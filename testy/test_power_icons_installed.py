@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Install release files into a fresh private disk and compare exact PNG bytes."""
+# Shared tooling remains in narzedzia after test sources moved.
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "narzedzia"))
 import json,tempfile
 from pathlib import Path
 from instalator.qemu_install import Guest,install,installer_iso,sha,sparse,target_fingerprint

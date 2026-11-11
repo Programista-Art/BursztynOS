@@ -1,0 +1,6 @@
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_hda_diag.cpp -o .hda-test/test-hda-diag
+ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-diag
+HDA diag host: 241 testow, 0 bledow
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined testy/test_hda_bws_isolation.cpp -o .hda-test/test-hda-bws
+ASAN_OPTIONS=detect_leaks=0 .hda-test/test-hda-bws
+HDA BWS isolation: 160 testow, 0 bledow

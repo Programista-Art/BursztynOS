@@ -1,0 +1,10 @@
+{
+  "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+  "addresses": {
+    "GraphicsPerf::graphics_perf": 11756640,
+    "GraphicsPerf::graphics_modes": 14647424,
+    "GraphicsPerf::graphics_resources": 14648736,
+    "committed_geometry": 5459008,
+    "GraphicsPerf::graphics_hints": 14844640
+  }
+}

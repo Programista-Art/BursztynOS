@@ -11,7 +11,7 @@ env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:halt_on_error=1', UBSAN_OPTI
 rows = []
 with tempfile.TemporaryDirectory(prefix='bursztyn-keyboard-history-') as directory:
     old = Path(directory) / 'sterowniki/wejscie/input_device.cpp'
-    old.write_bytes(subprocess.check_output(['git', 'show', 'f6541df:input_device.cpp'], cwd=root))
+    old.write_bytes(subprocess.check_output(['git', 'show', 'f6541df:sterowniki/wejscie/input_device.cpp'], cwd=root))
     for before, source in [(1, old), (0, root / 'sterowniki/wejscie/input_device.cpp')]:
         binary = out / f'keyboard-claim-{before}'
         subprocess.run(['g++', '-std=c++17', '-O1', '-g', '-I.',

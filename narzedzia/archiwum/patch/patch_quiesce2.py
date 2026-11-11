@@ -80,9 +80,9 @@ if old_func_start != -1 and old_func_end != -1:
             req.scanout_id = 0;
             req.resource_id = 0; /* 0 = disable */
             req.r.x = 0; req.r.y = 0; req.r.width = 0; req.r.height = 0;
-            
+
             VirtioGpuCtrlHdr resp{};
-            
+
             /* Budujemy lancuch deskryptorow bezposrednio jak w virtio_gpu_send_command_locked */
             gpu_memcpy(drv->cmd_vaddr, &req, sizeof(req));
             uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
@@ -101,11 +101,11 @@ if old_func_start != -1 and old_func_end != -1:
             bufs[1].is_write = true;
 
             __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
-            
+
             const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
             if (head >= 0) {
                 virtqueue_kick(drv->controlq, true);
-                
+
                 /* Czekamy na zakonczenie komendy disable */
                 for (uint32_t spin = 0; spin < 10000000U; ++spin) {
                     if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {

@@ -7,8 +7,10 @@ param(
     [string]$DiskSize = "4G",
     [ValidateSet("gtk", "sdl", "")]
     [string]$DisplayBackend = "gtk",
-    [ValidateRange(640,1280)][int]$GuestWidth = 1280,
-    [ValidateRange(360,720)][int]$GuestHeight = 720,
+    [ValidateRange(640,4096)][int]$GuestWidth = 1280,
+    [ValidateRange(480,4096)][int]$GuestHeight = 720,
+    [ValidateRange(640,8192)][int]$WindowWidth = 1280,
+    [ValidateRange(480,8192)][int]$WindowHeight = 720,
     [string]$Iso = "",
     [switch]$PrintArgv,
     [switch]$Audit,
@@ -21,7 +23,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2026-10-10-LINUX-PARITY"
+$LauncherVersion = "2026-11-09-GRAPHICS-PARITY"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
@@ -549,7 +551,7 @@ function Start-BursztynQemu {
     Write-Host "Display:      $($effectiveDisplay.ToUpperInvariant())"
     Write-Host "CPU:          TCG thread=single / 1 vCPU"
     Write-Host "RAM:          2 GiB"
-    Write-Host "Guest video:  ${GuestWidth}x${GuestHeight} (bounded viewport <= 1280x720)"
+    Write-Host "GPU hint:     ${GuestWidth}x${GuestHeight}; guest boot/config/Display Settings select the physical mode"
     if ($VirtIoFull) {
         Write-Host "Storage:      VirtIO-BLK"
         Write-Host "Network:      VirtIO-NET"
@@ -579,7 +581,7 @@ function Start-BursztynQemu {
 
     $windowLimiter = Start-QemuWindowLimiter `
         -TitleFragment "Bursztyn OS - $ModeName" `
-        -MaxWidth 1280 -MaxHeight 720
+        -MaxWidth $WindowWidth -MaxHeight $WindowHeight
     try {
     if ($SaveLog) {
         if (-not (Test-Path -LiteralPath $LogDir)) {

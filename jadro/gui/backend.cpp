@@ -424,7 +424,7 @@ void _start() {
     char linia[SHELL_INPUT_CAPACITY] = {};
 
     for (;;) {
-        
+
 
         const bool cala_linia =
             pobierz_linie(

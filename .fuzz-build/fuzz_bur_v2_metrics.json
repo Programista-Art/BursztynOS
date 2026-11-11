@@ -1,0 +1,10 @@
+{
+  "target": "fuzz_bur_v2",
+  "executions": 10007,
+  "seed_corpus_count": 2,
+  "final_corpus_count": 52,
+  "unique_edges": 244,
+  "regressions_verified": 5,
+  "elapsed_ms": 13766,
+  "crashes_found": 0
+}

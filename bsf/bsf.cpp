@@ -120,7 +120,7 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
   unsigned count = data.u16(4);
   if (!count || count > MaxTables || !data.has(12, count * 16))
     return false;
-  Bytes maxp{}, os2{}, post{}, full_cmap{};
+  Bytes maxp{}, post{}, full_cmap{};
   for (unsigned i = 0; i < count; ++i) {
     unsigned o = 12 + i * 16;
     uint32_t idtag = data.u32(o), off = data.u32(o + 8), len = data.u32(o + 12);
@@ -155,6 +155,18 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
       names = t;
     else if (idtag == tag("OS/2"))
       os2 = t;
+    else if (idtag == tag("GDEF"))
+      gdef = t;
+    else if (idtag == tag("GSUB"))
+      gsub = t;
+    else if (idtag == tag("GPOS"))
+      gpos = t;
+    else if (idtag == tag("fvar"))
+      fvar = t;
+    else if (idtag == tag("COLR"))
+      colr = t;
+    else if (idtag == tag("CPAL"))
+      cpal = t;
     else if (idtag == tag("post"))
       post = t;
   }
@@ -335,6 +347,11 @@ int Face::advance(unsigned g, int px) const {
   unsigned index = g < metrics ? g : metrics - 1;
   return int((int64_t(hmtx.u16(index * 4)) * px + units / 2) / units);
 }
+unsigned Face::advance_units(unsigned g) const {
+  if (g >= glyphs || !metrics)
+    return 0;
+  return hmtx.u16((g < metrics ? g : metrics - 1) * 4);
+}
 int Face::bearing(unsigned g, int px) const {
   if (g >= glyphs)
     return 0;
@@ -347,6 +364,9 @@ int Face::line_height(int px) const {
       units);
 }
 int Face::kerning(unsigned left, unsigned right, int px) const {
+  return int(int64_t(kerning_units(left, right)) * px / units);
+}
+int Face::kerning_units(unsigned left, unsigned right) const {
   if (left >= glyphs || right >= glyphs || !kern.has(0, 4) ||
       kern.u16(0) != 0 || kern.u16(2) > 32)
     return 0;
@@ -372,7 +392,7 @@ int Face::kerning(unsigned left, unsigned right, int px) const {
         else if (pair > key)
           hi = m;
         else
-          return int(int64_t(k.s16(o + 4)) * px / units);
+          return k.s16(o + 4);
       }
     }
     at += len;
@@ -703,7 +723,12 @@ void Cache::clear() {
 const Glyph *Cache::get(const Face &face, uint32_t cp, int px, unsigned style) {
   if (px < 1 || px > 128 || !face.id)
     return nullptr;
-  unsigned id = face.glyph(cp);
+  return get_glyph(face, face.glyph(cp), px, style);
+}
+const Glyph *Cache::get_glyph(const Face &face, unsigned id, int px,
+                              unsigned style) {
+  if (px < 1 || px > 128 || !face.id || id >= face.glyphs)
+    return nullptr;
   if (!slots_) {
     slots_ = BSF_NEW Glyph[CacheSlots];
     storage_ = BSF_NEW uint8_t[CacheBytes];
@@ -752,9 +777,12 @@ const Glyph *Cache::get(const Face &face, uint32_t cp, int px, unsigned style) {
 }
 bool Cache::contains(const Face &face, uint32_t cp, int px,
                      unsigned style) const {
+  return contains_glyph(face, face.glyph(cp), px, style);
+}
+bool Cache::contains_glyph(const Face &face, unsigned id, int px,
+                           unsigned style) const {
   if (!slots_)
     return false;
-  unsigned id = face.glyph(cp);
   for (unsigned i = 0; i < CacheSlots; ++i) {
     const auto &g = slots_[i];
     if (g.face == face.id && g.id == id && g.px == px && g.style == style)

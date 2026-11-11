@@ -1,0 +1,40 @@
+Disposable production boot workspace: /tmp/bursztyn-production-wjivh_3t
+
+[BLAD] Audyt rozruchu produkcyjnego wykazal nieprawidlowosci!
+====================================================================
+ BURSZTYN OS - AUDYT I WERYFIKACJA ROZRUCHU PRODUKCYJNEGO (NORMAL)
+====================================================================
+[INFO] Uruchamianie QEMU z obrazem produkcyjnym: /tmp/bursztyn-production-wjivh_3t/BursztynOS.iso
+[INFO] SHA256 dysku testowego przed bootem: c18aceee32b4c442dee30c45a50ecfeff04bc551bf49591ed85d8b17845a4809
+
+=================================================================
+CZASY OPERACJI ROZRUCHU I PRZYWRACANIA TAPETY:
+=================================================================
+  Kernel/system gotowy:           BRAK
+  Start przywracania tapety:      BRAK
+  Dekodowanie obrazu zakonczone:  BRAK
+  Tapeta zastosowana w jadrze:    BRAK
+  Zakonczenie procesu testu:      60.180 s
+=================================================================
+
+=================================================================
+PODSUMOWANIE AUDYTU ROZRUCHU PRODUKCYJNEGO (NORMAL BOOT):
+=================================================================
+  Znacznik [NORMAL BOOT] self-tests skipped:  FAIL
+  Brak znacznikow stres-testow w logu:        PASS
+  VirtIO-RNG inicjalizacja produkcyjna:       FAIL
+  VirtIO-RNG sanity check (16B):              FAIL
+  VirtIO-BLK inicjalizacja produkcyjna:       FAIL
+  VirtIO-BLK sanity check (odczyt LBA 0):     FAIL
+  Audyt dysku (zero zapisu, SHA256 delta=0):  PASS
+  VirtIO-GPU inicjalizacja bufora 2D:         FAIL
+  VirtIO-GPU rejestracja jako ekran:          FAIL
+  VirtIO-NET inicjalizacja sieci:             FAIL
+  Brak wyswietlania testowego wzorca kolorow: FAIL
+  Tapeta i kompozytor pulpitu gotowe:         FAIL
+  Kursor widoczny w (500, 300):               FAIL
+  Ruch myszy do (560, 340):                   FAIL
+  Przywrocenie tla w (500, 300):              FAIL
+=================================================================
+[STATUS ROZRUCHU] Gotowosc systemu: NIE
+[STATUS ROZRUCHU] Czas rozruchu do pulpitu: 60.18 s

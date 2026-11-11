@@ -1310,7 +1310,7 @@ __attribute__((noinline)) uint64_t bws_wylistuj_katalog(
     }
 
     if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ)&&
-       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,true)&&arg3<=8192))return 0;
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka,true)&&arg3<=BSF::DirectoryBytes))return 0;
 
     if (arg2 == 0 ||
         arg3 == 0 ||
@@ -2125,13 +2125,17 @@ __attribute__((noinline)) uint64_t bws_http_common(
     uint64_t adres_user = 0;
     uint32_t max_dlugosc = 0;
 
-    if (!dekoduj_bufor_sieci(
-            arg4,
-            &adres_user,
-            &max_dlugosc)) {
-
-        return 0;
-    }
+    bool counted = (arg4 & 0x80000000ULL) != 0;
+    if (wide) {
+        BwsBuforSieci64 request{};
+        if (!skopiuj_z_przestrzeni_uzytkownika(&request,
+            reinterpret_cast<const void*>(arg4), sizeof(request)) ||
+            !request.adres || request.pojemnosc < 2 || request.pojemnosc > MAX_HTTP_BWS ||
+            (request.flagi & ~1U)) return 0;
+        adres_user = request.adres;
+        max_dlugosc = request.pojemnosc;
+        counted = request.flagi & 1U;
+    } else if (!dekoduj_bufor_sieci(arg4, &adres_user, &max_dlugosc)) return 0;
 
     if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(
@@ -2234,7 +2238,7 @@ __attribute__((noinline)) uint64_t bws_http_common(
     }
 
     // Opt-in binary response mode preserves the legacy boolean return ABI.
-    return (arg4 & 0x80000000ULL) ? uint64_t(odebrano) + 1 : 1;
+    return counted ? uint64_t(odebrano) + 1 : 1;
 }
 
 /* =========================================================================
@@ -2686,8 +2690,11 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
     uint64_t poczatek =
         proces.granica_sterty;
 
+    const auto& uklad = uklady_procesow[aktualny_pid];
+    const uint64_t heap_base = uklad.wersja == 2 ? uklad.sterta_baza : BAZA_STERTY_USER;
+    const uint64_t heap_limit = uklad.wersja == 2 ? uklad.sterta_limit : KONIEC_STERTY_USER;
     if (poczatek <
-        BAZA_STERTY_USER) {
+        heap_base) {
 
         /*
          * Nie naprawiamy przypadkowego uszkodzenia deskryptora po cichu.
@@ -2712,7 +2719,7 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
     }
 
     if (koniec >
-        KONIEC_STERTY_USER) {
+        heap_limit) {
 
         return 0;
     }
@@ -2838,7 +2845,7 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
                 zuzyto,
                 &nowa_granica) &&
             nowa_granica <=
-                KONIEC_STERTY_USER) {
+                heap_limit) {
 
             proces.granica_sterty =
                 nowa_granica;
@@ -3026,7 +3033,6 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     uint64_t arg3,
     uint64_t arg4
 ) {
-    if (!proces_ma_prawo(proces, PRAWO_PLIKI_CZYTAJ)) return 0;
     char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
     if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
     uint64_t offset = arg2;
@@ -3039,6 +3045,8 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, true)) return 0;
     uint64_t end = 0;
     if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
+    if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ) &&
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)&&end<=BSF::MaxFile))return 0;
 
     /*
      * PSF nie moze pisac bezposrednio do bufora Ring 3:
@@ -3181,8 +3189,12 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         int w=gorne_i32(arg1),h=dolne_i32(arg1);if(w<0||h<0||w>512||h>128)return 0;
         size_t bytes=size_t(w)*size_t(h);
         if(bytes&&(!arg2||!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(arg2),bytes)||!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(arg2),bytes,false)))return 0;
+        BuforKernelowy mask(bytes, false);
+        if (bytes && (!mask || !skopiuj_z_przestrzeni_uzytkownika(
+                mask.get(), reinterpret_cast<const void*>(arg2), bytes))) return 0;
         BlokadaEkranu lock;
-        return skladacz_obrazu_ustaw_maske_tytulu(aktualny_pid,w,h,reinterpret_cast<const uint8_t*>(arg2))?1:0;
+        return skladacz_obrazu_ustaw_maske_tytulu(aktualny_pid,w,h,
+            bytes ? static_cast<const uint8_t*>(mask.get()) : nullptr)?1:0;
     }
     if (nr_funkcji == BWS_HTTP64 || nr_funkcji == BWS_HTTPS64)
         return bws_http_common(proces, nr_funkcji == BWS_HTTPS64,

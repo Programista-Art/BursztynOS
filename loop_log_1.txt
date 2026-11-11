@@ -1,0 +1,47 @@
+=================================================================
+ BURSZTYN OS - WERYFIKACJA RESTARTU GOSCIA (VIRTIO-GPU QUIESCE)
+=================================================================
+
+========================================================
+ URUCHAMIANIE: TEST_2_JPEG_WALLPAPER
+ Scenariusz: Zmiana 1 tapety JPEG
+========================================================
+[TEST_2_JPEG_WALLPAPER] Start procesu QEMU...
+[TEST_2_JPEG_WALLPAPER] Czekam na boot do pulpitu (max 90s)...
+[TEST_2_JPEG_WALLPAPER] Pulpit gotowy! Laczenie z QMP...
+[TEST_2_JPEG_WALLPAPER] Otwieram menu Start (klik w 50, 700)...
+[TEST_2_JPEG_WALLPAPER] Klikam aplikacje Tapety (140, 507)...
+[TEST_2_JPEG_WALLPAPER] Czekam na zaladowanie galerii miniatur...
+[TEST_2_JPEG_WALLPAPER] Wybieram tapete JPEG testphoto.jpg (303, 418)...
+[TEST_2_JPEG_WALLPAPER] Klikam Zastosuj (380, 570)...
+[TEST_2_JPEG_WALLPAPER] Potwierdzenie zmiany tapety w logu: BRAK LOGU
+[TEST_2_JPEG_WALLPAPER] Otwieram Menu Start (klik w 50, 700)...
+[TEST_2_JPEG_WALLPAPER] Przemieszczam kursor na '> Uruchom ponownie' w GUI (140, 632)...
+[TEST_2_JPEG_WALLPAPER] Klikam '> Uruchom ponownie' w GUI (140, 632)...
+[TEST_2_JPEG_WALLPAPER] Monitoruje log szeregowy pod katem [REBOOT TRACE]...
+    -> [SEEN] [REBOOT TRACE] begin
+    -> [SEEN] [REBOOT TRACE] stop new GPU submissions
+    -> [SEEN] [REBOOT TRACE] GPU[0] init=1 err=0 res=1 oldres=0 scan=1 back=1 cmds=424 errs=0 w=1280 h=720
+    -> [SEEN] [REBOOT TRACE] gpu quiesce begin
+    -> [SEEN] [REBOOT TRACE] gpu quiesce done
+    -> [SEEN] [REBOOT TRACE] filesystem flush begin
+    -> [SEEN] [REBOOT TRACE] filesystem flush done
+    -> [SEEN] [REBOOT TRACE] cli
+    -> [SEEN] [REBOOT TRACE] ACPI reset begin
+    -> [SEEN] [REBOOT TRACE] 8042 reset begin
+[TEST_2_JPEG_WALLPAPER] Wykryto ponowny rozruch jadra po resecie!
+  [PASS] [REBOOT TRACE] begin
+  [PASS] [REBOOT TRACE] stop new GPU submissions
+  [PASS] [REBOOT TRACE] GPU[
+  [PASS] [REBOOT TRACE] gpu quiesce begin
+  [PASS] [REBOOT TRACE] gpu quiesce done
+  [PASS] [REBOOT TRACE] filesystem flush begin
+  [PASS] [REBOOT TRACE] filesystem flush done
+  [PASS] [REBOOT TRACE] cli
+  [PASS] [REBOOT TRACE] Hardware reset (ACPI/8042)
+[TEST_2_JPEG_WALLPAPER] Ponowny rozruch po resecie: PASS
+[TEST_2_JPEG_WALLPAPER] Ostatni zaobserwowany marker: [REBOOT TRACE] 8042 reset begin
+[TEST_2_JPEG_WALLPAPER] Stan procesu QEMU: Dziala (responsywne)
+[TEST_2_JPEG_WALLPAPER] WYNIK KONCOWY: SUCCESS (PASS)
+
+[OK] TEST 2 zakonczony sukcesem: PASS

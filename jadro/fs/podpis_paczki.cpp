@@ -64,7 +64,7 @@ bool sciezka_podpisu(
 
     constexpr char ROZSZERZENIE[] = ".podpis";
     for (size_t i = 0; i < sizeof(ROZSZERZENIE); ++i) {
-        if (dlugosc + 1 >= pojemnosc) {
+        if (i >= pojemnosc - dlugosc) {
             return false;
         }
         wynik[dlugosc + i] = ROZSZERZENIE[i];
@@ -114,14 +114,14 @@ extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(
         return PodpisPaczkiWynik::BladOdczytu;
     }
 
-    uint8_t podpis[ROZMIAR_PODPISU]{};
+    uint8_t podpis[ROZMIAR_PODPISU + 1]{};
     uint32_t odczytano = 0;
 
     if (!czytaj_fragment_pliku(
             sciezka,
             0,
             reinterpret_cast<char*>(podpis),
-            static_cast<uint32_t>(ROZMIAR_PODPISU),
+            static_cast<uint32_t>(sizeof(podpis)),
             &odczytano)) {
         return PodpisPaczkiWynik::BrakPliku;
     }

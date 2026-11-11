@@ -1,6 +1,6 @@
 # Naprawa transportu poleceń i odkrywania kodeków Intel High Definition Audio (HDA)
 
-Data: 2026-10-12  
+Data: 2026-10-12
 Dotyczy: Sterownik `sterowniki/dzwiek/hda.cpp`, diagnostyka jądra `sterowniki/dzwiek/hda_diag.cpp`, format ABI `sterowniki/dzwiek/hda_diag_format.h`, aplikacja `programy/test_dzwieku/test_dzwieku.cpp`, testy hosta `narzedzia/test_hda_diag.cpp`, `narzedzia/test_dzwieku_hda_bws.cpp`.
 
 ---
@@ -25,7 +25,7 @@ Celem prac było przeprowadzenie audytu transportu poleceń HDA, zidentyfikowani
 W toku audytu kodu sterownika i warstwy diagnostycznej zidentyfikowano cztery kluczowe usterki:
 
 ### 2.1. Skasowanie rejestru STATESTS podczas rozruchu kontrolera
-Rejestr `STATESTS` (offset MMIO `0x0E`) to 16-bitowy rejestr statusu wykrycia kodeków na szynie HDA o semantyce **Write-1-to-Clear (W1C)**.  
+Rejestr `STATESTS` (offset MMIO `0x0E`) to 16-bitowy rejestr statusu wykrycia kodeków na szynie HDA o semantyce **Write-1-to-Clear (W1C)**.
 W procedurze startowej jądra sterownik odczytywał `STATESTS`, a następnie natychmiast wykonywał:
 ```cpp
 mmio_zapisz16(HDA_REG_STATESTS, statests); // skasowanie bitów SDI!

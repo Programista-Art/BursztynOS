@@ -1,0 +1,8 @@
+{
+  "iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+  "kernel_elf_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+  "packaged_kernel_sha256": "7583cc8ada78d965d43dc208c25c5cd56b9bebef8cfa83ddba16f4805037c769",
+  "load_segments_identical": true,
+  "git_branch": "test",
+  "git_head": "3e72641532cbe6aa7cbeb006405914a203e3a3cf"
+}

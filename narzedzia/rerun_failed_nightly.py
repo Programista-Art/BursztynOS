@@ -94,7 +94,7 @@ def main() -> int:
         "jobs": results,
         "fixes_applied": [
             "programy/tapety/tapety_linker.ld TEXT 0x44000->0x48000",
-            "programy/przegladarka_linker.ld + przegladarka.cpp TEXT 0x88000->0xE0000",
+            "programy/przegladarka/przegladarka_linker.ld + przegladarka.cpp TEXT 0x88000->0xE0000",
             "narzedzia/aktualizacje/test_gui_aktualizacje.py restored (host ABI/GUI gate)",
         ],
     }

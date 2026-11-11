@@ -42,15 +42,15 @@ new_rysuj = """void shell_rysuj_terminal() {
         int max_scroll = g_liczba_linii - max_linii;
         if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
+
         if (!g_scrolling) {
             g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        
+
         ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
+
         g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
@@ -125,11 +125,11 @@ new_mouse = """if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MY
                 mz.x = e.x - client_x;
                 mz.y = e.y - client_y;
                 mz.przycisk = (e.kod == 1) ? 1 : 0;
-                
+
                 if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
-                
+
                 if (g_pasek_przewijania->czy_brudna()) {
                     g_scrolling = true;
                     shell_rysuj_terminal();

@@ -1,6 +1,6 @@
 # Raport lokalnej weryfikacji BursztynOS — 2026-11-06
 
-Środowisko: WSL2 Ubuntu, `x86_64-linux-gnu-*`, QEMU, bez GitHuba.  
+Środowisko: WSL2 Ubuntu, `x86_64-linux-gnu-*`, QEMU, bez GitHuba.
 Orkiestracja: `narzedzia/run_local_suite.py --mode=nightly --stack-audit` + rerun po łatach.
 
 Artefakty JSON: `.local-ci/raport-nightly-*.json`, `.local-ci/raport-rerun-*.json`.
@@ -85,7 +85,7 @@ Host security + fuzz extended **nie wykryły nowych crashy** (0 unhandled).
 | smoke (w security-host) | ~35 033 | 0 |
 | extended | ~165 062 | 0 |
 
-Brak nowych crashy w BWS / BUR / BSP2 względem raportu hardening 2026-11-04.  
+Brak nowych crashy w BWS / BUR / BSP2 względem raportu hardening 2026-11-04.
 Regresje fuzz (`regressions=` w logach) to znane seed regressione, nie nowe CVE.
 
 ---

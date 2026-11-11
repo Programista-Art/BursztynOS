@@ -196,6 +196,7 @@ def main():
         "-m", "2G",
         "-display", "none",
         "-serial", "stdio",
+        "-boot", "order=d,strict=on",
         "-cdrom", str(iso),
         "-qmp", f"unix:{qmp_sock},server,nowait"
     ]
@@ -360,6 +361,7 @@ def main():
 
             # Wybierz mysz USB
             resp_mice = qmp.hmp("info mice").get("return", "")
+            print("[INFO] QEMU mice:", resp_mice.strip())
             m_hid = re.search(r"Mouse #(\d+):\s+QEMU HID Mouse", resp_mice)
             if m_hid:
                 qmp.hmp(f"mouse_set {m_hid.group(1)}")
@@ -400,9 +402,20 @@ def main():
 
                 # Ruch myszy
                 qmp.hmp("mouse_move 60 40")
-                time.sleep(0.5)
-
-                qmp.screendump(moved_dump_path)
+                # Wait for guest input processing and compositor publication.
+                # TCG can take longer than a fixed host half-second under load.
+                deadline = time.monotonic() + 30
+                while True:
+                    qmp.screendump(moved_dump_path)
+                    if moved_dump_path.exists() and moved_dump_path.stat().st_size > 0:
+                        mw, mh, mdata = parse_ppm(moved_dump_path)
+                        moved, _ = check_cursor_at(mdata, mw, mh, 560, 340)
+                        old, _ = check_cursor_at(mdata, mw, mh, 500, 300)
+                        if moved and not old:
+                            break
+                    if time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.25)
                 if moved_dump_path.exists() and moved_dump_path.stat().st_size > 0:
                     mw, mh, mdata = parse_ppm(moved_dump_path)
                     p_old_fill = get_pixel(mdata, mw, mh, 501, 301)

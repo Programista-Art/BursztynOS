@@ -1,0 +1,7 @@
+In file included from testy/../jadro/fs/psf.h:31,
+                 from testy/../jadro/fs/podpis_paczki.cpp:28,
+                 from testy/test_podpis_paczki_host.cpp:2:
+testy/../jadro/fs/storage_format.h:5:10: fatal error: block_device.h: No such file or directory
+    5 | #include "block_device.h"
+      |          ^~~~~~~~~~~~~~~~
+compilation terminated.

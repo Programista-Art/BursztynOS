@@ -67,7 +67,11 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertRegex(self.makefile,r'(?m)^QEMUDISPLAYARGS\s*\?=\s*\$\(if \$\(strip \$\(QEMU_DISPLAY_ARGS\)\),\$\(QEMU_DISPLAY_ARGS\),-display sdl\)$')
         common=self.makefile.split('QEMU_VIRTIO_COMMON_ARGS :=',1)[1].split('\n\n',1)[0]
         for name in ('virtio-keyboard-pci','virtio-mouse-pci','rng-builtin'):self.assertIn(name,common)
-        self.assertNotIn('virtio-tablet-pci',common)
+        # Linux pointer policy (2026-11-11): absolute tablet appended LAST, after
+        # the relative mouse fallback; the Windows default stays relative.
+        self.assertEqual(common.count('virtio-tablet-pci'),1)
+        self.assertLess(common.index('virtio-mouse-pci'),common.index('virtio-tablet-pci'))
+        self.assertTrue(common.rstrip().endswith('-device virtio-tablet-pci'))
         self.assertIn('[switch]$PrintArgv',self.launcher)
         self.assertIn('if ($PrintArgv -or $Audit) { $report | ConvertTo-Json -Depth 8; return }',self.launcher)
         self.assertIn('Get-UefiFirmware -ReadOnly',self.launcher)

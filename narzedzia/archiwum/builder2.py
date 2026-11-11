@@ -51,12 +51,12 @@ void _start() {
         shell_work_w = shell_screen_w;
         shell_work_h = shell_screen_h;
     }
-    
+
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
     gui_ustaw_tytul_okna("Powłoka Bursztynowa");
     gui_ustaw_przejecie_myszy(true);
-    
+
     motyw_inicjalizuj();
     g_pasek_przewijania = new PasekPrzewijania();
     g_pasek_przewijania->ustaw_orientacje(Orientacja::Pionowa);
@@ -105,13 +105,13 @@ void _start() {
 with open("shell.cpp", "w") as f:
     f.write(front)
     f.write(sec2_3)
-    
+
     # We must patch sec5 (the backend) to replace wypisz_pomoc and strings
-    
+
     pomoc_start = sec5.find("void wypisz_pomoc() {")
     pomoc_end = sec5.find("}\\n\\n} // namespace", pomoc_start)
     if pomoc_end == -1: pomoc_end = sec5.find("}\\n\\n/*", pomoc_start)
-    
+
     new_pomoc = """void wypisz_pomoc() {
     wypisz(
         "Dostępne polecenia:\\n\\n"

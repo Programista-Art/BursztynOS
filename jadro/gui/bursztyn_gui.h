@@ -546,4 +546,4 @@ void bws_zakoncz_proces();
 __attribute__((noreturn))
 void gui_zakoncz_aplikacje();
 
-} 
+}

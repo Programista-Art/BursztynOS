@@ -41,7 +41,6 @@ bool skopiuj_string_z_uzytkownika(char* dst, const char* src, size_t cap) {
     std::memcpy(dst, src, std::strlen(src) + 1); return true;
 }
 proces_t tablica_procesow[MAKS_PROCESOW]{};
-void fpu_reset_process(int) {}
 struct Page { uint8_t* bytes; uint64_t flags; };
 static int original_root;
 static void* current_root = &original_root;
@@ -87,12 +86,18 @@ extern "C" unsigned long stack_protector_losowy_offset_stron(
  * Host stand-in for package signature verification.
  *
  * The loader regression focuses on BUR header validation, W^X mapping and
- * ASLR layout - not on RSA. Real signature enforcement is covered by
- * test_bws_abuse_qemu.py. Accepting here keeps the loader test hermetic
+ * ASLR layout - not on RSA. Real RSA verification is covered by
+ * test_podpis_paczki.py. The injectable result keeps this loader test hermetic
  * (no mbedTLS dependency) without weakening the production path.
  */
+static PodpisPaczkiWynik signature_result = PodpisPaczkiWynik::Ok;
+static unsigned signature_calls;
+static bool check_signature_before_mapping;
+extern "C" void loader_ustaw_podpis_wymagany(bool);
 extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(const char*, const uint8_t*, uint64_t) {
-    return PodpisPaczkiWynik::Ok;
+    ++signature_calls;
+    if (check_signature_before_mapping) CHECK(frames.empty() && stacks.empty() && spaces.empty());
+    return signature_result;
 }
 extern "C" const char* podpis_paczki_blad(PodpisPaczkiWynik) {
     return "ok";
@@ -106,6 +111,11 @@ static WynikWalkera sprawdz_mapowanie(uint64_t* root, uint64_t address) {
     return {address < (1ULL << 32), false};
 }
 static bool mapuj_strone_wewnetrznie(uint64_t* root, uint64_t address, uint64_t pa, uint64_t flags) {
+    /*
+     * Loader mapuje w NIEAKTYWNEJ przestrzeni nowego procesu (celowo, aby
+     * nie przelaczac CR3). Stub musi to dopuszczac, ale tylko dla PML4,
+     * ktory powstal przez UtworzPrzestrzenAdresowaProcesu().
+     */
     CHECK(spaces.count(root) == 1);
     CHECK(root != reinterpret_cast<uint64_t*>(&original_root));
     CHECK(!(address & 4095)); CHECK(frames.count(reinterpret_cast<void*>(pa)));
@@ -264,7 +274,23 @@ int main(int argc, char** argv) {
     CHECK(bsp_wczytaj_obraz_bur(path, &b, BUR_MAKS_ROZMIAR_PLIKU, bur_blad_naglowka));
     CHECK(a.dane != b.dane); CHECK(a.rozmiar == executable.size());
     CHECK(!std::memcmp(a.dane, executable.data(), executable.size())); kfree(a.dane); kfree(b.dane);
+    ++scenarios;
+    check_signature_before_mapping = true;
+    loader_ustaw_podpis_wymagany(true);
+    for (auto rejected : {PodpisPaczkiWynik::BrakPliku, PodpisPaczkiWynik::Niezgodnosc,
+                          PodpisPaczkiWynik::ZlyRozmiar, PodpisPaczkiWynik::BrakSrodowiska}) {
+        signature_result = rejected;
+        const auto before = signature_calls;
+        CHECK(!bws_uruchom_program_z_pliku(path, 3, rights, false));
+        CHECK(signature_calls == before + 1);
+        clean();
+    }
+    signature_result = PodpisPaczkiWynik::Ok;
+    check_signature_before_mapping = false;
+    const auto verified_before = signature_calls;
     mapping();
+    CHECK(signature_calls == verified_before + 2);
+    loader_ustaw_podpis_wymagany(false);
     ++scenarios;
     void* root = UtworzPrzestrzenAdresowaProcesu(); UstawPrzestrzenAdresowa(root);
     void* physical = ZaalokujRamke(); const auto va = reinterpret_cast<void*>(RING3_DEFAULT_TEXT_VA);
@@ -278,6 +304,13 @@ int main(int argc, char** argv) {
     CHECK(!VmmMapujNowaStroneProcesu(reinterpret_cast<void*>(0x0000800000000000ULL), physical, false, true));
     UstawPrzestrzenAdresowa(nullptr); CHECK(!VmmMapujNowaStroneProcesu(va, physical, false, true));
     UstawPrzestrzenAdresowa(root);
+    CHECK(!VmmMapujNowaStroneProcesu(va, physical, true, true));
+    CHECK(!VmmMapujStroneBurV2WPrzestrzeni(root, va, physical, PTE_WRITE));
+    CHECK(!VmmMapujStroneBurV2WPrzestrzeni(root, va, physical, PTE_USER));
+    nx_aktywny = false;
+    CHECK(!VmmMapujNowaStroneProcesu(va, physical, true, false));
+    CHECK(!VmmMapujStroneBurV2WPrzestrzeni(root, va, physical, PTE_NX));
+    nx_aktywny = true;
     CHECK(VmmMapujNowaStroneProcesu(va, physical, false, true));
     CHECK(!VmmMapujNowaStroneProcesu(va, physical, true, true)); // preserve existing USER mapping
     CHECK(!(spaces.at(root).at(RING3_DEFAULT_TEXT_VA).flags & FLAGA_ZAPIS));

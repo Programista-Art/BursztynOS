@@ -1,0 +1,548 @@
+{
+  "release-720": {
+    "result": "PASS",
+    "mode": [
+      1280,
+      720
+    ],
+    "display": "none",
+    "iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 4.991013811537626,
+    "frame_total_ns": {
+      "count": 28,
+      "mean": 92283750,
+      "p50": 73282000.0,
+      "p95": 205774000,
+      "maximum": 296446000
+    },
+    "frame_compose_ns": {
+      "count": 28,
+      "mean": 77339428.57142857,
+      "p50": 68026000.0,
+      "p95": 174586000,
+      "maximum": 210777000
+    },
+    "frame_present_ns": {
+      "count": 28,
+      "mean": 14944321.42857143,
+      "p50": 7246500.0,
+      "p95": 46658000,
+      "maximum": 85669000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 94.9070235416561,
+      "p50": 78.13687399993796,
+      "p95": 242.90629600000102,
+      "maximum": 264.4409370000176
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        44
+      ],
+      "new": [
+        344,
+        84
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 28,
+      "compose_ns": 2165504000,
+      "present_ns": 418441000,
+      "rects": 28,
+      "pixels": 16167680,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 468097440,
+      "gpu_commands": 99,
+      "transfers": 51,
+      "transfer_pixels": 16192096,
+      "flushes": 48,
+      "flush_pixels": 18187696,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 358817180,
+      "cursor_presents": 20
+    },
+    "live_graphics_bytes": {
+      "before": 13787136,
+      "idle": 13787136
+    },
+    "host_resize_samples": 0
+  },
+  "r1080": {
+    "result": "PASS",
+    "mode": [
+      1920,
+      1080
+    ],
+    "display": "none",
+    "iso_sha256": "50bb00c9116ae1dc24e9c787ffbf0a132fad5b74332949ac520a1114cecabcc0",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 5.619380481291994,
+    "frame_total_ns": {
+      "count": 28,
+      "mean": 68328178.57142857,
+      "p50": 46017500.0,
+      "p95": 217712000,
+      "maximum": 228513000
+    },
+    "frame_compose_ns": {
+      "count": 28,
+      "mean": 61327857.14285714,
+      "p50": 38204000.0,
+      "p95": 180241000,
+      "maximum": 204648000
+    },
+    "frame_present_ns": {
+      "count": 28,
+      "mean": 7000321.428571428,
+      "p50": 1569000.0,
+      "p95": 29249000,
+      "maximum": 39509000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 80.61442758333708,
+      "p50": 50.621052999986205,
+      "p95": 259.6134189999475,
+      "maximum": 280.89045500007614
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        114
+      ],
+      "new": [
+        344,
+        154
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 28,
+      "compose_ns": 1717180000,
+      "present_ns": 196009000,
+      "rects": 28,
+      "pixels": 15985880,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 275120510,
+      "gpu_commands": 101,
+      "transfers": 52,
+      "transfer_pixels": 16010744,
+      "flushes": 49,
+      "flush_pixels": 20864480,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 212900390,
+      "cursor_presents": 21
+    },
+    "live_graphics_bytes": {
+      "before": 27611136,
+      "idle": 27611136
+    },
+    "host_resize_samples": 0
+  },
+  "r1440": {
+    "result": "PASS",
+    "mode": [
+      2560,
+      1440
+    ],
+    "display": "none",
+    "iso_sha256": "0442cc112020e5dbe568f14d023b98db2c4a0063730500770633b5f6932b5401",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 6.606179220394633,
+    "frame_total_ns": {
+      "count": 28,
+      "mean": 52060285.71428572,
+      "p50": 31794000.0,
+      "p95": 183910000,
+      "maximum": 225443000
+    },
+    "frame_compose_ns": {
+      "count": 28,
+      "mean": 46236642.85714286,
+      "p50": 29676000.0,
+      "p95": 167048000,
+      "maximum": 172363000
+    },
+    "frame_present_ns": {
+      "count": 28,
+      "mean": 5823642.857142857,
+      "p50": 1148000.0,
+      "p95": 48105000,
+      "maximum": 53080000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 51.91312291666842,
+      "p50": 39.29941100000178,
+      "p95": 215.56925099991986,
+      "maximum": 247.1054790000835
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        114
+      ],
+      "new": [
+        344,
+        154
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 28,
+      "compose_ns": 1294626000,
+      "present_ns": 163062000,
+      "rects": 29,
+      "pixels": 15991880,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 167378880,
+      "gpu_commands": 104,
+      "transfers": 53,
+      "transfer_pixels": 16016744,
+      "flushes": 51,
+      "flush_pixels": 21586296,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 94270200,
+      "cursor_presents": 23
+    },
+    "live_graphics_bytes": {
+      "before": 46964736,
+      "idle": 46964736
+    },
+    "host_resize_samples": 0
+  },
+  "rultra": {
+    "result": "PASS",
+    "mode": [
+      3440,
+      1440
+    ],
+    "display": "none",
+    "iso_sha256": "e135cda1a1b64b15f54f4a6df35f5f1f3c4c871a877eb557b6f45dc880d91845",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 7.13468186763901,
+    "frame_total_ns": {
+      "count": 27,
+      "mean": 43593222.222222224,
+      "p50": 38786000,
+      "p95": 83153000,
+      "maximum": 131103000
+    },
+    "frame_compose_ns": {
+      "count": 27,
+      "mean": 38394333.333333336,
+      "p50": 34317000,
+      "p95": 81889000,
+      "maximum": 129966000
+    },
+    "frame_present_ns": {
+      "count": 27,
+      "mean": 5198888.888888889,
+      "p50": 1264000,
+      "p95": 19038000,
+      "maximum": 23035000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 41.28123008333754,
+      "p50": 37.921939499995005,
+      "p95": 97.51688299991201,
+      "maximum": 125.58670600003552
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        114
+      ],
+      "new": [
+        344,
+        154
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 27,
+      "compose_ns": 1036647000,
+      "present_ns": 140370000,
+      "rects": 27,
+      "pixels": 15979880,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 171246910,
+      "gpu_commands": 102,
+      "transfers": 51,
+      "transfer_pixels": 16004744,
+      "flushes": 51,
+      "flush_pixels": 16004744,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 70372820,
+      "cursor_presents": 24
+    },
+    "live_graphics_bytes": {
+      "before": 62177280,
+      "idle": 62177280
+    },
+    "host_resize_samples": 0
+  },
+  "rgtk": {
+    "result": "PASS",
+    "mode": [
+      1280,
+      720
+    ],
+    "display": "gtk,zoom-to-fit=on",
+    "iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 5.79930683561358,
+    "frame_total_ns": {
+      "count": 28,
+      "mean": 63412892.85714286,
+      "p50": 51654000.0,
+      "p95": 149611000,
+      "maximum": 174651000
+    },
+    "frame_compose_ns": {
+      "count": 28,
+      "mean": 54065142.85714286,
+      "p50": 49200000.0,
+      "p95": 127901000,
+      "maximum": 171014000
+    },
+    "frame_present_ns": {
+      "count": 28,
+      "mean": 9347750,
+      "p50": 4362500.0,
+      "p95": 33968000,
+      "maximum": 46517000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 76.99301558335019,
+      "p50": 77.04515750003793,
+      "p95": 165.785114000073,
+      "maximum": 172.94471599996086
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        44
+      ],
+      "new": [
+        344,
+        84
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 28,
+      "compose_ns": 1513824000,
+      "present_ns": 261737000,
+      "rects": 28,
+      "pixels": 15851000,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 399533200,
+      "gpu_commands": 99,
+      "transfers": 51,
+      "transfer_pixels": 15875416,
+      "flushes": 48,
+      "flush_pixels": 17863432,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 331060700,
+      "cursor_presents": 20
+    },
+    "live_graphics_bytes": {
+      "before": 13787136,
+      "idle": 13787136
+    },
+    "host_resize_samples": 5
+  },
+  "rsdl": {
+    "result": "PASS",
+    "mode": [
+      1280,
+      720
+    ],
+    "display": "sdl",
+    "iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+    "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+    "host_fps": 6.895958245465342,
+    "frame_total_ns": {
+      "count": 27,
+      "mean": 47508814.81481481,
+      "p50": 36790000,
+      "p95": 187757000,
+      "maximum": 205146000
+    },
+    "frame_compose_ns": {
+      "count": 27,
+      "mean": 42761666.666666664,
+      "p50": 34053000,
+      "p95": 169008000,
+      "maximum": 185819000
+    },
+    "frame_present_ns": {
+      "count": 27,
+      "mean": 4747148.148148148,
+      "p50": 3569000,
+      "p95": 18749000,
+      "maximum": 19327000
+    },
+    "input_consumption_ms": {
+      "count": 24,
+      "mean": 46.47826600000352,
+      "p50": 39.1883785000573,
+      "p95": 156.51309599991237,
+      "maximum": 183.16473800007316
+    },
+    "security_registers": {
+      "cr4": "0x300678",
+      "efer": "0xd01",
+      "smep": true,
+      "smap": true,
+      "nx": true
+    },
+    "cursor_evidence": {
+      "old": [
+        284,
+        44
+      ],
+      "new": [
+        344,
+        84
+      ],
+      "restored": true,
+      "visible": true
+    },
+    "delta": {
+      "frames": 27,
+      "compose_ns": 1154565000,
+      "present_ns": 128173000,
+      "rects": 27,
+      "pixels": 15845000,
+      "full_frames": 0,
+      "copy_ns": 0,
+      "copy_bytes": 0,
+      "gpu_wait_ns": 230835430,
+      "gpu_commands": 101,
+      "transfers": 51,
+      "transfer_pixels": 15869864,
+      "flushes": 50,
+      "flush_pixels": 16593496,
+      "framebuffer_attempts": 0,
+      "framebuffer_creates": 0,
+      "scanouts": 0,
+      "host_polls": 0,
+      "host_hint_changes": 0,
+      "mode_requests": 0,
+      "mode_commits": 0,
+      "inputs": 24,
+      "input_samples": 24,
+      "input_ns": 155404600,
+      "cursor_presents": 23
+    },
+    "live_graphics_bytes": {
+      "before": 13787136,
+      "idle": 13787136
+    },
+    "host_resize_samples": 5
+  }
+}

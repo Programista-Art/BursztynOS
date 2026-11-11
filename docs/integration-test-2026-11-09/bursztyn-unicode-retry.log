@@ -1,0 +1,31 @@
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
+Notepad production edit/save/reopen: 60662 checks PASS; 60000 backward keys ns=37421097519; index bytes=12320
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Bounded catalog limit reached (128 faces / 1024 records).
+[BSF] Sort OOM.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+[BSF] Rejected font; fallback retained.
+[BSF] No usable TTF; bitmap fallback remains active.
+catalog=32 discover_ns=197029657 catalog_bytes=44544 io_bytes=48622080
+catalog=64 discover_ns=458282684 catalog_bytes=44544 io_bytes=97244160
+catalog=128 discover_ns=292145785 catalog_bytes=44544 io_bytes=194488320
+file=3145728 discover_ns=6591736 load_raster_ns=2355109 resident=3145728 peak=3145728
+file=16777184 discover_ns=23307592 load_raster_ns=8004702 resident=16777184 peak=16777184
+BSF expanded catalog/large-file/budget/failure tests: 4604 checks PASS
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
+Shell host: 2201/2201 PASS
+Host checks passed: editor, popup, clipboard, sponsors and version (100%, 125%); not OS runtime validation.
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -std=c++17 -O1 -g -fsanitize=address,undefined -fno-pie -no-pie -I. narzedzia/test_usb_keyboard_repeat.cpp -o .bsf-test/usb-keyboard-repeat
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/usb-keyboard-repeat
+USB HID: one tap, unchanged reports, delayed repeat, repeat rate and release PASS

@@ -1,5 +1,5 @@
 #pragma once
-#include "pzb.h"
+#include "jadro/bws/pzb.h"
 /* Private kernel metadata; does not change proces_t or BWS ABI. PID reuse is
  * initialized by the loader before any new process can be published. */
 struct UkladProcesu {

@@ -349,9 +349,12 @@ int main() {
     CHECK(BSF::previous_cluster("e\xcc\x81x",3)==0);
     std::vector<int> positions;
     CHECK(CzcionkaUI::rysuj_bsf("e\xcc\x81x",0,0,20,[&](int x,int,int,int,const uint8_t*){positions.push_back(x);}));
-    CHECK(positions.size()==3);
+    // BSF 2.0: e+U+0301 is canonically composed to the font's precomposed
+    // glyph (shaped path), so two bitmaps are drawn; the drawn position of
+    // 'x' must equal the measured caret from the same shared layout.
+    CHECK(positions.size()==2);
     auto* final_glyph=BSF::glyph('x',20);CHECK(final_glyph);
-    CHECK(positions[2]==BSF::measure_text("e",20)+BSF::kern('e','x',20)+final_glyph->x);
+    CHECK(positions[1]==BSF::measure_prefix("e\xcc\x81x",3,20)+final_glyph->x);
     uint32_t supplementary=0;
     CHECK(BSF::utf8("\xf0\x9f\x98\x80",4,supplementary)==4 && supplementary==0x1f600);
 

@@ -64,11 +64,23 @@ OVMF_VARS_RUNTIME="$SCRIPT_DIR/.bursztyn_ovmf_vars_unix.fd"
 #   QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #   QEMU_EXTRA_ARGS="-d guest_errors"
 #
-# Domyslnie pozwalamy QEMU wybrac natywny backend okna:
-# Linux -> zwykle GTK/SDL
-# macOS -> Cocoa
+# Linux defaults to GTK with viewport scaling, matching Windows.
+# macOS retains Cocoa; QEMU_DISPLAY_ARGS can select another frontend.
 AUDIO_BACKEND="${AUDIO_BACKEND:-$DEFAULT_AUDIO}"
-QEMU_DISPLAY_ARGS="${QEMU_DISPLAY_ARGS:-}"
+# Match Windows: GTK fits the guest image to the host window, without choosing
+# guest physical resolution. macOS retains its native Cocoa frontend.
+if [[ "$HOST_NAME" == "Linux" ]]; then
+    QEMU_DISPLAY_ARGS="${QEMU_DISPLAY_ARGS:--display gtk,zoom-to-fit=on}"
+else
+    QEMU_DISPLAY_ARGS="${QEMU_DISPLAY_ARGS:-}"
+fi
+GUEST_WIDTH="${GUEST_WIDTH:-1280}"
+GUEST_HEIGHT="${GUEST_HEIGHT:-720}"
+if [[ ! "$GUEST_WIDTH" =~ ^[0-9]{3,4}$ || ! "$GUEST_HEIGHT" =~ ^[0-9]{3,4}$ ]] ||
+   ((10#$GUEST_WIDTH < 640 || 10#$GUEST_WIDTH > 4096 || 10#$GUEST_HEIGHT < 480 || 10#$GUEST_HEIGHT > 4096)); then
+    echo "Invalid GPU hint: use width 640..4096 and height 480..4096" >&2
+    exit 1
+fi
 QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 
 # Firmware mozna nadpisac recznie:
@@ -248,7 +260,8 @@ append_common_machine_args() {
 
 append_audio_args() {
     if [[ "$AUDIO_BACKEND" == "off" || "$AUDIO_BACKEND" == "none" ]]; then
-        echo "[QEMU] Audio: wylaczone."
+        # Keep HDA and its PCI slot when muted, matching Windows.
+        QEMU_ARGS+=( -audiodev none,id=snd -device intel-hda -device hda-output,audiodev=snd )
         return 0
     fi
 
@@ -281,7 +294,7 @@ build_virtio_args() {
     local blk_dev="virtio-blk-pci,drive=disk,disable-legacy=on"
     local net_dev="virtio-net-pci,netdev=n1,disable-legacy=on"
     local rng_dev="virtio-rng-pci,rng=rng0,disable-legacy=on"
-    local gpu_dev="virtio-vga,disable-legacy=on,xres=1920,yres=1080"
+    local gpu_dev="virtio-vga,disable-legacy=on,xres=$GUEST_WIDTH,yres=$GUEST_HEIGHT"
     local kbd_dev="virtio-keyboard-pci"
     local mouse_dev="virtio-mouse-pci"
 
@@ -593,7 +606,7 @@ info_display() {
     echo "Po starcie uruchom: Ustawienia ekranu"
     echo
     echo "Sprawdz m.in.:"
-    echo "  - 1920x1080"
+    echo "  - 1280x720"
     echo "  - 1920x1080"
     echo "  - 2560x1440"
     echo "  - 3440x1440"

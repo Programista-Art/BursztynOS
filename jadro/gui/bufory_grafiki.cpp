@@ -1,3 +1,4 @@
+#include "graphics_perf.h"
 #include "bufory_grafiki.h"
 #include "pamiec.h"
 namespace {
@@ -14,7 +15,7 @@ bool bufory_grafiki_inicjalizuj() {
     if(!VmmMapujNowaStroneJadra(reinterpret_cast<void*>(BUFORY_GRAFIKI_BAZA),pa)) {
         ZwolnijRamke(pa); return false;
     }
-    rozmiary[0]=4096; zajete=4096; gotowe=true; return true;
+    rozmiary[0]=4096; zajete=4096; gotowe=true; GraphicsPerf::allocated(4096); return true;
 }
 void* bufor_grafiki_alokuj(size_t n) {
     if(!gotowe||!n||n>BUFORY_GRAFIKI_SLOT||n>SIZE_MAX-4095) return nullptr;
@@ -33,10 +34,12 @@ void* bufor_grafiki_alokuj(size_t n) {
     }
     if(off!=n) {
         rozmiary[i]=off; zajete-=n-off;
+        if(off)GraphicsPerf::allocated(off);
         bufor_grafiki_zwolnij(reinterpret_cast<void*>(va));
         return nullptr;
     }
     ++alokacje;
+    GraphicsPerf::allocated(n);
     return reinterpret_cast<void*>(va);
 }
 void* bufor_grafiki_alokuj_strony(size_t n, void** out_ramki, size_t max_ramek, size_t* out_liczba_ramek) {
@@ -63,11 +66,13 @@ void* bufor_grafiki_alokuj_strony(size_t n, void** out_ramki, size_t max_ramek, 
     }
     if(off != n) {
         rozmiary[i] = off; zajete -= (n - off);
+        if(off)GraphicsPerf::allocated(off);
         bufor_grafiki_zwolnij(reinterpret_cast<void*>(va));
         return nullptr;
     }
     *out_liczba_ramek = page_idx;
     ++alokacje;
+    GraphicsPerf::allocated(n);
     return reinterpret_cast<void*>(va);
 }
 void bufor_grafiki_zwolnij(void* p) {
@@ -81,6 +86,7 @@ void bufor_grafiki_zwolnij(void* p) {
         if(pa) ZwolnijRamke(pa);
     }
     zajete-=n; rozmiary[i]=0;
+    if(n)GraphicsPerf::freed(n);
 }
 uint64_t bufory_grafiki_bajty(){return zajete;}
 uint64_t bufory_grafiki_alokacje(){return alokacje;}

@@ -1,7 +1,7 @@
 # Audyt poprawności podsystemu Ustawienia ekranu (Bursztyn OS)
 
-**Data audytu:** 2026-09-06  
-**Status weryfikacji manualnej:** NOT MANUALLY VERIFIED BY HUMAN  
+**Data audytu:** 2026-09-06
+**Status weryfikacji manualnej:** NOT MANUALLY VERIFIED BY HUMAN
 **Wynik testów automatycznych:** PASS (PASS assertions = 31128, FAIL assertions = 0)
 
 ---

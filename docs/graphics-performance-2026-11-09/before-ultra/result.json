@@ -1,0 +1,12 @@
+{
+  "result": "FAIL",
+  "iso_sha256": "63a989c59dc8c6310e586e90f614b804ee8cb16de4bd246219aad4e98fab7692",
+  "source_iso_sha256": "e4ebbdd96c0e67eae5eebd93edf3589219371db8a1a032282c42e172acefee34",
+  "kernel_sha256": "01d6ee97f60699b1a905c10d5954169c4331ccaf1dc5b0bde9494f77400212f4",
+  "mode": [
+    3440,
+    1440
+  ],
+  "display": "none",
+  "error": "desktop"
+}

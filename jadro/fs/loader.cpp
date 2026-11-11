@@ -939,7 +939,7 @@ static bool mapuj_stos_uzytkownika(
     void* pml4,
     uint32_t flagi,
     uint64_t liczba_stron,
-    uint64_t baza_stosu = BAZA_STOSU_USER
+    uint64_t baza_stosu
 ) {
     for (uint64_t i = 0;
          i < liczba_stron;
@@ -1032,7 +1032,7 @@ struct ProbaUruchomienia {
 
 // Each page is populated through its supervisor HHDM alias before its final
 // user PTE exists. No user-visible writable executable preparation mapping.
-static bool mapuj_segment_v2(uint64_t va, uint64_t mem, const uint8_t* src,
+static bool mapuj_segment_v2(void* pml4, uint64_t va, uint64_t mem, const uint8_t* src,
     uint64_t bytes, uint64_t flags, const NaglowekBurV2& n,
     const BurV2Relokacja* reloc, uint64_t base, bool data_segment = false) {
     uint32_t next = 0;
@@ -1055,7 +1055,7 @@ static bool mapuj_segment_v2(uint64_t va, uint64_t mem, const uint8_t* src,
             for (size_t j = 0; j < width; ++j) dst[in_page+j] = value >> (8*j);
             ++next;
         }
-        if (!VmmMapujStroneBurV2(reinterpret_cast<void*>(va+off), frame, flags)) {
+        if (!VmmMapujStroneBurV2WPrzestrzeni(pml4, reinterpret_cast<void*>(va+off), frame, flags)) {
             ZwolnijRamke(frame); return false;
         }
     }
@@ -1160,7 +1160,6 @@ static bool uruchom_program_z_pliku_impl(
         return false;
     }
 
-    g_baza_stosu_user[pid] = baza_stosu;
 
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_image_start = loader_perf_now();
@@ -1240,6 +1239,7 @@ static bool uruchom_program_z_pliku_impl(
         uint64_t end = 0;
         for (uint32_t i = 0; i < n2.reloc_liczba; ++i) {
             uint64_t value = 0; size_t width = 0;
+            // Production model only needs aligned RELATIVE/ABS64 data fixups.
             if (relocs[i].typ != BUR_V2_RELOC_ABS64 ||
                 bur_v2_oblicz_wartosc_relokacji(n2, relocs[i], layout.baza_obrazu, &value, &width) != BUR_V2_OK ||
                 (i && relocs[i].offset_w_obrazie < end)) {
@@ -1253,6 +1253,7 @@ static bool uruchom_program_z_pliku_impl(
     }
     const uint64_t entry = v2 ? layout.punkt_wejscia_va : naglowek.punkt_wejscia;
     const uint64_t stack_base = v2 ? layout.stos_dol : baza_stosu;
+    g_baza_stosu_user[pid] = stack_base;
 #if BURSZTYNDIAGTESTDZWIEKU
     const bool trace_app = takie_same_sciezki(bezpieczna_sciezka,
         "/programy/test_dzwieku.cebula/test_dzwieku.bur");
@@ -1370,12 +1371,15 @@ static bool uruchom_program_z_pliku_impl(
         if (mapowanie_ok && kopiowane_dane >= sizeof(uint64_t)) {
             const StanPrzerwan stan_ssp = wylacz_przerwania();
             UstawPrzestrzenAdresowa(pml4_procesu);
+            {
+            OknoUzytkownika okno(reinterpret_cast<void*>(naglowek.dane_wirtualny), kopiowane_dane);
             (void)stack_protector_zainicjuj_segment_danych_procesu(
                 static_cast<uint64_t>(pid),
                 static_cast<uintptr_t>(naglowek.punkt_wejscia),
                 reinterpret_cast<uint8_t*>(naglowek.dane_wirtualny),
                 kopiowane_dane
             );
+            }
             UstawPrzestrzenAdresowa(poprzednie_pml4);
             przywroc_przerwania(stan_ssp);
         }
@@ -1383,14 +1387,14 @@ static bool uruchom_program_z_pliku_impl(
     }
 
     if (v2) {
-        mapowanie_ok = mapuj_segment_v2(layout.tekst_va, n2.tekst_rozmiar,
+        mapowanie_ok = mapuj_segment_v2(pml4_procesu, layout.tekst_va, n2.tekst_rozmiar,
             bufor_pliku+n2.tekst_przesuniecie, n2.tekst_rozmiar, 0, n2, relocs, layout.baza_obrazu) &&
-            mapuj_segment_v2(layout.rodata_va, n2.rodata_rozmiar,
+            mapuj_segment_v2(pml4_procesu, layout.rodata_va, n2.rodata_rozmiar,
             bufor_pliku+n2.rodata_przesuniecie, n2.rodata_rozmiar, VMM_FLAGA_NX, n2, relocs, layout.baza_obrazu) &&
-            mapuj_segment_v2(layout.dane_va, n2.dane_rozmiar_pamieci,
+            mapuj_segment_v2(pml4_procesu, layout.dane_va, n2.dane_rozmiar_pamieci,
             bufor_pliku+n2.dane_przesuniecie, n2.dane_rozmiar_pliku, VMM_FLAGA_NX | FLAGA_ZAPIS,
             n2, relocs, layout.baza_obrazu, true) &&
-            mapuj_segment_v2(layout.straznik_stosu_va, 4096,
+            mapuj_segment_v2(pml4_procesu, layout.straznik_stosu_va, 4096,
             reinterpret_cast<const uint8_t*>(&canary), sizeof(canary), VMM_FLAGA_NX, n2, relocs, layout.baza_obrazu);
         if (!mapowanie_ok) proba.obraz.blad = "bur-v2-image-mapping-failed";
         canary = 0;

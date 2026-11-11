@@ -1,0 +1,74 @@
++ python3 testy/test_dzwieku_size.py test_dzwieku.bin
+Test dźwięku: file=232368 maximum=524288 margin=291920
+Test dźwięku: file=524289 maximum=524288 margin=-1
+size gate: one byte above app budget rejected PASS
++ python3 testy/test_dzwieku_packaging.py
+BUR v2 file=232368 text=135168 rodata=57344 initialized_data=12288 zero_fill=4497408 mapped=4706304
+packaging-audit: 64 pass, 0 fail
++ g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -fsanitize=address,undefined -Wl,--gc-sections -I. -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -Isterowniki/pci -Isterowniki/virtio -Isterowniki/czas -Isterowniki/platforma -Isterowniki/magazyn -Isterowniki/grafika -Isterowniki/siec -Isterowniki/wejscie -Isterowniki -DBURSZTYN_LOADER_RUNTIME_HOST_TEST -DBURSZTYN_PSF_HOST_TEST -DBURSZTYNDIAGTESTDZWIEKU=0 jadro/fs/loader.cpp jadro/fs/storage_format.cpp testy/test_dzwieku_loader.cpp -o /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/loader-0
++ /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/loader-0 /home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/fixtures/bur_v1_legacy/aktualizacje.bin /home/programista/Pulpit/Burstzyn/BursztynOS/test_dzwieku.bin
+loader PASS ready pid=1 RIP=0x1001000 pages=144 file=202368 zero_fill=129408
+negative PASS truncated-header
+negative PASS invalid-magic
+negative PASS text-file-offset-out-of-range
+negative PASS text-size-out-of-range
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS data-file-offset-out-of-range
+negative PASS data-size-out-of-range
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS segments-overlap-in-memory
+negative PASS segments-overlap-in-file
+negative PASS entry-outside-text
+negative PASS data-size-out-of-range
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS text-file-end-overflow-or-truncated
+BUR v2 production loader rollback: 1165 frame and mapping failure stages PASS; NX/entropy denial PASS
+Test dzwieku loader/package: 31 scenarios, 11289212 checks PASS; ASan+UBSan
++ g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -fsanitize=address,undefined -Wl,--gc-sections -I. -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -Isterowniki/pci -Isterowniki/virtio -Isterowniki/czas -Isterowniki/platforma -Isterowniki/magazyn -Isterowniki/grafika -Isterowniki/siec -Isterowniki/wejscie -Isterowniki -DBURSZTYN_LOADER_RUNTIME_HOST_TEST -DBURSZTYN_PSF_HOST_TEST -DBURSZTYNDIAGTESTDZWIEKU=1 jadro/fs/loader.cpp jadro/fs/storage_format.cpp testy/test_dzwieku_loader.cpp -o /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/loader-1
++ /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/loader-1 /home/programista/Pulpit/Burstzyn/BursztynOS/narzedzia/fixtures/bur_v1_legacy/aktualizacje.bin /home/programista/Pulpit/Burstzyn/BursztynOS/test_dzwieku.bin
+loader PASS ready pid=1 RIP=0x1001000 pages=144 file=202368 zero_fill=129408
+negative PASS truncated-header
+negative PASS invalid-magic
+negative PASS text-file-offset-out-of-range
+negative PASS text-size-out-of-range
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS data-file-offset-out-of-range
+negative PASS data-size-out-of-range
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS segments-overlap-in-memory
+negative PASS segments-overlap-in-file
+negative PASS entry-outside-text
+negative PASS data-size-out-of-range
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS text-address-overflow-or-outside-user-image
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS data-address-overflow-or-outside-user-image
+negative PASS text-file-end-overflow-or-truncated
+BUR v2 production loader rollback: 1165 frame and mapping failure stages PASS; NX/entropy denial PASS
+Test dzwieku loader/package: 31 scenarios, 11289217 checks PASS; ASan+UBSan
++ g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -fsanitize=address,undefined -Wl,--gc-sections -I. -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -Isterowniki/pci -Isterowniki/virtio -Isterowniki/czas -Isterowniki/platforma -Isterowniki/magazyn -Isterowniki/grafika -Isterowniki/siec -Isterowniki/wejscie -Isterowniki -DBURSZTYNDIAGTESTDZWIEKU=1 testy/test_dzwieku_gui.cpp jadro/fs/storage_format.cpp -o /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/gui
+In file included from testy/../bursztyn_ui/bursztyn_ui.h:25,
+                 from testy/bursztyn_ui_host_fixture.h:255,
+                 from testy/test_dzwieku_gui.cpp:12:
+testy/../bursztyn_ui/pole_wielowierszowe.h: In member function ‘size_t BursztynUI::PoleWielowierszowe::granica_utf8(size_t) const’:
+testy/../bursztyn_ui/pole_wielowierszowe.h:624:9: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  624 |         if(b>=dlugosc_)return dlugosc_;while(b>0&&(static_cast<uint8_t>(bufor_[b])&0xC0U)==0x80U)--b;return b;
+      |         ^~
+testy/../bursztyn_ui/pole_wielowierszowe.h:624:40: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  624 |         if(b>=dlugosc_)return dlugosc_;while(b>0&&(static_cast<uint8_t>(bufor_[b])&0xC0U)==0x80U)--b;return b;
+      |                                        ^~~~~
+testy/test_dzwieku_gui.cpp: In function ‘int main(int, char**)’:
+testy/test_dzwieku_gui.cpp:196:27: warning: unused parameter ‘argv’ [-Wunused-parameter]
+  196 | int main(int argc, char** argv) {
+      |                    ~~~~~~~^~~~
++ /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/gui /home/programista/Pulpit/Burstzyn/BursztynOS/test_dzwieku.bin
+two-controller 128-widget report: 940346 bytes, complete file roundtrip PASS
+Test dzwieku GUI/font/report: 29 scenarios, 2662 checks PASS; ASan+UBSan
++ g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -fsanitize=address,undefined -Wl,--gc-sections -I. -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -Isterowniki/pci -Isterowniki/virtio -Isterowniki/czas -Isterowniki/platforma -Isterowniki/magazyn -Isterowniki/grafika -Isterowniki/siec -Isterowniki/wejscie -Isterowniki -DBURSZTYN_HDA_HOST_TEST testy/test_dzwieku_hda_bws.cpp sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_diag.cpp -o /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/hda-bws
++ /home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/repair/hda-bws
+Actual BWS89 maximum host elapsed 6409377 ns; instrumented service 800 ns
+Test dzwieku actual BWS89/90/HDA: 8 scenarios, 2161 checks PASS; ASan+UBSan
+TEST DŹWIĘKU: ASan + UBSan PASS (production and bounded startup trace)

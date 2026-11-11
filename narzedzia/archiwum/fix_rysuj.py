@@ -42,15 +42,15 @@ new_rysuj = """void shell_rysuj_terminal() {
         int max_scroll = g_liczba_linii - max_linii;
         if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
+
         if (!g_scrolling) {
             g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        
+
         ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
+
         g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
@@ -59,12 +59,12 @@ new_rysuj = """void shell_rysuj_terminal() {
 
     int text_x = client_x + 8;
     int cur_y = client_y + 4;
-    
+
     for (int i = 0; i < max_linii; ++i) {
         int idx = pierwsza_do_rysowania + i;
         if (idx >= g_liczba_linii) break;
         int real_idx = (g_pierwsza_linia + idx) % MAXSCROLLBACKLINES;
-        
+
         if (g_linie[real_idx].len > 0) {
             gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, 100, g_linie[real_idx].tekst);
         }

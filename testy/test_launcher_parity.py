@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Execute both print-only launchers; compare all canonical options and PCI order."""
+# Shared tooling remains in narzedzia after test sources moved.
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "narzedzia"))
 import difflib,json,os,shutil,subprocess,sys
 from pathlib import Path
 from qemu_launcher_audit import normalize,topology
@@ -46,7 +50,7 @@ else:
     }
 for name,data in [('linux',linux),('windows',windows)]:
  (OUT/(name+'.json')).write_text(json.dumps(data,indent=2)+'\n')
- assert len(topology(data['argv']))==7
+ assert len(topology(data['argv']))==(8 if name=='linux' else 7)
  assert data['topology']==topology(data['argv'])
 
 def canonical(argv):
@@ -62,14 +66,22 @@ def canonical(argv):
   result += [option,value]
  return result,host
 l,lh=canonical(linux['argv']);w,wh=canonical(windows['argv'])
-assert l==w, '\n'.join(difflib.unified_diff(l,w,fromfile='Linux',tofile='Windows'))
+# Exactly one documented difference (docs/virtio-gpu-mouse-reliability-2026-11-11.md):
+# Linux appends the absolute virtio-tablet-pci as its LAST device, so every other
+# option, value, order and BDF is still identical to the Windows profile.
+tablet=['-device','virtio-tablet-pci']
+i=next(k for k in range(0,len(l)-1,2) if l[k:k+2]==tablet)
+assert l.count('virtio-tablet-pci')==1 and all(l[k]!='-device' for k in range(i+2,len(l),2)), 'tablet must be the last device'
+l_without_tablet=l[:i]+l[i+2:]
+assert l_without_tablet==w, '\n'.join(difflib.unified_diff(l_without_tablet,w,fromfile='Linux',tofile='Windows'))
 assert '-device' in l and l[l.index('-accel')+1]=='tcg,thread=single'
-assert topology(linux['argv'])==topology(windows['argv'])
-assert all('virtio-tablet' not in a for a in l)
+assert topology(linux['argv'])[:7]==topology(windows['argv'])
+assert topology(linux['argv'])[7]['device']=='virtio-tablet-pci' and topology(linux['argv'])[7]['expected_bdf']=='00:09.0'
+assert all('virtio-tablet' not in a for a in w)
 # Dry-run of the real runuefi target must use precisely the audited arguments.
 text=subprocess.check_output(['make','-n','runuefi'],cwd=ROOT,text=True)
 import shlex
 commands=[shlex.split(line) for line in text.splitlines() if line.startswith(linux['argv'][0]+' ')]
 assert commands and commands[-1]==linux['argv']
 (OUT/'normalized-comparison.json').write_text(json.dumps({'linux':normalize(linux['argv']),'windows':normalize(windows['argv']),'canonical':l,'intentional_host_differences':{'linux':lh,'windows':wh}},indent=2)+'\n')
-print('Launcher parity: 8 checks PASS (actual Make argv, actual PowerShell argv, dry-run runtime argv, 7 PCI devices/order, all canonical properties, single TCG, relative mouse, explicit host differences)')
+print('Launcher parity: 9 checks PASS (actual Make argv, actual PowerShell argv, dry-run runtime argv, 7 shared PCI devices/order + Linux tablet at 00:09.0, all canonical properties, single TCG, relative mouse fallback, explicit host differences)')

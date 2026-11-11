@@ -1,8 +1,19 @@
 {
+  "ArabicShaping.txt": "c289c5fbc632fe3d5f969b5592d5f7fbdbc4b01f0f1370a38b83df5f6b94310c",
+  "BidiBrackets.txt": "2f0531dc6a2aafa7462c7f89008c2845ade52e51267ac5ba39339adeefb8fe53",
+  "BidiCharacterTest.txt": "18507f7ec57ec8155b7771dbc88f3e3201ad08eba4dba70e4e095ef628020fa8",
+  "BidiMirroring.txt": "8116a6eea6a7ff8c15b2cfda2d50cfe92fe90d05f95145daf09a510595a65aa5",
+  "BidiTest.txt": "23413900dddcd2a246440f1f0cf27a3e1e62b3d0aebfa8f44ce241f5950fe956",
+  "CompositionExclusions.txt": "59d2d9e3dfdf0a999cf9dae11d594f053631222679a2f5710315ea07f7fe82af",
   "DerivedCoreProperties.txt": "f55d0db69123431a7317868725b1fcbf1eab6b265d756d1bd7f0f6d9f9ee108b",
   "EastAsianWidth.txt": "b08191401dc125f4e84ef262a95754faae6b737c79538e17ea9664a63434e94e",
   "GraphemeBreakProperty.txt": "a7e52eee647e52dc210b8719b4d7037276f4b353810293d69377fc46374cec3f",
   "GraphemeBreakTest.txt": "ed9c5e92fd0911ccbeeb63c97cb19c519ea272ff1112ce843abd991582dd848f",
+  "LineBreak.txt": "a55cdc118493491e0a9c885b48eda953a6258a1e218f6050a11891231c79683f",
+  "PropertyValueAliases.txt": "4b7411fc592c4985e5f03643aa0bddfdfd45250ff1790d358926614d20e37652",
+  "Scripts.txt": "0eacb65169ae6eb1d399cd70826b3da15fff19f6f586eecf819b70c83b1d9b32",
   "UnicodeData.txt": "2fc713e6a31a87c4850a37fe2caffa4218180fadb5de86b43a143ddb4581fb86",
-  "emoji-data.txt": "d7aef489c8fe4c14f09ea5695200277c6b93ac82ac60845cdd2161b0d6835cc1"
+  "emoji-data.txt": "d7aef489c8fe4c14f09ea5695200277c6b93ac82ac60845cdd2161b0d6835cc1",
+  "extracted_DerivedBidiClass.txt": "b57884c59a3a5348d86faed39965bbddb4e4493d3c16c1ec378ec26bfb5821be",
+  "extracted_DerivedJoiningType.txt": "2e0ed3733272299007cf0b76e84a8a653192d99a4429d2232fffcabccfd2d462"
 }

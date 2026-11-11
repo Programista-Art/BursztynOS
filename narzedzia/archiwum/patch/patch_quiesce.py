@@ -24,7 +24,7 @@ if old_func_start != -1 and old_func_end != -1:
                 ? UINT64_MAX
                 : (start_ns + QUIESCE_TIMEOUT_NS);
 
-        /* 1. Poczekaj na zwolnienie blokady drv->lock i SPORBUJ JA ZAJAC. 
+        /* 1. Poczekaj na zwolnienie blokady drv->lock i SPORBUJ JA ZAJAC.
            Jesli nie uzyjemy test_and_set, mamy wyscig z ownerem kolejki. */
         bool locked = false;
         while (true) {
@@ -84,7 +84,7 @@ if old_func_start != -1 and old_func_end != -1:
             req.scanout_id = 0; /* zakladamy primary display */
             req.resource_id = 0; /* 0 = disable */
             req.r.x = 0; req.r.y = 0; req.r.width = 0; req.r.height = 0;
-            
+
             VirtioGpuCtrlHdr resp{};
             /* Wywolujemy bezposrednio funkcje nie-blokujaca, bo juz mamy drv->lock */
             __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);

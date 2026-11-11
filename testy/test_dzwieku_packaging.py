@@ -91,10 +91,10 @@ def main() -> int:
     exe = "test_dzwieku.bur"
     full = f"{pkg}/{exe}"
 
-    check(full in desktop, f"desktop_entries.h launcher path {full}")
-    check(full in kernel, f"kernel.cpp install path {full}")
-    check(full in wm, f"menedzer_okien.cpp SCIEZKA {full}")
-    check(pkg in psf, f"psf_bootstrap.h directory {pkg}")
+    check(full in desktop, f"jadro/gui/desktop_entries.h launcher path {full}")
+    check(full in kernel, f"jadro/rdzen/kernel.cpp install path {full}")
+    check(full in wm, f"programy/menedzer_okien/menedzer_okien.cpp SCIEZKA {full}")
+    check(pkg in psf, f"jadro/fs/psf_bootstrap.h directory {pkg}")
     check(f'"{exe}"' in kernel or exe in kernel, "kernel manifest plik_startowy")
     check("Test dźwięku" in desktop and "Test dźwięku" in wm, "display name consistency")
     # case-sensitive exact match of directory name
@@ -112,7 +112,7 @@ def main() -> int:
     check("BWS_HDA_DIAG = 89" in api, "BWS_HDA_DIAG == 89")
     check("BWS_HDA_TEST = 90" in api, "BWS_HDA_TEST == 90")
     check("BWS_DIAGNOSTYKA_SYSTEMU = 91" in api, "system diagnostics reserves 91")
-    check("BWS_PIERWSZY_WOLNY = 96" in api, "next free is 96")
+    check("BWS_PIERWSZY_WOLNY = 98" in api, "next free is 98")
 
     # --- built artifact ---
     blob = ROOT / "test_dzwieku.bin"

@@ -119,7 +119,7 @@ static void zbuduj_zakladke_dane(Panel& p) {
     tab.dodaj_kolumne("Status", 100, WyrownaniePoziome::Poczatek);
 
     /*
-     * Tabela procesow korzysta z BWS_PROCESY_LISTA (94), wiec pokazuje
+     * Tabela procesow korzysta z BWS_PROCESY_LISTA (96), wiec pokazuje
      * rzeczywisty stan tablica_procesow[]: realne PID-y, realny stan,
      * realna pamiec i realne PZB. Poprzednia wersja generowala 1000
      * fikcyjnych wierszy z indeksu petli - to byla atrapa.

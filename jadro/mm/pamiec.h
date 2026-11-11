@@ -709,3 +709,5 @@ extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* va);
 
 extern "C" bool VmmNxGotowy();
 extern "C" bool VmmMapujStroneBurV2(void*, void*, uint64_t);
+
+extern "C" bool VmmMapujStroneBurV2WPrzestrzeni(void* pml4, void* va, void* pa, uint64_t flags);

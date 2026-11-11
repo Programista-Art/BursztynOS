@@ -18,7 +18,7 @@ CORPUS_DIR = ROOT / ".fuzz-corpus"
 METRICS_OUT = ROOT / "docs/security-hardening-2026-11-04/fuzzing-metrics.json"
 
 FUZZERS = [
-    {"name":"fuzz_bur_v2", "sources":["narzedzia/fuzz/fuzz_bur_v2.cpp"],
+    {"name":"fuzz_bur_v2", "sources":["testy/fuzz/fuzz_bur_v2.cpp"],
      "extra_flags":[], "smoke_iters":10000, "extended_iters":50000},
     {
         "name": "fuzz_bws",

@@ -3,8 +3,8 @@
 #include "testy/pointing_test_descriptors.h"
 #include <vector>
 #include <algorithm>
-#include "narzedzia/virtualbox_tablet_descriptor.h"
-#include "narzedzia/pointer_transport_stream.h"
+#include "testy/virtualbox_tablet_descriptor.h"
+#include "testy/pointer_transport_stream.h"
 #define BURSZTYN_USB_HOST_TEST 1
 #include "sterowniki/usb/ohci.cpp"
 

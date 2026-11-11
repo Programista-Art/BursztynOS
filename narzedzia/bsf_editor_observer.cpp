@@ -6,7 +6,7 @@
 #undef private
 #define _start notepad_observer_entry
 #define __dso_handle notepad_observer_dso
-#include "../notatnik.cpp"
+#include "../programy/notatnik/notatnik.cpp"
 #undef _start
 #undef __dso_handle
 int main(){

@@ -1,0 +1,12 @@
+{
+  "result": "FAIL",
+  "iso_sha256": "c988bc4394707f5e2889fee28a040462d98ca3e94cc67c33412f7f3da2237f5a",
+  "source_iso_sha256": "6c073268920fa647e85259ffe6697d16ac28eec3fa54f0c0ad5442f96e6ee442",
+  "kernel_sha256": "c979f57415ccc0c9c0f5b97c77b189da5fe6b3054e7e11411ffeb4e706345919",
+  "mode": [
+    1920,
+    1080
+  ],
+  "display": "none",
+  "error": "AF_UNIX path too long"
+}

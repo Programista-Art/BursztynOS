@@ -574,7 +574,7 @@ public:
             log_perf_uint64(miniatury_btp_wczytane);
             log(" fallback pelny ");
             log_perf_uint64(miniatury_fallback_pelny);
-            // miniatury_pamiec_bajty to calkowita pojemnosc alokacji dla wszystkich TAPETY_MAX (65) elementow, 
+            // miniatury_pamiec_bajty to calkowita pojemnosc alokacji dla wszystkich TAPETY_MAX (65) elementow,
             // a nie tylko rozmiar uzytych miniatur (czyli 65 * 160 * 90 * 4 = 3744000 bajtow).
             log(" cache capacity bajty ");
             log_perf_uint64(miniatury_pamiec_bajty);

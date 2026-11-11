@@ -1,6 +1,6 @@
 #include "../bsf/runtime.h"
 #include "../bsf/asset_path.h"
-#include "../bursztyn_gui.h"
+#include "../jadro/gui/bursztyn_gui.h"
 #include <map>
 #include <string>
 #include <vector>

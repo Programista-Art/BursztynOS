@@ -2014,7 +2014,7 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
     bool wykonuj
 ) {
     const uint64_t adres = reinterpret_cast<uint64_t>(va);
-    if (!vmm_zainicjalizowany || !pml4 || !pa || adres < RING3_BASE ||
+    if (!vmm_zainicjalizowany || !nx_aktywny || (zapis && wykonuj) || !pml4 || !pa || adres < RING3_BASE ||
         !adres_user_kanoniczny(adres) || (adres & 4095U) ||
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
     const auto obecne = sprawdz_mapowanie(pml4, adres);
@@ -2034,6 +2034,18 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
 
     return mapuj_strone_wewnetrznie(pml4, adres,
         reinterpret_cast<uint64_t>(pa), flagi);
+}
+
+extern "C" bool VmmNxGotowy() { return nx_aktywny; }
+extern "C" bool VmmMapujStroneBurV2WPrzestrzeni(void* root, void* va, void* pa, uint64_t flags) {
+    BlokadaVMM blokada;
+    if (flags & ~(PTE_WRITE | PTE_NX)) return false;
+    return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
+        static_cast<uint64_t*>(root), va, pa,
+        (flags & PTE_WRITE) != 0, (flags & PTE_NX) == 0);
+}
+extern "C" bool VmmMapujStroneBurV2(void* va, void* pa, uint64_t flags) {
+    return VmmMapujStroneBurV2WPrzestrzeni(pml4_z_cr3(), va, pa, flags);
 }
 
 extern "C" bool VmmMapujNowaStroneProcesu(
@@ -2057,24 +2069,6 @@ extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
     BlokadaVMM blokada;
     return vmm_mapuj_nowa_strone_procesu_wewnetrznie(
         static_cast<uint64_t*>(pml4), va, pa, zapis, wykonuj);
-}
-
-extern "C" bool VmmNxGotowy() { return nx_aktywny; }
-extern "C" bool VmmMapujStroneBurV2(void* va, void* pa, uint64_t flags) {
-    BlokadaVMM blokada;
-    const uint64_t addr = reinterpret_cast<uint64_t>(va);
-    const uint64_t phys = reinterpret_cast<uint64_t>(pa);
-    if (!vmm_zainicjalizowany || !nx_aktywny || !pa ||
-        addr < RING3_BASE || !adres_user_kanoniczny(addr) ||
-        (addr & 4095) || (phys & 4095) ||
-        (flags & ~(PTE_WRITE | PTE_NX)) ||
-        ((flags & PTE_WRITE) && !(flags & PTE_NX))) return false;
-    uint64_t* pml4 = pml4_z_cr3();
-    if (!pml4) return false;
-    const auto old = sprawdz_mapowanie(pml4, addr);
-    if (old.obecna && old.user) return false;
-    return mapuj_strone_wewnetrznie(pml4, addr, phys,
-        PTE_PRESENT | PTE_USER | flags);
 }
 
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {

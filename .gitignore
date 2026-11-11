@@ -63,8 +63,6 @@ logi_qemu/
 *.pyo
 
 # --- Sekrety / lokalne klucze ---
-aktualizacja_klucz.h
-jadro/aktualizacja/aktualizacja_klucz.h
 
 # --- Binaria host-harnessów budowane w drzewie źródeł ---
 testy/test_bur_loader
@@ -100,3 +98,7 @@ boot*.log
 .isodir_*/
 
 .splash-preview/
+
+# Local integration verification outputs
+/.signature-test/
+/BursztynOS.iso

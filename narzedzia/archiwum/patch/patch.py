@@ -23,7 +23,7 @@ replacement = """    if (!completed) {
         log_append_u64_dec(timing, sizeof(timing), pos, spin_guard);
         gpu_klog(timing);
         gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Timeout polecenia kontrolnego!");
-        
+
         const uint32_t cmd_type = static_cast<const VirtioGpuCtrlHdr*>(req)->type;
         const uint32_t act_type = static_cast<const VirtioGpuCtrlHdr*>(static_cast<const void*>(resp_dma_vaddr))->type;
         const char* cmd_name = "UNKNOWN";

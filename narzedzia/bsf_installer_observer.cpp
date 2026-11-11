@@ -4,8 +4,8 @@
 #define private public
 #include "../bursztyn_ui/bursztyn_ui.h"
 #undef private
-#include "../loader.h"
-#include "../instalator_format.h"
+#include "../jadro/fs/loader.h"
+#include "../jadro/gui/instalator_format.h"
 #define class struct
 #define _start installer_observer_entry
 #define __dso_handle installer_observer_dso

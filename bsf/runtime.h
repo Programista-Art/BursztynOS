@@ -1,6 +1,12 @@
 #pragma once
 #include "bsf.h"
 #include "config.h"
+#include "layout.h"
+// BSF_COMPLEX_TEXT=0 builds the legacy LTR-only runtime (no BSF 2.0 engine
+// linked) for apps excluded by the kernel image budget; see docs/bsf2*.
+#ifndef BSF_COMPLEX_TEXT
+#define BSF_COMPLEX_TEXT 1
+#endif
 namespace BSF {
 int bitmap_width(uint32_t);
 const uint16_t *bitmap(uint32_t);
@@ -68,4 +74,32 @@ const Statistics &statistics();
 void preview(uint32_t id, int size); // local to Settings, never publishes
 void end_preview();
 void shutdown();
+// ---- BSF 2.0 shared layout ------------------------------------------------
+// One cached, shaped layout used by measure_text/measure_prefix/hit_test and
+// CzcionkaUI drawing whenever needs_complex_layout() is true (RTL, explicit
+// bidi controls, joining scripts, combining marks). Borrowed until the next
+// layout_text call; never retain across event-loop iterations.
+const TextLayout *layout_text(const char *text, size_t bytes, int px,
+                              bool bold = false, const char *family = nullptr,
+                              bool italic = false, int64_t max_width = 0,
+                              BaseDirection direction = BaseDirection::Auto);
+// Rasterize a shaped glyph id from a catalog face (GSUB output).
+const Glyph *glyph_id_face(uint32_t face, unsigned glyph, int px,
+                           bool bold = false, bool italic = false);
+// Draw a shared layout: mask(ctx,x,y,w,h,alpha) per glyph bitmap, lines
+// stacked by height(px). GPOS-positioned marks use font anchors; marks in
+// fonts without GPOS mark data use a bounded centring approximation.
+using MaskCallback = void (*)(void *, int, int, int, int, const uint8_t *);
+bool draw_layout(const TextLayout &, int x, int y, int px, bool bold,
+                 const char *family, MaskCallback, void *ctx);
+struct TextStatistics {
+  uint64_t layout_hits{}, layout_misses{}, layout_failures{}, shaped_runs{},
+      shaped_glyphs{}, fallback_searches{}, budget_failures{}, gsub_runs{},
+      gpos_runs{}, longest_run{};
+  size_t layout_bytes{};
+  // Appended (keeps earlier field offsets for observers): union of
+  // applied GSUB/GPOS lookup types, bit t = lookup type t.
+  uint64_t gsub_type_mask{}, gpos_type_mask{};
+};
+TextStatistics text_statistics();
 } // namespace BSF

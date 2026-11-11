@@ -48,7 +48,7 @@
     "-cdrom",
     "BursztynOS.iso"
   ],
-  "host_os": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+  "host_os": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
   "qemu_binary": "/usr/bin/qemu-system-x86_64",
   "topology": [
     {

@@ -141,7 +141,7 @@ def test_pliki_motywow_i_bezpieczenstwo():
     ok_kontrast = "motyw_waliduj_kontrast" in cpp
     raport("parser_fail_closed_i_kontrast", ok_limit_rozmiaru and ok_kontrast)
 
-    # Weryfikacja obecności wbudowanego fallbacku w motyw.h / motyw.cpp
+    # Weryfikacja obecności wbudowanego fallbacku w jadro/gui/motyw.h / jadro/gui/motyw.cpp
     motyw_h_path = os.path.join(REPO, "jadro/gui/motyw.h")
     with open(motyw_h_path, "r", encoding="utf-8") as f:
         h = f.read()

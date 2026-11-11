@@ -33,6 +33,14 @@ int main(){
  auto* gpu=virtio_gpu_get_driver(0);assert(gpu && gpu->initialized);
  assert(grafika_aktywuj_virtio_gpu(gpu));
  ekran_inicjalizuj(); // Production boot publishes the initial display generation.
+ const auto initial_resource=gpu->resource_id;
+ const auto initial_allocations=graphical_allocs.size()+g_host_fb_allocs.size()+g_host_dma_allocs.size();
+ for(unsigned retry=0;retry<100;++retry){
+  assert(virtio_gpu_setup_framebuffer(gpu,1280,720,true));
+  assert(gpu->resource_id==initial_resource);
+  assert(graphical_allocs.size()+g_host_fb_allocs.size()+g_host_dma_allocs.size()==initial_allocations);
+ }
+
  assert(utworz_warstwe(1,0,0,1280,720,0)>=0);
  assert(skladacz_obrazu_publikuj_klatke(1));
  struct Target{int w,h;uint32_t scale;};
@@ -82,6 +90,14 @@ int main(){
  auto temporary=grafika_geometria_ekranu();assert(cofnij());
  auto restored=grafika_geometria_ekranu();assert(restored.generation!=temporary.generation);
  assert(restored.width==previous.width && restored.height==previous.height && restored.scale==previous.scale);
+ // Borrowed VirtIO scene survives a return to the firmware backend, even
+ // when firmware and guest pitches differ. The GPU retains its own resource.
+ grafika_pobierz_wiersz_backbuffer(0)[0]=0x123456;
+ const auto live_resource=gpu->resource_id;
+ assert(grafika_przywroc_boot_backend());
+ assert(grafika_pobierz_wiersz_backbuffer(0)[0]==0x123456);
+ assert(gpu->resource_id==live_resource);
+ assert(grafika_aktywuj_virtio_gpu(gpu));
  usun_warstwe(1);
  input_reset_all();StanBuforowEkranu last{};grafika_pobierz_stan(&last);grafika_wymien_stan({});grafika_zwolnij_stan(&last);
  printf("Display transaction / immediate physical edges: %u checks PASS\n",checks);

@@ -4,6 +4,10 @@
 Uses the ordinary release payload and installer GUI. All disk writes are to
 new disposable files under .bsf-test; existing user disks are never attached.
 """
+# Shared tooling remains in narzedzia after test sources moved.
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "narzedzia"))
 import hashlib
 import argparse
 import json

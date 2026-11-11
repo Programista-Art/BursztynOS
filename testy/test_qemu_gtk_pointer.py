@@ -3,6 +3,10 @@
 Requires Xephyr, metacity, python-xlib. QMP only reads guest state; pointer and
 fullscreen inputs pass through the real GTK frontend. Disposable disk/desktop.
 """
+# Shared tooling remains in narzedzia after test sources moved.
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "narzedzia"))
 import argparse
 import hashlib
 import json

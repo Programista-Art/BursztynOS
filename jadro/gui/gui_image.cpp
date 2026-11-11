@@ -28,7 +28,7 @@ return -1; // Błąd: Plik jest za mały
 const btp_header_t* header = (const btp_header_t*)file_data;
 
 // [ZASADA BEZPIECZEŃSTWA] 2. Sprawdź Magiczny Numer
-if (header->magic[0] != 'B' || header->magic[1] != 'T' || 
+if (header->magic[0] != 'B' || header->magic[1] != 'T' ||
     header->magic[2] != 'P' || header->magic[3] != '1') {
     return -2; // Błąd: Nieznany format
 }
@@ -49,11 +49,11 @@ size_t byte_index = 0;
 if (header->compressed == 1) {
     while (pixels_drawn < pixels_to_draw && byte_index < data_size) {
         // Czytamy pakiet RLE
-        uint8_t count = pixel_data[byte_index++]; 
-        
+        uint8_t count = pixel_data[byte_index++];
+
         // Jeśli nie ma już miejsca na odczytanie koloru, przerywamy (ochrona przed awarią)
-        if (byte_index + 3 >= data_size) break; 
-        
+        if (byte_index + 3 >= data_size) break;
+
         // Odczyt koloru (zakładamy 32 bpp, 4 bajty)
         uint32_t color = *(uint32_t*)(&pixel_data[byte_index]);
         byte_index += 4;
@@ -63,7 +63,7 @@ if (header->compressed == 1) {
             // Obliczamy X i Y na ekranie
             uint32_t x = pixels_drawn % header->width;
             uint32_t y = pixels_drawn / header->width;
-            
+
             // Zapis prosto do bufora ramki (framebuffer)
             framebuffer[y * fb_width + x] = color;
             pixels_drawn++;

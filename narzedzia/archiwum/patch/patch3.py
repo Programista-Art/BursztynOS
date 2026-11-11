@@ -7,7 +7,7 @@ import re
 rysuj_pattern = """void shell_rysuj_terminal() {
     if (shell_minimized) return;
 
-    
+
     const BursztynMotyw* motyw = gui_pobierz_motyw();"""
 rysuj_new = """void shell_rysuj_terminal() {
     gui_rysuj_okno(shell_x, shell_y, shell_w, shell_h, "Powłoka Bursztynowa");
@@ -34,15 +34,15 @@ rysuj_pattern2 = """    KontekstRysowania ctx;
         int max_scroll = g_liczba_linii - max_linii;
         if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
+
         if (!g_scrolling) {
             g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        
+
         ctx.dodaj_przesuniecie(Punkt(shell_x, shell_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
+
         g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
@@ -73,15 +73,15 @@ rysuj_new2 = """    int client_x = shell_x + 4;
         int max_scroll = g_liczba_linii - max_linii;
         if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
+
         if (!g_scrolling) {
             g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        
+
         ctx.dodaj_przesuniecie(Punkt(client_x, client_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
+
         g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
@@ -99,7 +99,7 @@ content = content.replace("            ctx.rysuj_tekst(shell_x + 8, text_y, g_li
 mouse_old = """        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MYSZ_RUCH || e.typ == BWS_ZDARZENIE_MYSZ_UP) {
             gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
             if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
-            
+
             if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && akcja == GUI_BELKA_MINIMALIZUJ) {
                 shell_minimized = gui_minimalizuj_okno();
                 gui_ustaw_capture_myszy(false);
@@ -129,11 +129,11 @@ mouse_old = """        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDAR
                 mz.x = e.x - shell_x;
                 mz.y = e.y - shell_y;
                 mz.przycisk = (e.kod == 1) ? 1 : 0;
-                
+
                 if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
-                
+
                 if (g_pasek_przewijania->czy_brudna()) {
                     g_scrolling = true;
                     shell_rysuj_terminal();
@@ -201,11 +201,11 @@ mouse_new = """        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDAR
                 mz.x = e.x - client_x;
                 mz.y = e.y - client_y;
                 mz.przycisk = (e.kod == 1) ? 1 : 0;
-                
+
                 if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
-                
+
                 if (g_pasek_przewijania->czy_brudna()) {
                     g_scrolling = true;
                     shell_rysuj_terminal();

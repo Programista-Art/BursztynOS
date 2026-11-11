@@ -1,0 +1,45 @@
+{
+  "branch": "test",
+  "head": "954f5ddf1a44b999bc27ddab5376c430d08a203a",
+  "merge_head": "f28e346c985910f18b145adbc90781355f1c4e9f",
+  "committed": false,
+  "pushed": false,
+  "refs_unchanged": true,
+  "original_untracked_preserved": true,
+  "artifacts": {
+    "system_operacyjny.bin": {
+      "bytes": 14681704,
+      "sha256": "cbc7787f2307be2fb468caa3c2057b21e89b6408757e1697f715ac35d012fe52"
+    },
+    "BursztynOS.iso": {
+      "bytes": 40540160,
+      "sha256": "302f0ef42a89da52e9627b103afe56b1619dfa9e68298aacfd4ab18141fe4d62"
+    },
+    "ustawienia.bin": {
+      "bytes": 240096,
+      "sha256": "9e3cf6b94c06799a6e504139a1ceb2cf95fe2eb459dfb5749a3fe3621fed71bc"
+    },
+    "test_dzwieku.bin": {
+      "bytes": 232368,
+      "sha256": "5aed4c38fe0b8f0ecd945390dcb43a41765fc40385f69a8c3792393aec128d1e"
+    }
+  },
+  "passed_checks": {
+    "production_build": "bursztyn-build-final.log",
+    "production_iso": "bursztyn-iso-final.log",
+    "ssp_aslr_fuzz_host": "bursztyn-security-host.log",
+    "unicode_editor_fonts_shell": "bursztyn-unicode-retry.log",
+    "bsf_engine_ui_unicode_conformance": "bursztyn-bsf-hda-final.log",
+    "loader_vmm_signature_rollback_audio": "bursztyn-loader-verified.log",
+    "app_rsa_signatures": "bursztyn-signature.log",
+    "hda_diagnostics_isolation": "bursztyn-hda-final.log",
+    "settings_virtio_loader": "bursztyn-device-regression.log",
+    "installer_storage_wm_routing": "bursztyn-regression.log",
+    "native_bur2_aslr_nx_wx_smep_smap_ssp_fpu": "bursztyn-bur2-qemu-extended.log",
+    "native_bws_permissions_abuse": "bursztyn-bws-qemu-verified.log",
+    "native_ssp": "bursztyn-ssp-qemu.log",
+    "native_kernel_stack_guard": "bursztyn-guard-qemu.log",
+    "native_production_gui_cursor_devices_disk_integrity": "bursztyn-normal-boot-final.log"
+  },
+  "note": "Some combined historical make logs include early failures and nonexistent aliases; see report for final individual results. Entire nightly/physical/install-reboot matrices were not run."
+}

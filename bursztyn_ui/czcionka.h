@@ -21,10 +21,21 @@ namespace BursztynUI {
 class CzcionkaUI {
 public:
 #if defined(BSF_NATIVE)
+    // BSF 2.0: complex text (bidi, joining scripts, marks) is drawn from the
+    // same shaped layout that measure_text/measure_prefix/hit_test use. The
+    // draw loop lives once in the runtime; this thunk only forwards masks.
+    template<class Mask>
+    static void bsf_mask_thunk(void* ctx,int x,int y,int w,int h,const uint8_t* alpha){(*static_cast<Mask*>(ctx))(x,y,w,h,alpha);}
     template<class Mask>
     static bool rysuj_bsf(const char* text,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
         if(!BSF::ready(family)||px<1||px>128)return false;
-        size_t size=0;while(text&&text[size]&&size<65536)++size;uint32_t previous=0,previous_face=0,cluster_face=0;size_t cluster_end=0,cluster_begin=0;BSF::MarkPen marks;marks.base=x;
+        size_t size=0;while(text&&text[size]&&size<65536)++size;
+#if BSF_COMPLEX_TEXT
+        if(BSF::needs_complex_layout(text,size))
+            if(const auto* L=BSF::layout_text(text,size,px,bold,family))
+                return BSF::draw_layout(*L,x,y,px,bold,family,&bsf_mask_thunk<Mask>,&mask);
+#endif
+        uint32_t previous=0,previous_face=0,cluster_face=0;size_t cluster_end=0,cluster_begin=0;BSF::MarkPen marks;marks.base=x;
         for(size_t at=0;at<size;){
             if(at==cluster_end){cluster_begin=at;cluster_end=BSF::next_cluster(text,at,size);cluster_face=BSF::resolved_cluster(text+at,cluster_end-at,bold,family);}
             size_t byte_begin=at;uint32_t cp=0;at+=BSF::utf8(text+at,size-at,cp);if(BSF::default_ignorable(cp))continue;

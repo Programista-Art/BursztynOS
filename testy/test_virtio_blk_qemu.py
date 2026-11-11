@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Struktura VirtioBlkTestMarker zgodna z virtio_blk.h:
+# Struktura VirtioBlkTestMarker zgodna z sterowniki/virtio/virtio_blk.h:
 # - magic: 32 B ("BURSZTYN_TEST_SCRATCH_DISK_V1\0...")
 # - signature: uint64 (0x425552535A54594E, "BURSZTYN")
 # - version: uint32 (1)

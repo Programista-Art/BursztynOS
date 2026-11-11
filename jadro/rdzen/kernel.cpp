@@ -1,3 +1,4 @@
+#include "jadro/gui/display_mode_policy.h"
 #include "system_identity.h"
 #include "diagnostyka_systemu.h"
 #include "diagnostyka_systemu_format.h"
@@ -237,12 +238,9 @@ extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
 extern "C" uint8_t _binary_repro_bin_start[];
 extern "C" uint8_t _binary_repro_bin_end[];
 
-// obraz testowy
-extern "C" uint8_t _binary_obrazy_test_bmp_start[];
-extern "C" uint8_t _binary_obrazy_test_bmp_end[];
-
-extern "C" uint8_t _binary_obrazy_test1_bmp_start[];
-extern "C" uint8_t _binary_obrazy_test1_bmp_end[];
+// Obrazy testowe pulpitu (test.bmp, test1.bmp) nie sa juz osadzane w jadrze:
+// przychodza jako moduly Multiboot2 (patrz jadro/rdzen/obrazy_startowe.h).
+#include "obrazy_startowe.h"
 
 extern "C" uint8_t _binary_obrazy_logo_png_start[];
 extern "C" uint8_t _binary_obrazy_logo_png_end[];
@@ -1154,7 +1152,7 @@ void instaluj_wbudowane_programy() {
         "    \"uruchom_program\",\n"
         "    \"pliki_czytaj\"\n"
         "]\n";
-    
+
     static const char MANIFEST_SNAKE[] =
         "nazwa = \"Snake\"\n"
         "autor = \"Programista Art\"\n"
@@ -1267,7 +1265,7 @@ void instaluj_wbudowane_programy() {
         "    \"pliki_czytaj\",\n"
         "    \"pliki_zapisz\"\n"
         "]\n";
-    
+
     /*
      * WAZNE:
      * zapisujemy DOKLADNY rozmiar kazdego bloba z objcopy.
@@ -1377,21 +1375,6 @@ void instaluj_wbudowane_programy() {
         wypisz_log(buf);
     };
 #endif
-    const uint64_t test_bmp_rozmiar =
-        static_cast<uint64_t>(
-            _binary_obrazy_test_bmp_end -
-            _binary_obrazy_test_bmp_start);
-    const uint64_t test1_bmp_rozmiar =
-        static_cast<uint64_t>(
-            _binary_obrazy_test1_bmp_end -
-            _binary_obrazy_test1_bmp_start);
-#if BURSZTYN_TESTY_PSF
-    log_u32("[BSP-TEST] test.bmp blob size = ", (uint32_t)test_bmp_rozmiar);
-    log_u32("[BSP-TEST1] test1.bmp blob size = ", (uint32_t)test1_bmp_rozmiar);
-    if(test_bmp_rozmiar != test1_bmp_rozmiar){
-        wypisz_log("[BSP-TEST] UWAGA: rozmiary blob roznia sie");
-    }
-#endif
     // helper lambda do instalacji z diagnostyka i read-back
     auto instaluj_bmp = [&](const char* sciezka, const uint8_t* blob, uint32_t sz, const char* tag){
 #if BURSZTYN_TESTY_PSF
@@ -1475,8 +1458,43 @@ void instaluj_wbudowane_programy() {
 #endif
         (void)tag;
     };
-    instaluj_bmp("/uzytkownicy/Pulpit/test.bmp", _binary_obrazy_test_bmp_start, (uint32_t)test_bmp_rozmiar, "test");
-    instaluj_bmp("/uzytkownicy/Pulpit/test1.bmp", _binary_obrazy_test1_bmp_start, (uint32_t)test1_bmp_rozmiar, "test1");
+    // Obrazy pulpitu z modulow Multiboot2 (dokladna etykieta). Pamiec modulu
+    // pozostaje zarezerwowana w PMM (jak Ustawienia i czcionki BSF), bo plan
+    // instalacji krokowej przechowuje wskaznik do tych bajtow. Brak modulu
+    // (np. rozruch z dysku, gdzie plik juz istnieje) jest tylko logowany.
+    auto instaluj_bmp_z_modulu = [&](const char* etykieta, const char* sciezka, const char* tag){
+        ModulMB2 modul{};
+        if(!znajdz_modul_mb2(g_multiboot_info_ptr, etykieta, &modul) ||
+           !modul.poprawny || !tekst_rowny(modul.cmdline, etykieta)){
+            char b[96]={0};
+            const char* pre="[BSP] Brak modulu obrazu pulpitu: ";
+            size_t p=0; while(pre[p]&&p<60){b[p]=pre[p];p++;}
+            size_t i=0; while(etykieta[i]&&p<95){b[p++]=etykieta[i++];}
+            wypisz_log(b);
+            return;
+        }
+        const uint8_t* dane=reinterpret_cast<const uint8_t*>(uintptr_t(modul.start));
+        const obrazy_startowe::Wynik w=obrazy_startowe::sprawdz_bmp(dane, modul.start, modul.koniec);
+        if(w!=obrazy_startowe::Wynik::Ok){
+            char b[128]={0};
+            const char* pre="[BSP-BLAD] Odrzucono modul obrazu pulpitu: ";
+            size_t p=0; while(pre[p]&&p<60){b[p]=pre[p];p++;}
+            const char* o=obrazy_startowe::opis(w);
+            size_t i=0; while(o[i]&&p<127){b[p++]=o[i++];}
+            wypisz_log(b);
+            return;
+        }
+        instaluj_bmp(sciezka, dane, static_cast<uint32_t>(modul.rozmiar), tag);
+        {
+            char b[96]={0};
+            const char* pre="[BSP] Obraz pulpitu z modulu Multiboot2: ";
+            size_t p=0; while(pre[p]&&p<60){b[p]=pre[p];p++;}
+            size_t i=0; while(etykieta[i]&&p<95){b[p++]=etykieta[i++];}
+            wypisz_log(b);
+        }
+    };
+    instaluj_bmp_z_modulu(obrazy_startowe::EtykietaTest, obrazy_startowe::SciezkaTest, "test");
+    instaluj_bmp_z_modulu(obrazy_startowe::EtykietaTest1, obrazy_startowe::SciezkaTest1, "test1");
 
     const uint64_t logo_png_rozmiar =
         static_cast<uint64_t>(
@@ -2288,6 +2306,22 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     g_multiboot_info_ptr = multiboot_info_ptr;
+    display_mode_policy.follow_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=host");
+    display_mode_policy.observe_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=observe");
+    // Explicit guest mode, independent of OVMF's fallback GOP and host DPI.
+    static constexpr uint32_t startup_modes[][2]={{800,600},{1024,768},{1280,720},{1280,800},{1366,768},{1600,900},{1920,1080},{2560,1440},{3440,1440},{3840,2160}};
+    for(const auto& mode:startup_modes){
+        char option[48]="bursztyn.video=";unsigned n=sizeof("bursztyn.video=")-1;
+        for(unsigned dim=0;dim<2;++dim){
+            char digits[12];unsigned len=0,value=mode[dim];
+            do{digits[len++]=char('0'+value%10);value/=10;}while(value);
+            while(len)option[n++]=digits[--len];
+            if(!dim)option[n++]='x';
+        }
+        if(zadano_automatyczne_testy(g_multiboot_info_ptr,option)){
+            display_mode_policy.initial_width=mode[0];display_mode_policy.initial_height=mode[1];break;
+        }
+    }
     skladacz_obrazu_ustaw_odswiezanie(
         odczytaj_odswiezanie_klatek(g_multiboot_info_ptr));
 #if defined(BURSZTYN_DIAG_PCI_TRACE) && BURSZTYN_DIAG_PCI_TRACE

@@ -924,7 +924,7 @@ uint64_t socket_close(proces_t& p, uint64_t handle) {
 } // namespace
 
 /* =========================================================================
- * 22. ZARZADZANIE PROCESAMI (BWS 94/95)
+ * 22. ZARZADZANIE PROCESAMI (BWS 96/97)
  * ========================================================================= */
 
 namespace {
@@ -998,10 +998,10 @@ uint64_t procesy_lista(proces_t& p, uint64_t out_user, uint64_t max64) {
         w.poziom_pzb = q.poziom_zaufania;
         w.uprawnienia = q.uprawnienia;
 
-        const uint64_t sterta =
-            (q.granica_sterty > RING3_HEAP_BASE)
-                ? q.granica_sterty - RING3_HEAP_BASE
-                : 0;
+        const uint64_t heap_base = uklady_procesow[pid].wersja == 2
+            ? uklady_procesow[pid].sterta_baza : RING3_HEAP_BASE;
+        const uint64_t sterta = q.granica_sterty > heap_base
+            ? q.granica_sterty - heap_base : 0;
         w.sterta_bajtow = sterta;
         w.pamiec_bajtow = sterta;
 

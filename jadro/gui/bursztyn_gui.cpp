@@ -722,8 +722,14 @@ bool bws_siec_dns(const char* domena,
 }
 
 uint32_t bws_siec_pobierz_bajty(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity) {
-    if (!ip || !domain || !path || !buffer || capacity<2 || capacity>256*1024 ||
-        reinterpret_cast<uint64_t>(buffer)>UINT32_MAX) return 0;
+    if (!ip || !domain || !path || !buffer || capacity<2 || capacity>256*1024) return 0;
+    if (reinterpret_cast<uint64_t>(buffer)>UINT32_MAX) {
+        BwsBuforSieci64 req{reinterpret_cast<uint64_t>(buffer),capacity,1};
+        uint64_t result=bws_wywolaj(https?BWS_HTTPS64:BWS_HTTP64,
+            reinterpret_cast<uint64_t>(ip),reinterpret_cast<uint64_t>(domain),
+            reinterpret_cast<uint64_t>(path),reinterpret_cast<uint64_t>(&req));
+        return result>1 && result<=capacity ? uint32_t(result-1) : 0;
+    }
     uint64_t packed=(reinterpret_cast<uint64_t>(buffer)<<32)|uint64_t(capacity)|0x80000000ULL;
     uint64_t result=bws_wywolaj(https?30:29,reinterpret_cast<uint64_t>(ip),reinterpret_cast<uint64_t>(domain),reinterpret_cast<uint64_t>(path),packed);
     return result>1 && result<=capacity ? uint32_t(result-1) : 0;
@@ -745,6 +751,12 @@ bool bws_siec_pobierz_http(uint8_t* cel_ip,
      * Arg4 zawiera wskaznik i rozmiar w formacie oczekiwanym
      * przez obecna implementacje jadra.
      */
+    if (reinterpret_cast<uint64_t>(bufor)>UINT32_MAX) {
+        BwsBuforSieci64 req{reinterpret_cast<uint64_t>(bufor),max_dlugosc,0};
+        return bws_wywolaj(BWS_HTTP64,reinterpret_cast<uint64_t>(cel_ip),
+            reinterpret_cast<uint64_t>(domena),reinterpret_cast<uint64_t>(sciezka),
+            reinterpret_cast<uint64_t>(&req)) == 1;
+    }
     const uint64_t bufor_i_rozmiar =
         (reinterpret_cast<uint64_t>(bufor) << 32) |
         static_cast<uint64_t>(max_dlugosc);
@@ -768,6 +780,12 @@ bool bws_siec_pobierz_https(uint8_t* cel_ip,
     if (max_dlugosc != 0 && !bufor)
         return false;
 
+    if (reinterpret_cast<uint64_t>(bufor)>UINT32_MAX) {
+        BwsBuforSieci64 req{reinterpret_cast<uint64_t>(bufor),max_dlugosc,0};
+        return bws_wywolaj(BWS_HTTPS64,reinterpret_cast<uint64_t>(cel_ip),
+            reinterpret_cast<uint64_t>(domena),reinterpret_cast<uint64_t>(sciezka),
+            reinterpret_cast<uint64_t>(&req)) == 1;
+    }
     const uint64_t bufor_i_rozmiar =
         (reinterpret_cast<uint64_t>(bufor) << 32) |
         static_cast<uint64_t>(max_dlugosc);

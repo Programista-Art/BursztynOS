@@ -84,7 +84,7 @@ void wpisz_do_bufora(uint32_t cp) {
     }
     char buf[5];
     size_t bajty = Czcionka::zakoduj_utf8(cp, buf);
-    
+
     int act = (g_pierwsza_linia + g_liczba_linii - 1) % MAXSCROLLBACKLINES;
     if (g_linie[act].len + bajty > 250) {
         dodaj_nowa_linie();
@@ -128,15 +128,15 @@ void shell_rysuj_terminal() {
         int max_scroll = g_liczba_linii - max_linii;
         if (max_scroll < 0) max_scroll = 0;
         g_pasek_przewijania->ustaw_zakres(0, max_scroll);
-        
+
         if (!g_scrolling) {
             g_pasek_przewijania->ustaw_wartosc(max_scroll);
         }
-        
+
         ctx.dodaj_przesuniecie(Punkt(shell_x, shell_y));
         g_pasek_przewijania->rysuj(ctx);
         ctx.zdejmij_przesuniecie();
-        
+
         g_scroll_offset = max_scroll - g_pasek_przewijania->wartosc();
     }
 
@@ -145,13 +145,13 @@ void shell_rysuj_terminal() {
 
     int text_x = shell_x + 8;
     int cur_y = shell_y + 4;
-    
+
     // Rysuj linie scrollback
     for (int i = 0; i < max_linii; ++i) {
         int idx = pierwsza_do_rysowania + i;
         if (idx >= g_liczba_linii) break;
         int real_idx = (g_pierwsza_linia + idx) % MAXSCROLLBACKLINES;
-        
+
         if (g_linie[real_idx].len > 0) {
             gui_wypisz_tekst_kolor_skala(text_x, cur_y, tekst_kolor, 100, g_linie[real_idx].tekst);
         }
@@ -171,7 +171,7 @@ void shell_rysuj_terminal() {
         // Karetka
         ctx.rysuj_prostokat(Prostokat(input_text_x + wej_szer + 2, input_text_y, 2, 16), tekst_kolor);
     }
-    
+
     ctx.zdejmij_przyciecie();
 }
 
@@ -192,7 +192,7 @@ char pobierz_znak_blokujaco() {
     for (;;) {
         bws_zdarzenie e{};
         if (!gui_czekaj_na_zdarzenie(&e)) continue;
-        
+
         if (e.typ == BWS_ZDARZENIE_EKRAN) {
             gui_pobierz_rozdzielczosc(&shell_screen_w, &shell_screen_h);
             GuiMonitorInfo monitor{};
@@ -210,11 +210,11 @@ char pobierz_znak_blokujaco() {
         }
         if (e.typ == BWS_ZDARZENIE_FOCUS && shell_minimized) shell_minimized = false;
         if (e.typ == BWS_ZDARZENIE_ZAMKNIJ) gui_zakoncz_aplikacje();
-        
+
         if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MYSZ_RUCH || e.typ == BWS_ZDARZENIE_MYSZ_UP) {
             gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
             if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
-            
+
             if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && akcja == GUI_BELKA_MINIMALIZUJ) {
                 shell_minimized = gui_minimalizuj_okno();
                 gui_ustaw_capture_myszy(false);
@@ -244,11 +244,11 @@ char pobierz_znak_blokujaco() {
                 mz.x = e.x - shell_x;
                 mz.y = e.y - shell_y;
                 mz.przycisk = (e.klawisz & BWS_MYSZ_LEWY) ? 1 : 0;
-                
+
                 if (mz.typ == TypZdarzenia::WcisniecieMyszy) g_pasek_przewijania->przy_wcisnieciu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::ZwolnienieMyszy) g_pasek_przewijania->przy_zwolnieniu_myszy(mz);
                 else if (mz.typ == TypZdarzenia::RuchMyszy) g_pasek_przewijania->przy_ruchu_myszy(mz);
-                
+
                 if (g_pasek_przewijania->czy_brudna()) {
                     g_scrolling = true;
                     shell_rysuj_terminal();
@@ -268,14 +268,14 @@ char pobierz_znak_blokujaco() {
         }
 
         if (e.typ == BWS_ZDARZENIE_KLAWISZ && e.kod != 0) {
-            bool is_down = (e.klawisz & BWS_MYSZ_LEWY) == 0; // Klawisz is actually key state in BWS? Wait, e.klawisz might hold flags. 
+            bool is_down = (e.klawisz & BWS_MYSZ_LEWY) == 0; // Klawisz is actually key state in BWS? Wait, e.klawisz might hold flags.
             // In Bursztyn OS, BWS_ZDARZENIE_KLAWISZ means pressed down, e.kod is the char or scancode.
-            
+
             // Handle PageUp, PageDown, Home, End
             bool is_usb = (e.kod & 0x10000000) != 0; // Check BWS_KEY_SOURCE_USB
             bool is_e0 = (e.kod & 0x20000000) != 0;
             uint32_t baza = e.kod & 0xFF;
-            
+
             if (g_pasek_przewijania) {
                 ZdarzenieKlawiatury zk{};
                 zk.typ = TypZdarzenia::KlawiszWcisniety;
@@ -307,13 +307,13 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
     bool przepelnienie = false;
     bufor[0] = '\0';
     g_scrolling = false; // Reset scrolling on new command entry
-    
+
     for (;;) {
         g_obecny_bufor_wejscia = bufor;
         shell_rysuj_terminal();
-        
+
         char c = pobierz_znak_blokujaco();
-        
+
         if (c == '\n' || c == '\r') {
             bufor[pozycja] = '\0';
             g_obecny_bufor_wejscia = nullptr;
@@ -323,7 +323,7 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
             g_scrolling = false; // Auto-scroll to bottom after enter
             return !przepelnienie;
         }
-        
+
         if (c == '\b' || static_cast<uint8_t>(c) == 0x7FU) {
             if (!przepelnienie && pozycja > 0) {
                 --pozycja;
@@ -334,7 +334,7 @@ bool pobierz_linie(char* bufor, size_t pojemnosc) {
             }
             continue;
         }
-        
+
         if (!przepelnienie) {
             if (pozycja + 1 < pojemnosc) {
                 bufor[pozycja++] = c;
@@ -356,12 +356,12 @@ void _start() {
         shell_work_w = monitor.work_szer;
         shell_work_h = monitor.work_wys;
     }
-    
+
     if (bws_utworz_warstwe(shell_x, shell_y, shell_w, shell_h, 10) < 0)
         gui_zakoncz_aplikacje();
     gui_ustaw_tytul_okna("Powłoka Bursztynowa");
     gui_ustaw_przejecie_myszy(true);
-    
+
     motyw_inicjalizuj();
     g_pasek_przewijania = new PasekPrzewijania();
     g_pasek_przewijania->ustaw_orientacje(Orientacja::Pionowa);

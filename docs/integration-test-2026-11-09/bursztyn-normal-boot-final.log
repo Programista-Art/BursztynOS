@@ -1,0 +1,259 @@
+Disposable production boot workspace: /tmp/bursztyn-production-cz10oxsf
+TCG verification budgets: total=600 s, inactivity=300 s; all assertions retained
+====================================================================
+ BURSZTYN OS - AUDYT I WERYFIKACJA ROZRUCHU PRODUKCYJNEGO (NORMAL)
+====================================================================
+[INFO] Uruchamianie QEMU z obrazem produkcyjnym: /tmp/bursztyn-production-cz10oxsf/BursztynOS.iso
+[INFO] SHA256 dysku testowego przed bootem: c18aceee32b4c442dee30c45a50ecfeff04bc551bf49591ed85d8b17845a4809
+[NORMAL-SERIAL] [HAL] Aktywacja sterownika VESA VBE.
+[NORMAL-SERIAL] [MOUSE BOUNDS] source=cursor screen=1920x1080 max=1919x1079 gen=1
+[NORMAL-SERIAL] [EKRAN] Backend VESA (framebuffer).
+[NORMAL-SERIAL] [SYSTEM] Bursztyn OS HAL gotowy!
+[NORMAL-SERIAL] ==================================================
+[NORMAL-SERIAL] Bursztyn OS v1.0.1.9 (x86-64)
+[NORMAL-SERIAL] Polski System Operacyjny
+[NORMAL-SERIAL] Github: Programista-Art/BursztynOS
+[NORMAL-SERIAL] Autor: Dymitr Wygowski
+[NORMAL-SERIAL] ==================================================
+[NORMAL-SERIAL] [PMM] Skan pamieci fizycznej. Wykryto: 2047 MB RAM
+[NORMAL-SERIAL] [VMM] Paging 4-poziomowy aktywowany.
+[NORMAL-SERIAL] [HEAP] Sterta jadra 16 MiB gotowa.
+[NORMAL-SERIAL] [STACK] Podsystem chronionych stosow Ring 0 zainicjalizowany.
+[NORMAL-SERIAL] [ACPI] Multiboot2 ACPI old RSDP znaleziony.
+[NORMAL-SERIAL] [ACPI] SDT FACP
+[NORMAL-SERIAL] [ACPI] FADT bez obslugi RESET_REG.
+[NORMAL-SERIAL] [ACPI] DSDT _S5 gotowy.
+[NORMAL-SERIAL] [ACPI] SDT APIC
+[NORMAL-SERIAL] [ACPI] SDT HPET
+[NORMAL-SERIAL] [ACPI] SDT WAET
+[NORMAL-SERIAL] [ACPI] Uzywam RSDT.
+[NORMAL-SERIAL] [HPET] ACPI HPET znaleziony.
+[NORMAL-SERIAL] [HPET] MMIO=0xFED00000
+[NORMAL-SERIAL] [HPET] period=10000000 fs
+[NORMAL-SERIAL] [HPET] frequency=100000000 Hz
+[NORMAL-SERIAL] [HPET-TEST] 32-bit wrap monotonic: OK
+[NORMAL-SERIAL] [SCHED] PID 0 (idle) przygotowany.
+[NORMAL-SERIAL] [KRYPTO] Pula mbedTLS gotowa.
+[NORMAL-SERIAL] [PCI] Rozpoczynam skanowanie PCI...
+[NORMAL-SERIAL] [TIMER] LAPIC measured=75274700 Hz
+[NORMAL-SERIAL] [TIMER] Scheduler=250 Hz
+[NORMAL-SERIAL] [TIMER] LAPIC initial_count=301099
+[NORMAL-SERIAL] [APIC] LAPIC/IOAPIC uruchomiony.
+[NORMAL-SERIAL] [USB] Inicjalizacja podsystemu USB.
+[NORMAL-SERIAL] [xHCI controller] index=0 BDF=0:6.0 vendor=0x1B36 device=0xD BAR=0x0 ports=0 slots=0 version=0x0 result=detected
+[NORMAL-SERIAL] [xHCI] PCI controller znaleziony.
+[NORMAL-SERIAL] [xHCI] vendor=0x1B36 device=0xD
+[NORMAL-SERIAL] [xHCI] BAR=0xFEB90000 (64-bit), size=0x4000
+[NORMAL-SERIAL] [xHCI] version=0x100
+[NORMAL-SERIAL] [xHCI] max_slots=64
+[NORMAL-SERIAL] [xHCI] max_ports=8
+[NORMAL-SERIAL] [xHCI] max_intrs=16
+[NORMAL-SERIAL] [xHCI] context_size=32
+[NORMAL-SERIAL] [xHCI] scratchpads=0
+[NORMAL-SERIAL] [xHCI] Protocol USB  rev=2.0 ports=5..8 PSIC=0 slot_type=0
+[NORMAL-SERIAL] [xHCI] Speed IDs USB2 implied: 1=Full 2=Low 3=High.
+[NORMAL-SERIAL] [xHCI] Protocol USB  rev=3.0 ports=1..4 PSIC=0 slot_type=0
+[NORMAL-SERIAL] [xHCI] Speed IDs USB3 implied: 4=Super.
+[NORMAL-SERIAL] [xHCI] Firmware handoff: not required
+[NORMAL-SERIAL] [xHCI] Halt: OK
+[NORMAL-SERIAL] [xHCI] Reset: OK
+[NORMAL-SERIAL] [xHCI] pagesize mask=0x1
+[NORMAL-SERIAL] [xHCI] DCBAA: OK
+[NORMAL-SERIAL] [xHCI] Command Ring: OK
+[NORMAL-SERIAL] [xHCI] Event Ring: OK
+[NORMAL-SERIAL] [xHCI] Run: OK
+[NORMAL-SERIAL] [xHCI controller] index=0 BDF=0:6.0 vendor=0x1B36 device=0xD BAR=0xFEB90000 ports=8 slots=64 version=0x100 result=ready
+[NORMAL-SERIAL] [USB] xHCI gotowy.
+[NORMAL-SERIAL] [PS/2] controller detected
+[NORMAL-SERIAL] [INPUT REGISTER] dev='ps2-keyboard' bus=PS2 id=0 kinds=0x1 prio=10
+[NORMAL-SERIAL] [PS/2] keyboard detected, streaming enabled
+[NORMAL-SERIAL] [INPUT REGISTER] dev='ps2-mouse' bus=PS2 id=3 kinds=0x2 prio=10
+[NORMAL-SERIAL] [INPUT OWNER] Preferred pointer source: 'ps2-mouse' bus=PS2 id=3 prio=10
+[NORMAL-SERIAL] [PS/2] auxiliary mouse detected, streaming enabled
+[NORMAL-SERIAL] [BWS] API Wywolan Systemowych gotowe.
+[NORMAL-SERIAL] [AHCI] Szukam kontrolera SATA AHCI...
+[NORMAL-SERIAL] [AHCI] IDENTIFY SATA port 0.
+[NORMAL-SERIAL] QEMU HARDDISK
+[NORMAL-SERIAL] [VIRTIO-PCI] device=VirtIO-BLK (Urzadzenie blokowe) modern transport found (BDF 00:03.0)
+[NORMAL-SERIAL] [VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[NORMAL-SERIAL] [VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[NORMAL-SERIAL] [VIRTIO-PCI] features device=0x10130006E54 driver=0x100000000
+[NORMAL-SERIAL] [VIRTIO-PCI] device=VirtIO-RNG (Generator losowy) modern transport found (BDF 00:04.0)
+[NORMAL-SERIAL] [VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[NORMAL-SERIAL] [VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[NORMAL-SERIAL] [VIRTIO-PCI] features device=0x10130000000 driver=0x100000000
+[NORMAL-SERIAL] [VIRTIO-PCI] device=VirtIO-GPU (Karta graficzna) modern transport found (BDF 00:05.0)
+[NORMAL-SERIAL] [VIRTIO-PCI] common cfg BAR=2 offset=0x1000 len=0x800
+[NORMAL-SERIAL] [VIRTIO-PCI] notify cfg BAR=2 offset=0x3000 len=0x1000 multiplier=4
+[NORMAL-SERIAL] [VIRTIO-PCI] features device=0x10130000002 driver=0x100000000
+[NORMAL-SERIAL] [VIRTIO-PCI] device=VirtIO-NET (Karta sieciowa) modern transport found (BDF 00:07.0)
+[NORMAL-SERIAL] [VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[NORMAL-SERIAL] [VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[NORMAL-SERIAL] [VIRTIO-PCI] features device=0x10130BF8024 driver=0x100000000
+[NORMAL-SERIAL] [NORMAL BOOT] VirtIO self-tests skipped.
+[NORMAL-SERIAL] [VIRTIO-RNG] MSI-X configured successfully for queue 0
+[NORMAL-SERIAL] [VIRTIO-RNG] Device initialized successfully (queue 0, DRIVER_OK)
+[NORMAL-SERIAL] [VIRTIO-RNG] Sanity check: OK (16B entropy read).
+[NORMAL-SERIAL] [VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[NORMAL-SERIAL] [VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[NORMAL-SERIAL] [VIRTIO-BLK] Sanity check: OK (read LBA 0).
+[NORMAL-SERIAL] [VIRTIO-GPU] Wykryto urzadzenie VirtIO-GPU na magistrali PCI (BDF 0:5.0)
+[NORMAL-SERIAL] [VIRTIO-GPU] eventq niedostepna; tryb stalego rozmiaru.
+[NORMAL-SERIAL] [VIRTIO-GPU] MSI-X configured successfully (entry 0)
+[NORMAL-SERIAL] [VIRTIO-GPU] Sprzetowa plaszczyzna kursora aktywna.
+[NORMAL-SERIAL] [VIRTIO-GPU] GETDISPLAYINFO scanout0=1280x800 (enabled=1)
+[NORMAL-SERIAL] [VIRTIO-GPU] boot mode=1920x1080
+[NORMAL-SERIAL] [VIRTIO-GPU] mode source=host-display
+[NORMAL-SERIAL] [VIRTIO-GPU] selected initial mode=1280x800
+[NORMAL-SERIAL] [VIRTIO-GPU] Framebuffer gotowy: 1280x800 (stron=1000, wpisow_sg=3, format=B8G8R8X8)
+[NORMAL-SERIAL] [VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D.
+[NORMAL-SERIAL] [VIRTIO-GPU] SETSCANOUT 1280x800 result=OK
+[NORMAL-SERIAL] [HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.
+[NORMAL-SERIAL] [E1000] Szukam Intel 82540EM (8086:100E)...
+[NORMAL-SERIAL] [E1000] Brak wspieranej karty 82540EM.
+[NORMAL-SERIAL] [VIRTIO-NET] MSI-X configured successfully (RX=0, TX=1)
+[NORMAL-SERIAL] [VIRTIO-NET] RX buffers posted: count=128 avail_idx=128 used_idx=0
+[NORMAL-SERIAL] [VIRTIO-NET] MAC: 52:54:00:12:34:56
+[NORMAL-SERIAL] [VIRTIO-NET] Karta gotowa; link aktywny.
+[NORMAL-SERIAL] [VIRTIO-NET] Zarejestrowano jako NetworkDevice (virtio-net0).
+[NORMAL-SERIAL] [DHCP] Wysylam DHCPDISCOVER...
+[NORMAL-SERIAL] [VIRTIO-NET] TX submit head=0 avail_idx=1 used_idx=0
+[NORMAL-SERIAL] [VIRTIO-NET] TX completion head=0 used_idx=1
+[NORMAL-SERIAL] [VIRTIO-NET] RX packet: used.len=602 frame_len=590 rx_avail_idx=128 rx_used_idx=1
+[NORMAL-SERIAL] [DHCP] DHCPOFFER odebrany, wysylam DHCPREQUEST...
+[NORMAL-SERIAL] [VIRTIO-NET] TX submit head=0 avail_idx=2 used_idx=1
+[NORMAL-SERIAL] [VIRTIO-NET] TX completion head=0 used_idx=2
+[NORMAL-SERIAL] [VIRTIO-NET] RX packet: used.len=602 frame_len=590 rx_avail_idx=129 rx_used_idx=2
+[NORMAL-SERIAL] [DHCP] IPv4: 10.0.2.15
+[NORMAL-SERIAL] [DHCP] Brama: 10.0.2.2
+[NORMAL-SERIAL] [DHCP] Maska: 255.255.255.0
+[NORMAL-SERIAL] [DHCP] DNS: 10.0.2.3
+[NORMAL-SERIAL] [ROUTE] local subnet
+[NORMAL-SERIAL] [ROUTE] next_hop=10.0.2.2
+[NORMAL-SERIAL] [ARP] cache miss ip=10.0.2.2
+[NORMAL-SERIAL] [ARP] request ip=10.0.2.2
+[NORMAL-SERIAL] [VIRTIO-NET] TX submit head=0 avail_idx=3 used_idx=2
+[NORMAL-SERIAL] [VIRTIO-NET] TX completion head=0 used_idx=3
+[NORMAL-SERIAL] [VIRTIO-NET] RX packet: used.len=76 frame_len=64 rx_avail_idx=130 rx_used_idx=3
+[NORMAL-SERIAL] [ARP] reply/cache ip=10.0.2.2
+[NORMAL-SERIAL] [ARP] resolved ip=10.0.2.2
+[NORMAL-SERIAL] [SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.
+[NORMAL-SERIAL] [SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[NORMAL-SERIAL] [HDA] Brak dostepnego urzadzenia HDA.
+[NORMAL-SERIAL] [BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2...
+[NORMAL-SERIAL] [BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.
+[NORMAL-SERIAL] [PSF] total_blocks=32768
+[NORMAL-SERIAL] [PSF] bitmap_start=1 count=1
+[NORMAL-SERIAL] [PSF] inode_start=2 count=1024
+[NORMAL-SERIAL] [PSF] data_start=1026 count=31742
+[NORMAL-SERIAL] [ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.
+[NORMAL-SERIAL] [PCI] Rozpoczynam skanowanie PCI...
+[NORMAL-SERIAL] [PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[NORMAL-SERIAL] [BSP] Drzewiasty system plikow PSF gotowy.
+[NORMAL-SERIAL] [BSP] Wbudowana Powloka zainstalowana.
+[NORMAL-SERIAL] [BSP] /cytaty.txt zainstalowany.
+[NORMAL-SERIAL] [BSP] /obrazy/logo.png dodany do planu instalacji.
+[NORMAL-SERIAL] [BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[NORMAL-SERIAL] [BSP] Notatnik zainstalowany jako .cebula.
+[NORMAL-SERIAL] [BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[NORMAL-SERIAL] [BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[NORMAL-SERIAL] [BSP] Gra snake zainstalowana jako .cebula.
+[NORMAL-SERIAL] [BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[NORMAL-SERIAL] [BSP] BursztynUI Demo zainstalowane jako .cebula.
+[NORMAL-SERIAL] [BSP] Kontrolki 2 zainstalowane jako .cebula.
+[NORMAL-SERIAL] [EKRAN] Aplikacja zainstalowana.
+[NORMAL-SERIAL] [TAPETA] Aplikacja Tapety zainstalowana.
+[NORMAL-SERIAL] [BSP] Kontrolki 3 zainstalowane jako .cebula.
+[NORMAL-SERIAL] [BSP] Kontrolki 4 zainstalowane jako .cebula.
+[NORMAL-SERIAL] [BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[NORMAL-SERIAL] [BSP] Test dzwieku zainstalowany jako .cebula.
+[NORMAL-SERIAL] [BSP] Kalkulator zainstalowany jako .cebula.
+[NORMAL-SERIAL] [BSP] Menedzer Okien zainstalowany.
+[NORMAL-SERIAL] [TAPETA] Znaleziono modul tapety.pak, bajtow: 10977056
+[NORMAL-SERIAL] [TAPETA] Pakiet tapety.pak, liczba plikow: 28
+[NORMAL-SERIAL] [TAPETA] Zainstalowano brakujacych: 28
+[NORMAL-SERIAL] [TAPETA] Zachowano istniejacych: 0
+[NORMAL-SERIAL] [PMM] Pamiec fizyczna modulu tapety.pak zwolniona do puli PMM.
+[NORMAL-SERIAL] [EKRAN INIT] boot=1280x800x32
+[NORMAL-SERIAL] [EKRAN INIT] backend=virtio-gpu-runtime
+[NORMAL-SERIAL] [EKRAN INIT] cfg=missing; active=boot
+[NORMAL-SERIAL] [DIAG] Boot report saved: /logi/BOOTLOG.TXT
+[NORMAL-SERIAL] [SCHED] Wielozadaniowosc Round-Robin aktywna.
+[NORMAL-SERIAL] --------------------------------------------------
+[NORMAL-SERIAL] [KERNEL] Jadro i scheduler gotowe.
+[NORMAL-SERIAL] [VIRTIO-NET] TX MSI-X count=1
+[NORMAL-SERIAL] [VIRTIO-NET] RX MSI-X count=1
+[NORMAL-SERIAL] [USB root port] controller=0 port=1
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [USB root port] controller=0 port=2
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [USB root port] controller=0 port=3
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [USB root port] controller=0 port=4
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [USB root port] controller=0 port=5
+[NORMAL-SERIAL] [USB root port] connected PORTSC=0x20EE1
+[NORMAL-SERIAL] [USB root port] controller=0 port=6
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [TAPETA] Tapeta gotowa.
+[NORMAL-SERIAL] [USB root port] controller=0 port=8
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [xHCI] EP0 initial MaxPacket=64
+[NORMAL-SERIAL] [xHCI] Device Context address=0xD740000
+[NORMAL-SERIAL] [xHCI] Device Context OK.
+[NORMAL-SERIAL] [xHCI] EP0 Ring address=0xD742000
+[NORMAL-SERIAL] [xHCI] EP0 Ring OK.
+[NORMAL-SERIAL] [USB root port] controller=0 port=7
+[NORMAL-SERIAL] [USB root port] disconnected PORTSC=0x202A0
+[NORMAL-SERIAL] [USB device] controller=0 port=5 slot=1 VID=0x627 PID=0x1 class=0 configuration=1 interfaces=1 HID interfaces=1
+[NORMAL-SERIAL] [USB interface] controller=0 slot=1 interface=0 alternate=0 endpoints=1 class=3 subclass=1 protocol=2
+[NORMAL-SERIAL] [USB HID descriptor] controller=0 slot=1 interface=0 alternate=0 subclass=1 protocol=2 endpoint=0x81 MPS=4 bInterval=7 report-length=52
+[NORMAL-SERIAL] [USB HID] controller=0 port=5 slot=1 interface=0 endpoint=0x81 DCI=3 MPS=4 interval=6 role=other/unknown result=endpoint configured
+[NORMAL-SERIAL] [INPUT REGISTER] dev='usb-mouse' bus=USB id=1 kinds=0x2 prio=20
+[NORMAL-SERIAL] [USB-HID] First Interrupt IN transfer queued.
+[NORMAL-SERIAL] [USB HID] controller=0 port=5 slot=1 interface=0 endpoint=0x81 DCI=3 MPS=4 interval=6 role=boot-mouse result=interrupt IN armed
+[NORMAL-SERIAL] [BOOT-TELEMETRY] kernel_ready_time_us=29987679 desktop_ready_time_us=115118894 delta_us=85131215
+[NORMAL-SERIAL] [SYSTEM] Pulpit gotowy.
+[NORMAL-SERIAL] System operacyjny gotowy!
+
+[INFO] Weryfikacja wizualna pulpitu i kursora w trybie normalnym przez QMP...
+[INFO] QEMU mice: Mouse #2: QEMU PS/2 Mouse
+* Mouse #3: QEMU HID Mouse
+[INFO] Wzorzec testowy NIE zostal wyrenderowany (piksel 100,100 = (9, 10, 38), a nie Amber) (PASS)
+[INFO] Kursor w pozycji domyslnej (500, 300): WIDOCZNY (PASS)
+[INFO] Stare polozenie kursora (500, 300): PRZYWROCONE TLO (piksel=(59, 42, 148)) (PASS)
+[INFO] Nowe polozenie kursora (560, 340): WIDOCZNY (PASS)
+
+=================================================================
+CZASY OPERACJI ROZRUCHU I PRZYWRACANIA TAPETY:
+=================================================================
+  Kernel/system gotowy:           165.357 s
+  Start przywracania tapety:      BRAK
+  Dekodowanie obrazu zakonczone:  BRAK
+  Tapeta zastosowana w jadrze:    81.824 s
+  Zakonczenie procesu testu:      169.394 s
+=================================================================
+
+=================================================================
+PODSUMOWANIE AUDYTU ROZRUCHU PRODUKCYJNEGO (NORMAL BOOT):
+=================================================================
+  Znacznik [NORMAL BOOT] self-tests skipped:  PASS
+  Brak znacznikow stres-testow w logu:        PASS
+  VirtIO-RNG inicjalizacja produkcyjna:       PASS
+  VirtIO-RNG sanity check (16B):              PASS
+  VirtIO-BLK inicjalizacja produkcyjna:       PASS
+  VirtIO-BLK sanity check (odczyt LBA 0):     PASS
+  Audyt dysku (zero zapisu, SHA256 delta=0):  PASS
+  VirtIO-GPU inicjalizacja bufora 2D:         PASS
+  VirtIO-GPU rejestracja jako ekran:          PASS
+  VirtIO-NET inicjalizacja sieci:             PASS
+  Brak wyswietlania testowego wzorca kolorow: PASS
+  Tapeta i kompozytor pulpitu gotowe:         PASS
+  Kursor widoczny w (500, 300):               PASS
+  Ruch myszy do (560, 340):                   PASS
+  Przywrocenie tla w (500, 300):              PASS
+=================================================================
+[STATUS ROZRUCHU] Gotowosc systemu: TAK
+[STATUS ROZRUCHU] Czas rozruchu do pulpitu: 169.39 s
+
+[SUKCES] Rozruch produkcyjny jest w pelni bezpieczny, nieinwazyjny, wolny od testow obciazeniowych i gotowy (PASS)!

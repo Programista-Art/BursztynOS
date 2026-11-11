@@ -212,6 +212,19 @@ static void opaque_fastpath_cases(){
     usun_warstwe(2);usun_warstwe(1);skladacz_reset_ekranu();
 }
 int main(){
+    // Compare packed rows against the pixel contract, including transparent
+    // holes, black markers, high bytes and every short/unaligned tail.
+    uint32_t rng=0x19460829U;
+    for(int width=0;width<=257;++width)for(int offset=0;offset<4;++offset){
+        std::vector<uint32_t> src(width+8),dst(width+8,0x12345678),expected=dst;
+        for(auto& c:src){rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;c=(rng%5)?rng:0;}
+        for(int i=0;i<width;++i)if(src[offset+i])expected[offset+i]=src[offset+i]&0xffffffU;
+        zloz_wiersz_nieprzezroczysty(dst.data()+offset,src.data()+offset,width);
+        assert(dst==expected);
+        graphics_copy_pixels(dst.data()+offset,src.data()+offset,width);
+        for(int i=0;i<width;++i)expected[offset+i]=src[offset+i];
+        assert(dst==expected);
+    }
     rounded_window_cases();
     opaque_fastpath_cases();
     for(auto dpi:{100U,125U}){

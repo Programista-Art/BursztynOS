@@ -26,6 +26,7 @@ proces Ring 3 (`PZB_UZYTKOWNIK`), ktory wykonuje serie zlosliwych wywolan BWS:
 """
 
 import shutil
+import os
 import subprocess
 import sys
 import time
@@ -96,8 +97,8 @@ __attribute__((section(".naglowek"), used))
 NaglowekBur naglowek = {
     {'B', 'U', 'R', '\0'},
     (uint64_t)&_start,
-    0x1000ULL, 0x4c000ULL, 0x1001000ULL,
-    0x4d000ULL, 0x20000ULL, 0x104d000ULL
+    0x1000ULL, 0x4e000ULL, 0x1001000ULL,
+    0x4f000ULL, 0x20000ULL, 0x104f000ULL
 };
 }
 
@@ -210,6 +211,11 @@ extern "C" __attribute__((noreturn)) void _start() {
     log_s("[BWS-ABUSE-QEMU] 4/6 Odrzucanie przepelnien rozmiarow (sterta/blit): OK\n");
 
     /* 5. Egzekwowanie PZB i PRAWO_* dla operacji systemowych z PZB_UZYTKOWNIK */
+    uint8_t process_list[2048] = {};
+    CHECK_BWS(bws_wywolaj(BWS_PROCESY_LISTA, reinterpret_cast<uint64_t>(process_list), 1, 0, 0) == 0,
+              "Unprivileged process enumerated privileged process metadata");
+    CHECK_BWS(bws_wywolaj(BWS_PROCES_ZABIJ, 1, 0, 0, 0) == 0,
+              "Unprivileged process killed the system manager");
     CHECK_BWS(bws_wywolaj(BWS_RESET, 0, 0, 0, 0) == 0,
               "Unprivileged process allowed to call BWS_RESET");
     CHECK_BWS(bws_wywolaj(BWS_SHUTDOWN, 0, 0, 0, 0) == 0,
@@ -357,7 +363,8 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     start = time.time()
     full_log = ""
-    while time.time() - start < 240.0:
+    timeout = float(os.environ.get("BURSZTYN_QEMU_TIMEOUT", "240"))
+    while time.time() - start < timeout:
         if serial_log.exists():
             full_log = serial_log.read_text(encoding="utf-8", errors="replace")
             if "[BWS-ABUSE-QEMU] ALL_CHECKS_PASSED" in full_log or "[BWS-ABUSE-FAIL]" in full_log:

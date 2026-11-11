@@ -191,7 +191,7 @@ def run_qemu_guest_reboot_test(test_id, change_wallpaper=False, multi_wallpaper=
         "-device", "virtio-blk-pci,drive=disk,disable-legacy=on",
         "-serial", f"file:{serial_path}",
         "-qmp", f"unix:{sock_path},server=on,wait=off",
-        
+
         "-boot", "order=d",
         "-cdrom", str(ISO),
         "-bios", str(OVMF),

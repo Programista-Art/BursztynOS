@@ -1,5 +1,5 @@
 /*
- * Bursztyn OS - publiczne ABI listy procesow (BWS 94/95).
+ * Bursztyn OS - publiczne ABI listy procesow (BWS 96/97).
  *
  * BWS_PROCESY_LISTA wypelnia tablice BwsProcesInfo rzeczywistym stanem
  * tablica_procesow[]. Aplikacja (menedzer zadan, diagnostyka) widzi

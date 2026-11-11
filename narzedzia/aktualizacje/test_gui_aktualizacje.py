@@ -74,7 +74,7 @@ def test_bws_ota_abi() -> None:
 
 def test_aplikacja_ring3() -> None:
     src = read("programy/aktualizacje/aktualizacje.cpp")
-    raport("aktualizacje_include_bws_ota", '#include "bws_ota.h"' in src or '#include "../../bws_ota.h"' in src)
+    raport("aktualizacje_include_bws_ota", '#include "jadro/bws/bws_ota.h"' in src or '#include "../../bws_ota.h"' in src)
     raport("aktualizacje_pobierz_status", "bws_ota_pobierz_status" in src)
     raport("aktualizacje_wykonaj_polecenie", "bws_ota_wykonaj_polecenie" in src)
     for cmd in (

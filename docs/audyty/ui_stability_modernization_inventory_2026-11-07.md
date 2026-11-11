@@ -1,6 +1,6 @@
 # Inwentaryzacja UI / input / compositor / BWS — 2026-11-07
 
-Zakres: architektura przed naprawą kursora i modernizacją UX (plan 1B+2A).  
+Zakres: architektura przed naprawą kursora i modernizacją UX (plan 1B+2A).
 Źródła: kod, `docs/11_audyt_bws_nowoczesne.md`, `docs/raport-lokalna-weryfikacja-2026-11-06.md`, audyty pointer/cursor/desktop.
 
 ## Model wyświetlania (bez zmian architektonicznych)

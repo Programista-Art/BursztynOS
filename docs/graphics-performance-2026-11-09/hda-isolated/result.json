@@ -1,0 +1,31 @@
+{
+  "kernel": "/tmp/bursztyn-graphics-candidate-kernel.bin",
+  "kernel_sha256": "a42f746343b24e2833f63d539cebbb10671efccb74f3ef64b89481a6b1f6924d",
+  "qemu": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "firmware": "/usr/share/ovmf/OVMF.fd",
+  "boot_medium": "virtio",
+  "disk_attached": false,
+  "results": [
+    {
+      "backend": "wav",
+      "serial_log": "/home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/regression-qemu/wav-serial.log",
+      "result": "PASS",
+      "pcm": {
+        "channels": 2,
+        "sample_bytes": 2,
+        "rate_hz": 44100,
+        "frames": 22256,
+        "nonzero_samples": 44510,
+        "first_nonzero_frame": 1,
+        "last_nonzero_frame": 22255,
+        "active_seconds": 0.5046485260770975,
+        "peak": 9247
+      }
+    },
+    {
+      "backend": "none",
+      "serial_log": "/home/programista/Pulpit/Burstzyn/BursztynOS/.hda-test/regression-qemu/none-serial.log",
+      "result": "PASS"
+    }
+  ]
+}

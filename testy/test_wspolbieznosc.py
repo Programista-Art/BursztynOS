@@ -65,7 +65,7 @@ WLASCICIEL = {
     "jadro/aktualizacja/aktualizacja.cpp": {"GuardOTA"},
     "jadro/fs/psf.cpp": {"BlokadaPSF"},
     "jadro/fs/storage_format.cpp": {"GuardStorageFormatter"},
-    "ahci.cpp": {"GuardAHCI"},
+    "sterowniki/magazyn/ahci.cpp": {"GuardAHCI"},
 }
 
 
@@ -78,11 +78,11 @@ def test_kolejnosc_blokad():
         ("jadro/aktualizacja/aktualizacja.cpp", {"GuardOTA"}),
         ("jadro/fs/psf.cpp", {"BlokadaPSF"}),
         ("jadro/fs/storage_format.cpp", {"GuardStorageFormatter"}),
-        ("ahci.cpp", {"GuardAHCI"}),
+        ("sterowniki/magazyn/ahci.cpp", {"GuardAHCI"}),
         ("jadro/siec/siec.cpp", set()),
         ("jadro/bws/scheduler.cpp", set()),
-        ("klawiatura.cpp", set()),
-        ("mysz.cpp", set()),
+        ("sterowniki/wejscie/klawiatura.cpp", set()),
+        ("sterowniki/wejscie/mysz.cpp", set()),
         ("sterowniki/grafika/grafika.cpp", set()),
     ]:
         src = bez_komentarzy(czytaj(rel))
@@ -102,8 +102,8 @@ def test_irq_bez_blokad():
     ok = True
     for rel, funkcje in [
         ("sterowniki/grafika/grafika.cpp", ["obsluga_przerwania_zegara"]),
-        ("klawiatura.cpp", ["obsluga_przerwania_klawiatury"]),
-        ("mysz.cpp", ["obsluga_przerwania_myszy"]),
+        ("sterowniki/wejscie/klawiatura.cpp", ["obsluga_przerwania_klawiatury"]),
+        ("sterowniki/wejscie/mysz.cpp", ["obsluga_przerwania_myszy"]),
     ]:
         src = bez_komentarzy(czytaj(rel))
         for fn in funkcje:
@@ -134,7 +134,7 @@ def test_brak_spania_pod_blokada():
                 "scheduler_pobierz_klawisz_lub_zablokuj", "usypij", "sleep_ms",
                 "czekaj_na_zamek", "BWS38"]
     ok = True
-    for rel in ["jadro/aktualizacja/aktualizacja.cpp", "jadro/fs/storage_format.cpp", "ahci.cpp"]:
+    for rel in ["jadro/aktualizacja/aktualizacja.cpp", "jadro/fs/storage_format.cpp", "sterowniki/magazyn/ahci.cpp"]:
         src = bez_komentarzy(czytaj(rel))
         traf = [z for z in zakazane if z in src]
         if traf:

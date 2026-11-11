@@ -83,7 +83,9 @@ static void test_brak_surowych_verbow() {
     CHECK(BWS_DIAGNOSTYKA_SYSTEMU == 91);
     CHECK(BWS_HTTP64 == 94);
     CHECK(BWS_HTTPS64 == 95);
-    CHECK(BWS_PIERWSZY_WOLNY == 96);
+    CHECK(BWS_PROCESY_LISTA == 96);
+    CHECK(BWS_PROCES_ZABIJ == 97);
+    CHECK(BWS_PIERWSZY_WOLNY == 98);
 
     /* Istniejace numery nie ulegly zmianie. */
     CHECK(BWS_DZWIEK_TON == 27);

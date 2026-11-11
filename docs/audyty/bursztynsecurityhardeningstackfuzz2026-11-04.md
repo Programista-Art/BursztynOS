@@ -1,8 +1,8 @@
 # Bursztyn OS — Runtime Security Hardening: Compiler Stack Protection, BWS/BUR/BSP2 Fuzzing Infrastructure, Memory-Safety Fixes & BUR v2 ASLR Architecture
 
-**Date:** 2026-11-04  
-**Baseline Commit:** `63bbd43d251be1e30dada0ddf1c8d79888324edf`  
-**Target Architecture:** x86-64 Freestanding (Ring 0 Kernel + Ring 3 Native `.bur` Applications)  
+**Date:** 2026-11-04
+**Baseline Commit:** `63bbd43d251be1e30dada0ddf1c8d79888324edf`
+**Target Architecture:** x86-64 Freestanding (Ring 0 Kernel + Ring 3 Native `.bur` Applications)
 **Compiler Toolchain:** `x86_64-linux-gnu-g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0`
 
 ---

@@ -1,6 +1,6 @@
 # Asynchroniczne nieblokujące skanowanie HDA oraz audyt parzystości wejścia QEMU Linux vs Windows
 
-Data: 2026-10-12  
+Data: 2026-10-12
 Dotyczy: Sterownik jądra `sterowniki/dzwiek/hda.cpp`, podsystem diagnostyczny `sterowniki/dzwiek/hda_diag.cpp`, format ABI `sterowniki/dzwiek/hda_diag_format.h`, aplikacja `programy/test_dzwieku/test_dzwieku.cpp`, audyt launcherów `Makefile` i `runwindows.ps1`, narzędzia `narzedzia/test_hda_diag.cpp`, `narzedzia/test_dzwieku_hda_bws.cpp`, `narzedzia/test_dzwieku_gui.cpp`, `narzedzia/qemu_launcher_audit.py`, `narzedzia/test_launcher_parity.py`.
 
 ---

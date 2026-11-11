@@ -1,0 +1,20 @@
+usage: test_bsf_installed_qemu.py [-h] [--reset-grid-preferences]
+                                  [--refresh-grid-payloads] [--desktop-grid]
+                                  [--resume RESUME]
+
+Install into a new private image, verify BSF bytes, apply and reboot. Uses the
+ordinary release payload and installer GUI. All disk writes are to new
+disposable files under .bsf-test; existing user disks are never attached.
+
+options:
+  -h, --help            show this help message and exit
+  --reset-grid-preferences
+                        Initialize only a copied private fixture to Sans 16
+                        before acceptance
+  --refresh-grid-payloads
+                        Refresh final WM and EFI kernel within existing
+                        allocation in an offline private fixture before
+                        booting
+  --desktop-grid        Repeated family transitions and disk-only restart
+                        anchor comparison
+  --resume RESUME       Verify an already completed private test installation

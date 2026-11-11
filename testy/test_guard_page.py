@@ -3,7 +3,7 @@
 testy/test_guard_page.py - Kontrolowany test regresyjny naruszenia guard page stosu jadra w QEMU.
 Weryfikuje, ze:
   1. Dolna strona stosu jadra (P=0, unmapped guard page) wywoluje wyjatek #PF przy probie zapisu/przekroczenia.
-  2. Obsluga wyjatku w idt.cpp prawidlowo identyfikuje naruszenie guard page.
+  2. Obsluga wyjatku w jadro/arch/idt.cpp prawidlowo identyfikuje naruszenie guard page.
   3. Zostaje wyemitowany komunikat diagnostyczny ze wszystkimi wymaganymi polami:
      - [STACK] KRYTYCZNE przekroczenie stosu jadra
      - pid, program, rsp, stackbase, stacktop, used, lastbws

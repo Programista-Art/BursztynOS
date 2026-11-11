@@ -35,13 +35,13 @@ class Settings : public Okno {
   PowierzchniaRysunkowa *preview{};
   uint32_t ids[BSF::MaxFiles]{};
   unsigned family_count{};
-  /* Strony: 0=System, 1=Energia, 2=Wyglad, 3=Motywy, 4=Czcionki, 5=Wsparcie. */
   void reload_fonts() {
     auto c=BSF::configuration(); families->wyczysc(); family_count=0;
     for(unsigned i=0;i<BSF::enumerate();++i){
       auto* f=BSF::info(i);bool duplicate=false;
       for(unsigned j=0;j<family_count;++j) if(same_font_name(BSF::family_name(ids[j]),f->family))duplicate=true;
       if(duplicate)continue;
+      // Prefer a regular representative, retain families with incomplete styles.
       for(unsigned j=i;j<BSF::enumerate();++j){auto* candidate=BSF::info(j);
         if(same_font_name(candidate->family,f->family)&&!candidate->italic&&candidate->weight<600){f=candidate;break;}}
       families->dodaj_element(f->family,f->id);ids[family_count]=f->id;
@@ -51,6 +51,7 @@ class Settings : public Okno {
     if(!family_count)families->dodaj_element("Bitmapowa czcionka awaryjna",0);
     if(families->wybrany_indeks()<0)families->ustaw_wybrany_indeks(0);
   }
+  /* Strony: 0=System, 1=Energia, 2=Wyglad, 3=Motywy, 4=Czcionki, 5=Wsparcie. */
   void show(unsigned page) {
     font_page->ustaw_widoczna(page == 4);
     system_page->ustaw_widoczna(page==0);
@@ -77,7 +78,10 @@ class Settings : public Okno {
     int px = ui_skaluj(sizes[si],preview->skala_dpi().procent());
     const char *lines[] = {"Bursztyn OS", "Zażółć gęślą jaźń",
                            "Привет мир · Привіт світ",
-                           "Καλημέρα κόσμε · Αθήνα", "e\xcc\x81 a\xcc\x88 · Ґґ Єє Іі Її Ўў"};
+                           "Καλημέρα κόσμε · Αθήνα", "e\xcc\x81 a\xcc\x88 · Ґґ Єє Іі Її Ўў",
+                           // BSF 2.0 bidi + shaping samples (wrapped by word).
+                           "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd (2026)",
+                           "\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645 \u0644\u0627"};
     int column = preview->obszar().szerokosc / 2;
     for (unsigned weight = 0; weight < 2; ++weight) {
       int x = ui_skaluj(10,preview->skala_dpi().procent()) + int(weight) * column, y = ui_skaluj(8,preview->skala_dpi().procent());
@@ -85,6 +89,38 @@ class Settings : public Okno {
                           motyw_kolor(MOTYW_KOLOR_AKCENT), ui_skaluj(14,preview->skala_dpi().procent()), true);
       y += ui_skaluj(22,preview->skala_dpi().procent());
       for (auto *line : lines) {
+        size_t length = 0;
+        while (line[length])
+          ++length;
+#if BSF_COMPLEX_TEXT
+        // Shaped/bidi samples wrap at spaces so one shaping run is never
+        // split inside a word (per-scalar splitting would break joining).
+        if (BSF::needs_complex_layout(line, length)) {
+          int limit = column - ui_skaluj(20,preview->skala_dpi().procent());
+          char part[256]{};
+          size_t start = 0;
+          while (start < length) {
+            size_t end = start, fit = start;
+            while (end < length) {
+              size_t next = end;
+              while (next < length && line[next] != ' ') ++next;
+              if (next - start >= sizeof(part)) break;
+              for (size_t k = start; k < next; ++k) part[k - start] = line[k];
+              part[next - start] = 0;
+              if (fit > start && BSF::measure_text(part, px, weight != 0) > limit) break;
+              fit = next;
+              end = next < length ? next + 1 : next;
+            }
+            if (fit == start) fit = end > start ? end : length;
+            for (size_t k = start; k < fit; ++k) part[k - start] = line[k];
+            part[fit - start] = 0;
+            ctx.rysuj_tekst_bsf({x, y}, part, motyw_kolor(MOTYW_KOLOR_TEKST), px, weight != 0);
+            y += BSF::height(px) > 0 ? BSF::height(px) + 2 : 18;
+            start = fit < length && line[fit] == ' ' ? fit + 1 : fit;
+          }
+          continue;
+        }
+#endif
         char part[256]{};
         unsigned used = 0;
         int width = 0;

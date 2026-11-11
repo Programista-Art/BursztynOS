@@ -1,0 +1,42 @@
+[
+  {
+    "path": "loop_log_1.txt",
+    "sha256": "15fce90543411c43ca9dfdeb5210401a82f661e9367931a03d55a13dc929477c",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "loop_log_2.txt",
+    "sha256": "13569fb86bb25b244ba4d876055a8c2499ceb9b9cb3e84b298f3e386666f3e5b",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "loop_test.sh",
+    "sha256": "09d803036ddefa6c6cc1699028453ba5ca88290749e235bdf939945d1f9a211d",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "narzedzia/aktualizacje/test_16k_bws84_irq.py",
+    "sha256": "f46eddbb3dd1215b3816327d5a9ace3a1442e3461a609da02e8c6b401caae98c",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "narzedzia/test_kalkulator_gui.py",
+    "sha256": "93345bcd1eaec37f1f8f56f14c7ed938b9f2d5547964028fe8c1f890e5db6d47",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "narzedzia/test_motyw_host.cpp",
+    "sha256": "571df88d9c1541771afa72d1fb699294301f08cecdfaeb141c2dcedc05ae05c4",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "narzedzia/test_motywy_qemu.py",
+    "sha256": "3268df0a0b195e561809135eaa1a29aab832e825e5829bd544bc85b8acf865e5",
+    "unchanged_from_backup": true
+  },
+  {
+    "path": "narzedzia/test_notatnik_gui.py",
+    "sha256": "5f9e4f951f126a857ef0ad69d597fd9f8d4addf61ff7a458060bc6e73d883e06",
+    "unchanged_from_backup": true
+  }
+]
