@@ -1,5 +1,59 @@
 # BSF 2.0 test report — 2026-11-11
 
+> **Stabilization update (same day, branch `feature/bsf-2-stabilization`).**
+> Sections 0 and 7a below supersede the corresponding original numbers; the
+> full narrative is in `bsf2stabilization-2026-11-11.md`.
+
+## 0. Stabilization re-verification (final tree)
+
+| Suite | Result |
+|---|---|
+| `make test-bsf-bidi-host` | BidiTest 770,241/770,241, BidiCharacterTest 91,707/91,707 |
+| `make test-bsf-shaping-host` | **120/120 rows exact (1,222 glyphs)**; every GSUB 1–8 and GPOS 1–9 type *applied* (asserted). Correction: the original 110 rows never applied GSUB 3 or 8. |
+| `make test-bsf-layout-host` | 409,086 checks |
+| `make test-bsf2-kernel-abi-host` (new) | 41,018 checks (BWS 51 cmds 0/1/2 boundaries + fault injection, blob content hash, BMP module validator) |
+| `test-bsf-host` / `-ui-host` / `-graphemes-host` / `-resources-host` | 12,204 / 9,084 / 1,187 / 4,604 checks |
+| `make test-notepad-unicode-host` | 60,662 checks (60,000 keys 8.0 s); LTR-only build (`-DBSF_COMPLEX_TEXT=0 -O0`, no BSF 2.0 sources) also 60,662 |
+| `make test-shell-ttf-host` | pass |
+| `make fuzz-bsf2-smoke` | 0 crashes: bidi 20,000 iters / 704 edges, layout 5,000 / 2,838, OTL 3,000 / 1,746 |
+| `make test-virtio-pci` | **fails, pre-existing** (did not link at `950352a`/`36cc9da`; after the link stub, ASan/UBSan defects in the harness reproduce with the unmodified driver) |
+
+Kernel image: `__kernel_end` 0xEA6000 (360 KiB headroom) at `36cc9da` →
+**0xD1A000 (1,944 KiB)** with the desktop BMPs as Multiboot2 modules and the
+BSF 2.0 engine in every GUI app.
+
+## 7a. Native verification of the final ISO (stabilization)
+
+ISO SHA-256 `658a732b54d22e2772956d61073f4e1336cc2368101585c751a34a0870ec83bb`
+(41,596,928 bytes). Workload per run: boot → close Diagnostics → desktop
+(both BMP module imports logged; at 1280×720 also open `test1.bmp` in the
+image viewer and wait for the decoded title) → Settings → Fonts (BSF counters
+read from the process) → Notepad (type) → Shell (`pwd`) → launch/render/close
+Calculator, Snake, Kontrolki 4 → serial log free of faults.
+
+| Mode | Command | Result |
+|---|---|---|
+| UEFI, virtio-vga, production ISO, 1280×720 | `python3 narzedzia/bsf2_native_qemu.py --resolution 1280x720 [--tag rN]` | **2 of 3 runs pass every check**; run 1 passed every check up to Calculator, then hit the pre-existing virtio-gpu timeout at the Snake stage |
+| UEFI, `--video 1920x1080` | `… --video 1920x1080` | **pass**, all checks |
+| UEFI, `--video 2560x1440` | `… --video 2560x1440 --timeout 1800` | **pass**, all checks |
+| BIOS, std VGA (guest chose 1920×1080) | `… --bios` | **pass**, all checks |
+
+Every run that reached Settings: Unicode blob received, 22 layouts built,
+36 shaped runs, GSUB types applied {1, 4}, GPOS {2}, 0 layout failures,
+0 budget failures. Artefacts (git-ignored):
+`.bsf-test/stab/final-native/<mode>/` (`bsf2-native.json`, `serial.log`,
+`desktop.png`, `desktop-image-test1.png`, `settings-fonts-bidi.png`,
+`notepad.png`, `shell.png`, `app-*.png`).
+
+VirtIO-GPU A/B (`narzedzia/virtio_gpu_ab_qemu.py`, both commits concurrently
+per round): idle host 0/5 vs 0/5 timeouts; one extra busy host process 3/5
+(`950352a`) vs 4/5 (`36cc9da`); saturated host 7/7 vs 7/7. Pre-existing and
+load-dependent; see `bsf2stabilization-2026-11-11.md` §Phase 4.
+
+---
+
+*Original report (BSF 2.0 integration) follows.*
+
 Branch `feature/bsf-2-advanced-text-layout` (uncommitted working tree, based
 on `test` @ `950352a`). Host: Linux x86-64, g++ (system), QEMU
 (`qemu-system-x86_64`, TCG), OVMF. All host tests use ASan + UBSan with

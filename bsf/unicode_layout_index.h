@@ -11,5 +11,8 @@ constexpr uint32_t TableOffset[TableCount] = {104,5165,8707,15378,29966,33697,34
 constexpr uint32_t TableBytes[TableCount] = {5061,3542,6671,14588,3731,896,2568,9234,6210,8469,656};
 constexpr uint32_t TableRecord[TableCount] = {7,7,7,7,7,7,6,9,6,9,4};
 constexpr unsigned ScriptCount = 164;
+// FNV-1a (32-bit) of all Size bytes: Ring 3 rejects a copy whose
+// content differs from the tables this binary was built against.
+constexpr uint32_t ContentHash = 0x5d8d4bff;
 }
 }

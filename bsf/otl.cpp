@@ -1178,6 +1178,22 @@ bool resolve_subtable(const Context &c, const LookupInfo &l, unsigned k,
   }
   return s.n != 0;
 }
+void count_applied(Statistics &st, bool gpos, unsigned declared,
+                   unsigned type, unsigned format) {
+  ++(gpos ? st.positionings : st.substitutions);
+  unsigned f = format <= 3 ? format : 0;
+  if (gpos) {
+    if (type < 10)
+      ++st.gpos_applied[type][f];
+    if (declared == 9 && type != 9)
+      ++st.gpos_applied[9][1];
+  } else {
+    if (type < 9)
+      ++st.gsub_applied[type][f];
+    if (declared == 7 && type != 7)
+      ++st.gsub_applied[7][1];
+  }
+}
 bool apply_lookup_at(Context &c, const LookupInfo &l, unsigned i, int &next) {
   if (skip(c, l, c.buf.info[i], false))
     return false;
@@ -1190,7 +1206,7 @@ bool apply_lookup_at(Context &c, const LookupInfo &l, unsigned i, int &next) {
       continue;
     if (apply_subtable(c, l, type, s, i, next)) {
       if (c.stats)
-        ++(c.gpos ? c.stats->positionings : c.stats->substitutions);
+        count_applied(*c.stats, c.gpos, l.type, type, s.u16(0));
       return true;
     }
   }
@@ -1342,6 +1358,22 @@ bool position(const Layout &L, const Plan &plan, Buffer &buf, Budget &budget,
   }
   finish_offsets(buf, rtl);
   return ok;
+}
+uint32_t Statistics::gsub_type_mask() const {
+  uint32_t m = 0;
+  for (unsigned t = 1; t < 9; ++t)
+    for (unsigned f = 0; f < 4; ++f)
+      if (gsub_applied[t][f])
+        m |= 1u << t;
+  return m;
+}
+uint32_t Statistics::gpos_type_mask() const {
+  uint32_t m = 0;
+  for (unsigned t = 1; t < 10; ++t)
+    for (unsigned f = 0; f < 4; ++f)
+      if (gpos_applied[t][f])
+        m |= 1u << t;
+  return m;
 }
 } // namespace OT
 } // namespace BSF

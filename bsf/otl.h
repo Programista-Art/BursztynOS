@@ -109,6 +109,13 @@ bool build_plan(const Layout &, const uint32_t *scripts, unsigned script_count,
 struct Statistics {
   uint64_t lookups_applied{}, substitutions{}, positionings{},
       budget_failures{}, malformed{};
+  // Successful subtable applications by lookup type and subtable format
+  // (index 0 = unknown format). Extension lookups (GSUB 7 / GPOS 9) are
+  // counted under their own type *and* under the resolved type.
+  uint32_t gsub_applied[9][4]{}, gpos_applied[10][4]{};
+  // Bit t set = lookup type t applied at least once.
+  uint32_t gsub_type_mask() const;
+  uint32_t gpos_type_mask() const;
 };
 // Apply all planned GSUB lookups in stage/lookup order. Returns false if
 // the budget was exhausted (buffer remains well-formed, partially shaped).

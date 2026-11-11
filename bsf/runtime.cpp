@@ -747,6 +747,8 @@ const TextLayout *layout_text(const char *text, size_t bytes, int px, bool bold,
   text_stats.budget_failures += ls.budget_failures;
   text_stats.gsub_runs += ls.gsub_runs;
   text_stats.gpos_runs += ls.gpos_runs;
+  text_stats.gsub_type_mask |= ls.gsub_type_mask;
+  text_stats.gpos_type_mask |= ls.gpos_type_mask;
   if (ls.longest_run > text_stats.longest_run)
     text_stats.longest_run = ls.longest_run;
   text_stats.layout_bytes += bytes + s.layout.glyph_count() * sizeof(LayoutGlyph);

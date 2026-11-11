@@ -251,6 +251,8 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
     stats_.gsub_runs += rep.gsub;
     stats_.gpos_runs += rep.gpos;
     stats_.legacy_kern_runs += rep.legacy_kern;
+    stats_.gsub_type_mask |= rep.stats.gsub_type_mask();
+    stats_.gpos_type_mask |= rep.stats.gpos_type_mask();
     if (!ok) {
       ++stats_.budget_failures;
       if (!buf.len)

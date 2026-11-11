@@ -64,6 +64,8 @@ struct LayoutOptions {
 struct LayoutStatistics {
   uint64_t runs{}, shaped_glyphs{}, fallback_searches{}, budget_failures{},
       gsub_runs{}, gpos_runs{}, legacy_kern_runs{}, longest_run{};
+  // Union of OT::Statistics type masks over all runs (bit t = type t).
+  uint32_t gsub_type_mask{}, gpos_type_mask{};
 };
 class TextLayout {
 public:

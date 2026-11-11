@@ -569,6 +569,15 @@ static bool g_host_use_mock_time = false;
 static unsigned g_gpu_complete_on_clock_read = 0;
 void host_mmio_write16(volatile void* addr, uint16_t val);
 
+// jadro/gui/graphics_perf.h (telemetry only) reads the kernel HPET API.
+// Give it a plain host clock, independent of the driver's mocked deadline
+// clock above, so telemetry never consumes injected completion events.
+bool hpet_dostepny() { return true; }
+uint64_t czas_monotoniczny_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 uint64_t host_czas_monotoniczny_ns(void) {
     if (g_gpu_complete_on_clock_read && --g_gpu_complete_on_clock_read == 0) {
         auto* drv = virtio_gpu_get_driver(0);

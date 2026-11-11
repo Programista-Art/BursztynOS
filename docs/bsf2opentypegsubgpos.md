@@ -14,7 +14,8 @@ order. Clusters are compared at grapheme granularity: BSF clusters are
 UAX #29 grapheme starts (the editing model), while HarfBuzz keeps e.g. ZWNJ
 as its own cluster.
 
-Result: **110/110 rows exact, 1,164 glyphs**, fonts: DejaVu Sans, DejaVu Sans
+Result: **120/120 rows exact, 1,222 glyphs** (2026-11-11; 110/1,164 before
+the GSUB 3/8 rows were added), fonts: DejaVu Sans, DejaVu Sans
 Bold, DejaVu Serif Condensed Italic, Alice (repository), Noto Naskh Arabic,
 Noto Kufi Arabic, Noto Sans Arabic, Noto Nastaliq Urdu, Noto Sans Coptic,
 Noto Sans Hebrew, Noto Serif Hebrew, Noto Sans (host fonts; rows are skipped, not failed, if a host font is
@@ -39,9 +40,50 @@ Defects found by the oracle and fixed during development:
 4. Mark reordering must use the established *modified* combining classes
    (Hebrew points, Arabic shadda).
 
-Lookup-type coverage: every GSUB type 1–8 and GPOS type 1–9 occurs in at
-least one oracle font (probe of each font's LookupList, extension-resolved).
-Application per type is not separately counted.
+### Lookup application instrumentation (2026-11-11)
+
+`OT::Statistics` now counts every *successful* subtable application by
+lookup type and subtable format (`gsub_applied[type][format]`,
+`gpos_applied[type][format]`; extension lookups count under GSUB 7 / GPOS 9
+and under the resolved type). `make test-bsf-shaping-host` sums them over
+the corpus, prints the table and **fails if any GSUB type 1–8 or GPOS type
+1–9 was never applied** (asserted only when no row was skipped). Natively,
+`TextStatistics.gsub_type_mask/gpos_type_mask` (appended fields) expose the
+same information per process; the QEMU harness reports them.
+
+This instrumentation corrected the earlier report: presence in a font's
+LookupList is not application. With the original 110 rows, **GSUB 3 and
+GSUB 8 were never applied** (HarfBuzz did not apply them either — both
+engines agreed on every row, so the oracle could not reveal it):
+
+- GSUB 8 (reverse chaining) in Noto Sans Coptic fires only when a plain
+  overline precedes an already-connected one (lowercase then uppercase
+  letter, e.g. `ⲁ̅Ⲛ̅`); the earlier Coptic rows never formed that context.
+  Four rows were added; HarfBuzz's message trace confirms lookup 17 runs on
+  the old rows without substituting.
+- GSUB 3 (alternate) appears in the oracle fonts only under `aalt`, which no
+  default feature plan includes. A new opt-in `FeatureAalt` (first alternate,
+  same as HarfBuzz `aalt=1`) and five oracle rows with an optional seventh
+  column `aalt` now exercise it.
+
+Applications over the 120-row corpus (format 1 / 2 / 3):
+
+| Type | GSUB | GPOS |
+|---|---|---|
+| 1 | 259 (26 / 233 / –) | 2 (2 / 0 / –) |
+| 2 | 68 (68) | 268 (14 / 254) |
+| 3 | 25 (25) | 24 (24) |
+| 4 | 49 (49) | 129 (129) |
+| 5 | 13 (4 / 9 / 0) | 7 (7) |
+| 6 | 49 (0 / 29 / 20) | 17 (17) |
+| 7 | 51 (extension) | 1 (0 / 1 / 0) |
+| 8 | 4 (4) | 1 (0 / 0 / 1) |
+| 9 | – | 7 (extension) |
+
+Formats **not** exercised by real fonts in the corpus: GSUB 5 format 3,
+GSUB 6 format 1, GPOS 7 formats 1 and 3, GPOS 8 formats 1 and 2. They share
+`apply_context` with the exercised formats and are reached by the OTL
+fuzzer, but have no exact-oracle row (follow-up: synthetic fonts).
 
 ## Tables and lookups
 
@@ -54,7 +96,7 @@ Application per type is not separately counted.
   sets, mark attachment type; default ignorables (except ZWJ/ZWNJ) are skipped
   in context matching.
 - **GSUB** 1 single (fmt 1/2), 2 multiple (incl. deletion), 3 alternate
-  (first alternate), 4 ligature (ligature id/component tracking for marks),
+  (first alternate; reached through the opt-in `aalt` feature only), 4 ligature (ligature id/component tracking for marks),
   5 context and 6 chained context (fmt 1/2/3 with nested lookup records),
   7 extension, 8 reverse chaining single (applied back-to-front).
 - **GPOS** 1 single, 2 pair (fmt 1 pair sets, fmt 2 class pairs; second
@@ -70,7 +112,7 @@ Stage order follows HarfBuzz's default and Arabic shapers:
 `rvrn` | `ltra ltrm` or `rtla rtlm` | `ccmp locl` | (Arabic: `isol`,
 `fina`, `fin2`, `fin3`, `medi`, `med2`, `init` each in its own stage, then
 `rlig`, then `calt`, then `rclt mset`) | `rlig calt rclt liga clig`
-(+`dlig` when requested). GPOS: `kern mark mkmk curs dist abvm blwm`.
+(+`dlig`, `aalt` when requested). GPOS: `kern mark mkmk curs dist abvm blwm`.
 Lookups run in (stage, lookup index) order with per-glyph feature masks
 (Arabic forms come from the joining state machine).
 

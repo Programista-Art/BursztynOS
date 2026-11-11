@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
   unsigned rows = 0, exact = 0, skipped = 0, glyphs = 0;
   std::vector<std::string> failures;
   OT::Buffer buf;
+  uint64_t gsub_total[9][4]{}, gpos_total[10][4]{};
   while (std::getline(in, line)) {
     if (line.empty() || line[0] == '#')
       continue;
@@ -58,7 +59,9 @@ int main(int argc, char **argv) {
       f.push_back(part);
     if (f.size() == 5)
       f.push_back("");
-    CHECK(f.size() == 6);
+    if (f.size() == 6)
+      f.push_back("");
+    CHECK(f.size() == 7);
     Loaded *&font = fonts[f[1]];
     if (!font) {
       font = new Loaded;
@@ -89,10 +92,21 @@ int main(int argc, char **argv) {
     ShapeOptions o;
     o.script = script_index(f[2]);
     o.rtl = f[3] == "rtl";
+    // Column 7: opt-in features requested from both shapers.
+    if (f[6].find("dlig") != std::string::npos)
+      o.features |= FeatureDlig;
+    if (f[6].find("aalt") != std::string::npos)
+      o.features |= FeatureAalt;
     ShapeReport report;
     bool ok = shape(font->face, font->layout, cps.data(), clusters.data(),
                     cps.size(), o, buf, &report);
     ++rows;
+    for (unsigned t = 0; t < 9; ++t)
+      for (unsigned k = 0; k < 4; ++k)
+        gsub_total[t][k] += report.stats.gsub_applied[t][k];
+    for (unsigned t = 0; t < 10; ++t)
+      for (unsigned k = 0; k < 4; ++k)
+        gpos_total[t][k] += report.stats.gpos_applied[t][k];
     std::vector<std::vector<long>> expect;
     std::stringstream rs(f[5]);
     while (std::getline(rs, part, ';')) {
@@ -117,7 +131,7 @@ int main(int argc, char **argv) {
     if (ok && got == expect)
       ++exact;
     else {
-      std::string msg = f[0] + " " + f[2] + " " + f[3] + " '" + text + "'";
+      std::string msg = f[0] + " " + f[2] + " " + f[3] + " '" + text + "' " + f[6];
       failures.push_back(msg);
       if (verbose) {
         std::fprintf(stderr, "MISMATCH %s (ok=%d)\n  expect:", msg.c_str(), ok);
@@ -134,8 +148,32 @@ int main(int argc, char **argv) {
     delete kv.second;
   for (auto &m : failures)
     std::fprintf(stderr, "shaping mismatch: %s\n", m.c_str());
+  // Instrumentation: every supported lookup type must actually be applied
+  // by the oracle corpus (not merely present in some font's LookupList).
+  unsigned missing_types = 0;
+  auto report_type = [&](const char *table, unsigned t, const uint64_t *f) {
+    uint64_t sum = f[0] + f[1] + f[2] + f[3];
+    std::printf("  %s %u applied %8llu (format1 %llu, format2 %llu, format3 %llu, other %llu)\n",
+                table, t, (unsigned long long)sum, (unsigned long long)f[1],
+                (unsigned long long)f[2], (unsigned long long)f[3],
+                (unsigned long long)f[0]);
+    if (!sum) {
+      std::fprintf(stderr, "lookup type never applied: %s %u\n", table, t);
+      ++missing_types;
+    }
+  };
+  if (!skipped) {
+    std::printf("Lookup application counts over the oracle corpus:\n");
+    for (unsigned t = 1; t < 9; ++t)
+      report_type("GSUB", t, gsub_total[t]);
+    for (unsigned t = 1; t < 10; ++t)
+      report_type("GPOS", t, gpos_total[t]);
+    std::printf("Lookup types never applied: %u\n", missing_types);
+  } else {
+    std::printf("Lookup type coverage not asserted (%u rows skipped)\n", skipped);
+  }
   std::printf("BSF shaping vs HarfBuzz oracle: %u/%u rows exact (%u glyphs), "
               "%u rows skipped (font unavailable), %u checks\n",
               exact, rows, glyphs, skipped, checks);
-  return exact == rows ? 0 : 1;
+  return exact == rows && !missing_types ? 0 : 1;
 }

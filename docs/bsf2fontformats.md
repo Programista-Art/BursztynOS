@@ -32,10 +32,13 @@
    integration → formats. The first four were completed with verified
    evidence; formats were reached last.
 2. **Kernel image budget**: every format parser is linked into each
-   full-engine app, all embedded in the 15 MiB kernel image (366 KiB
-   headroom remains). A CFF interpreter (~10–15 KiB code) fits; WOFF2
-   (Brotli) and COLRv1 do not without first changing how apps are packaged
-   (see `bsf2architecture.md`).
+   full-engine app, all embedded in the 15 MiB kernel image. At the BSF 2.0
+   merge 360 KiB of headroom remained; after the 2026-11-11 stabilization
+   (desktop BMPs moved to Multiboot2 modules, engine in every GUI app) it is
+   1,944 KiB. Every parser is multiplied by ~20 embedded apps, so a CFF
+   interpreter (~10–15 KiB code, ~300 KiB total) fits; WOFF2 (Brotli) and
+   COLRv1 should still be weighed against that multiplier (see
+   `bsf2architecture.md`).
 3. Shipping untested parsers for untrusted input would be worse than
    rejecting the formats, which is the current, safe behaviour.
 

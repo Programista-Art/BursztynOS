@@ -1,6 +1,7 @@
-# BSF 2.0 support matrix — 2026-11-11
+# BSF 2.0 support matrix — 2026-11-11 (stabilization update)
 
-Branch `feature/bsf-2-advanced-text-layout` (from `test` @ `950352a`).
+Originally branch `feature/bsf-2-advanced-text-layout` (merged into `test`
+as `36cc9da`); updated on `feature/bsf-2-stabilization` (from `36cc9da`).
 Status vocabulary:
 
 - **Verified** — implemented and verified by the tests/evidence named here.
@@ -29,11 +30,11 @@ Status vocabulary:
 |---|---|---|
 | GDEF glyph classes, mark attachment classes, mark glyph sets | **Verified** | Used by every GPOS/GSUB oracle row. ItemVariationStore parsed only as an offset (no variations). |
 | ScriptList / LangSys / FeatureList / LookupList, lookup flags | **Verified** | Script preference incl. `DFLT`/`dflt`/`latn` fallback; Indic v2→v1 tags. FeatureVariations (GSUB/GPOS 1.1) ignored. |
-| GSUB 1 single, 2 multiple, 3 alternate, 4 ligature, 5 context, 6 chained context, 7 extension, 8 reverse chaining | **Verified** | Every type occurs in at least one oracle font whose rows all match HarfBuzz exactly (GSUB 2 Noto Naskh; 5 and 7 Noto Nastaliq Urdu — 131 extension lookups; 8 Noto Sans Coptic, visible as overline variants). Per-type application counters are not instrumented. Alternate uses the first alternate (no UI for others). |
-| GPOS 1 single, 2 pair (fmt 1/2), 3 cursive, 4 mark-to-base, 5 mark-to-ligature, 6 mark-to-mark, 7 context, 8 chained context, 9 extension | **Verified** | Every type occurs in an oracle font with exact rows (3 and 7 Noto Nastaliq Urdu — up to 10 cursive y-offsets per word match exactly; 8 Noto Sans/Noto Sans Arabic; 9 Noto Sans). Device tables apply only with an explicit ppem (layout passes none, matching unhinted HarfBuzz). Anchor format 2 contour points are not used (same as unhinted shaping). |
+| GSUB 1 single, 2 multiple, 3 alternate, 4 ligature, 5 context, 6 chained context, 7 extension, 8 reverse chaining | **Verified** | Every type is **applied** (per-type/per-format counters, asserted by `make test-bsf-shaping-host`) by rows that match HarfBuzz exactly. The earlier claim that Coptic rows exercised GSUB 8 was wrong (corrected 2026-11-11: new rows `ⲁ̅Ⲛ̅` …). GSUB 3 is reached only through the opt-in `aalt` feature (first alternate). Not exercised by any real-font row: GSUB 5 fmt 3, GSUB 6 fmt 1. |
+| GPOS 1 single, 2 pair (fmt 1/2), 3 cursive, 4 mark-to-base, 5 mark-to-ligature, 6 mark-to-mark, 7 context, 8 chained context, 9 extension | **Verified** | Every type is applied (counted) by exact rows; GPOS 7 fmt 1/3 and GPOS 8 fmt 1/2 have no real-font row. Rows (3 and 7 Noto Nastaliq Urdu — up to 10 cursive y-offsets per word match exactly; 8 Noto Sans/Noto Sans Arabic; 9 Noto Sans). Device tables apply only with an explicit ppem (layout passes none, matching unhinted HarfBuzz). Anchor format 2 contour points are not used (same as unhinted shaping). |
 | Feature set | **Verified** | `rvrn ltra ltrm rtla rtlm ccmp locl isol fina fin2 fin3 medi med2 init rlig calt rclt mset liga clig dlig(opt-in) kern mark mkmk curs dist abvm blwm`, staged like HarfBuzz's default/Arabic shapers. |
 | Legacy `kern` table fallback | **Verified** | Used only when GPOS has no `kern` lookups (pre-existing behaviour preserved). |
-| Shaping oracle agreement | **Verified** | **110/110 rows exact** (1,164 glyphs; glyph id, cluster, x/y advance, x/y offset) vs host HarfBuzz across 12 fonts (`make test-bsf-shaping-host`). |
+| Shaping oracle agreement | **Verified** | **120/120 rows exact** (1,222 glyphs; glyph id, cluster, x/y advance, x/y offset) vs host HarfBuzz across 12 fonts (`make test-bsf-shaping-host`). |
 | Mark positioning without GPOS data | **Partial (approximation)** | Flagged `GlyphFallbackMark`; centred/stacked by combining class. Distinct from real GPOS anchors. |
 
 ## Scripts
@@ -71,14 +72,14 @@ Status vocabulary:
 | Settings → Fonts | **Verified** | Hebrew + Arabic samples drawn natively by BSF 2.0 (QEMU counters + screenshots). Font format / axes / writing-system info: **not added**. |
 | Terminal (Shell) | **Partial, by design** | Logical cell order is preserved; no visual reordering or shaping in the cell grid (keeps command text, paths and cursor addressing exact). |
 | Husarz browser | **Not integrated** | Its coroutine layout/paint pipeline still shapes per code point (with existing grapheme-correct forms). CSS `direction`/`unicode-bidi` unsupported. See `bsf2complextextediting.md`. |
-| Apps built with `BSF_COMPLEX_TEXT=0` (calculator, snake, demos, tests, sound test, wallpaper, splash) | **Legacy LTR path** | Excluded because every app is embedded in the 15 MiB kernel image (see `bsf2architecture.md`). |
+| Calculator, snake, demos (demo_ui, kontrolki 2/3/4), system tests, sound test, wallpaper, splash | **Full engine** (since 2026-11-11) | Enabled after the desktop BMPs left the kernel image; calculator, snake and Kontrolki 4 launch, render and close natively (QEMU). `BSF_COMPLEX_TEXT=0` remains available as an explicit per-app opt-out; no app uses it. |
 
 ## Platform verification
 
 | Environment | Status |
 |---|---|
-| UEFI QEMU 1280×720 (production ISO) | **Partially verified** — 2/4 final runs pass; 2 stopped by the intermittent virtio-gpu control-command timeout already recorded in 2026-10-31 logs (pre-existing; see test report §7). BSF checks passed in every run that reached them. |
-| UEFI QEMU 1920×1080 (grub.cfg-only mode fixture) | **Verified** |
-| BIOS QEMU (guest chose 1920×1080) | **Verified** |
-| UEFI QEMU 2560×1440 (grub.cfg-only mode fixture) | **Verified** (final run; earlier attempts failed for harness timing / host load, see report) |
+| UEFI QEMU 1280×720 (production ISO) | **Partially verified** — final ISO 2/3 full passes; the third stopped at the Snake stage on the intermittent virtio-gpu timeout, which A/B shows is pre-existing and host-load dependent (`950352a` and `36cc9da` equally affected). |
+| UEFI QEMU 1920×1080 (grub.cfg-only mode fixture) | **Verified** (final ISO) |
+| BIOS QEMU (guest chose 1920×1080) | **Verified** (final ISO) |
+| UEFI QEMU 2560×1440 (grub.cfg-only mode fixture) | **Verified** (final ISO) |
 | Installed-disk boot, Windows QEMU, physical hardware | **Not tested** |
