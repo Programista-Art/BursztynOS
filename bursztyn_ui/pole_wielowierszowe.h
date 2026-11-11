@@ -379,6 +379,7 @@ public:
         else if (k == 0x4BU) {
             if (!shift && czy_ma_zaznaczenie()) {
                 kursor_ = poczatek_zaznaczenia();
+            } else if (!ctrl && ruch_wizualny(-1)) {
             } else {
                 kursor_ = poprzedni_bajt(kursor_, ctrl);
             }
@@ -386,6 +387,7 @@ public:
         else if (k == 0x4DU) {
             if (!shift && czy_ma_zaznaczenie()) {
                 kursor_ = koniec_zaznaczenia();
+            } else if (!ctrl && ruch_wizualny(1)) {
             } else {
                 kursor_ = nastepny_bajt(kursor_, ctrl);
             }
@@ -408,7 +410,9 @@ public:
     }
 
 private:
-    struct Linia { size_t start{0}, koniec{0}, logiczna{0}; int szerokosc{0}; };
+    // zlozona: the visual line needs BSF 2.0 layout (bidi/shaping); computed
+    // once per rebuild so caret keys never rescan long lines.
+    struct Linia { size_t start{0}, koniec{0}, logiczna{0}; int szerokosc{0}; bool zlozona{false}; };
     struct Geometria {
         Prostokat zewnetrzny;
         Prostokat wewnatrz_ramki;
@@ -536,6 +540,21 @@ private:
             if(koniec_log>start && bufor_[koniec_log-1]=='\r')--koniec_log;
             size_t p = start;
             if (p == koniec_log) dodaj_linie(p, p, logiczna, 0);
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+            // BSF 2.0: bidi/shaped paragraphs wrap using the same shaped
+            // advances that draw them (isolated-form metrics would differ).
+            if (p < koniec_log && BSF::ready() && BSF::needs_complex_layout(bufor_+start,koniec_log-start)) {
+                const auto* L=BSF::layout_text(bufor_+start,koniec_log-start,piksele_bsf(),false,nullptr,false,
+                    zawijanie_?int64_t(limit)*BSF::Fixed:0);
+                if (L) {
+                    for(size_t k=0;k<L->line_count()&&liczba_wizualnych_<MAKS_LINII_WIZUALNYCH;++k){
+                        const auto& vl=L->lines()[k];
+                        dodaj_linie(start+vl.byte_begin,start+vl.byte_end,logiczna,int((vl.width+BSF::Fixed/2)/BSF::Fixed));
+                    }
+                    p = koniec_log;
+                }
+            }
+#endif
             while (p < koniec_log && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
                 size_t q = p; int szer = 0, ostatnia_spacja = -1, szer_spacji = 0;
 #if defined(BSF_NATIVE)
@@ -567,15 +586,39 @@ private:
     }
     void dodaj_linie(size_t a,size_t b,size_t log,int szer) {
         if (liczba_wizualnych_>=MAKS_LINII_WIZUALNYCH) return;
-        linie_[liczba_wizualnych_++]={a,b,log,szer}; if(szer>maks_szerokosc_) maks_szerokosc_=szer;
+        bool zlozona=false;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        zlozona=b>a&&BSF::needs_complex_layout(bufor_+a,b-a);
+#endif
+        linie_[liczba_wizualnych_++]={a,b,log,szer,zlozona}; if(szer>maks_szerokosc_) maks_szerokosc_=szer;
     }
     size_t linia_dla_bajtu(size_t b) const {
         for(size_t i=0;i<liczba_wizualnych_;++i) if(b>=linie_[i].start && b<=linie_[i].koniec) return i;
         return liczba_wizualnych_?liczba_wizualnych_-1:0;
     }
+#if defined(BSF_NATIVE)
+    int piksele_bsf() const { return ui_skaluj(BSF::ui_size(),skala_dpi_.procent()); }
+    // Shared layout of one visual line when it needs bidi/shaping, else null.
+    const BSF::TextLayout* uklad_linii(size_t li) const {
+#if !BSF_COMPLEX_TEXT
+        (void)li;return nullptr;
+#else
+        if(li>=liczba_wizualnych_||!linie_[li].zlozona||!BSF::ready())return nullptr;
+        size_t a=linie_[li].start,n=linie_[li].koniec-a;
+        if(!n)return nullptr;
+        return BSF::layout_text(bufor_+a,n,piksele_bsf());
+#endif
+    }
+#endif
     int x_w_linii(size_t li,size_t bajt) const {
         if(li>=liczba_wizualnych_) return 0;
         if(bajt<linie_[li].start) bajt=linie_[li].start;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if(const auto* L=uklad_linii(li)){
+            size_t off=bajt>linie_[li].koniec?linie_[li].koniec-linie_[li].start:bajt-linie_[li].start;
+            return int((L->caret_x(off)+BSF::Fixed/2)/BSF::Fixed);
+        }
+#endif
         return szerokosc_fragmentu(linie_[li].start,bajt);
     }
     int szerokosc_fragmentu(size_t a,size_t b) const {
@@ -633,12 +676,44 @@ private:
     }
     size_t poprzedni_bajt(size_t p,bool slowo) const { if(!p)return 0;p=poprzedni_klaster(p);if(slowo){while(p>0&&bufor_[p]==' ')p=poprzedni_klaster(p);while(p>0&&bufor_[poprzedni_klaster(p)]!=' '&&bufor_[poprzedni_klaster(p)]!='\n')p=poprzedni_klaster(p);}return p; }
     size_t nastepny_bajt(size_t p,bool slowo) const { if(p>=dlugosc_)return dlugosc_;p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);if(slowo){while(p<dlugosc_&&bufor_[p]!=' '&&bufor_[p]!='\n')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);while(p<dlugosc_&&bufor_[p]==' ')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);}return p; }
+    // Left/Right on a bidi/shaped visual line move visually; false means the
+    // caret is at the visual edge, so the logical cross-line move applies.
+    bool ruch_wizualny(int dir){
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        size_t li=linia_dla_bajtu(kursor_);const auto* L=uklad_linii(li);if(!L)return false;
+        size_t a=linie_[li].start,n=linie_[li].koniec-a,off=kursor_-a;if(kursor_<a||off>n)return false;
+        size_t m=L->move_visual(off,dir);
+        if(m==off||m>n)return false;
+        // move_visual falls back to logical order at the visual edge; only a
+        // genuinely visual step is taken here.
+        int64_t x0=L->caret_x(off),x1=L->caret_x(m);
+        if(dir>0?x1<=x0:x1>=x0)return false;
+        kursor_=a+m;return true;
+#else
+        (void)dir;return false;
+#endif
+    }
     void przesun_pionowo(int delta){size_t li=linia_dla_bajtu(kursor_);int n=static_cast<int>(li)+delta;if(n<0)n=0;if(n>=static_cast<int>(liczba_wizualnych_))n=static_cast<int>(liczba_wizualnych_)-1;kursor_=bajt_z_x(static_cast<size_t>(n),preferowane_x_);}
 
     void rysuj_linie(KontekstRysowania& ctx,size_t li,int y,const Geometria& g,const StylStanu& styl) {
         Linia ln=linie_[li]; int offx=static_cast<int>(poziomy_->wartosc());
         size_t so=poczatek_zaznaczenia(), sd=koniec_zaznaczenia();
         size_t a=so>ln.start?so:ln.start,b=sd<ln.koniec?sd:ln.koniec;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if(czy_ma_zaznaczenie()&&a<b)if(const auto* L=uklad_linii(li)){
+            // Mixed-direction selection is a set of visual spans.
+            BSF::TextLayout::Span spans[32];size_t ns=L->selection(a-ln.start,b-ln.start,spans,32);
+            int h=CzcionkaUI::pobierz_wysokosc(skala_dpi_);
+            for(size_t k=0;k<ns;++k){int x1=g.widok.x-offx+int(spans[k].x0/BSF::Fixed),x2=g.widok.x-offx+int((spans[k].x1+BSF::Fixed-1)/BSF::Fixed);
+                ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,h),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
+            size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
+            ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);
+            ns=L->selection(a-ln.start,b-ln.start,spans,32); // layout may be re-fetched by paint
+            for(size_t k=0;k<ns;++k){int x1=g.widok.x-offx+int(spans[k].x0/BSF::Fixed),x2=g.widok.x-offx+int((spans[k].x1+BSF::Fixed-1)/BSF::Fixed);
+                ctx.dodaj_przyciecie(Prostokat(x1,y,x2-x1,h));ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);ctx.zdejmij_przyciecie();}
+            return;
+        }
+#endif
         if(czy_ma_zaznaczenie()&&a<b){int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);int x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
         size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
         ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);

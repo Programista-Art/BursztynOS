@@ -1,13 +1,31 @@
 """Read-only QMP observation of a Ring 3 process; no guest-state writes."""
-import re,struct,subprocess
+import json,re,struct,subprocess
+from functools import lru_cache
+from pathlib import Path
+
+@lru_cache(maxsize=1)
+def process_layout():
+    root=Path(__file__).resolve().parents[1]
+    binary=root/'.bsf-test/bsf-process-layout'
+    subprocess.run(['g++','-std=c++17',str(root/'narzedzia/qemu_process_layout.cpp'),'-o',str(binary)],check=True)
+    return json.loads(subprocess.check_output([str(binary)],text=True))
 class ProcessObserver:
     def __init__(self,hmp,symbol,elf,title):
         self.hmp,self.symbol,self.title=hmp,symbol,title.encode()
         self.symbols=subprocess.check_output(['nm','-C',str(elf)],text=True)
+        try:self.layouts=symbol('uklady_procesow')
+        except RuntimeError:self.layouts=None
+        self.layout=process_layout() if self.layouts is not None else dict(process_size=144,cr3_offset=0x38)
     def address(self,name):
         m=re.search(r'^([0-9a-f]+) [bBdDvVrRtT] '+re.escape(name)+r'$',self.symbols,re.M)
         if not m:raise AssertionError('Missing observer symbol '+name)
-        return int(m[1],16)
+        address=int(m[1],16)
+        if self.layouts is not None:
+            pid=self.pid();assert pid,'Process has not published a window: '+self.title.decode()
+            metadata=self.physical(self.layouts+pid*self.layout['layout_size'],self.layout['layout_size'])
+            if struct.unpack_from('<I',metadata,self.layout['version_offset'])[0]==2:
+                address+=struct.unpack_from('<Q',metadata)[0]
+        return address
     def physical(self,a,n):
         result=[]
         for row in self.hmp(f'xp /{n}bx 0x{a:x}').splitlines():
@@ -19,7 +37,7 @@ class ProcessObserver:
         return next((i for i in range(1,16) if names[i*48:(i+1)*48].startswith(self.title)),None)
     def user(self,a,n):
         p=self.pid();assert p
-        root=struct.unpack('<Q',self.physical(self.symbol('tablica_procesow')+p*144+0x38,8))[0]
+        root=struct.unpack('<Q',self.physical(self.symbol('tablica_procesow')+p*self.layout['process_size']+self.layout['cr3_offset'],8))[0]
         result=b''
         while n:
             table=root&0x000ffffffffff000

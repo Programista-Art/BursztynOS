@@ -4,7 +4,8 @@
 #include "limits.h"
 // Bursztynowy System Czcionek. This API and all parsers are userspace only.
 namespace BSF {
-constexpr unsigned MaxTables = 64, MaxGlyphs = 16384;
+// MaxGlyphs is the sfnt limit (uint16 numGlyphs) so CJK faces load.
+constexpr unsigned MaxTables = 64, MaxGlyphs = 65535;
 constexpr unsigned MaxPoints = 4096, MaxContours = 128, MaxVertices = 8192,
                    MaxCompoundDepth = 8;
 constexpr unsigned MaxFaces = 4, MaxBitmap = 128,
@@ -27,6 +28,7 @@ struct Bytes {
 };
 struct Face {
   Bytes data{}, head{}, hhea{}, hmtx{}, loca{}, glyf{}, cmap{}, kern{}, names{};
+  Bytes gdef{}, gsub{}, gpos{}, cff{}, cff2{}, os2{}, fvar{}, colr{}, cpal{};
   uint32_t id{};
   uint16_t glyphs{}, units{}, metrics{}, weight{400};
   int ascent{}, descent{}, gap{};
@@ -39,6 +41,8 @@ struct Face {
   int bearing(unsigned, int) const;
   int kerning(unsigned, unsigned, int) const;
   int line_height(int px) const;
+  unsigned advance_units(unsigned glyph) const;
+  int kerning_units(unsigned left, unsigned right) const;
 
 private:
   bool parse(const void *, size_t, uint32_t);
@@ -77,6 +81,9 @@ public:
   // Borrowed until the next lookup. Paint immediately; never retain in
   // DOM/layout.
   const Glyph *get(const Face &, uint32_t cp, int px, unsigned style = 0);
+  // Glyph-ID access for shaped text (GSUB output has no code point).
+  const Glyph *get_glyph(const Face &, unsigned glyph, int px, unsigned style = 0);
+  bool contains_glyph(const Face &, unsigned glyph, int px, unsigned style = 0) const;
   bool contains(const Face &, uint32_t cp, int px, unsigned style = 0) const;
 };
 bool rasterize(const Face &, unsigned glyph, int px, Glyph &, uint8_t *mask,
