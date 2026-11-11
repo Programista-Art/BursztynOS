@@ -428,16 +428,12 @@ static void publish_report(const PointerReport& r) {
     if(r.absolute_motion && (r.has_x || r.has_y)) {
         const int w=grafika_pobierz_szerokosc(),h=grafika_pobierz_wysokosc();
         int x=grafika_pobierz_mysz_x(),y=grafika_pobierz_mysz_y();
-        const bool valid_x=r.has_x && dev->abs_x.max>dev->abs_x.min;
-        const bool valid_y=r.has_y && dev->abs_y.max>dev->abs_y.min;
-        if(valid_x) {
-            const int32_t raw=r.x<dev->abs_x.min?dev->abs_x.min:r.x>dev->abs_x.max?dev->abs_x.max:r.x;
-            x=int(((int64_t(raw)-dev->abs_x.min)*(w-1))/(int64_t(dev->abs_x.max)-dev->abs_x.min));
-        }
-        if(valid_y) {
-            const int32_t raw=r.y<dev->abs_y.min?dev->abs_y.min:r.y>dev->abs_y.max?dev->abs_y.max:r.y;
-            y=int(((int64_t(raw)-dev->abs_y.min)*(h-1))/(int64_t(dev->abs_y.max)-dev->abs_y.min));
-        }
+        const bool valid_x=r.has_x && w>0 && dev->abs_x.max>dev->abs_x.min;
+        const bool valid_y=r.has_y && h>0 && dev->abs_y.max>dev->abs_y.min;
+        // Device-specific axis semantics end here: one shared, rounded,
+        // endpoint-preserving conversion for every absolute transport.
+        if(valid_x) x=pointer_map_absolute(r.x,dev->abs_x.min,dev->abs_x.max,w);
+        if(valid_y) y=pointer_map_absolute(r.y,dev->abs_y.min,dev->abs_y.max,h);
         if(valid_x || valid_y) {
 #if BURSZTYNDIAGABSMAP
             if(auto* a=abs_sample(dev))a->record(r.x,r.y,r.has_x,r.has_y,dev->abs_x.min,dev->abs_x.max,

@@ -4,7 +4,7 @@
 #include "testy/pointing_test_descriptors.h"
 #include <algorithm>
 #include <random>
-#include "narzedzia/virtualbox_tablet_descriptor.h"
+#include "testy/virtualbox_tablet_descriptor.h"
 
 void ps2_tests(){
     Ps2MouseParser p{};Ps2MouseReport r{};CHECK(p.configure(0));p.streaming=true;
@@ -151,9 +151,11 @@ void ownership_tests(){
         InputEvent es[]={{INPUT_EV_REL,INPUT_REL_X,100},{INPUT_EV_REL,INPUT_REL_Y,100},{INPUT_EV_KEY,INPUT_BTN_LEFT,1},{INPUT_EV_SYN,0,0}};
         input_dispatch_events(&ps2,es,4);CHECK(motions==before+1&&clicks==click_before);CHECK(input_pointer_is_active(&ps2)&&input_pointer_is_active(&usb));
         r=tablet_report(l,2000,2000);CHECK(hid_pointer_publish(usb,l,r.data(),r.size(),1));CHECK(px==width-1&&py==height-1);
-        r=tablet_report(l,500,500);CHECK(hid_pointer_publish(usb,l,r.data(),r.size(),1));CHECK(px==(width-1)/2&&py==(height-1)/2);
+        // Exact midpoint of -1000..2000: rounded endpoint mapping -> nearest pixel.
+        const int midx=int((int64_t(width-1)*1500+1500)/3000),midy=int((int64_t(height-1)*1500+1500)/3000);
+        r=tablet_report(l,500,500);CHECK(hid_pointer_publish(usb,l,r.data(),r.size(),1));CHECK(px==midx&&py==midy);
         virtio.kinds=INPUT_DEVICE_KIND_TABLET;virtio.bus_type=INPUT_BUS_VIRTIO;CHECK(input_register_device(&virtio));CHECK(input_get_pointer_owner()==&virtio);
-        CHECK(px==(width-1)/2&&py==(height-1)/2);
+        CHECK(px==midx&&py==midy);
         r=tablet_report(l,-1000,-1000);CHECK(hid_pointer_publish(usb,l,r.data(),r.size(),1));CHECK(px==0&&py==0);
         CHECK(input_unregister_device(&virtio));CHECK(input_get_pointer_owner()==&usb);hid_pointer_remove(usb);CHECK(input_get_pointer_owner()==&ps2);CHECK(px==0&&py==0);
         input_dispatch_events(&ps2,es,4);CHECK(motions>before);

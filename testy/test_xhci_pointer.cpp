@@ -1,8 +1,8 @@
 #include "testy/pointing_host_stubs.h"
 #include "sterowniki/usb/hid_pointer.h"
 #include "testy/pointing_test_descriptors.h"
-#include "narzedzia/virtualbox_tablet_descriptor.h"
-#include "narzedzia/pointer_transport_stream.h"
+#include "testy/virtualbox_tablet_descriptor.h"
+#include "testy/pointer_transport_stream.h"
 #include "sterowniki/usb/xhci.cpp"
 #include <cstring>
 static Controller& xhc=controllers[0];

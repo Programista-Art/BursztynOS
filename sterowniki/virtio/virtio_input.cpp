@@ -399,8 +399,19 @@ static bool virtio_input_classify_device(VirtioInputDriver* drv) {
             }
         }
 
-        // BTN_TOUCH = 0x14A = 330 = bajt 41 bit 2
-        drv->input_dev.abs_contact_required = key_bits_size > 41 && (key_bits[41] & (1U << 2));
+        // BTN_TOUCH = 0x14A = 330 = bajt 41 bit 2. Contact gates absolute
+        // motion only on direct-touch devices (INPUT_PROP_DIRECT, Linux
+        // touchscreen semantics). QEMU >= 8.0 advertises BTN_TOUCH on every
+        // virtio-tablet (shared keymap_button for multitouch) without
+        // INPUT_PROP_DIRECT; that pointer tablet must move on hover. Gating it
+        // dropped every absolute move (2026-11-11 native finding).
+        const bool advertises_touch = key_bits_size > 41 && (key_bits[41] & (1U << 2));
+        uint8_t prop_bits[8]{};
+        uint8_t prop_size = 0;
+        const bool direct = virtio_input_query_config(drv->dev, VIRTIO_INPUT_CFG_PROP_BITS, 0,
+                                prop_bits, &prop_size, sizeof(prop_bits)) && prop_size > 0 &&
+                            (prop_bits[0] & (1U << VIRTIO_INPUT_PROP_DIRECT)) != 0;
+        drv->input_dev.abs_contact_required = advertises_touch && direct;
     }
 
     // 2. Analiza osi wzglednych (subsel = INPUT_EV_REL)

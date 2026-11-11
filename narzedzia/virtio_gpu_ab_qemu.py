@@ -71,16 +71,22 @@ def main():
             res = json.loads(res_file.read_text()) if res_file.exists() else {}
             run = {'round': rnd, 'variant': name, 'ok': bool(res.get('ok')),
                    'gpu_timeout': bool(res.get('gpu_timeout')), 'stage': res.get('stage'),
-                   'seconds': round(ended[tag] - t0), 'error': (res.get('error') or '')[:200]}
+                   'seconds': round(ended[tag] - t0), 'error': (res.get('error') or '')[:200],
+                   'gpu_recovery': res.get('gpu_recovery') or {}}
             summary['runs'].append(run)
             print(json.dumps(run), flush=True)
         totals = {}
         for r in summary['runs']:
-            t = totals.setdefault(r['variant'], {'runs': 0, 'pass': 0, 'gpu_timeout': 0, 'other_fail': 0})
+            t = totals.setdefault(r['variant'], {'runs': 0, 'pass': 0, 'gpu_timeout': 0, 'other_fail': 0,
+                                                 'timeout_runs_passed': 0, 'soft_timeouts': 0,
+                                                 'late_completions': 0, 'permanent_failures': 0})
             t['runs'] += 1
             t['pass'] += r['ok']
             t['gpu_timeout'] += r['gpu_timeout']
             t['other_fail'] += (not r['ok']) and not r['gpu_timeout']
+            t['timeout_runs_passed'] += r['ok'] and r['gpu_timeout']
+            for k in ('soft_timeouts', 'late_completions', 'permanent_failures'):
+                t[k] += (r.get('gpu_recovery') or {}).get(k, 0)
         summary['totals'] = totals
         summary_path.write_text(json.dumps(summary, indent=2) + '\n')
     print(json.dumps(summary['totals'], indent=2))

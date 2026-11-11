@@ -2086,6 +2086,12 @@ static bool sprawdz_zmiane_geometrii_medium() {
  * Zwraca true, gdy tryb zostal zmieniony.
  */
 bool skladacz_obrazu_wykonaj_zmiane_geometrii() {
+    // Idle loop, outside the screen lock: reap a late VirtIO-GPU completion
+    // (non-blocking) so recovery does not wait for the next damaged frame.
+    // One state comparison when the GPU is healthy.
+    if(auto* gpu=virtio_gpu_get_driver(0);gpu&&gpu->cmd_state==VIRTIO_GPU_CMD_TIMED_OUT_PENDING){
+        if(virtio_gpu_service_recovery(gpu))skladacz_obrazu_oznacz_dirty_rect(0,0,grafika_pobierz_szerokosc(),grafika_pobierz_wysokosc());
+    }
     (void)sprawdz_zmiane_geometrii_medium();
     if (__atomic_load_n(&g_geometria_oczekuje, __ATOMIC_ACQUIRE) == 0) {
         return false;

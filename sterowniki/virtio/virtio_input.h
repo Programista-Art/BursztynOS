@@ -37,6 +37,9 @@ extern "C" {
 #define VIRTIO_INPUT_CFG_ID_SERIAL 0x02U
 #define VIRTIO_INPUT_CFG_ID_DEVIDS 0x03U
 #define VIRTIO_INPUT_CFG_PROP_BITS 0x10U
+/* Linux input properties (bit numbers in the PROP_BITS bitmap) */
+#define VIRTIO_INPUT_PROP_POINTER 0U
+#define VIRTIO_INPUT_PROP_DIRECT  1U
 #define VIRTIO_INPUT_CFG_EV_BITS   0x11U
 #define VIRTIO_INPUT_CFG_ABS_INFO  0x12U
 

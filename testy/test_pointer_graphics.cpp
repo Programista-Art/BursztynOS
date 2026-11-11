@@ -31,8 +31,9 @@ int main(){
     assert(grafika_pobierz_mysz_x()==x&&grafika_pobierz_mysz_y()==y);
     for(int value:{0,16384,32767,16384}){
         auto report=tablet_report(l,value,value);assert(hid_pointer_publish(usb,l,report.data(),report.size(),1));
-        assert(grafika_pobierz_mysz_x()==int(int64_t(value)*1279/32767));
-        assert(grafika_pobierz_mysz_y()==int(int64_t(value)*719/32767));
+        // Rounded endpoint mapping (nearest pixel; 0 -> 0, 32767 -> extent-1).
+        assert(grafika_pobierz_mysz_x()==int((int64_t(value)*1279+16383)/32767));
+        assert(grafika_pobierz_mysz_y()==int((int64_t(value)*719+16383)/32767));
     }
     x=grafika_pobierz_mysz_x();y=grafika_pobierz_mysz_y();hid_pointer_remove(usb);
     assert(input_get_pointer_owner()==&ps2);assert(grafika_pobierz_mysz_x()==x&&grafika_pobierz_mysz_y()==y);

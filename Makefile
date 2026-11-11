@@ -1528,7 +1528,16 @@ QEMU_VIRTIO_COMMON_ARGS := \
 	-vga none \
 	-device virtio-vga,disable-legacy=on,xres=$(QEMU_VIRTIO_XRES),yres=$(QEMU_VIRTIO_YRES) \
 	-device virtio-keyboard-pci \
-	-device virtio-mouse-pci
+	-device virtio-mouse-pci \
+	-device virtio-tablet-pci
+
+# Wskaznik (docs/virtio-gpu-mouse-reliability-2026-11-11.md): podstawowym
+# urzadzeniem jest bezwzgledny virtio-tablet-pci (dodany NA KONCU, BDF
+# pozostalych 7 urzadzen bez zmian). Linuksowy frontend SDL 2.30 w trybie
+# wzglednym przelicza ruch z bezwzglednego wskaznika hosta (VirtualBox/VMware,
+# tablety, ekrany dotykowe) jako prev-cur w jednostkach urzadzenia, co daje
+# odwrocony i przeskalowany ruch kursora. Z tabletem QEMU nie wchodzi w tryb
+# wzgledny. Fallback: virtio-mouse-pci (wzgledna), potem PS/2 z i8042.
 
 # Produkcyjny profil VirtIO 1.x Modern PCI (Live / CD / instalator).
 # xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
@@ -2250,6 +2259,15 @@ input_device.o grafika.o hid_pointer.o: jadro/gui/pointer_coordinates.h
 test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
 	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/pointer-graphics
+
+# Host frontend model -> QEMU event -> production InputDevice -> production
+# cursor/hit-test, at every supported resolution (docs/virtio-gpu-mouse-reliability-2026-11-11.md).
+.PHONY: test-mouse-pipeline-host
+test-mouse-pipeline-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_mouse_pipeline_host.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/mouse-pipeline
+	@for r in 800x600 1024x768 1280x720 1920x1080 2560x1440; do \
+		ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/mouse-pipeline $${r%x*} $${r#*x} || exit 1; \
+	done
 
 # Physical hardware diagnostics: bounded, deferred, no polling or timing changes.
 BURSZTYNDIAGXHCIPHYSICALMOUSE ?= 0

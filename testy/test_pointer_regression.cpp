@@ -3,7 +3,7 @@
 #include "ui_skala.h"
 #include "sterowniki/usb/hid_pointer.h"
 #include "testy/pointing_test_descriptors.h"
-#include "narzedzia/virtualbox_tablet_descriptor.h"
+#include "testy/virtualbox_tablet_descriptor.h"
 #include <algorithm>
 #include <vector>
 static void relative(InputDevice& d,int x,int y){InputEvent e[]={{INPUT_EV_REL,INPUT_REL_X,uint32_t(x)},{INPUT_EV_REL,INPUT_REL_Y,uint32_t(y)},{INPUT_EV_SYN,0,0}};input_dispatch_events(&d,e,3);}
@@ -54,7 +54,7 @@ static void early_geometry(){
     HidPointerLayout l{};CHECK(hid_pointer_compile(virtualbox_tablet_descriptor,sizeof(virtualbox_tablet_descriptor),l));
     InputDevice u{};CHECK(hid_pointer_register(u,l,11));CHECK(input_get_pointer_owner()==&p);
     auto r=tablet_report(l,16384,16384,1);CHECK(hid_pointer_publish(u,l,r.data(),r.size(),11));CHECK(input_get_pointer_owner()==&u);CHECK(px==632&&py==370);
-    input_set_pointer_ready(true);input_service_all();CHECK(px==639&&py==359&&last_buttons==1);
+    input_set_pointer_ready(true);input_service_all();CHECK(px==640&&py==360&&last_buttons==1); // 16384 -> nearest pixel (639.52, 359.51)
     const int x=px,y=py;hid_pointer_remove(u);CHECK(input_get_pointer_owner()==&p);CHECK(px==x&&py==y);
     input_service_all();CHECK(px==x&&py==y);relative(p,1,-1);CHECK(px==x+1&&py==y-1);
     input_reset_all();
@@ -100,7 +100,9 @@ static void absolute_endpoints(){
         CHECK(input_register_device(&d));absolute(d,range.first,range.first);
         auto expected_abs=[&](int32_t raw,int extent){
             auto clamped=std::clamp(raw,range.first,range.second);
-            return int((__int128(clamped)-range.first)*(extent-1)/(int64_t(range.second)-range.first));
+            // Rounded endpoint mapping (2026-11-11): nearest pixel, min->0, max->extent-1.
+            const __int128 span=int64_t(range.second)-range.first;
+            return int(((__int128(clamped)-range.first)*(extent-1)+span/2)/span);
         };
         for(int32_t raw:{range.first,range.second,int32_t(int64_t(range.first)+(int64_t(range.second)-range.first)/2),int32_t(INT_MIN),int32_t(INT_MAX)}){
             // Independent X and Y packets must not remap the other axis.

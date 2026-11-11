@@ -19,7 +19,7 @@ from test_hda_regression_qemu import Qmp  # noqa: E402
 from PIL import Image  # noqa: E402
 
 FAULTS = ('[PF]', '[KERNEL-PANIC]', '[GP]', 'KRYTYCZNY BLAD SYSTEMU',
-          '[VIRTIO-GPU] BLAD KRYTYCZNY', '[USER FAULT]')
+          '[VIRTIO-GPU] BLAD KRYTYCZNY', '[VIRTIO-GPU-RECOVERY] PERMANENT_FAILURE', '[USER FAULT]')
 
 
 def main():
@@ -336,6 +336,15 @@ def main():
         except subprocess.TimeoutExpired:
             vm.kill()
     result.setdefault('gpu_timeout', False)
+    # Recovery counters from the serial log (pass or fail): soft timeouts,
+    # validated late completions and permanent failures.
+    text = serial.read_text(errors='replace') if serial.exists() else ''
+    result['gpu_recovery'] = {
+        'soft_timeouts': text.count('Timeout polecenia kontrolnego'),
+        'late_completions': text.count('[VIRTIO-GPU-RECOVERY] late completion'),
+        'permanent_failures': text.count('[VIRTIO-GPU-RECOVERY] PERMANENT_FAILURE'),
+    }
+    result['gpu_timeout'] = result['gpu_recovery']['soft_timeouts'] > 0
     (out / 'bsf2-native.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
     return 0 if result.get('ok') else 1

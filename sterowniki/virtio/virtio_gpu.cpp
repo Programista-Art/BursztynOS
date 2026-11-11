@@ -244,6 +244,382 @@ bool virtio_gpu_is_quiescing(void) {
  * 1. WYSLANIE I WYKONANIE POLECENIA KONTROLNEGO NA CONTROLQ
  * ========================================================================= */
 
+static const char* virtio_gpu_cmd_name(uint32_t cmd_type) {
+    switch(cmd_type) {
+        case 0x0100: return "GET_DISPLAY_INFO";
+        case 0x0101: return "RESOURCE_CREATE_2D";
+        case 0x0102: return "RESOURCE_UNREF";
+        case 0x0103: return "SET_SCANOUT";
+        case 0x0104: return "RESOURCE_FLUSH";
+        case 0x0105: return "TRANSFER_TO_HOST_2D";
+        case 0x0106: return "RESOURCE_ATTACH_BACKING";
+        case 0x0107: return "RESOURCE_DETACH_BACKING";
+        case 0x0300: return "UPDATE_CURSOR";
+        case 0x0301: return "MOVE_CURSOR";
+    }
+    return "UNKNOWN";
+}
+
+const char* virtio_gpu_cmd_state_name(VirtioGpuCmdState state) {
+    switch (state) {
+        case VIRTIO_GPU_CMD_IDLE: return "IDLE";
+        case VIRTIO_GPU_CMD_SUBMITTED: return "SUBMITTED";
+        case VIRTIO_GPU_CMD_WAITING: return "WAITING";
+        case VIRTIO_GPU_CMD_TIMED_OUT_PENDING: return "TIMED_OUT_PENDING";
+        case VIRTIO_GPU_CMD_RECOVERED: return "RECOVERED";
+        case VIRTIO_GPU_CMD_PERMANENT_FAILURE: return "PERMANENT_FAILURE";
+    }
+    return "INVALID";
+}
+
+/*
+ * Late-completion policy (docs/virtio-gpu-mouse-reliability-2026-11-11.md).
+ * TRANSFER_TO_HOST_2D and RESOURCE_FLUSH only copy/present guest pixels that
+ * the next frame rewrites; the caller can drop the frame. They return failure
+ * at the soft deadline and stay TIMED_OUT_PENDING (asynchronous recovery).
+ * Every other command changes resource/backing/scanout state the caller must
+ * know the outcome of, so the same call keeps waiting until the bounded hard
+ * deadline (synchronous recovery) and reports the real, validated result.
+ * Nothing is ever resubmitted: the device executes each chain at most once.
+ */
+static bool virtio_gpu_cmd_async_recovery(uint32_t cmd_type) {
+    return cmd_type == VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D ||
+           cmd_type == VIRTIO_GPU_CMD_RESOURCE_FLUSH;
+}
+
+static void virtio_gpu_log_u64(const char* prefix, uint64_t a, const char* mid = nullptr,
+                               uint64_t b = 0, const char* tail = nullptr, const char* text = nullptr) {
+    char buf[200]{};
+    size_t pos = 0;
+    log_append_str(buf, sizeof(buf), pos, prefix);
+    log_append_u64_dec(buf, sizeof(buf), pos, a);
+    if (mid) { log_append_str(buf, sizeof(buf), pos, mid); log_append_u64_dec(buf, sizeof(buf), pos, b); }
+    if (tail) log_append_str(buf, sizeof(buf), pos, tail);
+    if (text) log_append_str(buf, sizeof(buf), pos, text);
+    gpu_klog(buf);
+}
+
+static void virtio_gpu_permanent_failure_locked(VirtioGpuDriver* drv, const char* reason) {
+    if (drv->cmd_state != VIRTIO_GPU_CMD_PERMANENT_FAILURE) {
+        drv->recovery.permanent_failures++;
+        char buf[200]{};
+        size_t pos = 0;
+        log_append_str(buf, sizeof(buf), pos, "[VIRTIO-GPU-RECOVERY] PERMANENT_FAILURE: ");
+        log_append_str(buf, sizeof(buf), pos, reason);
+        log_append_str(buf, sizeof(buf), pos, " cmd=");
+        log_append_str(buf, sizeof(buf), pos, virtio_gpu_cmd_name(drv->pending_cmd_type));
+        gpu_klog(buf);
+    }
+    drv->cmd_state = VIRTIO_GPU_CMD_PERMANENT_FAILURE;
+    drv->permanent_failure_reason = reason;
+    /* DMA, descriptors and framebuffer stay allocated until a confirmed reset. */
+    drv->has_error = true;
+    drv->error_count++;
+}
+
+static void virtio_gpu_log_timeout_diag_locked(VirtioGpuDriver* drv, uint32_t cmd_type,
+                                               uint32_t expected_resp_type, int head,
+                                               uint64_t elapsed_ns, uint32_t spins_left) {
+    char timing[400]{}; size_t pos = 0;
+    log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU] timeout elapsed_ns=");
+    log_append_u64_dec(timing, sizeof(timing), pos, elapsed_ns);
+    log_append_str(timing, sizeof(timing), pos, " spins_left=");
+    log_append_u64_dec(timing, sizeof(timing), pos, spins_left);
+    gpu_klog(timing);
+    // Soft deadline only: the recovery policy decides; PERMANENT_FAILURE is
+    // logged separately as "[VIRTIO-GPU-RECOVERY] PERMANENT_FAILURE".
+    gpu_klog("[VIRTIO-GPU] Timeout polecenia kontrolnego (miekki termin 500 ms)");
+
+    const uint8_t* resp_dma_vaddr = static_cast<const uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
+    const uint32_t act_type = reinterpret_cast<const VirtioGpuCtrlHdr*>(resp_dma_vaddr)->type;
+    pos = 0;
+    log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] cmd=");
+    log_append_u64_dec(timing, sizeof(timing), pos, cmd_type);
+    log_append_str(timing, sizeof(timing), pos, " (");
+    log_append_str(timing, sizeof(timing), pos, virtio_gpu_cmd_name(cmd_type));
+    log_append_str(timing, sizeof(timing), pos, ") exp_resp=");
+    log_append_u64_dec(timing, sizeof(timing), pos, expected_resp_type);
+    log_append_str(timing, sizeof(timing), pos, " act_resp=");
+    log_append_u64_dec(timing, sizeof(timing), pos, act_type);
+    gpu_klog(timing);
+
+    pos = 0;
+    log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] qstate: avail=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->avail ? drv->controlq->avail->idx : 0);
+    log_append_str(timing, sizeof(timing), pos, " used=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->used ? drv->controlq->used->idx : 0);
+    log_append_str(timing, sizeof(timing), pos, " last_used=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->last_used_idx);
+    log_append_str(timing, sizeof(timing), pos, " head=");
+    log_append_u64_dec(timing, sizeof(timing), pos, static_cast<uint64_t>(head));
+    gpu_klog(timing);
+
+    pos = 0;
+    log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] drvstate: initialized=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->initialized ? 1 : 0);
+    log_append_str(timing, sizeof(timing), pos, " cmd_done=");
+    log_append_u64_dec(timing, sizeof(timing), pos, __atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE));
+    log_append_str(timing, sizeof(timing), pos, " lock=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->lock);
+    log_append_str(timing, sizeof(timing), pos, " err=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->has_error);
+    log_append_str(timing, sizeof(timing), pos, " quiesc=");
+    log_append_u64_dec(timing, sizeof(timing), pos, __atomic_load_n(&g_gpu_reboot_quiescing, __ATOMIC_ACQUIRE));
+    log_append_str(timing, sizeof(timing), pos, " cmd_seq=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->cmd_count);
+    gpu_klog(timing);
+
+    pos = 0;
+    log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] qstate_extra: q_size=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->queue_size);
+    log_append_str(timing, sizeof(timing), pos, " num_free=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->num_free);
+    log_append_str(timing, sizeof(timing), pos, " notify_off=");
+    log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->queue_notify_off);
+    gpu_klog(timing);
+
+    if (drv->dev) {
+        const uint16_t isr = virtio_pci_read_isr(drv->dev);
+        pos = 0;
+        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] pci isr=");
+        log_append_u64_dec(timing, sizeof(timing), pos, isr);
+        gpu_klog(timing);
+    }
+}
+
+enum class GpuCompletion : uint8_t { None, Ours, Corrupt };
+
+/* Pop at most one used entry; it must be exactly the chain we own. */
+static GpuCompletion virtio_gpu_try_pop_locked(VirtioGpuDriver* drv, int head, uint32_t* used_len) {
+    if (!__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) && !virtqueue_has_used(drv->controlq))
+        return GpuCompletion::None;
+    void* cookie = nullptr;
+    const int popped = virtqueue_pop_used(drv->controlq, &cookie, used_len);
+    if (popped == -1) return GpuCompletion::None;
+    if (popped < -1) return GpuCompletion::Corrupt;
+    // pop_used already validated the whole chain; with a single outstanding
+    // controlq chain any other head means the device completed something we
+    // never submitted (or completed twice).
+    if (popped != head) return GpuCompletion::Corrupt;
+    if (virtqueue_has_used(drv->controlq)) return GpuCompletion::Corrupt; // extra entry
+    return GpuCompletion::Ours;
+}
+
+/* Validates length and type of a completion for the outstanding chain.
+   Returns true only for the expected successful response. */
+static bool virtio_gpu_finish_completion_locked(VirtioGpuDriver* drv, uint32_t used_len,
+                                                size_t resp_len, bool exact_len,
+                                                void* resp_out, uint32_t expected_resp_type,
+                                                bool* device_rejected) {
+    *device_rejected = false;
+    const bool len_ok = exact_len ? used_len == resp_len
+                                  : (used_len >= sizeof(VirtioGpuCtrlHdr) && used_len <= resp_len);
+    if (!len_ok) {
+        gpu_klog("[VIRTIO-GPU] BLAD: Nieprawidlowa lub znieksztalcona dlugosc used_len!");
+        virtio_gpu_permanent_failure_locked(drv, "invalid used_len");
+        return false;
+    }
+    const uint8_t* resp_dma_vaddr = static_cast<const uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
+    if (resp_out) gpu_memcpy(resp_out, resp_dma_vaddr, resp_len);
+    VirtioGpuCtrlHdr hdr{};
+    gpu_memcpy(&hdr, resp_dma_vaddr, sizeof(hdr));
+    if (hdr.type != expected_resp_type) {
+        char err_buf[128]{};
+        size_t epos = 0;
+        log_append_str(err_buf, sizeof(err_buf), epos, "[VIRTIO-GPU] Odpowiedz bledu sprzetu: type=0x");
+        log_append_u64_dec(err_buf, sizeof(err_buf), epos, hdr.type);
+        log_append_str(err_buf, sizeof(err_buf), epos, " (oczekiwano=0x");
+        log_append_u64_dec(err_buf, sizeof(err_buf), epos, expected_resp_type);
+        log_append_str(err_buf, sizeof(err_buf), epos, ")");
+        gpu_klog(err_buf);
+        drv->error_count++;
+        *device_rejected = true;
+        return false;
+    }
+    return true;
+}
+
+/*
+ * TIMED_OUT_PENDING -> IDLE only after the device returned exactly the chain
+ * it owns, with a valid length. Never blocks. After the hard deadline (or
+ * without a clock to measure one) the driver fails closed.
+ */
+static void virtio_gpu_reap_pending_locked(VirtioGpuDriver* drv) {
+    if (drv->cmd_state != VIRTIO_GPU_CMD_TIMED_OUT_PENDING) return;
+    // Same rule as the in-call wait: the used ring is inspected once more at
+    // (or after) the hard deadline. A validated completion already published
+    // by the device is reaped; with none visible the driver fails closed and
+    // never looks again (a completion after that decision is ignored).
+    uint32_t used_len = 0;
+    const GpuCompletion c = virtio_gpu_try_pop_locked(drv, drv->pending_head, &used_len);
+    if (c == GpuCompletion::Corrupt) {
+        virtio_gpu_permanent_failure_locked(drv, "unexpected used-ring entry while pending");
+        return;
+    }
+    const uint64_t now = gpu_monotonic_ns();
+    if (c == GpuCompletion::None) {
+        if (now == 0 || now >= drv->pending_hard_deadline_ns)
+            virtio_gpu_permanent_failure_locked(drv, "no completion before hard deadline");
+        return;
+    }
+    bool rejected = false;
+    const bool ok = virtio_gpu_finish_completion_locked(drv, used_len, drv->pending_resp_len, false,
+                                                        nullptr, drv->pending_expected_resp, &rejected);
+    if (!ok && !rejected) return; // permanent failure already recorded
+    const uint64_t late = now > drv->pending_submit_ns ? now - drv->pending_submit_ns : 0;
+    drv->recovery.late_completions++;
+    if (rejected) drv->recovery.late_error_responses++;
+    if (late > drv->recovery.max_late_ns) drv->recovery.max_late_ns = late;
+    drv->cmd_state = VIRTIO_GPU_CMD_RECOVERED;
+    drv->recovery.recoveries++;
+    drv->recovery_full_refresh = true; // the dropped frame(s) must be republished
+    virtio_gpu_log_u64("[VIRTIO-GPU-RECOVERY] late completion reaped seq=", drv->pending_seq,
+                       " late_ms=", late / 1000000ULL, " cmd=", virtio_gpu_cmd_name(drv->pending_cmd_type));
+    drv->pending_head = -1;
+    drv->cmd_state = VIRTIO_GPU_CMD_IDLE;
+}
+
+/* Gate for every controlq user: may the shared command buffer be written? */
+static bool virtio_gpu_controlq_ready_locked(VirtioGpuDriver* drv) {
+    if (virtio_gpu_is_quiescing()) return false;
+    if (!drv || !drv->dev || !drv->controlq || !drv->cmd_vaddr || drv->has_error) return false;
+    if (drv->cmd_state == VIRTIO_GPU_CMD_TIMED_OUT_PENDING) {
+        virtio_gpu_reap_pending_locked(drv);
+        if (drv->cmd_state != VIRTIO_GPU_CMD_IDLE) {
+            if (drv->cmd_state == VIRTIO_GPU_CMD_TIMED_OUT_PENDING) drv->recovery.rejected_while_pending++;
+            return false;
+        }
+    }
+    if (drv->cmd_state != VIRTIO_GPU_CMD_IDLE) {
+        virtio_gpu_permanent_failure_locked(drv, "controlq not idle");
+        return false;
+    }
+    // With nothing outstanding, a used entry can only be bogus.
+    if (virtqueue_has_used(drv->controlq)) {
+        virtio_gpu_permanent_failure_locked(drv, "used-ring entry without outstanding command");
+        return false;
+    }
+    return true;
+}
+
+/*
+ * Submits the request already placed at cmd_vaddr (offset 0) and waits for
+ * it: soft deadline VIRTIO_GPU_DEFAULT_TIMEOUT_MS, then the recovery policy.
+ */
+static bool virtio_gpu_execute_locked(VirtioGpuDriver* drv, size_t req_len, size_t resp_len,
+                                      bool exact_resp_len, void* resp_out,
+                                      uint32_t expected_resp_type) {
+    const uint32_t cmd_type = static_cast<const VirtioGpuCtrlHdr*>(drv->cmd_vaddr)->type;
+    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
+    gpu_secure_zero(resp_dma_vaddr, resp_len);
+
+    VirtqBuffer bufs[2];
+    bufs[0].phys_addr = drv->cmd_paddr;
+    bufs[0].len = static_cast<uint32_t>(req_len);
+    bufs[0].is_write = false;
+    bufs[1].phys_addr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
+    bufs[1].len = static_cast<uint32_t>(resp_len);
+    bufs[1].is_write = true;
+
+    __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
+    const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
+    if (head < 0) {
+        gpu_klog("[VIRTIO-GPU] BLAD: virtqueue_submit failed!");
+        drv->error_count++;
+        return false;
+    }
+    drv->cmd_state = VIRTIO_GPU_CMD_SUBMITTED;
+    drv->pending_head = head;
+    drv->pending_cmd_type = cmd_type;
+    drv->pending_expected_resp = expected_resp_type;
+    drv->pending_resp_len = static_cast<uint32_t>(resp_len);
+    drv->pending_seq = drv->cmd_count;
+    virtqueue_kick(drv->controlq, true);
+    drv->cmd_count++;
+    GraphicsPerf::add(GraphicsPerf::GpuCommands);
+    GraphicsPerf::Timer wait_timer(GraphicsPerf::GpuWaitNs);
+
+    const uint64_t start_ns = gpu_monotonic_ns();
+    drv->pending_submit_ns = start_ns;
+    const uint64_t timeout_ns = VIRTIO_GPU_DEFAULT_TIMEOUT_MS * 1000000ULL;
+    const uint64_t hard_ns = VIRTIO_GPU_RECOVERY_HARD_DEADLINE_MS * 1000000ULL;
+    const uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
+    drv->pending_hard_deadline_ns = (start_ns > UINT64_MAX - hard_ns) ? UINT64_MAX : (start_ns + hard_ns);
+    drv->cmd_state = VIRTIO_GPU_CMD_WAITING;
+
+    // Returns Ours/Corrupt, or None when the deadline (or spin guard) expired.
+    auto wait_until = [&](uint64_t limit_ns, uint32_t& spin_guard, uint32_t* used_len) {
+        bool expired = false;
+        for (;;) {
+            const GpuCompletion c = virtio_gpu_try_pop_locked(drv, head, used_len);
+            if (c != GpuCompletion::None) return c;
+            // Completion can arrive while the clock read stalls (e.g. under TCG).
+            // Poll once more before treating the sampled deadline as expired.
+            if (expired || spin_guard == 0) return GpuCompletion::None;
+            --spin_guard;
+            const uint64_t now = gpu_monotonic_ns();
+            expired = now != 0 && now >= limit_ns;
+            asm volatile("pause" ::: "memory");
+        }
+    };
+
+    uint32_t used_len = 0;
+    uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
+    GpuCompletion c = wait_until(deadline_ns, spin_guard, &used_len);
+    bool late = false;
+    if (c == GpuCompletion::None) {
+        drv->recovery.soft_timeouts++;
+        const uint64_t now = gpu_monotonic_ns();
+        virtio_gpu_log_timeout_diag_locked(drv, cmd_type, expected_resp_type, head,
+                                           now > start_ns ? now - start_ns : 0, spin_guard);
+        if (start_ns == 0) {
+            // No clock: a hard deadline cannot be measured. Fail closed.
+            virtio_gpu_permanent_failure_locked(drv, "timeout without monotonic clock");
+            return false;
+        }
+        drv->cmd_state = VIRTIO_GPU_CMD_TIMED_OUT_PENDING;
+        if (virtio_gpu_cmd_async_recovery(cmd_type)) {
+            // Frame dropped; descriptors/DMA stay owned by the device.
+            virtio_gpu_log_u64("[VIRTIO-GPU-RECOVERY] TIMED_OUT_PENDING seq=", drv->pending_seq,
+                               " hard_ms=", VIRTIO_GPU_RECOVERY_HARD_DEADLINE_MS, " cmd=", virtio_gpu_cmd_name(cmd_type));
+            return false;
+        }
+        virtio_gpu_log_u64("[VIRTIO-GPU-RECOVERY] waiting for late completion seq=", drv->pending_seq,
+                           " hard_ms=", VIRTIO_GPU_RECOVERY_HARD_DEADLINE_MS, " cmd=", virtio_gpu_cmd_name(cmd_type));
+        uint32_t hard_guard = VIRTIO_GPU_MAX_SPINS_GUARD * 10U;
+        c = wait_until(drv->pending_hard_deadline_ns, hard_guard, &used_len);
+        if (c == GpuCompletion::None) {
+            virtio_gpu_permanent_failure_locked(drv, "no completion before hard deadline");
+            return false;
+        }
+        late = true;
+    }
+    if (c == GpuCompletion::Corrupt) {
+        gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Uszkodzenie kolejki virtqueue_pop_used!");
+        virtio_gpu_permanent_failure_locked(drv, "corrupt or foreign used-ring entry");
+        return false;
+    }
+
+    bool rejected = false;
+    const bool ok = virtio_gpu_finish_completion_locked(drv, used_len, resp_len, exact_resp_len,
+                                                        resp_out, expected_resp_type, &rejected);
+    if (!ok && !rejected) return false; // permanent failure recorded
+    if (late) {
+        const uint64_t now = gpu_monotonic_ns();
+        const uint64_t late_ns = now > start_ns ? now - start_ns : 0;
+        drv->recovery.late_completions++;
+        if (rejected) drv->recovery.late_error_responses++;
+        if (late_ns > drv->recovery.max_late_ns) drv->recovery.max_late_ns = late_ns;
+        drv->cmd_state = VIRTIO_GPU_CMD_RECOVERED;
+        drv->recovery.recoveries++;
+        virtio_gpu_log_u64("[VIRTIO-GPU-RECOVERY] late completion in call seq=", drv->pending_seq,
+                           " late_ms=", late_ns / 1000000ULL, " cmd=", virtio_gpu_cmd_name(cmd_type));
+    }
+    drv->pending_head = -1;
+    drv->cmd_state = VIRTIO_GPU_CMD_IDLE;
+    return ok;
+}
+
 static bool virtio_gpu_send_command_locked(
     VirtioGpuDriver* drv,
     const void* req,
@@ -252,207 +628,24 @@ static bool virtio_gpu_send_command_locked(
     size_t resp_len,
     uint32_t expected_resp_type
 ) {
-    if (virtio_gpu_is_quiescing()) {
-        return false;
-    }
-
-    if (!drv || !drv->dev || !drv->controlq || !drv->cmd_vaddr ||
-        req_len == 0 || resp_len == 0 ||
+    if (!drv || req_len == 0 || resp_len == 0 ||
         req_len > VIRTIO_GPU_CMD_REQ_MAX_SIZE ||
-        resp_len > VIRTIO_GPU_CMD_RESP_MAX_SIZE ||
-        drv->has_error) {
+        resp_len > VIRTIO_GPU_CMD_RESP_MAX_SIZE) {
         return false;
     }
+    if (!virtio_gpu_controlq_ready_locked(drv)) return false;
 
-    /* Kopiujemy polecenie do obszaru DMA zadania (offset 0) */
+    /* Bufor polecen jest wolny (IDLE): kopiujemy zadanie do obszaru DMA */
     gpu_memcpy(drv->cmd_vaddr, req, req_len);
+    return virtio_gpu_execute_locked(drv, req_len, resp_len, false, resp, expected_resp_type);
+}
 
-    /* Zerujemy obszar odpowiedzi DMA */
-    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
-    gpu_secure_zero(resp_dma_vaddr, resp_len);
-
-    const uint64_t req_paddr = drv->cmd_paddr;
-    const uint64_t resp_paddr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
-
-    /*
-     * Budujemy lancuch deskryptorow:
-     * Deskryptor 1: bufor zadania (Device-READ) -> flaga VIRTQ_DESC_F_NEXT
-     * Deskryptor 2: bufor odpowiedzi (Device-WRITE) -> flaga VIRTQ_DESC_F_WRITE
-     */
-    VirtqBuffer bufs[2];
-    bufs[0].phys_addr = req_paddr;
-    bufs[0].len = static_cast<uint32_t>(req_len);
-    bufs[0].is_write = false;
-
-    bufs[1].phys_addr = resp_paddr;
-    bufs[1].len = static_cast<uint32_t>(resp_len);
-    bufs[1].is_write = true;
-
-    __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
-
-    const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
-    if (head < 0) {
-        gpu_klog("[VIRTIO-GPU] BLAD: virtqueue_submit failed!");
-        drv->error_count++;
-        return false;
-    }
-
-    virtqueue_kick(drv->controlq, true);
-    drv->cmd_count++;
-    GraphicsPerf::add(GraphicsPerf::GpuCommands);
-    GraphicsPerf::Timer wait_timer(GraphicsPerf::GpuWaitNs);
-
-    /*
-     * Oczekiwanie na zakonczenie ze scisle ograniczonym czasem monotonicznym.
-     */
-    const uint64_t start_ns = gpu_monotonic_ns();
-    const uint64_t timeout_ns = VIRTIO_GPU_DEFAULT_TIMEOUT_MS * 1000000ULL;
-    const uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
-
-    uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
-    bool completed = false;
-    uint32_t actual_used_len = 0;
-    bool deadline_expired = false;
-
-    for (;;) {
-
-        if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
-            void* cookie = nullptr;
-            uint32_t used_len = 0;
-            int popped = virtqueue_pop_used(drv->controlq, &cookie, &used_len);
-            if (popped >= 0) {
-                completed = true;
-                actual_used_len = used_len;
-                break;
-            } else if (popped < -1) {
-                gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Uszkodzenie kolejki virtqueue_pop_used!");
-                drv->has_error = true;
-                drv->error_count++;
-                return false;
-            }
-        }
-
-        // Completion can arrive while the clock read stalls (e.g. under TCG).
-        // Poll once more before treating the sampled deadline as a timeout.
-        if (deadline_expired || spin_guard == 0) break;
-        --spin_guard;
-        const uint64_t now = gpu_monotonic_ns();
-        deadline_expired = now != 0 && now >= deadline_ns;
-        asm volatile("pause" ::: "memory");
-    }
-
-    if (!completed) {
-        char timing[400]{}; size_t pos = 0;
-        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU] timeout elapsed_ns=");
-        log_append_u64_dec(timing, sizeof(timing), pos, gpu_monotonic_ns() - start_ns);
-        log_append_str(timing, sizeof(timing), pos, " spins_left=");
-        log_append_u64_dec(timing, sizeof(timing), pos, spin_guard);
-        gpu_klog(timing);
-        gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: Timeout polecenia kontrolnego!");
-
-        const uint32_t cmd_type = static_cast<const VirtioGpuCtrlHdr*>(req)->type;
-        const uint32_t act_type = static_cast<const VirtioGpuCtrlHdr*>(static_cast<const void*>(resp_dma_vaddr))->type;
-        const char* cmd_name = "UNKNOWN";
-        switch(cmd_type) {
-            case 0x0100: cmd_name = "GET_DISPLAY_INFO"; break;
-            case 0x0101: cmd_name = "RESOURCE_CREATE_2D"; break;
-            case 0x0102: cmd_name = "RESOURCE_UNREF"; break;
-            case 0x0103: cmd_name = "SET_SCANOUT"; break;
-            case 0x0104: cmd_name = "RESOURCE_FLUSH"; break;
-            case 0x0105: cmd_name = "TRANSFER_TO_HOST_2D"; break;
-            case 0x0106: cmd_name = "RESOURCE_ATTACH_BACKING"; break;
-            case 0x0107: cmd_name = "RESOURCE_DETACH_BACKING"; break;
-            case 0x0300: cmd_name = "UPDATE_CURSOR"; break;
-            case 0x0301: cmd_name = "MOVE_CURSOR"; break;
-        }
-
-        pos = 0;
-        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] cmd=");
-        log_append_u64_dec(timing, sizeof(timing), pos, cmd_type);
-        log_append_str(timing, sizeof(timing), pos, " (");
-        log_append_str(timing, sizeof(timing), pos, cmd_name);
-        log_append_str(timing, sizeof(timing), pos, ") exp_resp=");
-        log_append_u64_dec(timing, sizeof(timing), pos, expected_resp_type);
-        log_append_str(timing, sizeof(timing), pos, " act_resp=");
-        log_append_u64_dec(timing, sizeof(timing), pos, act_type);
-        gpu_klog(timing);
-
-        pos = 0;
-        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] qstate: avail=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->avail ? drv->controlq->avail->idx : 0);
-        log_append_str(timing, sizeof(timing), pos, " used=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->used ? drv->controlq->used->idx : 0);
-        log_append_str(timing, sizeof(timing), pos, " last_used=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq->last_used_idx);
-        log_append_str(timing, sizeof(timing), pos, " head=");
-        log_append_u64_dec(timing, sizeof(timing), pos, head);
-        gpu_klog(timing);
-
-        pos = 0;
-        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] drvstate: initialized=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->initialized ? 1 : 0);
-        log_append_str(timing, sizeof(timing), pos, " cmd_done=");
-        log_append_u64_dec(timing, sizeof(timing), pos, __atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE));
-        log_append_str(timing, sizeof(timing), pos, " lock=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->lock);
-        log_append_str(timing, sizeof(timing), pos, " err=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->has_error);
-        log_append_str(timing, sizeof(timing), pos, " quiesc=");
-        log_append_u64_dec(timing, sizeof(timing), pos, __atomic_load_n(&g_gpu_reboot_quiescing, __ATOMIC_ACQUIRE));
-        log_append_str(timing, sizeof(timing), pos, " cmd_seq=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->cmd_count);
-        gpu_klog(timing);
-
-        pos = 0;
-        log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] qstate_extra: q_size=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq ? drv->controlq->queue_size : 0);
-        log_append_str(timing, sizeof(timing), pos, " num_free=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq ? drv->controlq->num_free : 0);
-        log_append_str(timing, sizeof(timing), pos, " notify_off=");
-        log_append_u64_dec(timing, sizeof(timing), pos, drv->controlq ? drv->controlq->queue_notify_off : 0);
-        gpu_klog(timing);
-
-        if (drv->dev) {
-            uint16_t isr = virtio_pci_read_isr(drv->dev);
-            pos = 0;
-            log_append_str(timing, sizeof(timing), pos, "[VIRTIO-GPU-DIAG] pci isr=");
-            log_append_u64_dec(timing, sizeof(timing), pos, isr);
-            gpu_klog(timing);
-        }
-
-        drv->has_error = true;
-        drv->error_count++;
-        /* NIGDY nie traktujemy timeoutu jako sukces i NIE zwalniamy DMA uzywanego przez sprzet! */
-        return false;
-    }
-
-    /* Weryfikacja dlugosci odpowiedzi zapisanej przez urzadzenie */
-    if (actual_used_len < sizeof(VirtioGpuCtrlHdr) || actual_used_len > resp_len) {
-        gpu_klog("[VIRTIO-GPU] BLAD: Nieprawidlowa lub znieksztalcona dlugosc used_len!");
-        drv->has_error = true;
-        drv->error_count++;
-        return false;
-    }
-
-    /* Kopiujemy odpowiedz z bufora DMA */
-    gpu_memcpy(resp, resp_dma_vaddr, resp_len);
-
-    /* Weryfikacja typu odpowiedzi */
-    const VirtioGpuCtrlHdr* resp_hdr = static_cast<const VirtioGpuCtrlHdr*>(resp);
-    if (resp_hdr->type != expected_resp_type) {
-        char err_buf[128]{};
-        size_t epos = 0;
-        log_append_str(err_buf, sizeof(err_buf), epos, "[VIRTIO-GPU] Odpowiedz bledu sprzetu: type=0x");
-        log_append_u64_dec(err_buf, sizeof(err_buf), epos, resp_hdr->type);
-        log_append_str(err_buf, sizeof(err_buf), epos, " (oczekiwano=0x");
-        log_append_u64_dec(err_buf, sizeof(err_buf), epos, expected_resp_type);
-        log_append_str(err_buf, sizeof(err_buf), epos, ")");
-        gpu_klog(err_buf);
-        drv->error_count++;
-        return false;
-    }
-
-    return true;
+bool virtio_gpu_service_recovery(VirtioGpuDriver* drv) {
+    if (!drv || !drv->initialized) return false;
+    GpuSpinLockGuard guard(drv->lock);
+    if (drv->has_error) return false;
+    virtio_gpu_reap_pending_locked(drv);
+    return drv->cmd_state == VIRTIO_GPU_CMD_IDLE;
 }
 
 /* =========================================================================
@@ -529,6 +722,8 @@ bool virtio_gpu_cmd_resource_attach_backing(
     const size_t total_cmd_len = sizeof(VirtioGpuResourceAttachBacking) + entries_bytes;
 
     GpuSpinLockGuard guard(drv->lock);
+    // Never write the shared command buffer while the device may own it.
+    if (!virtio_gpu_controlq_ready_locked(drv)) return false;
 
     /* Budujemy zapytanie bezposrednio w buforze DMA polecen */
     VirtioGpuResourceAttachBacking* req = static_cast<VirtioGpuResourceAttachBacking*>(drv->cmd_vaddr);
@@ -541,96 +736,10 @@ bool virtio_gpu_cmd_resource_attach_backing(
         static_cast<uint8_t*>(drv->cmd_vaddr) + sizeof(VirtioGpuResourceAttachBacking));
     gpu_memcpy(dst_entries, entries, entries_bytes);
 
-    /* Zerujemy obszar odpowiedzi DMA */
-    uint8_t* resp_dma_vaddr = static_cast<uint8_t*>(drv->cmd_vaddr) + VIRTIO_GPU_CMD_RESP_OFFSET;
-    gpu_secure_zero(resp_dma_vaddr, sizeof(VirtioGpuCtrlHdr));
-
-    const uint64_t req_paddr = drv->cmd_paddr;
-    const uint64_t resp_paddr = drv->cmd_paddr + VIRTIO_GPU_CMD_RESP_OFFSET;
-
-    VirtqBuffer bufs[2];
-    bufs[0].phys_addr = req_paddr;
-    bufs[0].len = static_cast<uint32_t>(total_cmd_len);
-    bufs[0].is_write = false;
-
-    bufs[1].phys_addr = resp_paddr;
-    bufs[1].len = static_cast<uint32_t>(sizeof(VirtioGpuCtrlHdr));
-    bufs[1].is_write = true;
-
-    __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
-
-    const int head = virtqueue_submit(drv->controlq, bufs, 2, nullptr);
-    if (head < 0) {
-        gpu_klog("[VIRTIO-GPU] BLAD: virtqueue_submit failed dla attach_backing!");
-        drv->error_count++;
-        return false;
-    }
-
-    virtqueue_kick(drv->controlq, true);
-    drv->cmd_count++;
-    GraphicsPerf::add(GraphicsPerf::GpuCommands);
-    GraphicsPerf::Timer wait_timer(GraphicsPerf::GpuWaitNs);
-
-    const uint64_t start_ns = gpu_monotonic_ns();
-    const uint64_t timeout_ns = VIRTIO_GPU_DEFAULT_TIMEOUT_MS * 1000000ULL;
-    const uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
-
-    uint32_t spin_guard = VIRTIO_GPU_MAX_SPINS_GUARD;
-    bool completed = false;
-    uint32_t actual_used_len = 0;
-    bool deadline_expired = false;
-
-    for (;;) {
-
-        if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
-            void* cookie = nullptr;
-            uint32_t used_len = 0;
-            int popped = virtqueue_pop_used(drv->controlq, &cookie, &used_len);
-            if (popped >= 0) {
-                completed = true;
-                actual_used_len = used_len;
-                break;
-            } else if (popped < -1) {
-                gpu_klog("[VIRTIO-GPU] BLAD KRYTYCZNY: virtqueue_pop_used blad!");
-                drv->has_error = true;
-                drv->error_count++;
-                return false;
-            }
-        }
-
-        // Completion can arrive while the clock read stalls (e.g. under TCG).
-        // Poll once more before treating the sampled deadline as a timeout.
-        if (deadline_expired || spin_guard == 0) break;
-        --spin_guard;
-        const uint64_t now = gpu_monotonic_ns();
-        deadline_expired = now != 0 && now >= deadline_ns;
-        asm volatile("pause" ::: "memory");
-    }
-
-    if (!completed) {
-        gpu_klog("[VIRTIO-GPU] BLAD: Timeout attach_backing!");
-        drv->has_error = true;
-        drv->error_count++;
-        return false;
-    }
-
-    if (actual_used_len < sizeof(VirtioGpuCtrlHdr) || actual_used_len > sizeof(VirtioGpuCtrlHdr)) {
-        gpu_klog("[VIRTIO-GPU] BLAD: Znieksztalcony used_len dla attach_backing!");
-        drv->has_error = true;
-        drv->error_count++;
-        return false;
-    }
-
+    // Response must be exactly one header (previous behaviour kept).
     VirtioGpuCtrlHdr resp{};
-    gpu_memcpy(&resp, resp_dma_vaddr, sizeof(resp));
-
-    if (resp.type != VIRTIO_GPU_RESP_OK_NODATA) {
-        gpu_klog("[VIRTIO-GPU] Urzadzenie odrzucilo attach_backing!");
-        drv->error_count++;
-        return false;
-    }
-
-    return true;
+    return virtio_gpu_execute_locked(drv, total_cmd_len, sizeof(VirtioGpuCtrlHdr), true,
+                                     &resp, VIRTIO_GPU_RESP_OK_NODATA);
 }
 
 
@@ -1371,12 +1480,26 @@ bool virtio_gpu_setup_framebuffer(VirtioGpuDriver* drv, uint32_t width, uint32_t
     return true;
 }
 
+// Frames are dropped (not queued) while a timed-out command is pending; a
+// late completion is reaped first so the frame knows it must be full.
+static bool virtio_gpu_frame_gate(VirtioGpuDriver* drv) {
+    if (drv->cmd_state != VIRTIO_GPU_CMD_TIMED_OUT_PENDING) return true;
+    if (virtio_gpu_service_recovery(drv)) return true;
+    if (drv->cmd_state == VIRTIO_GPU_CMD_TIMED_OUT_PENDING) drv->recovery.rejected_while_pending++;
+    return false;
+}
+
 bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
     if (!PrezentacjaStartu::dozwolona() || virtio_gpu_is_quiescing() || !drv || !drv->initialized || drv->has_error || drv->resource_id == 0) return false;
+    // Reap a late completion first so this frame already knows it must be full.
+    if (!virtio_gpu_frame_gate(drv)) return false;
 
     const bool first=drv->initial_scanout_pending;
     // Reject partial initial updates: they cannot authorize a visible scanout.
     if(first&&(x!=0||y!=0||width!=drv->fb_width||height!=drv->fb_height))return false;
+    // After a recovered timeout earlier frames were dropped: republish all of it.
+    const bool full_refresh=drv->recovery_full_refresh&&!first;
+    if(full_refresh){x=0;y=0;width=drv->fb_width;height=drv->fb_height;}
     if (!virtio_gpu_cmd_transfer_to_host_2d(drv, drv->resource_id, x, y, width, height)) {
         return false;
     }
@@ -1391,6 +1514,7 @@ bool virtio_gpu_transfer_and_flush(VirtioGpuDriver* drv, uint32_t x, uint32_t y,
         return false;
     }
     if(first)SplashFirstDiag::event("first_resource_flush",gpu_monotonic_ns()/1000,drv->resource_id);
+    if(full_refresh)drv->recovery_full_refresh=false;
     return true;
 }
 
@@ -1403,6 +1527,7 @@ bool virtio_gpu_transfer_rects_and_flush(VirtioGpuDriver* drv,
         !drv->initialized || drv->has_error || drv->resource_id == 0) {
         return false;
     }
+    if (!virtio_gpu_frame_gate(drv)) return false;
 
     if (drv->initial_scanout_pending) {
         if (count != 1 ||
@@ -1413,6 +1538,9 @@ bool virtio_gpu_transfer_rects_and_flush(VirtioGpuDriver* drv,
         }
         return virtio_gpu_transfer_and_flush(
             drv, rects[0].x, rects[0].y, rects[0].width, rects[0].height);
+    }
+    if (drv->recovery_full_refresh) {
+        return virtio_gpu_transfer_and_flush(drv, 0, 0, drv->fb_width, drv->fb_height);
     }
 
     uint32_t left = drv->fb_width;
@@ -1541,6 +1669,8 @@ bool virtio_gpu_init(VirtioPciDevice* dev) {
     gpu_secure_zero(drv, sizeof(*drv));
     drv->dev = dev;
     drv->irq_vector = -1;
+    drv->cmd_state = VIRTIO_GPU_CMD_IDLE;
+    drv->pending_head = -1;
 
     // PCI probe already completed this exact 2D feature negotiation and owns
     // no queues. Resetting it again destroys the visible firmware surface in
@@ -1907,6 +2037,7 @@ void virtio_gpu_quiesce_for_reboot(void) {
                 if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) ||
                     virtqueue_has_used(drv->controlq)) {
                     quiesced = drain_used();
+                    if (quiesced) { drv->cmd_state = VIRTIO_GPU_CMD_IDLE; drv->pending_head = -1; }
                     __atomic_store_n(&drv->command_done, 0U, __ATOMIC_RELEASE);
                     break;
                 }
@@ -2097,6 +2228,11 @@ bool virtio_gpu_reset(VirtioGpuDriver* drv) {
     drv->old_scanout_pending = false;
     drv->initialized = false;
     drv->has_error = false;
+    // Confirmed hardware reset: the device owns no descriptor any more.
+    drv->cmd_state = VIRTIO_GPU_CMD_IDLE;
+    drv->pending_head = -1;
+    drv->recovery_full_refresh = false;
+    drv->permanent_failure_reason = nullptr;
     drv->dev = nullptr;
 
     return true;
