@@ -17,6 +17,7 @@
 #define zaktualizuj_kolo_myszy unused_wheel_mock
 #define klog_serial unused_log_mock
 #define host_czas_monotoniczny_ns unused_transport_clock_mock
+#define BURSZTYN_HOST_KERNEL_CLOCK_PROVIDED 1 // defined below (test_now)
 #include "test_virtio_pci.cpp"
 #undef main
 #undef grafika_pobierz_boot_rozmiar

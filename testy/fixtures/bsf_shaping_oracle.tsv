@@ -109,3 +109,13 @@ NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	lt
 NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b293cc85e2b2a5cc8520e2b2a1cc85e2b2adcc85e2b2a5cc85	52,0,258,0,0,0;189,0,0,0,-97,-207;70,5,480,0,0,0;10,5,0,0,-173,-207;3,10,260,0,0,0;66,11,624,0,0,0;10,11,0,0,-317,-207;78,16,529,0,0,0;10,16,0,0,-222,-207;70,21,480,0,0,0;10,21,0,0,-173,-207
 NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b281cc85e2b29bcc85e2b29fcc85e2b295cc85	34,0,574,0,0,0;10,0,0,0,-267,-207;60,5,632,0,0,0;191,5,0,0,-291,-207;64,10,605,0,0,0;10,10,0,0,-298,-207;54,15,534,0,0,0;10,15,0,0,-227,-207
 NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	cfa3e2b28fe2b2a3e2b293	19,0,816,0,0,0;48,2,637,0,0,0;68,5,530,0,0,0;52,8,258,0,0,0
+NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b281cc85e2b29acc85	34,0,574,0,0,0;199,0,0,0,-291,0;59,5,760,0,0,0;197,5,0,0,-382,0
+NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b281ccbfe2b29accbf	34,0,574,0,0,0;200,0,0,0,-291,0;59,5,760,0,0,0;210,5,0,0,-382,0
+NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b2a1cc85e2b29bcc85e2b280cc85e2b29ecc85	66,0,624,0,0,0;199,0,0,0,-314,0;60,5,632,0,0,0;196,5,0,0,-320,0;33,10,633,0,0,0;196,10,0,0,-319,0;63,15,781,0,0,0;197,15,0,0,-391,0
+NotoSansCoptic	/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf	Copt	ltr	e2b293cc85e2b2a5cc8520e2b2a0cc85e2b2accc85	52,0,258,0,0,0;189,0,0,0,-97,-207;70,5,480,0,0,0;10,5,0,0,-173,-207;3,10,260,0,0,0;65,11,731,0,0,0;196,11,0,0,-365,0;77,16,586,0,0,0;199,16,0,0,-294,0
+DejaVuSans	czcionki/ttf/DejaVuSans.ttf	Latn	ltr	61676c7920494a20c58a	531,0,1300,0,0,0;74,1,1300,0,0,0;6005,2,569,0,0,0;6127,3,1298,0,0,0;3,4,651,0,0,0;6015,5,908,0,0,0;5995,6,1048,0,0,0;3,7,651,0,0,0;5970,8,1532,0,0,0	aalt
+DejaVuSans	czcionki/ttf/DejaVuSans.ttf	Latn	ltr	4a6179	5995,0,1048,0,0,0;531,1,1300,0,0,0;6127,2,1298,0,0,0	aalt
+NotoSans	/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf	Latn	ltr	283031323334353637383929	2724,0,226,0,0,0;1839,1,350,0,0,0;123,2,350,0,0,0;116,3,350,0,0,0;117,4,350,0,0,0;551,5,350,0,0,0;552,6,350,0,0,0;1840,7,350,0,0,0;553,8,350,0,0,0;554,9,350,0,0,0;1841,10,350,0,0,0;2725,11,226,0,0,0	aalt
+NotoSans	/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf	Latn	ltr	612b623d63	108,0,357,0,0,0;2796,1,338,0,0,0;2195,2,525,0,0,0;2790,3,338,0,0,0;2196,4,514,0,0,0	aalt
+NotoNaskhArabic	/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf	Arab	rtl	d8a8d8aad8ab	66,4,817,0,0,0;55,2,360,0,0,0;38,0,275,0,0,0	aalt
+NotoNaskhArabic	/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf	Arab	rtl	d9ae	32,0,817,0,0,0	aalt

@@ -22,6 +22,11 @@ inline bool unicode_layout_valid(const uint8_t *b, size_t n) {
     if (u32(16 + t * 8) != UnicodeBlob::TableOffset[t] ||
         u32(20 + t * 8) != UnicodeBlob::TableBytes[t])
       return false;
-  return true;
+  // Whole-content check (once per process): catches a kernel/app built from
+  // different Unicode tables with identical sizes, or a corrupted copy.
+  uint32_t h = 0x811c9dc5u;
+  for (size_t i = 0; i < n; ++i)
+    h = (h ^ b[i]) * 0x01000193u;
+  return h == UnicodeBlob::ContentHash;
 }
 } // namespace BSF

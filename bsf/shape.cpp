@@ -138,6 +138,8 @@ const OT::Plan *plan_for(const Face &f, const OT::Layout &L, uint8_t script,
     add('c', 'l', 'i', 'g', GlobalMask, last);
   if (o.features & FeatureDlig)
     add('d', 'l', 'i', 'g', GlobalMask, last);
+  if (o.features & FeatureAalt)
+    add('a', 'a', 'l', 't', GlobalMask, last);
   if (o.features & FeatureKern)
     add('k', 'e', 'r', 'n', GlobalMask, 0, true);
   if (o.features & FeatureMarks) {

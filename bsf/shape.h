@@ -9,6 +9,7 @@ namespace BSF {
 enum ShapeFeatures : uint32_t {
   FeatureLiga = 1, FeatureKern = 2, FeatureCalt = 4, FeatureClig = 8,
   FeatureDlig = 16, FeatureMarks = 32,
+  FeatureAalt = 64, // opt-in: first alternate of every 'aalt' lookup (GSUB 1/3)
   FeatureDefault = FeatureLiga | FeatureKern | FeatureCalt | FeatureClig | FeatureMarks
 };
 struct ShapeOptions {

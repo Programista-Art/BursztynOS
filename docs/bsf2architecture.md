@@ -104,24 +104,49 @@ every app binary, i.e. ~1.4 MiB of the kernel image. Instead:
 
 ## Kernel image budget and `BSF_COMPLEX_TEXT`
 
-The engine is ~40 KiB of code per statically linked app (measured with `nm`
-on `notatnik.elf`; `-Os` vs `-Oz` differ by < 3%). Linking it into all 19
-embedded apps exceeded the 15 MiB image guard. The guard was **not** raised
-and no assets were removed. Instead a compile-time switch selects the engine
-per app:
+Nearly every GUI app is linked into the kernel image as a raw blob, and
+`jadro/arch/linker.ld` asserts `__kernel_end <= 15 MiB` (RING3_BASE 16 MiB
+minus a 1 MiB guard). The guard has never been raised.
 
-- Full BSF 2.0 (`bursztyn_gui.o`): Notepad, Husarz/przeglądarka (library
-  present; browser pipeline not yet integrated), Explorer, Shell, window
-  manager/desktop, image viewer, updates, installer, Settings (Settings is a
-  GRUB module, not in the kernel image).
-- Legacy LTR (`bursztyn_gui_ltr.o`, `-DBSF_COMPLEX_TEXT=0`): calculator,
-  snake, test, demo_ui, kontrolki2/3/4, test_dzwieku, repro, tapety, ekran.
+**Original integration (`36cc9da`).** The engine is ~40 KiB of code per
+statically linked app; linking it into all embedded apps overflowed the
+guard, so a compile-time switch kept calculator, snake, test, demo_ui,
+kontrolki2/3/4, test_dzwieku, repro, tapety and ekran on the legacy LTR path
+(`bursztyn_gui_ltr.o`, `-DBSF_COMPLEX_TEXT=0`). Image end 0xEA6000
+(page-aligned `__kernel_end`), **360 KiB** below the guard. (Earlier
+revisions of this document quoted 0xEA47F0/366 KiB and the test report
+0xEA57F0/362 KiB — those were the last `LOAD` segment ends of two different
+builds; the page-aligned symbol is used from now on.)
 
-Result: image end 0xEA47F0, **366 KiB** below the guard. Options that would
-let every app use BSF 2.0 (owner decisions, not taken here): move the test
-BMP blobs (~2.1 MiB) or demo apps out of the kernel image, ship more apps as
-`.bur` GRUB modules like Settings, or move layout into a single Ring 3 text
-service process.
+**Stabilization (2026-11-11).** The two desktop sample images
+(`obrazy/test.bmp` 750,056 B and `obrazy/test1.bmp` 1,350,056 B, together
+2,100,112 B ≈ 2.0 MiB) were the largest embedded assets. They are no longer
+linked into the kernel: `narzedzia/package_desktop_images.py` stages them as
+`/boot/pulpit/*.bmp` and adds `module2 … pulpit/test.bmp` /
+`pulpit/test1.bmp` to every GRUB entry of the production ISO, the CI ISOs and
+the 8K ISO. At boot the kernel finds each module by exact label, validates it
+(`jadro/rdzen/obrazy_startowe.h`, see `bsf2security.md`) and writes the same
+bytes to `/uzytkownicy/Pulpit/test.bmp` / `test1.bmp` exactly as the old blob
+path did (same PSF diagnostics under `BURSZTYN_TESTY_PSF`, same installation
+plan entry). The module memory stays PMM-reserved because the step-wise
+installer keeps a pointer to the data. On an installed system booting from
+disk (no modules) the files already exist from installation; the kernel
+logs `[BSP] Brak modulu obrazu pulpitu` and leaves them untouched.
+
+| Build | `__kernel_end` | Headroom below 15 MiB |
+|---|---|---|
+| `950352a` (before BSF 2.0) | 0xE29000 | 860 KiB |
+| `36cc9da` (BSF 2.0, 11 apps LTR-only) | 0xEA6000 | 360 KiB |
+| BMPs as modules, same app split | 0xCA7000 | 2,404 KiB (+2,044 KiB) |
+| BMPs as modules, **engine in every GUI app** (final) | 0xD1A000 | **1,944 KiB** |
+
+With that space the LTR split was removed: every GUI app now links
+`$(BSF_APP_GUI)` = `bursztyn_gui.o` (`repro` contains no text drawing, so
+`--gc-sections` drops the engine there). The LTR library and
+`BSF_LTR_APPS_TMP` remain as an explicit, documented opt-out (empty list).
+App size budgets still hold (tapety 360,320 B and test_dzwieku 282,432 B of
+their 512 KiB limits). The terminal's logical cell order is unchanged (the
+Shell already had the full engine; its cell grid never reorders).
 
 ## Caches and budgets
 

@@ -119,7 +119,7 @@ static void signed_and_modes(){
     const int x=px,y=py;auto report=tablet_report(l,600,300);CHECK(hid_pointer_publish(t,l,report.data(),report.size(),100));
     CHECK(px==x&&py==y); // tip=0 never publishes these coordinates
     for(unsigned i=0;i<l.field_count;++i)if(l.fields[i].page==13){const unsigned bit=l.fields[i].offset;report[bit/8]|=uint8_t(1U<<(bit%8));}
-    CHECK(hid_pointer_publish(t,l,report.data(),report.size(),100));CHECK(px==600&&py==168);
+    CHECK(hid_pointer_publish(t,l,report.data(),report.size(),100));CHECK(px==600&&py==169); // 300*719/1279=168.65 -> nearest pixel
     state("descriptor Tip Switch",t,u);input_reset_all();
 }
 int main(){coexistence();geometry();contactless_tablet();signed_and_modes();printf("Input coexistence: %u checks PASS\n",checks);}

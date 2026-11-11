@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "jadro/gui/display_mode_policy.h"
 #include <cassert>
 #include <vector>
 #include <string>
@@ -565,18 +566,35 @@ void host_klog(const char* msg) {
 
 static uint64_t g_host_mock_time_ns = 0;
 static bool g_host_use_mock_time = false;
+// Deterministic recovery tests: every driver clock read advances mock time.
+static uint64_t g_host_mock_step_ns = 0;
+static uint64_t g_gpu_complete_jump_ns = 600000000ULL;
 // Deliver a GPU response during the deadline read, after the caller's poll.
 static unsigned g_gpu_complete_on_clock_read = 0;
 void host_mmio_write16(volatile void* addr, uint16_t val);
+
+// jadro/gui/graphics_perf.h (telemetry only) reads the kernel HPET API.
+// Give it a plain host clock, independent of the driver's mocked deadline
+// clock above, so telemetry never consumes injected completion events.
+// Suites that #include this file and provide their own kernel clock (e.g.
+// test_splash_production_path.cpp) define BURSZTYN_HOST_KERNEL_CLOCK_PROVIDED.
+#ifndef BURSZTYN_HOST_KERNEL_CLOCK_PROVIDED
+bool hpet_dostepny() { return true; }
+uint64_t czas_monotoniczny_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+#endif
 
 uint64_t host_czas_monotoniczny_ns(void) {
     if (g_gpu_complete_on_clock_read && --g_gpu_complete_on_clock_read == 0) {
         auto* drv = virtio_gpu_get_driver(0);
         g_mock.gpu_skip_reply = false;
         host_mmio_write16(virtio_pci_notify_address(drv->dev, drv->controlq->queue_notify_off), 0);
-        g_host_mock_time_ns += 600000000ULL;
+        g_host_mock_time_ns += g_gpu_complete_jump_ns;
     }
     if (g_host_use_mock_time) {
+        g_host_mock_time_ns += g_host_mock_step_ns;
         return g_host_mock_time_ns;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -917,7 +935,8 @@ void host_mmio_write16(volatile void* addr, uint16_t val) {
                     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
                     if (drv && drv->controlq && drv->controlq->avail && drv->controlq->used && drv->controlq->desc) {
                         VirtQueue* vq = drv->controlq;
-                        while (g_mock.gpu_processed_count != vq->avail->idx) {
+                        // 16-bit ring index semantics (wraps at 65536), as on a real device.
+                        while (static_cast<uint16_t>(g_mock.gpu_processed_count) != vq->avail->idx) {
                             const uint16_t a_idx = g_mock.gpu_processed_count & (vq->queue_size - 1U);
                             const uint16_t head_id = vq->avail->ring[a_idx];
                             if (head_id < vq->queue_size) {
@@ -4395,6 +4414,27 @@ void test_virtio_net_stress_and_wraparound() {
 // MOCKI I TESTY VIRTIO-GPU
 // ============================================================================
 
+// A failing TEST_ASSERT returns early. Every GPU test therefore owns a scope
+// guard declared after its stack VirtioPciDevice: it tears the driver down
+// while the device object is still alive, so no global driver slot can keep a
+// pointer into a dead stack frame (previously: ASan stack-use-after-return in
+// the next test's virtio_gpu_reset_all and an invalid-bool UBSan load).
+// Same lifetime rule for VirtIO-Input tests: a failing TEST_ASSERT returns
+// early; the InputDevice registry must not keep a pointer into the dead
+// frame (found 2026-11-11: ASan stack-use-after-return in input_reset_all).
+struct InputRegistryScope {
+    InputRegistryScope() = default;
+    InputRegistryScope(const InputRegistryScope&) = delete;
+    InputRegistryScope& operator=(const InputRegistryScope&) = delete;
+    ~InputRegistryScope() { input_reset_all(); }
+};
+struct GpuDriverScope {
+    GpuDriverScope() = default;
+    GpuDriverScope(const GpuDriverScope&) = delete;
+    GpuDriverScope& operator=(const GpuDriverScope&) = delete;
+    ~GpuDriverScope() { virtio_gpu_reset_all(); }
+};
+
 static bool setup_mock_gpu_device(VirtioPciDevice* dev,
                                    uint32_t disp_w = 1280,
                                    uint32_t disp_h = 800,
@@ -4482,6 +4522,7 @@ void test_virtio_gpu_first_publication() {
     for(unsigned generation=0;generation<2;++generation) {
         virtio_gpu_reset_all();
         VirtioPciDevice dev{};
+        GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
         TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe first-frame GPU");
         TEST_ASSERT(virtio_gpu_init(&dev), "Init first-frame GPU");
         auto* drv=virtio_gpu_get_driver(0);
@@ -4533,14 +4574,19 @@ void test_virtio_gpu_first_publication() {
 void test_virtio_gpu_init_and_cleanup() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe urzadzenia GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Inicjalizacja VirtIO-GPU");
 
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
     TEST_ASSERT(drv != nullptr, "Pobranie instancji drv != nullptr");
     TEST_ASSERT(drv->initialized, "drv->initialized == true");
-    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280");
-    TEST_ASSERT(drv->display_height == 800, "display_height == 800");
+    // Since 950352a the explicit guest boot policy (display_mode_policy,
+    // default 1280x720) owns the initial mode; GET_DISPLAY_INFO (1280x800
+    // here) is only a hint. The previous 1280x800 expectation was stale.
+    TEST_ASSERT(drv->display_width == display_mode_policy.initial_width, "display_width == polityka gościa");
+    TEST_ASSERT(drv->display_height == display_mode_policy.initial_height, "display_height == polityka gościa");
+    TEST_ASSERT(drv->display_width == 1280 && drv->display_height == 720, "domyslna polityka 1280x720");
     TEST_ASSERT(drv->resource_id == 1, "resource_id == 1");
     TEST_ASSERT(drv->fb_vaddr != nullptr, "fb_vaddr != nullptr");
 
@@ -4556,6 +4602,7 @@ void test_virtio_gpu_init_and_cleanup() {
 void test_virtio_gpu_get_display_info() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1920, 1080), "Probe GPU 1920x1080");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4577,6 +4624,7 @@ void test_virtio_gpu_get_display_info() {
 void test_virtio_gpu_resource_create_2d() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4594,6 +4642,7 @@ void test_virtio_gpu_resource_create_2d() {
 void test_virtio_gpu_attach_backing() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4650,6 +4699,7 @@ void test_virtio_gpu_attach_backing() {
 void test_virtio_gpu_set_scanout() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4670,6 +4720,7 @@ void test_virtio_gpu_set_scanout() {
 void test_virtio_gpu_transfer_to_host_2d() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4688,6 +4739,7 @@ void test_virtio_gpu_transfer_to_host_2d() {
 void test_virtio_gpu_resource_flush() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4711,6 +4763,7 @@ void test_virtio_gpu_batched_dirty_publication() {
     virtio_gpu_reset_all();
     gpu_scanout_model.reset();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4761,6 +4814,7 @@ void test_virtio_gpu_batched_dirty_publication() {
 void test_virtio_gpu_malformed_response() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4778,8 +4832,12 @@ void test_virtio_gpu_malformed_response() {
 // 96. VirtIO-GPU: Timeout polecenia kontrolnego
 // ----------------------------------------------------------------------------
 void test_virtio_gpu_command_timeout() {
+    // Semantics since the 2026-11-11 recovery work: a RESOURCE_FLUSH timeout
+    // keeps the descriptors with the device (TIMED_OUT_PENDING) instead of
+    // latching has_error at once; permanence follows only at the hard deadline.
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4788,17 +4846,43 @@ void test_virtio_gpu_command_timeout() {
                 "Complete initial frame before command timeout injection");
     g_mock.gpu_skip_reply = true;
     TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Timeout zwraca false");
-    TEST_ASSERT(drv->has_error, "drv->has_error == true po timeoucie");
+    TEST_ASSERT(drv->cmd_state == VIRTIO_GPU_CMD_TIMED_OUT_PENDING, "TIMED_OUT_PENDING po timeoucie");
+    TEST_ASSERT(drv->recovery.soft_timeouts == 1, "soft_timeouts == 1");
+    TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Kolejne polecenie odrzucone");
+    TEST_ASSERT(drv->recovery.rejected_while_pending == 1, "odrzucone bez wysylki");
 
     g_mock.gpu_skip_reply = false;
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 }
 
+// Regression (2026-11-11): a GPU test that returned early through a failing
+// TEST_ASSERT left g_gpu_drivers[0].dev pointing into its dead stack frame;
+// the next test's virtio_gpu_reset_all() then read it (ASan
+// stack-use-after-return; with UAR off, UBSan invalid bool load of
+// dev->input_init_active). GpuDriverScope must leave no driver behind.
+static void gpu_scope_helper_returns_early(bool* initialized) {
+    VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope;
+    *initialized = setup_mock_gpu_device(&dev) && virtio_gpu_init(&dev);
+    if (*initialized) return;  // early return with an initialized driver
+}
+void test_gpu_driver_scope_releases_device_on_early_return() {
+    virtio_gpu_reset_all();
+    bool initialized = false;
+    gpu_scope_helper_returns_early(&initialized);
+    TEST_ASSERT(initialized, "helper initialized a driver on its own stack device");
+    TEST_ASSERT(virtio_gpu_get_driver(0) == nullptr, "no driver slot survives the helper's frame");
+    TEST_ASSERT(virtio_gpu_get_driver_count() == 0, "driver count reset");
+    virtio_gpu_reset_all();  // must not touch the dead stack device (ASan)
+    TEST_ASSERT(g_host_dma_allocs.empty() && g_host_fb_allocs.empty(), "everything released by the scope");
+}
+
 // Regression: a response published during a delayed clock read is not a timeout.
 void test_virtio_gpu_completion_at_deadline() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU for deadline race");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU for deadline race");
     auto* drv = virtio_gpu_get_driver(0);
@@ -4834,6 +4918,7 @@ void test_virtio_gpu_completion_at_deadline() {
 void test_virtio_gpu_arithmetic_overflow() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4851,6 +4936,7 @@ void test_virtio_gpu_arithmetic_overflow() {
 void test_virtio_gpu_invalid_dimensions() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4870,6 +4956,7 @@ void test_virtio_gpu_invalid_dimensions() {
 void test_virtio_gpu_queue_corruption() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4894,6 +4981,7 @@ void test_virtio_gpu_queue_corruption() {
 void test_virtio_gpu_reset_failure_quarantine() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4925,6 +5013,7 @@ void test_virtio_gpu_reset_failure_quarantine() {
 void test_virtio_gpu_resource_teardown_ordering() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -4964,6 +5053,7 @@ void test_virtio_gpu_repeated_init_reset() {
 
     for (int i = 0; i < ITERS; ++i) {
         VirtioPciDevice dev{};
+        GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
         TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe w petli");
         TEST_ASSERT(virtio_gpu_init(&dev), "Init w petli");
         VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
@@ -4980,6 +5070,7 @@ void test_virtio_gpu_repeated_init_reset() {
 void test_virtio_gpu_msix_operation() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device_msix(&dev), "Probe GPU z MSI-X");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init z MSI-X");
 
@@ -5015,6 +5106,13 @@ void test_virtio_gpu_format_constants() {
 void test_virtio_gpu_noncontiguous_backing() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
+    // The SG-coalescing geometry below needs a 1024x768 framebuffer; select it
+    // through the guest mode policy that owns the initial mode.
+    struct PolicyRestore { uint32_t w=display_mode_policy.initial_width,h=display_mode_policy.initial_height;
+        ~PolicyRestore(){display_mode_policy.initial_width=w;display_mode_policy.initial_height=h;} } policy_restore;
+    display_mode_policy.initial_width = 1024;
+    display_mode_policy.initial_height = 768;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Probe GPU 1024x768");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -5043,6 +5141,7 @@ void test_virtio_gpu_noncontiguous_backing() {
 void test_virtio_gpu_used_len_validation() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -5096,6 +5195,7 @@ void test_virtio_gpu_used_len_validation() {
 void test_virtio_gpu_error_responses() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU");
     TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU");
 
@@ -5142,41 +5242,46 @@ void grafika_pobierz_boot_rozmiar(uint32_t* out_w, uint32_t* out_h) {
 void test_virtio_gpu_boot_mode_preservation() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
+    struct PolicyRestore { uint32_t w=display_mode_policy.initial_width,h=display_mode_policy.initial_height;
+        ~PolicyRestore(){display_mode_policy.initial_width=w;display_mode_policy.initial_height=h;g_mock_boot_w=g_mock_boot_h=0;} } policy_restore;
 
     /*
-     * Priorytet zrodel trybu jest udokumentowana polityka produktowa:
-     * "system dostosowuje sie do medium, ktore go wyswietla". GET_DISPLAYINFO
-     * opisuje realny scanout (okno QEMU / monitor VM), wiec wygrywa z trybem
-     * bootloadera, ktory OVMF/GRUB czesto narzucaja niezaleznie od okna.
+     * Polityka produktu od 950352a (docs/graphics-performance-2026-11-09.md):
+     * jawna polityka gościa (display_mode_policy, domyślnie 1280x720, albo
+     * bursztyn.video=WxH) wybiera tryb startowy. GET_DISPLAY_INFO (okno QEMU)
+     * oraz tryb bootloadera/GOP są wyłącznie wskazówkami. Poprzednia wersja
+     * tego testu opisywała starą politykę "host wygrywa" i była nieaktualna.
      */
-    // Przypadek 1: host 1280x800, bootloader 640x480 -> wygrywa host.
+    // Przypadek 1: host 1280x800, bootloader 640x480 -> wygrywa polityka 1280x720.
     g_mock_boot_w = 640;
     g_mock_boot_h = 480;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 800), "Setup mock GPU z dinfo=1280x800");
-    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU przy zgodzie host/bootloader");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU przy roznych trybach host/bootloader");
     VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
     TEST_ASSERT(drv != nullptr, "drv != nullptr");
-    TEST_ASSERT(drv->fb_width == 1280, "fb_width == 1280 (tryb hosta)");
-    TEST_ASSERT(drv->fb_height == 800, "fb_height == 800 (tryb hosta)");
-    TEST_ASSERT(drv->display_width == 1280, "display_width == 1280 (tryb hosta)");
-    TEST_ASSERT(drv->display_height == 800, "display_height == 800 (tryb hosta)");
+    TEST_ASSERT(drv->fb_width == 1280 && drv->fb_height == 720, "fb 1280x720 (polityka gościa)");
+    TEST_ASSERT(drv->display_width == 1280 && drv->display_height == 720, "display 1280x720 (polityka gościa)");
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 
-    // Przypadek 2: host oferuje inny tryb niz bootloader -> host ma priorytet.
+    // Przypadek 2: polityka 1024x768 (np. bursztyn.video), host 1920x1080,
+    // bootloader 1280x720 -> wygrywa polityka.
+    display_mode_policy.initial_width = 1024;
+    display_mode_policy.initial_height = 768;
     g_mock_boot_w = 1280;
     g_mock_boot_h = 720;
-    TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Setup mock GPU z dinfo=1024x768");
-    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU przy roznym trybie hosta i bootloadera");
+    TEST_ASSERT(setup_mock_gpu_device(&dev, 1920, 1080), "Setup mock GPU z dinfo=1920x1080");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU z polityka 1024x768");
     drv = virtio_gpu_get_driver(0);
-    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 (host bije bootloader GOP)");
-    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 (host bije bootloader GOP)");
+    TEST_ASSERT(drv->fb_width == 1024, "fb_width == 1024 (polityka bije host i GOP)");
+    TEST_ASSERT(drv->fb_height == 768, "fb_height == 768 (polityka bije host i GOP)");
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
 
-    // Przypadek 3: bootloader za duzy (> 64 MiB) -> odrzucony, wygrywa host.
+    // Przypadek 3: bootloader za duzy (> 64 MiB) nie wplywa na wybor.
     g_mock_boot_w = 50000;
     g_mock_boot_h = 50000;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1024, 768), "Setup mock GPU 1024x768");
@@ -5187,8 +5292,6 @@ void test_virtio_gpu_boot_mode_preservation() {
 
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
-    g_mock_boot_w = 0;
-    g_mock_boot_h = 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -5197,6 +5300,7 @@ void test_virtio_gpu_boot_mode_preservation() {
 void test_virtio_gpu_runtime_modeset_and_rollback() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     g_mock_boot_w = 1280;
     g_mock_boot_h = 720;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 720), "Probe GPU");
@@ -5256,6 +5360,7 @@ void test_virtio_gpu_runtime_modeset_and_rollback() {
 void test_virtio_gpu_confirmation_lifecycle_and_injected_failures() {
     virtio_gpu_reset_all();
     VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope; // resets drivers while the stack device is alive
     g_mock_boot_w = 1280;
     g_mock_boot_h = 720;
     TEST_ASSERT(setup_mock_gpu_device(&dev, 1280, 720), "Probe GPU");
@@ -5503,8 +5608,13 @@ struct MockVirtioInputConfigState {
     int abs_max_x = 32767;
     int abs_min_y = 0;
     int abs_max_y = 32767;
+    // Tablet (dev_type 2) advertises BTN_TOUCH. With prop_direct it is a
+    // direct-touch device (touchscreen: motion needs contact); without it, it
+    // models QEMU 8.x virtio-tablet (BTN_TOUCH bit, no INPUT_PROP_DIRECT).
+    bool prop_direct = true;
 
     void reset() {
+        prop_direct = true;
         dev_type = 0;
         force_zero_size = false;
         malformed_size = false;
@@ -5592,7 +5702,8 @@ void mock_virtio_input_on_config_select(VirtioPciDevice* dev, uint8_t select, ui
         }
         case VIRTIO_INPUT_CFG_PROP_BITS: {
             virtio_pci_write_device_config8(dev, 2, 1);
-            virtio_pci_write_device_config8(dev, 8, 0);
+            virtio_pci_write_device_config8(dev, 8,
+                (g_mock_input_cfg.dev_type == 2 && g_mock_input_cfg.prop_direct) ? (1U << VIRTIO_INPUT_PROP_DIRECT) : 0);
             break;
         }
         case VIRTIO_INPUT_CFG_EV_BITS: {
@@ -5813,6 +5924,7 @@ void test_virtio_input_keyboard_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
 
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init keyboard driver");
     TEST_ASSERT(drv.has_keyboard, "Sklasyfikowano jako klawiature");
     TEST_ASSERT(!drv.has_rel_mouse, "Nie jest mysza wzgledna");
@@ -5832,6 +5944,7 @@ void test_virtio_input_mouse_rel_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
 
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init mouse driver");
     TEST_ASSERT(!drv.has_keyboard, "Nie jest klawiatura");
     TEST_ASSERT(drv.has_rel_mouse, "Sklasyfikowano jako mysz wzgledna");
@@ -5850,6 +5963,7 @@ void test_virtio_input_tablet_abs_classification() {
     TEST_ASSERT(setup_mock_input_device(&dev, 2), "Probe dev");
 
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init tablet driver");
     TEST_ASSERT(!drv.has_keyboard, "Nie jest klawiatura");
     TEST_ASSERT(!drv.has_rel_mouse, "Nie jest mysza wzgledna");
@@ -5869,6 +5983,7 @@ void test_virtio_input_ev_key_press_release() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -5898,6 +6013,7 @@ void test_virtio_input_btn_events() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -5930,6 +6046,7 @@ void test_virtio_input_rel_xy() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -5952,6 +6069,7 @@ void test_virtio_input_rel_wheel() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -5978,6 +6096,7 @@ void test_virtio_input_abs_scaling() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 2), "Probe tablet");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     TEST_ASSERT(mock_inject_input_event(&drv,INPUT_EV_KEY,INPUT_BTN_TOUCH,1),"Active touch contact for coordinate scaling");
@@ -6022,8 +6141,9 @@ void test_virtio_input_abs_scaling() {
                 mock_inject_input_event(&drv,INPUT_EV_ABS,INPUT_ABS_Y,raw_y);
                 mock_inject_input_event(&drv,INPUT_EV_SYN,INPUT_SYN_REPORT,0);
                 virtio_input_poll_events(&drv,10);
-                TEST_ASSERT(g_mock_input_capture.abs_x==int(int64_t(raw_x)*(mode.first-1)/32767) &&
-                            g_mock_input_capture.abs_y==int(int64_t(raw_y)*(mode.second-1)/32767),
+                // Rounded endpoint mapping: nearest pixel, 0 -> 0, 32767 -> extent-1.
+                TEST_ASSERT(g_mock_input_capture.abs_x==int((int64_t(raw_x)*(mode.first-1)+16383)/32767) &&
+                            g_mock_input_capture.abs_y==int((int64_t(raw_y)*(mode.second-1)+16383)/32767),
                             "Runtime modeset: tablet reaches every physical edge without margin");
             }
         }
@@ -6032,6 +6152,52 @@ void test_virtio_input_abs_scaling() {
     g_mock_screen_w = 1024;
     g_mock_screen_h = 768;
     TEST_ASSERT(virtio_input_reset(&drv), "Reset");
+    input_reset_all();
+}
+
+// Regression (2026-11-11, native): QEMU >= 8.0 virtio-tablet advertises
+// BTN_TOUCH (shared keymap_button) but no INPUT_PROP_DIRECT. It is a pointer
+// tablet: hover motion must move the cursor without any contact event. A
+// direct-touch device (PROP_DIRECT) keeps contact-gated motion.
+void test_virtio_input_qemu_tablet_hover_without_contact() {
+    for (const bool direct : {false, true}) {
+        input_reset_all();
+        g_mock_screen_w = 1280;
+        g_mock_screen_h = 720;
+        g_mock_input_cfg.reset();
+        VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_input_device(&dev, 2), "Probe tablet");
+        g_mock_input_cfg.prop_direct = direct;
+        VirtioInputDriver drv{};
+        InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
+        TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
+        TEST_ASSERT(drv.input_dev.abs_contact_required == direct, "contact gating follows INPUT_PROP_DIRECT");
+        g_mock_input_capture.reset();
+        g_mock_input_capture.abs_x = g_mock_input_capture.abs_y = -1;
+        // Hover: no BTN_TOUCH, exactly what QEMU sends for host pointer motion.
+        mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_X, 32741);  // host px 1279 @1280
+        mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_Y, 16383);  // QEMU: host px 360 @720
+        mock_inject_input_event(&drv, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+        virtio_input_poll_events(&drv, 10);
+        if (!direct) {
+            // Endpoint mapping of QEMU's half-open px*32767/size encoding is
+            // within 1 px of the host pixel (1279 -> 1278, 360 -> 359).
+            TEST_ASSERT(g_mock_input_capture.abs_x == 1278 && g_mock_input_capture.abs_y == 359,
+                        "hover moves the cursor (rounded endpoint mapping)");
+            mock_inject_input_event(&drv, INPUT_EV_ABS, INPUT_ABS_X, 0);
+            mock_inject_input_event(&drv, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+            virtio_input_poll_events(&drv, 10);
+            TEST_ASSERT(g_mock_input_capture.abs_x == 0 && g_mock_input_capture.abs_y == 359, "X-only report keeps Y");
+            mock_inject_input_event(&drv, INPUT_EV_KEY, INPUT_BTN_LEFT, 1);
+            mock_inject_input_event(&drv, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+            virtio_input_poll_events(&drv, 10);
+            TEST_ASSERT(g_mock_input_capture.buttons & 0x01U, "left button at hover position");
+        } else {
+            TEST_ASSERT(g_mock_input_capture.abs_x == -1, "direct-touch device: no motion without contact");
+        }
+        TEST_ASSERT(virtio_input_reset(&drv), "Reset");
+    }
+    g_mock_input_cfg.reset();
     input_reset_all();
 }
 
@@ -6044,6 +6210,7 @@ void test_virtio_input_asymmetric_abs_mapping() {
     g_mock_input_cfg.abs_min_x=101;g_mock_input_cfg.abs_max_x=60001;
     g_mock_input_cfg.abs_min_y=503;g_mock_input_cfg.abs_max_y=9503;
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv,&dev),"Init asymmetric tablet");
     TEST_ASSERT(drv.input_dev.abs_x.min==101&&drv.input_dev.abs_x.max==60001&&
                 drv.input_dev.abs_y.min==503&&drv.input_dev.abs_y.max==9503,
@@ -6076,8 +6243,9 @@ void test_virtio_input_asymmetric_abs_mapping() {
                 send(raw.first,raw.second);
                 const int x=raw.first<101?101:(raw.first>60001?60001:raw.first);
                 const int y=raw.second<503?503:(raw.second>9503?9503:raw.second);
-                TEST_ASSERT(g_mock_input_capture.abs_x==int(int64_t(x-101)*(mode.first-1)/59900)&&
-                            g_mock_input_capture.abs_y==int(int64_t(y-503)*(mode.second-1)/9000),
+                // Rounded endpoint mapping (nearest pixel) over the advertised range.
+                TEST_ASSERT(g_mock_input_capture.abs_x==int((int64_t(x-101)*(mode.first-1)+59900/2)/59900)&&
+                            g_mock_input_capture.abs_y==int((int64_t(y-503)*(mode.second-1)+9000/2)/9000),
                             "Non-square mapping invariant across external host resize/DPI");
             }
             send(101,503);send(60001,0,true,false);
@@ -6114,6 +6282,7 @@ void test_virtio_input_syn_report() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -6154,6 +6323,7 @@ void test_virtio_input_malformed_used_len() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -6176,6 +6346,7 @@ void test_virtio_input_invalid_desc_id() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     mock_inject_input_event(&drv, INPUT_EV_KEY, INPUT_KEY_A, 1, 8, 99);
@@ -6192,6 +6363,7 @@ void test_virtio_input_unsupported_event_type() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     g_mock_input_capture.reset();
@@ -6210,6 +6382,7 @@ void test_virtio_input_queue_recycling() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     for (int batch = 0; batch < 3; ++batch) {
@@ -6231,6 +6404,7 @@ void test_virtio_input_queue_wraparound() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 1), "Probe dev");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init");
 
     constexpr size_t TOTAL = 5000;
@@ -6251,6 +6425,7 @@ void test_virtio_input_msix_setup_and_delivery() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device_msix(&dev, 0), "Probe dev z MSI-X");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init z MSI-X");
 
     TEST_ASSERT(drv.use_msix, "Wlaczono tryb MSI-X");
@@ -6277,6 +6452,7 @@ void test_virtio_input_polling_fallback() {
     VirtioPciDevice dev{};
     TEST_ASSERT(setup_mock_input_device(&dev, 0), "Probe dev bez MSI-X");
     VirtioInputDriver drv{};
+    InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
     TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init bez MSI-X");
 
     TEST_ASSERT(!drv.use_msix, "MSI-X wylaczone");
@@ -6297,6 +6473,7 @@ void test_virtio_input_repeated_init_reset() {
         VirtioPciDevice dev{};
         TEST_ASSERT(setup_mock_input_device_msix(&dev, 1), "Probe cyklu");
         VirtioInputDriver drv{};
+        InputRegistryScope input_scope_drv; // unregisters while the driver object is alive
         TEST_ASSERT(host_input_prepare_and_activate(&drv, &dev), "Init cyklu");
 
         for (int i = 0; i < 5; ++i) {
@@ -6318,6 +6495,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
     {
         VirtioPciDevice dev_kbd{};
         VirtioInputDriver drv_kbd{};
+        InputRegistryScope input_scope_drv_kbd; // unregisters while the driver object is alive
         TEST_ASSERT(setup_mock_input_device_msix(&dev_kbd, 0), "Probe kbd");
         TEST_ASSERT(host_input_prepare_and_activate(&drv_kbd, &dev_kbd), "Init kbd");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla kbd");
@@ -6332,6 +6510,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
     {
         VirtioPciDevice dev_mouse{};
         VirtioInputDriver drv_mouse{};
+        InputRegistryScope input_scope_drv_mouse; // unregisters while the driver object is alive
         TEST_ASSERT(setup_mock_input_device_msix(&dev_mouse, 1), "Probe mouse");
         TEST_ASSERT(host_input_prepare_and_activate(&drv_mouse, &dev_mouse), "Init mouse");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla mouse");
@@ -6346,6 +6525,7 @@ void test_virtio_input_dma_and_vector_cleanup() {
     {
         VirtioPciDevice dev_tab{};
         VirtioInputDriver drv_tab{};
+        InputRegistryScope input_scope_drv_tab; // unregisters while the driver object is alive
         TEST_ASSERT(setup_mock_input_device_msix(&dev_tab, 2), "Probe tab");
         TEST_ASSERT(host_input_prepare_and_activate(&drv_tab, &dev_tab), "Init tab");
         TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "1 wektor zaalokowany dla tab");
@@ -7050,6 +7230,7 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
     // 2. Podlacz mysz VirtIO (wysoki priorytet = 30)
     VirtioPciDevice dev_mouse{};
     VirtioInputDriver drv_mouse{};
+    InputRegistryScope input_scope_drv_mouse; // unregisters while the driver object is alive
     TEST_ASSERT(setup_mock_input_device_msix(&dev_mouse, 1), "Probe VirtIO mouse");
     TEST_ASSERT(host_input_prepare_and_activate(&drv_mouse, &dev_mouse), "Init VirtIO mouse");
     TEST_ASSERT(input_get_pointer_owner() == &drv_mouse.input_dev, "VirtIO przejmuje wlasnosc kursora od PS/2");
@@ -7093,6 +7274,7 @@ void test_input_pointer_ownership_and_no_duplicate_motion() {
 #include "test_virtio_input_lifecycle.inc"
 #include "../sterowniki/virtio/virtio_input_qemu_diag.h"
 #include "test_virtio_input_qemu_checkpoints.inc"
+#include "test_virtio_gpu_recovery.inc"
 
 int main() {
     input_set_pointer_ready(true);
@@ -7212,6 +7394,21 @@ int main() {
     RUN_TEST(test_virtio_gpu_malformed_response);
     RUN_TEST(test_virtio_gpu_command_timeout);
     RUN_TEST(test_virtio_gpu_completion_at_deadline);
+    RUN_TEST(test_gpu_recovery_normal_completion_dormant);
+    RUN_TEST(test_gpu_recovery_completion_just_before_timeout);
+    RUN_TEST(test_gpu_recovery_sync_command_completes_after_soft_deadline);
+    RUN_TEST(test_gpu_recovery_async_late_completion_then_normal_operation);
+    RUN_TEST(test_gpu_recovery_service_reaps_without_new_frame);
+    RUN_TEST(test_gpu_recovery_completion_after_hard_deadline_fails_closed);
+    RUN_TEST(test_gpu_recovery_completion_visible_at_deadline_check);
+    RUN_TEST(test_gpu_recovery_no_completion_sync_and_async);
+    RUN_TEST(test_gpu_recovery_invalid_late_responses);
+    RUN_TEST(test_gpu_recovery_unexpected_descriptor_index);
+    RUN_TEST(test_gpu_recovery_spurious_used_entry_while_idle);
+    RUN_TEST(test_gpu_recovery_used_ring_wraparound);
+    RUN_TEST(test_gpu_recovery_repeated_timeouts_and_lifetime);
+    RUN_TEST(test_gpu_recovery_without_clock_fails_closed);
+    RUN_TEST(test_gpu_driver_scope_releases_device_on_early_return);
     RUN_TEST(test_virtio_gpu_arithmetic_overflow);
     RUN_TEST(test_virtio_gpu_invalid_dimensions);
     RUN_TEST(test_virtio_gpu_queue_corruption);
@@ -7260,6 +7457,7 @@ int main() {
     RUN_TEST(test_virtio_input_rel_xy);
     RUN_TEST(test_virtio_input_rel_wheel);
     RUN_TEST(test_virtio_input_abs_scaling);
+    RUN_TEST(test_virtio_input_qemu_tablet_hover_without_contact);
     RUN_TEST(test_virtio_input_asymmetric_abs_mapping);
     RUN_TEST(test_virtio_input_syn_report);
     RUN_TEST(test_virtio_input_malformed_config_size);

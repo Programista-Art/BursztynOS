@@ -510,8 +510,6 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	motyw.o \
 	test_dzwieku_blob.o \
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
-	test_bmp_blob.o \
-	test1_bmp_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
@@ -802,11 +800,14 @@ bsf2_layout.o: bsf/layout.cpp $(BSF2_HEADERS)
 bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o $(BSF2_OBJECTS) ring3_ssp.o
 	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o $(BSF2_OBJECTS) ring3_ssp.o -o $@
 
-# Legacy LTR-only GUI library (BSF_COMPLEX_TEXT=0). Every app is embedded in
-# the kernel image, which must end below 15 MiB (RING3_BASE - 1 MiB guard);
-# the ~40 KiB BSF 2.0 engine is linked only into text-centric apps.
-BSF_LTR_APPS_TMP := kalkulator_tmp.o test_tmp.o demo_ui_tmp.o kontrolki2_tmp.o kontrolki3tmp.o \
-	kontrolki4tmp.o snake_tmp.o test_dzwieku_tmp.o repro_tmp.o tapety_tmp.o ekran_tmp.o
+# Legacy LTR-only GUI library (BSF_COMPLEX_TEXT=0), kept as an explicit
+# per-app opt-out. Every app is embedded in the kernel image, which must end
+# below 15 MiB (RING3_BASE - 1 MiB guard). Since the desktop sample BMPs moved
+# to Multiboot2 modules (2026-11-11) there is room for the BSF 2.0 engine in
+# every GUI app, so the list is empty: to opt an app out, add its *_tmp.o
+# here AND link it with $(BSF_APP_GUI) instead of $(BSF_APP_GUI).
+BSF_LTR_APPS_TMP :=
+BSF_APP_GUI := bursztyn_gui.o
 $(BSF_LTR_APPS_TMP): RING3_FLAGS += -DBSF_COMPLEX_TEXT=0
 bursztyn_gui_base_ltr.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -DBSF_COMPLEX_TEXT=0 -Os -ffunction-sections -fdata-sections -c $< -o $@
@@ -921,9 +922,9 @@ eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 kalkulator_tmp.o: programy/kalkulator/kalkulator.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui_ltr.o $(KALKULATOR_LINKER)
+kalkulator_blob.o: kalkulator_tmp.o $(BSF_APP_GUI) $(KALKULATOR_LINKER)
 	$(LD) --gc-sections -T $(call bur_linker,$(KALKULATOR_LINKER)) $(RING3_LDFLAGS) \
-		kalkulator_tmp.o bursztyn_gui_ltr.o -o kalkulator.elf
+		kalkulator_tmp.o $(BSF_APP_GUI) -o kalkulator.elf
 	$(BUR_CONVERT) kalkulator.elf kalkulator.bin
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
@@ -931,9 +932,9 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui_ltr.o $(KALKULATOR_LINKER)
 test_tmp.o: programy/test/test.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui_ltr.o programy/test/test_linker.ld
+test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o $(BSF_APP_GUI) programy/test/test_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/test/test_linker.ld) $(RING3_LDFLAGS) \
-		test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui_ltr.o -o test.elf
+		test_tmp.o ekran_format_ring3.o btp_ring3.o $(BSF_APP_GUI) -o test.elf
 	$(BUR_CONVERT) test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
@@ -941,9 +942,9 @@ test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui_ltr.o prog
 demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_linker.ld
+demo_ui_blob.o: demo_ui_tmp.o $(BSF_APP_GUI) programy/demo_ui/demo_ui_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
-		demo_ui_tmp.o bursztyn_gui_ltr.o -o demo_ui.elf
+		demo_ui_tmp.o $(BSF_APP_GUI) -o demo_ui.elf
 	$(BUR_CONVERT) demo_ui.elf demo_ui.bin
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
 
@@ -951,9 +952,9 @@ demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_linker
 kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_linker.ld
+kontrolki2_blob.o: kontrolki2_tmp.o $(BSF_APP_GUI) programy/demo_ui/demo_ui_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki2_tmp.o bursztyn_gui_ltr.o -o kontrolki2.elf
+		kontrolki2_tmp.o $(BSF_APP_GUI) -o kontrolki2.elf
 	$(BUR_CONVERT) kontrolki2.elf kontrolki2.bin
 	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
 
@@ -963,9 +964,9 @@ kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_
 kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui_ltr.o programy/kontrolki3/kontrolki3_linker.ld
+kontrolki3blob.o: kontrolki3tmp.o $(BSF_APP_GUI) programy/kontrolki3/kontrolki3_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki3/kontrolki3_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki3tmp.o bursztyn_gui_ltr.o -o kontrolki3.elf
+		kontrolki3tmp.o $(BSF_APP_GUI) -o kontrolki3.elf
 	$(BUR_CONVERT) kontrolki3.elf kontrolki3.bin
 	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
@@ -973,19 +974,17 @@ kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui_ltr.o programy/kontrolki3/kontrol
 kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui_ltr.o programy/kontrolki4/kontrolki4_linker.ld
+kontrolki4blob.o: kontrolki4tmp.o $(BSF_APP_GUI) programy/kontrolki4/kontrolki4_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki4/kontrolki4_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki4tmp.o bursztyn_gui_ltr.o -o kontrolki4.elf
+		kontrolki4tmp.o $(BSF_APP_GUI) -o kontrolki4.elf
 	$(BUR_CONVERT) kontrolki4.elf kontrolki4.bin
 	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
 
-# Obraz testowy test.bmp
-test_bmp_blob.o: obrazy/test.bmp
-	$(LD) -r -b binary obrazy/test.bmp -o test_bmp_blob.o
-
-# Drugi obraz testowy
-test1_bmp_blob.o: obrazy/test1.bmp
-	$(LD) -r -b binary obrazy/test1.bmp -o test1_bmp_blob.o
+# Obrazy testowe pulpitu (test.bmp, test1.bmp) nie sa linkowane do jadra:
+# narzedzia/package_desktop_images.py dodaje je jako moduly Multiboot2
+# (etykiety pulpit/test.bmp, pulpit/test1.bmp) do kazdego wpisu GRUB.
+DESKTOP_IMAGES := obrazy/test.bmp obrazy/test1.bmp
+kernel.o: jadro/rdzen/obrazy_startowe.h
 
 # Logo systemu logo.png
 logo_png_blob.o: obrazy/logo.png
@@ -1004,9 +1003,9 @@ $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 snake_tmp.o: gry/snake/snake.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
-snake_blob.o: snake_tmp.o bursztyn_gui_ltr.o $(RING3_STD_LINKER)
+snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(RING3_STD_LINKER)
 	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
-		snake_tmp.o bursztyn_gui_ltr.o -o snake.elf
+		snake_tmp.o $(BSF_APP_GUI) -o snake.elf
 	$(BUR_CONVERT) snake.elf snake.bin
 	$(LD) -r -b binary snake.bin -o snake_blob.o
 
@@ -1042,9 +1041,9 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp jadro/gui/bursztyn_gu
 		sterowniki/dzwiek/hda_diag_format.h jadro/rdzen/wersja_systemu.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
-test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui_ltr.o programy/test_dzwieku/test_dzwieku_linker.ld testy/test_dzwieku_size.py
+test_dzwieku_blob.o: test_dzwieku_tmp.o $(BSF_APP_GUI) programy/test_dzwieku/test_dzwieku_linker.ld testy/test_dzwieku_size.py
 	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/test_dzwieku/test_dzwieku_linker.ld) $(RING3_LDFLAGS) \
-		test_dzwieku_tmp.o bursztyn_gui_ltr.o -o test_dzwieku.elf
+		test_dzwieku_tmp.o $(BSF_APP_GUI) -o test_dzwieku.elf
 	$(BUR_CONVERT) test_dzwieku.elf test_dzwieku.bin
 	$(PYTHON) testy/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
@@ -1061,9 +1060,9 @@ ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(USTAWIENIA_LINKER)
 repro_tmp.o: programy/repro/repro.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
-repro_blob.o: repro_tmp.o bursztyn_gui_ltr.o programy/repro/repro_linker.ld
+repro_blob.o: repro_tmp.o $(BSF_APP_GUI) programy/repro/repro_linker.ld
 	$(LD) -T $(call bur_linker,programy/repro/repro_linker.ld) $(RING3_LDFLAGS) \
-		repro_tmp.o bursztyn_gui_ltr.o -o repro.elf
+		repro_tmp.o $(BSF_APP_GUI) -o repro.elf
 	$(BUR_CONVERT) repro.elf repro.bin
 	$(LD) -r -b binary repro.bin -o repro_blob.o
 
@@ -1132,7 +1131,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -1187,6 +1186,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 	$(PYTHON) narzedzia/package_bsf.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_support.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_power_icons.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_desktop_images.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -1346,7 +1346,7 @@ iso: $(ISO)
 # Tymczasowy artefakt developerski/CI sluzacy wylacznie do bezobslugowego
 # uruchomienia drugiego wpisu (bursztyn.test=automated) w QEMU bez oczekiwania na menu.
 # Wykorzystuje dokladnie ten sam plik jadra $(KERNEL) co kanoniczny $(ISO).
-$(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+$(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK) $(DESKTOP_IMAGES)
 	@mkdir -p $(CI_TEST_DIR)/boot/grub
 	@cp $(KERNEL) $(CI_TEST_DIR)/boot/
 	@cp $(TAPETY_PAK) $(CI_TEST_DIR)/boot/tapety.pak
@@ -1363,10 +1363,11 @@ $(CI_TEST_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    boot' \
 		'}' \
 		> $(CI_TEST_DIR)/boot/grub/grub.cfg
+	@$(PYTHON) narzedzia/package_desktop_images.py $(CI_TEST_DIR)
 	@$(GRUB_MKRESCUE) -o $@ $(CI_TEST_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
 	@rm -rf $(CI_TEST_DIR)
 
-$(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+$(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK) $(DESKTOP_IMAGES)
 	@mkdir -p $(CI_BLK_DIR)/boot/grub
 	@cp $(KERNEL) $(CI_BLK_DIR)/boot/
 	@cp $(TAPETY_PAK) $(CI_BLK_DIR)/boot/tapety.pak
@@ -1383,10 +1384,11 @@ $(CI_BLK_DESTRUCTIVE_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    boot' \
 		'}' \
 		> $(CI_BLK_DIR)/boot/grub/grub.cfg
+	@$(PYTHON) narzedzia/package_desktop_images.py $(CI_BLK_DIR)
 	@$(GRUB_MKRESCUE) -o $@ $(CI_BLK_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
 	@rm -rf $(CI_BLK_DIR)
 
-$(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
+$(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK) $(DESKTOP_IMAGES)
 	@mkdir -p $(CI_DEST_ONLY_DIR)/boot/grub
 	@cp $(KERNEL) $(CI_DEST_ONLY_DIR)/boot/
 	@cp $(TAPETY_PAK) $(CI_DEST_ONLY_DIR)/boot/tapety.pak
@@ -1403,6 +1405,7 @@ $(CI_DESTRUCTIVE_ONLY_ISO): $(KERNEL) check-kernel $(GRUB_CFG) $(TAPETY_PAK)
 		'    boot' \
 		'}' \
 		> $(CI_DEST_ONLY_DIR)/boot/grub/grub.cfg
+	@$(PYTHON) narzedzia/package_desktop_images.py $(CI_DEST_ONLY_DIR)
 	@$(GRUB_MKRESCUE) -o $@ $(CI_DEST_ONLY_DIR) --xorriso=$(XORRISO) >/dev/null 2>&1
 	@rm -rf $(CI_DEST_ONLY_DIR)
 
@@ -1416,7 +1419,7 @@ check-test8k:
 		exit 1; \
 	fi
 
-$(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
+$(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK) $(DESKTOP_IMAGES)
 	@mkdir -p $(ISO8K_DIR)/boot/grub
 	@cp $(KERNEL) $(ISO8K_DIR)/boot/
 	@echo "[ISO-8K] Kopiuje $(LARGE_TEST_BMP) jako /boot/test8k.bmp (modul Multiboot2)."
@@ -1437,6 +1440,7 @@ $(GRUB8K_CFG): $(KERNEL) check-test8k $(TAPETY_PAK)
 		'    boot' \
 		'}' \
 		> $(GRUB8K_CFG)
+	@$(PYTHON) narzedzia/package_desktop_images.py $(ISO8K_DIR)
 
 $(ISO8K): check-kernel check-test8k $(GRUB8K_CFG)
 	$(GRUB_MKRESCUE) -o $@ $(ISO8K_DIR) --xorriso=$(XORRISO)
@@ -1524,7 +1528,16 @@ QEMU_VIRTIO_COMMON_ARGS := \
 	-vga none \
 	-device virtio-vga,disable-legacy=on,xres=$(QEMU_VIRTIO_XRES),yres=$(QEMU_VIRTIO_YRES) \
 	-device virtio-keyboard-pci \
-	-device virtio-mouse-pci
+	-device virtio-mouse-pci \
+	-device virtio-tablet-pci
+
+# Wskaznik (docs/virtio-gpu-mouse-reliability-2026-11-11.md): podstawowym
+# urzadzeniem jest bezwzgledny virtio-tablet-pci (dodany NA KONCU, BDF
+# pozostalych 7 urzadzen bez zmian). Linuksowy frontend SDL 2.30 w trybie
+# wzglednym przelicza ruch z bezwzglednego wskaznika hosta (VirtualBox/VMware,
+# tablety, ekrany dotykowe) jako prev-cur w jednostkach urzadzenia, co daje
+# odwrocony i przeskalowany ruch kursora. Z tabletem QEMU nie wchodzi w tryb
+# wzgledny. Fallback: virtio-mouse-pci (wzgledna), potem PS/2 z i8042.
 
 # Produkcyjny profil VirtIO 1.x Modern PCI (Live / CD / instalator).
 # xres/yres sa jedynie poczatkowa wskazowka scanoutu QEMU; sterownik
@@ -1853,12 +1866,12 @@ test-image:
 tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h jadro/gui/tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 	@test -s $@ || { rm -f $@; echo "[BLAD] tapety_tmp.o jest pusty"; exit 1; }
-tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui_ltr.o programy/tapety/tapety_linker.ld testy/test_tapety_size.py
+tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o $(BSF_APP_GUI) programy/tapety/tapety_linker.ld testy/test_tapety_size.py
 	@if [ ! -s tapety_tmp.o ]; then \
 		echo "[TAPETY BUILD] tapety_tmp.o jest pusty lub uszkodzony - ponowna kompilacja..."; \
 		$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o; \
 	fi
-	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui_ltr.o -o tapety.elf
+	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o $(BSF_APP_GUI) -o tapety.elf
 	$(BUR_CONVERT) tapety.elf tapety.bin
 	$(PYTHON) testy/test_tapety_size.py tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
@@ -1874,8 +1887,8 @@ bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h jad
 
 ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h jadro/gui/ekran_format.h jadro/gui/ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
-ekran_blob.o: ekran_tmp.o bursztyn_gui_ltr.o programy/ekran/ekran_linker.ld
-	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui_ltr.o -o ekran.elf
+ekran_blob.o: ekran_tmp.o $(BSF_APP_GUI) programy/ekran/ekran_linker.ld
+	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o $(BSF_APP_GUI) -o ekran.elf
 	$(BUR_CONVERT) ekran.elf ekran.bin
 	$(LD) -r -b binary ekran.bin -o $@
 $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: jadro/gui/ui_skala.h
@@ -2246,6 +2259,15 @@ input_device.o grafika.o hid_pointer.o: jadro/gui/pointer_coordinates.h
 test-pointer-graphics-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
 	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_pointer_graphics.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/pointer-graphics
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) .wm-test/pointer-graphics
+
+# Host frontend model -> QEMU event -> production InputDevice -> production
+# cursor/hit-test, at every supported resolution (docs/virtio-gpu-mouse-reliability-2026-11-11.md).
+.PHONY: test-mouse-pipeline-host
+test-mouse-pipeline-host: $(filter-out .wm-test/runtime-host/testy/test_splash_production_path.o,$(STARTUP_HOST_OBJECTS))
+	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -DBURSZTYN_PMM_HOST_TEST -Wl,--gc-sections testy/test_mouse_pipeline_host.cpp sterowniki/usb/hid_pointer.cpp $^ -o .wm-test/mouse-pipeline
+	@for r in 800x600 1024x768 1280x720 1920x1080 2560x1440; do \
+		ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .wm-test/mouse-pipeline $${r%x*} $${r#*x} || exit 1; \
+	done
 
 # Physical hardware diagnostics: bounded, deferred, no polling or timing changes.
 BURSZTYNDIAGXHCIPHYSICALMOUSE ?= 0
@@ -2774,7 +2796,7 @@ test-display-mode-policy:
 virtio_gpu.o: jadro/gui/display_mode_policy.h
 
 # ---------------------------------------------------------------- BSF 2.0
-.PHONY: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host test-bsf2-host bsf-shaping-oracle
+.PHONY: test-bsf2-kernel-abi-host test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host test-bsf2-host bsf-shaping-oracle
 test-bsf-bidi-host:
 	@mkdir -p .bsf-test
 	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf_bidi.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/bidi
@@ -2790,7 +2812,15 @@ test-bsf-layout-host:
 # Regenerate expectations with the host HarfBuzz (development oracle only).
 bsf-shaping-oracle:
 	$(PYTHON) narzedzia/generate_bsf_shaping_oracle.py
-test-bsf2-host: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host
+test-bsf2-host: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host test-bsf2-kernel-abi-host
+
+# BWS 51 (incl. command 2) boundary/negative tests on the production handler
+# source with a simulated Ring 3 address space, Ring 3 blob validation and the
+# desktop BMP Multiboot2 module validator.
+test-bsf2-kernel-abi-host: testy/test_bsf2_kernel_abi.cpp jadro/gui/czcionka_systemowa.cpp jadro/rdzen/obrazy_startowe.h bsf/unicode_layout.h bsf/unicode_layout_index.h bsf/unicode_layout_data.inc
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -I. -Ijadro/bws -Ijadro/gui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_bsf2_kernel_abi.cpp -o .bsf-test/kernel-abi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/kernel-abi
 
 # BSF 2.0 coverage-guided fuzzing (ASan + UBSan + trace-pc) on testy/fuzz/fuzz_engine.h.
 # Iterations: BSF2_FUZZ_ITERS (default per target below). Corpora: .fuzz-corpus/bsf2.

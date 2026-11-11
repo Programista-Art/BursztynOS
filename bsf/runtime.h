@@ -97,6 +97,9 @@ struct TextStatistics {
       shaped_glyphs{}, fallback_searches{}, budget_failures{}, gsub_runs{},
       gpos_runs{}, longest_run{};
   size_t layout_bytes{};
+  // Appended (keeps earlier field offsets for observers): union of
+  // applied GSUB/GPOS lookup types, bit t = lookup type t.
+  uint64_t gsub_type_mask{}, gpos_type_mask{};
 };
 TextStatistics text_statistics();
 } // namespace BSF

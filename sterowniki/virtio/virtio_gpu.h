@@ -274,6 +274,30 @@ static_assert(sizeof(VirtioGpuMoveCursor) == 40, "VirtioGpuMoveCursor must be 40
  * ========================================================================= */
 
 
+/*
+ * Stan jedynego bufora polecen controlq (cmd_vaddr: zadanie @0, odpowiedz
+ * @VIRTIO_GPU_CMD_RESP_OFFSET). W danej chwili urzadzenie posiada co najwyzej
+ * jeden lancuch deskryptorow controlq. Opis: docs/virtio-gpu-mouse-reliability-2026-11-11.md
+ */
+enum VirtioGpuCmdState : uint8_t {
+    VIRTIO_GPU_CMD_IDLE = 0,          // brak polecenia u urzadzenia
+    VIRTIO_GPU_CMD_SUBMITTED,         // lancuch opublikowany w avail, przed kick
+    VIRTIO_GPU_CMD_WAITING,           // oczekiwanie do miekkiego terminu (500 ms)
+    VIRTIO_GPU_CMD_TIMED_OUT_PENDING, // termin minal; DMA i deskryptory nadal nalezy do urzadzenia
+    VIRTIO_GPU_CMD_RECOVERED,         // zwalidowane spoznione zakonczenie; kolejka spojna
+    VIRTIO_GPU_CMD_PERMANENT_FAILURE  // fail-closed; DMA w kwarantannie do resetu sprzetu
+};
+
+struct VirtioGpuRecoveryStats {
+    uint64_t soft_timeouts;        // przekroczenia miekkiego terminu
+    uint64_t late_completions;     // zwalidowane spoznione zakonczenia (po miekkim terminie)
+    uint64_t recoveries;           // powroty do IDLE po spoznionym zakonczeniu
+    uint64_t late_error_responses; // spoznione zakonczenie z bledem urzadzenia (kolejka spojna)
+    uint64_t rejected_while_pending; // polecenia odrzucone bez wysylki w TIMED_OUT_PENDING
+    uint64_t permanent_failures;
+    uint64_t max_late_ns;          // najdluzsze zaobserwowane opoznienie od wysylki
+};
+
 struct VirtioGpuDriver {
     VirtioPciDevice* dev;
     VirtQueue*       controlq;
@@ -356,6 +380,19 @@ struct VirtioGpuDriver {
     uint64_t transfer_count;
     uint64_t flush_count;
     uint64_t error_count;
+
+    /* Odzyskiwanie po timeoucie controlq (ograniczone, bez ponownej wysylki) */
+    VirtioGpuCmdState cmd_state;
+    int32_t  pending_head;          // glowa lancucha posiadanego przez urzadzenie
+    uint32_t pending_cmd_type;
+    uint32_t pending_expected_resp;
+    uint32_t pending_resp_len;      // dlugosc bufora odpowiedzi tego lancucha
+    uint64_t pending_seq;           // cmd_count w chwili wysylki
+    uint64_t pending_submit_ns;
+    uint64_t pending_hard_deadline_ns;
+    bool     recovery_full_refresh; // po odzyskaniu: nastepna publikacja = pelna klatka
+    const char* permanent_failure_reason;
+    VirtioGpuRecoveryStats recovery;
 };
 
 /* =========================================================================
@@ -371,6 +408,14 @@ struct VirtioGpuDriver {
 #endif
 
 bool virtio_gpu_init(VirtioPciDevice* dev);
+/* Nieblokujaca proba odebrania spoznionego zakonczenia (TIMED_OUT_PENDING).
+   Zwraca true, gdy controlq jest IDLE i gotowa na nowe polecenie. */
+bool virtio_gpu_service_recovery(VirtioGpuDriver* drv);
+const char* virtio_gpu_cmd_state_name(VirtioGpuCmdState state);
+/* Twardy, ograniczony termin odzyskiwania liczony od wysylki polecenia.
+   10 s: natywnie (QEMU TCG, silne obciazenie hosta) zmierzono spoznione
+   zakonczenia do 3,8 s, a 7 polecen nie zakonczylo sie w 5 s. */
+constexpr uint64_t VIRTIO_GPU_RECOVERY_HARD_DEADLINE_MS = 10000ULL;
 bool virtio_gpu_reset(VirtioGpuDriver* drv);
 void virtio_gpu_reset_all(void);
 
