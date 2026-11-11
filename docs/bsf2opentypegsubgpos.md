@@ -1,0 +1,106 @@
+# BSF 2.0 — OpenType GSUB/GPOS shaping
+
+Implementation: `bsf/otl.{h,cpp}` (tables), `bsf/shape.{h,cpp}` (shaper).
+
+## Verification method
+
+The host's HarfBuzz is used **only as a development oracle** through
+PyGObject (`narzedzia/generate_bsf_shaping_oracle.py`); Bursztyn OS never
+links it. The generator writes `testy/fixtures/bsf_shaping_oracle.tsv`
+(font, script, direction, UTF-8, expected glyph records). `make
+test-bsf-shaping-host` shapes every row with BSF and compares **glyph IDs,
+clusters, x/y advances and x/y offsets exactly**, in font units and visual
+order. Clusters are compared at grapheme granularity: BSF clusters are
+UAX #29 grapheme starts (the editing model), while HarfBuzz keeps e.g. ZWNJ
+as its own cluster.
+
+Result: **110/110 rows exact, 1,164 glyphs**, fonts: DejaVu Sans, DejaVu Sans
+Bold, DejaVu Serif Condensed Italic, Alice (repository), Noto Naskh Arabic,
+Noto Kufi Arabic, Noto Sans Arabic, Noto Nastaliq Urdu, Noto Sans Coptic,
+Noto Sans Hebrew, Noto Serif Hebrew, Noto Sans (host fonts; rows are skipped, not failed, if a host font is
+absent — the report prints the skip count).
+
+Coverage of the corpus: Polish, Vietnamese stacked diacritics, Latin
+ligatures and kerning, Cyrillic, Greek (incl. polytonic marks), Arabic
+contextual forms, lam-alef ligatures, harakat with shadda, the Allah
+ligature with marks, Nastaliq cursive chains (GPOS 3) and contextual
+substitution/positioning (GSUB 5, GPOS 7, GSUB 7 extensions), Coptic overlines
+(GSUB 8 reverse chaining), tatweel, Persian/Urdu/Uyghur
+letters, Arabic-Indic digits, ZWJ/ZWNJ, brackets in RTL, Hebrew niqqud with
+dagesh/shin dot.
+
+Defects found by the oracle and fixed during development:
+
+1. `CompositionExclusions.txt` entries were not parsed (no `;` separator),
+   so Hebrew presentation forms were wrongly composed.
+2. Decomposition must require the second component's glyph (shortest form).
+3. Ligature cluster merging must extend over trailing marks sharing the last
+   component's cluster.
+4. Mark reordering must use the established *modified* combining classes
+   (Hebrew points, Arabic shadda).
+
+Lookup-type coverage: every GSUB type 1–8 and GPOS type 1–9 occurs in at
+least one oracle font (probe of each font's LookupList, extension-resolved).
+Application per type is not separately counted.
+
+## Tables and lookups
+
+- **GDEF**: glyph class, mark attachment class, mark glyph sets. Without
+  GDEF, glyph classes are synthesized from General_Category Mn.
+- **ScriptList/LangSys/FeatureList/LookupList**: script preference list
+  (Indic `dev2`→`deva`), fallbacks `DFLT`, `dflt`, `latn`; optional LangSys
+  tag; required feature honoured. FeatureVariations are ignored.
+- **Lookup flags**: RightToLeft, IgnoreBase/Ligatures/Marks, mark filtering
+  sets, mark attachment type; default ignorables (except ZWJ/ZWNJ) are skipped
+  in context matching.
+- **GSUB** 1 single (fmt 1/2), 2 multiple (incl. deletion), 3 alternate
+  (first alternate), 4 ligature (ligature id/component tracking for marks),
+  5 context and 6 chained context (fmt 1/2/3 with nested lookup records),
+  7 extension, 8 reverse chaining single (applied back-to-front).
+- **GPOS** 1 single, 2 pair (fmt 1 pair sets, fmt 2 class pairs; second
+  value record skips the pair glyph), 3 cursive (entry/exit, RTL flag, chain
+  reversal), 4 mark-to-base, 5 mark-to-ligature (component selection via
+  ligature id/component), 6 mark-to-mark, 7/8 context, 9 extension. Mark
+  advances are zeroed by GDEF after GPOS; attachment chains are resolved
+  iteratively with cycle detection.
+
+## Feature plan
+
+Stage order follows HarfBuzz's default and Arabic shapers:
+`rvrn` | `ltra ltrm` or `rtla rtlm` | `ccmp locl` | (Arabic: `isol`,
+`fina`, `fin2`, `fin3`, `medi`, `med2`, `init` each in its own stage, then
+`rlig`, then `calt`, then `rclt mset`) | `rlig calt rclt liga clig`
+(+`dlig` when requested). GPOS: `kern mark mkmk curs dist abvm blwm`.
+Lookups run in (stage, lookup index) order with per-glyph feature masks
+(Arabic forms come from the joining state machine).
+
+## Arabic joining
+
+Joining types from `DerivedJoiningType.txt` (U, R, D, C→D, L, T
+transparent) drive the standard state machine producing isol/fina/medi/init
+masks. Syriac Alaph and Dalath-Rish groups (fin2/fin3/med2) are not
+modelled. Fonts without GSUB do **not** get the Unicode presentation-form
+fallback.
+
+## Security bounds
+
+Every read goes through `Bytes` (offset+length validated, zero on overrun);
+every loop driven by font data spends from a per-run `Budget` (default 4 Mi
+steps); contextual recursion depth ≤ 6; context length ≤ 64; multiple
+substitution ≤ 32 glyphs; buffer capacity fixed at twice the input; extension
+of an extension is rejected; glyph IDs ≥ numGlyphs are rejected. Exhaustion
+leaves a well-formed, partially shaped buffer and is counted in
+`budget_failures`.
+
+## Fallback positioning
+
+When a run's font has no GPOS mark lookups, mark glyphs are flagged
+`GlyphFallbackMark` and the renderer centres/stacks them by combining class
+(the pre-existing approximation). GPOS-positioned marks are flagged
+`GlyphGposMark` and use the font's anchors.
+
+## Not covered
+
+Indic/Thai/Khmer/Myanmar syllable shaping, Hangul jamo shaping beyond
+normalization, USE, `aalt`/stylistic sets UI, variation-indexed device
+tables, `BASE`/`JSTF`/`MATH`, vertical layout (`vert`, `vhea`).

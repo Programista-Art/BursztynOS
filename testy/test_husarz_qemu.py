@@ -75,6 +75,7 @@ def main():
     parser.add_argument('--javascript-only', action='store_true', help='Native bounded JavaScript, DOM, events, forms, timers and external cache')
     parser.add_argument('--font-size-matrix-only',action='store_true')
     parser.add_argument('--live-font-install-only',action='store_true')
+    parser.add_argument('--app-elf-directory',type=Path,help='Matching application ELFs for an archived private live-font test')
     parser.add_argument('--font-resources-only',action='store_true')
     parser.add_argument('--expected-font-count',type=int,default=128)
     parser.add_argument('--expected-resident-bytes',type=int,default=0)

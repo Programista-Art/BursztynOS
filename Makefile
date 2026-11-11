@@ -583,7 +583,7 @@ boot.o: jadro/arch/boot.S
 	$(CC) $(ASM_FLAGS) -c $< -o $@
 bufory_grafiki.o: jadro/gui/bufory_grafiki.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-czcionka_systemowa.o: jadro/gui/czcionka_systemowa.cpp
+czcionka_systemowa.o: jadro/gui/czcionka_systemowa.cpp bsf/unicode_layout_data.inc bsf/unicode_layout_index.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 diagnostyka_systemu.o: jadro/diag/diagnostyka_systemu.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
@@ -777,8 +777,43 @@ stack_protector.o: jadro/mm/stack_protector.cpp jadro/mm/stack_protector.h jadro
 ring3_ssp.o: jadro/mm/ring3_ssp.cpp jadro/mm/stack_protector.h jadro/bws/bws_api.h
 	$(CXX) $(RING3_FLAGS) -fno-stack-protector -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o
-	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o ring3_ssp.o -o $@
+# BSF 2.0 text layout (UAX #9, OpenType GSUB/GPOS, shared layout). Ring 3
+# only; no libc mem* symbols exist there, so loop->memcpy idioms are disabled.
+# Host builds link the static Unicode blob; Ring 3 fetches it via BWS 51/2.
+BSF2_CORE := bsf/unicode_props.cpp bsf/bidi.cpp bsf/otl.cpp bsf/shape.cpp bsf/layout.cpp
+BSF2_SOURCES := $(BSF2_CORE) bsf/unicode_layout_static.cpp
+BSF2_HEADERS := bsf/text.h bsf/otl.h bsf/shape.h bsf/layout.h bsf/bsf.h bsf/unicode_layout.h bsf/unicode_layout_index.h
+BSF2_OBJECTS := bsf2_props.o bsf2_bidi.o bsf2_otl.o bsf2_shape.o bsf2_layout.o bsf2_unicode_bws.o
+BSF2_FLAGS = $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-tree-loop-distribute-patterns -Os -fstack-usage
+bsf2_unicode_bws.o: bsf/unicode_layout_bws.cpp $(BSF2_HEADERS) jadro/gui/bursztyn_gui.h
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+bsf2_props.o: bsf/unicode_props.cpp $(BSF2_HEADERS)
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+bsf2_bidi.o: bsf/bidi.cpp $(BSF2_HEADERS)
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+bsf2_otl.o: bsf/otl.cpp $(BSF2_HEADERS)
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+bsf2_shape.o: bsf/shape.cpp $(BSF2_HEADERS)
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+bsf2_layout.o: bsf/layout.cpp $(BSF2_HEADERS)
+	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+-include bsf2_props.d bsf2_bidi.d bsf2_otl.d bsf2_shape.d bsf2_layout.d
+
+bursztyn_gui.o: bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o $(BSF2_OBJECTS) ring3_ssp.o
+	$(LD) -r bursztyn_gui_base.o bsf_core.o bsf_runtime.o bsf_bitmap.o $(BSF2_OBJECTS) ring3_ssp.o -o $@
+
+# Legacy LTR-only GUI library (BSF_COMPLEX_TEXT=0). Every app is embedded in
+# the kernel image, which must end below 15 MiB (RING3_BASE - 1 MiB guard);
+# the ~40 KiB BSF 2.0 engine is linked only into text-centric apps.
+BSF_LTR_APPS_TMP := kalkulator_tmp.o test_tmp.o demo_ui_tmp.o kontrolki2_tmp.o kontrolki3tmp.o \
+	kontrolki4tmp.o snake_tmp.o test_dzwieku_tmp.o repro_tmp.o tapety_tmp.o ekran_tmp.o
+$(BSF_LTR_APPS_TMP): RING3_FLAGS += -DBSF_COMPLEX_TEXT=0
+bursztyn_gui_base_ltr.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h bsf/runtime.h
+	$(CXX) $(RING3_FLAGS) -DBSF_COMPLEX_TEXT=0 -Os -ffunction-sections -fdata-sections -c $< -o $@
+bsf_runtime_ltr.o: bsf/runtime.cpp bsf/runtime.h bsf/config.h $(BSF2_HEADERS)
+	$(CXX) $(RING3_FLAGS) -DBSF_COMPLEX_TEXT=0 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -fstack-usage -c $< -o $@
+bursztyn_gui_ltr.o: bursztyn_gui_base_ltr.o bsf_core.o bsf_runtime_ltr.o bsf_bitmap.o ring3_ssp.o
+	$(LD) -r bursztyn_gui_base_ltr.o bsf_core.o bsf_runtime_ltr.o bsf_bitmap.o ring3_ssp.o -o $@
 
 bursztyn_gui_base.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
@@ -793,7 +828,7 @@ bursztyn_gui_minimal.o: bursztyn_gui_minimal_base.o ring3_ssp.o
 bsf_core.o: bsf/bsf.cpp bsf/bsf.h bsf/vendor/stb_truetype.h
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -Os -fstack-usage -c $< -o $@
 
-bsf_runtime.o: bsf/runtime.cpp bsf/runtime.h bsf/config.h
+bsf_runtime.o: bsf/runtime.cpp bsf/runtime.h bsf/config.h $(BSF2_HEADERS)
 	$(CXX) $(RING3_FLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -fstack-usage -c $< -o $@
 
 bsf_bitmap.o: bsf/bitmap.cpp bsf/runtime.h
@@ -886,9 +921,9 @@ eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 kalkulator_tmp.o: programy/kalkulator/kalkulator.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
+kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui_ltr.o $(KALKULATOR_LINKER)
 	$(LD) --gc-sections -T $(call bur_linker,$(KALKULATOR_LINKER)) $(RING3_LDFLAGS) \
-		kalkulator_tmp.o bursztyn_gui.o -o kalkulator.elf
+		kalkulator_tmp.o bursztyn_gui_ltr.o -o kalkulator.elf
 	$(BUR_CONVERT) kalkulator.elf kalkulator.bin
 	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
 
@@ -896,9 +931,9 @@ kalkulator_blob.o: kalkulator_tmp.o bursztyn_gui.o $(KALKULATOR_LINKER)
 test_tmp.o: programy/test/test.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy/test/test_linker.ld
+test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui_ltr.o programy/test/test_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/test/test_linker.ld) $(RING3_LDFLAGS) \
-		test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o -o test.elf
+		test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui_ltr.o -o test.elf
 	$(BUR_CONVERT) test.elf test.bin
 	$(LD) -r -b binary test.bin -o test_blob.o
 
@@ -906,9 +941,9 @@ test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o bursztyn_gui.o programy
 demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
+demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
-		demo_ui_tmp.o bursztyn_gui.o -o demo_ui.elf
+		demo_ui_tmp.o bursztyn_gui_ltr.o -o demo_ui.elf
 	$(BUR_CONVERT) demo_ui.elf demo_ui.bin
 	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
 
@@ -916,9 +951,9 @@ demo_ui_blob.o: demo_ui_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
 kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_linker.ld
+kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui_ltr.o programy/demo_ui/demo_ui_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki2_tmp.o bursztyn_gui.o -o kontrolki2.elf
+		kontrolki2_tmp.o bursztyn_gui_ltr.o -o kontrolki2.elf
 	$(BUR_CONVERT) kontrolki2.elf kontrolki2.bin
 	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
 
@@ -928,9 +963,9 @@ kontrolki2_blob.o: kontrolki2_tmp.o bursztyn_gui.o programy/demo_ui/demo_ui_link
 kontrolki3tmp.o: programy/kontrolki3/kontrolki3.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_linker.ld
+kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui_ltr.o programy/kontrolki3/kontrolki3_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki3/kontrolki3_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki3tmp.o bursztyn_gui.o -o kontrolki3.elf
+		kontrolki3tmp.o bursztyn_gui_ltr.o -o kontrolki3.elf
 	$(BUR_CONVERT) kontrolki3.elf kontrolki3.bin
 	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
 
@@ -938,9 +973,9 @@ kontrolki3blob.o: kontrolki3tmp.o bursztyn_gui.o programy/kontrolki3/kontrolki3_
 kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui.o programy/kontrolki4/kontrolki4_linker.ld
+kontrolki4blob.o: kontrolki4tmp.o bursztyn_gui_ltr.o programy/kontrolki4/kontrolki4_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki4/kontrolki4_linker.ld) $(RING3_LDFLAGS) \
-		kontrolki4tmp.o bursztyn_gui.o -o kontrolki4.elf
+		kontrolki4tmp.o bursztyn_gui_ltr.o -o kontrolki4.elf
 	$(BUR_CONVERT) kontrolki4.elf kontrolki4.bin
 	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
 
@@ -969,9 +1004,9 @@ $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 snake_tmp.o: gry/snake/snake.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
-snake_blob.o: snake_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
+snake_blob.o: snake_tmp.o bursztyn_gui_ltr.o $(RING3_STD_LINKER)
 	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
-		snake_tmp.o bursztyn_gui.o -o snake.elf
+		snake_tmp.o bursztyn_gui_ltr.o -o snake.elf
 	$(BUR_CONVERT) snake.elf snake.bin
 	$(LD) -r -b binary snake.bin -o snake_blob.o
 
@@ -1007,9 +1042,9 @@ test_dzwieku_tmp.o: programy/test_dzwieku/test_dzwieku.cpp jadro/gui/bursztyn_gu
 		sterowniki/dzwiek/hda_diag_format.h jadro/rdzen/wersja_systemu.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
-test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui.o programy/test_dzwieku/test_dzwieku_linker.ld testy/test_dzwieku_size.py
+test_dzwieku_blob.o: test_dzwieku_tmp.o bursztyn_gui_ltr.o programy/test_dzwieku/test_dzwieku_linker.ld testy/test_dzwieku_size.py
 	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/test_dzwieku/test_dzwieku_linker.ld) $(RING3_LDFLAGS) \
-		test_dzwieku_tmp.o bursztyn_gui.o -o test_dzwieku.elf
+		test_dzwieku_tmp.o bursztyn_gui_ltr.o -o test_dzwieku.elf
 	$(BUR_CONVERT) test_dzwieku.elf test_dzwieku.bin
 	$(PYTHON) testy/test_dzwieku_size.py test_dzwieku.bin
 	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
@@ -1026,9 +1061,9 @@ ustawienia_blob.o: ustawienia_tmp.o bursztyn_gui.o $(USTAWIENIA_LINKER)
 repro_tmp.o: programy/repro/repro.cpp jadro/gui/bursztyn_gui.h
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
 
-repro_blob.o: repro_tmp.o bursztyn_gui.o programy/repro/repro_linker.ld
+repro_blob.o: repro_tmp.o bursztyn_gui_ltr.o programy/repro/repro_linker.ld
 	$(LD) -T $(call bur_linker,programy/repro/repro_linker.ld) $(RING3_LDFLAGS) \
-		repro_tmp.o bursztyn_gui.o -o repro.elf
+		repro_tmp.o bursztyn_gui_ltr.o -o repro.elf
 	$(BUR_CONVERT) repro.elf repro.bin
 	$(LD) -r -b binary repro.bin -o repro_blob.o
 
@@ -1818,12 +1853,12 @@ test-image:
 tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h jadro/gui/tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 	@test -s $@ || { rm -f $@; echo "[BLAD] tapety_tmp.o jest pusty"; exit 1; }
-tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o programy/tapety/tapety_linker.ld testy/test_tapety_size.py
+tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui_ltr.o programy/tapety/tapety_linker.ld testy/test_tapety_size.py
 	@if [ ! -s tapety_tmp.o ]; then \
 		echo "[TAPETY BUILD] tapety_tmp.o jest pusty lub uszkodzony - ponowna kompilacja..."; \
 		$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c programy/tapety/tapety.cpp -o tapety_tmp.o; \
 	fi
-	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui.o -o tapety.elf
+	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o bursztyn_gui_ltr.o -o tapety.elf
 	$(BUR_CONVERT) tapety.elf tapety.bin
 	$(PYTHON) testy/test_tapety_size.py tapety.bin
 	$(LD) -r -b binary tapety.bin -o $@
@@ -1839,8 +1874,8 @@ bochs_vbe.o: sterowniki/grafika/bochs_vbe.cpp sterowniki/grafika/bochs_vbe.h jad
 
 ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekran_okno.h jadro/gui/ekran_format.h jadro/gui/ui_skala.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -c $< -o $@
-ekran_blob.o: ekran_tmp.o bursztyn_gui.o programy/ekran/ekran_linker.ld
-	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui.o -o ekran.elf
+ekran_blob.o: ekran_tmp.o bursztyn_gui_ltr.o programy/ekran/ekran_linker.ld
+	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o bursztyn_gui_ltr.o -o ekran.elf
 	$(BUR_CONVERT) ekran.elf ekran.bin
 	$(LD) -r -b binary ekran.bin -o $@
 $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: jadro/gui/ui_skala.h
@@ -2430,19 +2465,19 @@ test-bsf-host:
 .PHONY: test-bsf-ui-host
 test-bsf-ui-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
+	g++ -std=c++17 -fcoroutines -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_bsf_ui.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/ui-host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ui-host
 
 .PHONY: profile-bsf-host
 profile-bsf-host:
 	@mkdir -p .bsf-test
-	g++ $(HOST_INCLUDES) -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
+	g++ $(HOST_INCLUDES) -std=c++17 -O2 -ffunction-sections -fdata-sections narzedzia/profile_bsf.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/profile
 	.bsf-test/profile
 
 .PHONY: test-desktop-ttf-host
 test-desktop-ttf-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
+	g++ -std=c++17 -fcoroutines -O0 -g0 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/desktop-ttf-host
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/desktop-ttf-host
 
 .PHONY: test-slider-pixels-host
@@ -2454,7 +2489,7 @@ test-slider-pixels-host:
 .PHONY: test-desktop-rubber-host
 test-desktop-rubber-host:
 	@mkdir -p .bsf-test
-	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
+	g++ -std=c++17 -fcoroutines -O0 -g0 -DBURSZTYN_RUBBER_ONLY -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_desktop_ttf.cpp bursztyn_ui/ikona_png.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/rubber-interleave-final
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/rubber-interleave-final
 
 wsparcie_mecenasi_blob.o: dane/sponsorze/mecenasi.txt
@@ -2663,7 +2698,7 @@ bsf_core.o: bsf/unicode.inc bsf/unicode_data.inc
 .PHONY: test-notepad-unicode-host
 test-notepad-unicode-host:
 	@mkdir -p .bsf-test
-	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
 
 .PHONY: fuzz-bsf-coverage-host
@@ -2689,7 +2724,7 @@ test-usb-keyboard-repeat-host:
 .PHONY: test-bsf-resources-host
 test-bsf-resources-host:
 	@mkdir -p .bsf-test
-	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fcheck-new -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_bsf_resources.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/resources
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/resources
 
 bsf_terminal.o: bsf/terminal.cpp bsf/terminal.h bsf/terminal_width.inc
@@ -2698,13 +2733,13 @@ bsf_terminal.o: bsf/terminal.cpp bsf/terminal.h bsf/terminal_width.inc
 .PHONY: test-shell-ttf-host
 test-shell-ttf-host:
 	@mkdir -p .bsf-test
-	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -DBSF_NATIVE=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-pie -no-pie testy/test_shell_terminal.cpp bsf/bsf.cpp bsf/terminal.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/shell-ttf
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shell-ttf
 
 .PHONY: bsf-display-layout
 bsf-display-layout:
 	@mkdir -p .bsf-test
-	g++ $(HOST_INCLUDES) -std=c++17 -O1 -I. -ffunction-sections -fdata-sections narzedzia/bsf_display_layout.cpp bsf/bsf.cpp bsf/runtime.cpp bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/display-layout-generator
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -I. -ffunction-sections -fdata-sections narzedzia/bsf_display_layout.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/display-layout-generator
 	.bsf-test/display-layout-generator
 
 .PHONY: bsf-installer-observer
@@ -2737,3 +2772,36 @@ test-display-mode-policy:
 	g++ $(HOST_INCLUDES) $(STARTUP_HOST_FLAGS) -MMD -MP -c $< -o $@
 
 virtio_gpu.o: jadro/gui/display_mode_policy.h
+
+# ---------------------------------------------------------------- BSF 2.0
+.PHONY: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host test-bsf2-host bsf-shaping-oracle
+test-bsf-bidi-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf_bidi.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/bidi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bidi
+test-bsf-shaping-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf_shaping.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/shaping
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/shaping
+test-bsf-layout-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf_layout.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/layout
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/layout
+# Regenerate expectations with the host HarfBuzz (development oracle only).
+bsf-shaping-oracle:
+	$(PYTHON) narzedzia/generate_bsf_shaping_oracle.py
+test-bsf2-host: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host
+
+# BSF 2.0 coverage-guided fuzzing (ASan + UBSan + trace-pc) on testy/fuzz/fuzz_engine.h.
+# Iterations: BSF2_FUZZ_ITERS (default per target below). Corpora: .fuzz-corpus/bsf2.
+BSF2_FUZZ_FLAGS := -std=c++17 -O1 -g -I. -fsanitize=address,undefined -fsanitize-coverage=trace-pc -fno-omit-frame-pointer
+BSF2_FUZZ_ENV := ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+.PHONY: fuzz-bsf2-smoke
+fuzz-bsf2-smoke:
+	@mkdir -p .fuzz-build/bsf2 .fuzz-corpus/bsf2
+	g++ $(BSF2_FUZZ_FLAGS) testy/fuzz/fuzz_bsf_bidi.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .fuzz-build/bsf2/fuzz_bsf_bidi
+	g++ $(BSF2_FUZZ_FLAGS) testy/fuzz/fuzz_bsf_layout.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .fuzz-build/bsf2/fuzz_bsf_layout
+	g++ $(BSF2_FUZZ_FLAGS) testy/fuzz/fuzz_bsf_otl.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .fuzz-build/bsf2/fuzz_bsf_otl
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_bidi --iterations=$(or $(BSF2_FUZZ_ITERS),20000) --corpus-out=.fuzz-corpus/bsf2/bidi --metrics-out=.fuzz-build/bsf2/bidi.json
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_layout --iterations=$(or $(BSF2_FUZZ_ITERS),5000) --corpus-out=.fuzz-corpus/bsf2/layout --metrics-out=.fuzz-build/bsf2/layout.json
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_otl --iterations=$(or $(BSF2_FUZZ_ITERS),3000) --corpus-out=.fuzz-corpus/bsf2/otl --metrics-out=.fuzz-build/bsf2/otl.json

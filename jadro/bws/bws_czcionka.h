@@ -4,6 +4,8 @@
 
 /* Additive BWS 51 operation. arg1=0 still returns the legacy height (16).
  * arg1=1, arg2=output, arg3=sizeof(output): a bounded copy of the system font.
+ * arg1=2, arg2=output, arg3=BSF::UnicodeBlob::Size: bounded copy of the
+ * read-only BSF Unicode 15.1.0 layout tables (bsf/unicode_layout_index.h).
  * No pointers, MMIO or writable kernel mappings are exported. */
 constexpr uint32_t BWS_CZCIONKA_WERSJA = 1;
 constexpr uint32_t BWS_CZCIONKA_GLIFY = 1170;

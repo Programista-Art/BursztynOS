@@ -478,6 +478,11 @@ size_t text_size(const char* text,size_t limit){
 int measure_text(const char *text, int px, bool bold, const char *family,
                  size_t limit) {
   size_t n=text_size(text,limit);
+#if BSF_COMPLEX_TEXT
+  if(needs_complex_layout(text,n))
+    if(const auto* L=layout_text(text,n,px,bold,family))
+      return int((L->width()+Fixed/2)/Fixed); // same rounding as legacy advances
+#endif
   TextMetrics pen;
   for(size_t start=0;start<n;){
     size_t end=next_cluster(text,start,n);
@@ -488,6 +493,13 @@ int measure_text(const char *text, int px, bool bold, const char *family,
 int measure_prefix(const char* text,size_t offset,int px,bool bold,
                    const char* family,size_t limit){
   size_t n=text_size(text,limit);
+#if BSF_COMPLEX_TEXT
+  if(needs_complex_layout(text,n))
+    if(const auto* L=layout_text(text,n,px,bold,family)){
+      int64_t x=L->caret_x(offset<n?offset:n);
+      return int((x+Fixed/2)/Fixed);
+    }
+#endif
   TextMetrics pen;
   for(size_t start=0;start<n&&start<offset;){
     size_t end=next_cluster(text,start,n);
@@ -498,8 +510,13 @@ int measure_prefix(const char* text,size_t offset,int px,bool bold,
 }
 size_t hit_test(const char* text,int x,int px,bool bold,const char* family,
                 size_t limit){
-  if(x<=0)return 0;
   size_t n=text_size(text,limit);
+#if BSF_COMPLEX_TEXT
+  if(needs_complex_layout(text,n))
+    if(const auto* L=layout_text(text,n,px,bold,family))
+      return L->hit_test(int64_t(x)*Fixed,0);
+#endif
+  if(x<=0)return 0;
   TextMetrics pen;
   for(size_t start=0;start<n;){
     size_t end=next_cluster(text,start,n);
@@ -622,7 +639,236 @@ void rescan() {
   resource_info.resident_bytes=0;
   invalidate_resolution(); initialized=false; init();
 }
+#if BSF_COMPLEX_TEXT
+namespace {
+// ---------------------------------------------------------------- layouts
+constexpr unsigned LayoutSlots = 4;
+struct LayoutSlot {
+  TextLayout layout;
+  uint64_t hash{}, used{};
+  uint32_t generation{}, family{};
+  int px{};
+  int64_t max_width{};
+  uint8_t style{}, direction{};
+  bool valid{};
+};
+LayoutSlot *layout_slots{};
+uint64_t layout_clock{};
+TextStatistics text_stats{};
+struct ResolverContext { bool bold, italic; const char *family; };
+uint32_t resolver_run(void *u, const char *t, size_t a, size_t b) {
+  auto *c = static_cast<ResolverContext *>(u);
+  return resolved_cluster(t + a, b - a, c->bold, c->family, c->italic);
+}
+uint32_t resolver_cluster(void *u, const char *t, size_t a, size_t b) {
+  auto *c = static_cast<ResolverContext *>(u);
+  uint32_t id = resolved_cluster(t + a, b - a, c->bold, c->family, c->italic);
+  if (id)
+    return id;
+  // Explicit per-scalar fallback: the base scalar decides the face.
+  for (size_t at = a; at < b;) {
+    uint32_t cp;
+    at += utf8(t + at, b - at, cp);
+    if (!combining(cp) && !default_ignorable(cp))
+      return resolved_face(cp, c->bold, c->family, c->italic);
+  }
+  return 0;
+}
+const Face *resolver_face(void *, uint32_t id) { return by_id(id); }
+int32_t resolver_fallback(void *, uint32_t cp, int px) {
+  return int32_t((int64_t(bitmap_width(cp) + 1) * px * 65536) / 16);
+}
+uint64_t text_hash(const char *t, size_t n) {
+  uint64_t h = 1469598103934665603ull;
+  for (size_t i = 0; i < n; ++i)
+    h = (h ^ uint8_t(t[i])) * 1099511628211ull;
+  return h;
+}
+} // namespace
+const TextLayout *layout_text(const char *text, size_t bytes, int px, bool bold,
+                              const char *family, bool italic, int64_t max_width,
+                              BaseDirection direction) {
+  if (!text || bytes > MaxLayoutBytes || px < 1 || px > 128)
+    return nullptr;
+  init();
+  if (!layout_slots) {
+    layout_slots = new LayoutSlot[LayoutSlots];
+    if (!layout_slots)
+      return nullptr;
+  }
+  uint64_t h = text_hash(text, bytes);
+  uint32_t fam = family ? identity(family) : 0, gen = generation();
+  uint8_t style = uint8_t(unsigned(bold) | (unsigned(italic) << 1));
+  for (unsigned i = 0; i < LayoutSlots; ++i) {
+    LayoutSlot &s = layout_slots[i];
+    if (!s.valid || s.hash != h || s.px != px || s.style != style ||
+        s.family != fam || s.generation != gen || s.max_width != max_width ||
+        s.direction != uint8_t(direction) || s.layout.bytes() != bytes)
+      continue;
+    bool equal = true;
+    const char *own = s.layout.text();
+    for (size_t k = 0; k < bytes && equal; ++k)
+      equal = own[k] == text[k];
+    if (!equal)
+      continue;
+    s.used = ++layout_clock;
+    ++text_stats.layout_hits;
+    return &s.layout;
+  }
+  ++text_stats.layout_misses;
+  unsigned victim = 0;
+  for (unsigned i = 1; i < LayoutSlots; ++i)
+    if (!layout_slots[i].valid ||
+        (layout_slots[victim].valid && layout_slots[i].used < layout_slots[victim].used))
+      victim = i;
+  LayoutSlot &s = layout_slots[victim];
+  if (s.valid)
+    text_stats.layout_bytes -= s.layout.bytes() + s.layout.glyph_count() * sizeof(LayoutGlyph);
+  s.valid = false;
+  ResolverContext ctx{bold, italic, family};
+  FontResolver fr;
+  fr.user = &ctx;
+  fr.run_face = resolver_run;
+  fr.cluster_face = resolver_cluster;
+  fr.face = resolver_face;
+  fr.fallback_advance = resolver_fallback;
+  LayoutOptions o;
+  o.px = px;
+  o.direction = direction;
+  o.max_width = max_width;
+  if (!s.layout.build(text, bytes, o, fr)) {
+    ++text_stats.layout_failures;
+    return nullptr;
+  }
+  const LayoutStatistics &ls = s.layout.statistics();
+  text_stats.shaped_runs += ls.runs;
+  text_stats.shaped_glyphs += ls.shaped_glyphs;
+  text_stats.fallback_searches += ls.fallback_searches;
+  text_stats.budget_failures += ls.budget_failures;
+  text_stats.gsub_runs += ls.gsub_runs;
+  text_stats.gpos_runs += ls.gpos_runs;
+  if (ls.longest_run > text_stats.longest_run)
+    text_stats.longest_run = ls.longest_run;
+  text_stats.layout_bytes += bytes + s.layout.glyph_count() * sizeof(LayoutGlyph);
+  s.hash = h;
+  s.px = px;
+  s.style = style;
+  s.family = fam;
+  s.generation = gen;
+  s.max_width = max_width;
+  s.direction = uint8_t(direction);
+  s.used = ++layout_clock;
+  s.valid = true;
+  return &s.layout;
+}
+const Glyph *glyph_id_face(uint32_t id, unsigned glyph, int px, bool bold, bool italic) {
+  auto *f = by_id(id);
+  return f && cache ? cache->get_glyph(*f, glyph, px, unsigned(bold) | (unsigned(italic) << 1))
+                    : nullptr;
+}
+TextStatistics text_statistics() { return text_stats; }
+namespace {
+int fixed_round(int64_t v) {
+  v += Fixed / 2;
+  return int(v >= 0 ? v / Fixed : -((-v + Fixed - 1) / Fixed));
+}
+} // namespace
+bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
+                 const char *family, MaskCallback mask, void *ctx) {
+  if (!mask || px < 1 || px > 128)
+    return false;
+  const int asc = ascent(px, family), h = height(px, family);
+  const int line_h = h > 0 ? h : px;
+  const size_t n = L.glyph_count();
+  // Pass 1: base bitmap extents (fallback mark placement needs the base,
+  // which follows the mark in RTL visual order).
+  struct Extent { int x, y, w, h; bool valid; };
+  Extent *ext = n ? new Extent[n] : nullptr;
+  if (n && !ext)
+    return false;
+  for (size_t l = 0; l < L.line_count(); ++l) {
+    const LayoutLine &line = L.lines()[l];
+    int base_y = y + int(l) * line_h + asc;
+    for (size_t i = line.glyph_begin; i < line.glyph_end; ++i) {
+      const LayoutGlyph &g = L.glyphs()[i];
+      ext[i] = Extent{};
+      if (g.flags & (GlyphMark | GlyphHidden | GlyphMissing))
+        continue;
+      if (const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold))
+        ext[i] = {x + fixed_round(g.x + g.x_offset) + b->x,
+                  base_y - fixed_round(g.y_offset) + b->y, b->width, b->height, true};
+    }
+  }
+  for (size_t l = 0; l < L.line_count(); ++l) {
+    const LayoutLine &line = L.lines()[l];
+    int top = y + int(l) * line_h, base_y = top + asc;
+    int above = 0, below = 0;
+    uint32_t stacked = 0xffffffffu;
+    for (size_t i = line.glyph_begin; i < line.glyph_end; ++i) {
+      const LayoutGlyph &g = L.glyphs()[i];
+      if (g.flags & GlyphHidden)
+        continue;
+      int gx = x + fixed_round(g.x + g.x_offset), gy = base_y - fixed_round(g.y_offset);
+      if (g.flags & GlyphMissing) {
+        // Bitmap fallback for scalars no installed face covers.
+        if (g.flags & GlyphMark)
+          continue;
+        int w = (bitmap_width(g.codepoint) * px + 8) / 16, hh = px;
+        if (w > 128) w = 128;
+        if (hh > 128) hh = 128;
+        if (w < 1)
+          continue;
+        auto *a = new uint8_t[size_t(w) * hh];
+        if (!a)
+          continue;
+        const uint16_t *bits = bitmap(g.codepoint);
+        for (int yy = 0; yy < hh; ++yy)
+          for (int xx = 0; xx < w; ++xx)
+            a[yy * w + xx] = bits && (bits[yy * 16 / hh] & (1u << (15 - xx * 16 / px))) ? 255 : 0;
+        mask(ctx, gx, top, w, hh, a);
+        delete[] a;
+        continue;
+      }
+      const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold);
+      if (!b)
+        continue;
+      int dx = gx + b->x, dy = gy + b->y;
+      if (g.flags & GlyphFallbackMark) {
+        const Extent *base = nullptr;
+        for (size_t k = line.glyph_begin; k < line.glyph_end && !base; ++k)
+          if (ext[k].valid && L.glyphs()[k].cluster == g.cluster)
+            base = &ext[k];
+        if (base) {
+          if (stacked != g.cluster) {
+            stacked = g.cluster;
+            above = below = 0;
+          }
+          unsigned ccc = combining_class(g.codepoint);
+          bool low = ccc == 200 || ccc == 202 || ccc == 218 || ccc == 220 ||
+                     ccc == 222 || ccc == 233 || ccc == 240;
+          dx = base->x + base->w / 2 - b->width / 2;
+          if (low) {
+            dy = base->y + base->h + 1 + below;
+            below += b->height + 1;
+          } else if (ccc != 1) {
+            dy = base->y - b->height - 1 - above;
+            above += b->height + 1;
+          }
+        }
+      }
+      mask(ctx, dx, dy, b->width, b->height, b->alpha);
+    }
+  }
+  delete[] ext;
+  return true;
+}
+#endif
 void shutdown() {
+#if BSF_COMPLEX_TEXT
+  delete[] layout_slots;
+  layout_slots = nullptr;
+  text_stats = TextStatistics{};
+#endif
   invalidate_resolution();
   for (auto &item : loaded) {
     delete[] item.bytes;
