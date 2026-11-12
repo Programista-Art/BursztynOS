@@ -112,3 +112,7 @@ boot*.log
 # --- Artefakty pomiarow graficznych (zrzuty PPM, setki MB) ---
 /.graphics-perf/
 
+
+# --- Lokalny wybor formatu .bur (generowany przez build) ---
+/.bur-format-config
+
