@@ -112,7 +112,9 @@ def main() -> int:
     check("BWS_HDA_DIAG = 89" in api, "BWS_HDA_DIAG == 89")
     check("BWS_HDA_TEST = 90" in api, "BWS_HDA_TEST == 90")
     check("BWS_DIAGNOSTYKA_SYSTEMU = 91" in api, "system diagnostics reserves 91")
-    check("BWS_PIERWSZY_WOLNY = 98" in api, "next free is 98")
+    check("BWS_PIERWSZY_WOLNY = 100" in api, "next free is 100")
+    check("BWS_GUI_BLIT_SKALOWANY = 98" in api, "2D scaled blit reserves 98")
+    check("BWS_GUI_SKALA_WARSTWY = 99" in api, "layer scale reserves 99")
 
     # --- built artifact ---
     blob = ROOT / "test_dzwieku.bin"

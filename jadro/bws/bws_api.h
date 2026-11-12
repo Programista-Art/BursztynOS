@@ -129,7 +129,20 @@ enum BwsNumer : uint64_t {
     BWS_PROCESY_LISTA = 96,
     BWS_PROCES_ZABIJ = 97,
 
-    BWS_PIERWSZY_WOLNY = 98
+    /*
+     * Akceleracja 2D dla przegladarek (Husarz, Chromium).
+     *
+     * BWS_GUI_BLIT_SKALOWANY: jeden skalowany blit z bufora Ring 3 do warstwy
+     *   procesu; filtr nearest/bilinear/box, opcjonalne zachowanie proporcji.
+     * BWS_GUI_SKALA_WARSTWY: deklaracja skali powierzchni warstwy, zeby
+     *   kompozytor skalowal gotowa powierzchnie do okna bez udzialu aplikacji.
+     *
+     * Oba wywolania sa addytywne: BWS 1..97 zachowuja zamrozone znaczenie.
+     */
+    BWS_GUI_BLIT_SKALOWANY = 98,
+    BWS_GUI_SKALA_WARSTWY = 99,
+
+    BWS_PIERWSZY_WOLNY = 100
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

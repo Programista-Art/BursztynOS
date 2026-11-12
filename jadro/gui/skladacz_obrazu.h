@@ -460,6 +460,23 @@ void skladacz_stan_max(int pid,bool max);
 void skladacz_obrazu_odswiez_dekoracje();
 bool skladacz_obrazu_dekoracja_w_punkcie(int pid, int lx, int ly);
 
+/* Skala powierzchni warstwy (BWS99).
+ *
+ * Aplikacja moze rysowac tresc w dowolnej rozdzielczosci zrodla i zadeklarowac
+ * ja kompozytorowi. Warstwa zachowuje swoj bufor i geometrie (ABI bez zmian);
+ * kompozytor probkuje zrodlo src_w x src_h w skale zadeklarowanej trybem.
+ *
+ *   src_w/src_h == 0            - skala wylaczona (probkowanie 1:1),
+ *   src_w/src_h == wymiary warstwy - rowniez 1:1 (bez narzutu),
+ *   tryb                         - SkalowanieTryb (0 rozciagnij, 1 dopasuj, 2 wypelnij).
+ *
+ * Deklaracja jest wlasnoscia procesu i jest zerowana przy usunieciu warstwy.
+ * Zwraca false dla niepoprawnych wymiarow lub PID.
+ */
+bool skladacz_obrazu_ustaw_skale(int pid, int src_w, int src_h, uint32_t tryb);
+void skladacz_obrazu_pobierz_skale(int pid, int* src_w, int* src_h, uint32_t* tryb);
+
+
 // Wyciszanie pod zewnetrzna blokada ekranu, bez oczekiwania na GPU.
 void skladacz_obrazu_wycisz();
 void skladacz_obrazu_wznow();

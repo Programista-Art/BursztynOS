@@ -1,6 +1,7 @@
 #include "jadro/gui/display_mode_policy.h"
 #include "jadro/gui/graphics_perf.h"
 #include "jadro/gui/graphics_copy.h"
+#include "jadro/gui/skalowanie.h"
 #include "kolor_alfa.h"
 #include "bws_gui_batch.h"
 #include "diagnostyka_systemu.h"
@@ -3956,6 +3957,241 @@ extern "C" bool bws_gui_blit(int x,int y,int w,int h,const uint32_t* pixels) {
 extern "C" bool bws_gui_alpha_blit(int x,int y,int w,int h,const uint32_t* pixels) {
     return gui_blit_region(x,y,w,h,pixels,false,true);
 }
+
+/*
+ * BWS98 - skalowany blit do warstwy procesu.
+ *
+ * Kontrakt:
+ *   - zrodlo jest ciaglym buforem src_w x src_h w Ring 3 (stride = src_w*4),
+ *   - wynik trafia do prostokata dst_x/dst_y/dst_w/dst_h we wspolrzednych
+ *     ekranu, przycietego do warstwy wywolujacego,
+ *   - filtr i tryb dopasowania pochodza z deskryptora,
+ *   - pusty piksel (dokladne 0) nie jest zapisywany, chyba ze flaga
+ *     BWS_BLIT_ZAMIEN_REGION kaze nadpisac caly prostokat.
+ *
+ * Bufor Ring 3 jest czytany wylacznie wewnatrz OknoUzytkownika, wiec SMAP
+ * pozostaje aktywny dla calego pozostalego kodu jadra.
+ */
+/*
+ * Zlozenie skalowanego piksela z pokryciem czesciowym w powierzchnie warstwy.
+ *
+ * Warstwa jest dla kompozytora powierzchnia RGB: gorny bajt nie jest kanalem
+ * alfa. Piksel o coverage < 255 musi wiec zostac zmieszany z tym, co juz jest
+ * w warstwie - inaczej kompozytor obcina gorny bajt i krawedzie skalowanego
+ * tekstu dostaja jasna obwodke.
+ *
+ * Wynik pozostaje w konwencji znacznikow: 0 = puste, 0x01000000 = widoczna
+ * czern, 0x00RRGGBB = kolor.
+ */
+static inline void compose_scaled_into(uint32_t& dst, uint32_t src, uint32_t coverage) {
+    const uint32_t zrodlo_rgb = src & 0x00FFFFFFU;
+    uint32_t zlozony;
+    if (dst == 0U) {
+        zlozony = zrodlo_rgb;
+    } else {
+        zlozony = 0U;
+        for (unsigned shift = 0; shift < 24; shift += 8) {
+            const uint32_t s = (zrodlo_rgb >> shift) & 0xFFU;
+            const uint32_t d = (dst >> shift) & 0xFFU;
+            zlozony |= ((s * coverage + d * (255U - coverage) + 127U) / 255U) << shift;
+        }
+    }
+    dst = zlozony ? zlozony : 0x01000000U;
+}
+
+static bool gui_blit_skalowany_region(const BwsBlitSkalowany& r, bool batch) {    if (!r.piksele || r.src_w == 0U || r.src_h == 0U || r.src_w > 8192U || r.src_h > 8192U)
+        return false;
+    if (!skalowanie_filtr_poprawny(r.filtr)) return false;
+    if (!backbuffer || !aktywny_ekran || !BwsProcesMaWarstwe()) return false;
+
+    uint64_t zrodlo_piksele = 0;
+    if (__builtin_mul_overflow((uint64_t)r.src_w, (uint64_t)r.src_h, &zrodlo_piksele))
+        return false;
+    /* Ten sam limit co BWS57: 4 mln pikseli zrodla na jedno wywolanie. */
+    if (zrodlo_piksele > 4ULL * 1024ULL * 1024ULL) return false;
+
+    warstwa_obrazu* warstwa = pobierz_warstwe(aktualny_pid);
+    if (!warstwa || !warstwa->bufor_pikseli) return false;
+
+    int dst_w = r.dst_w;
+    int dst_h = r.dst_h;
+    int dst_x = r.dst_x;
+    int dst_y = r.dst_y;
+    if (dst_w <= 0 || dst_h <= 0 || dst_w > 8192 || dst_h > 8192) return false;
+
+    const bool zachowaj = (r.flagi & BWS_BLIT_ZACHOWAJ_ASPECT) != 0U;
+    if (zachowaj) {
+        const SkalowanieProstokat p = skalowanie_dopasuj(
+            r.src_w, r.src_h,
+            static_cast<uint32_t>(dst_w), static_cast<uint32_t>(dst_h),
+            r.tryb);
+        if (p.szerokosc <= 0 || p.wysokosc <= 0) return false;
+        dst_x += p.x;
+        dst_y += p.y;
+        dst_w = p.szerokosc;
+        dst_h = p.wysokosc;
+    }
+
+    /* Przyciecie do warstwy wywolujacego (moze byc poza ekranem). */
+    const int lx0 = dst_x < warstwa->x ? warstwa->x : dst_x;
+    const int ly0 = dst_y < warstwa->y ? warstwa->y : dst_y;
+    const int warstwa_x1 = warstwa->x + (int)warstwa->szerokosc;
+    const int warstwa_y1 = warstwa->y + (int)warstwa->wysokosc;
+    const int dst_x1 = dst_x + dst_w;
+    const int dst_y1 = dst_y + dst_h;
+    const int lx1 = dst_x1 > warstwa_x1 ? warstwa_x1 : dst_x1;
+    const int ly1 = dst_y1 > warstwa_y1 ? warstwa_y1 : dst_y1;
+    if (lx0 >= lx1 || ly0 >= ly1) return false;
+
+    const uint32_t filtr = r.filtr;
+    const bool alfa = (r.flagi & BWS_BLIT_ALFA_SOURCE_OVER) != 0U;
+    const bool nadpisz_puste = (r.flagi & BWS_BLIT_ZAMIEN_REGION) != 0U;
+
+    SkalowanieZrodlo z{};
+    z.piksele = reinterpret_cast<const uint32_t*>(r.piksele);
+    z.szerokosc = r.src_w;
+    z.wysokosc = r.src_h;
+
+    OknoUzytkownika okno(reinterpret_cast<const void*>(r.piksele),
+                         (size_t)zrodlo_piksele * sizeof(uint32_t));
+
+    const uint32_t dst_w_u = static_cast<uint32_t>(dst_w);
+    const uint32_t dst_h_u = static_cast<uint32_t>(dst_h);
+    const uint32_t liczba = static_cast<uint32_t>(lx1 - lx0);
+    const uint32_t pierwszy_x = static_cast<uint32_t>(lx0 - dst_x);
+
+    for (int y = ly0; y < ly1; ++y) {
+        const uint32_t wiersz_dst = static_cast<uint32_t>(y - dst_y);
+        uint32_t* wiersz = warstwa->bufor_pikseli +
+                           (size_t)(y - warstwa->y) * (size_t)warstwa->szerokosc +
+                           (size_t)(lx0 - warstwa->x);
+
+        /*
+         * Szybka sciezka 1:1 - brak matematyki probkowania. Kopiujemy blokowo
+         * dokladnie sprawdzony fragment (najczestszy przypadek: aplikacja
+         * rysuje w skali DPI i wysyla nietkniety obraz).
+         */
+        if (dst_w_u == z.szerokosc && dst_h_u == z.wysokosc && filtr == SKALOWANIE_NEAREST) {
+            const uint32_t* zrodlo = z.piksele + (size_t)wiersz_dst * z.szerokosc + pierwszy_x;
+            if (nadpisz_puste && !alfa) {
+                skalowanie_kopia_1do1(wiersz, zrodlo, liczba);
+                continue;
+            }
+            for (uint32_t i = 0; i < liczba; ++i) {
+                const uint32_t pix = zrodlo[i];
+                if (pix == 0U) {
+                    if (nadpisz_puste) wiersz[i] = 0U;
+                    continue;
+                }
+                const uint32_t coverage = (pix >> 24) & 0xFFU;
+                if (alfa || (coverage != 0U && coverage != 255U)) {
+                    compose_scaled_into(wiersz[i], pix, coverage);
+                } else {
+                    wiersz[i] = pix;
+                }
+            }
+            continue;
+        }
+
+        /*
+         * Szybka sciezka: pelne nadpisanie bez filtrowania przezroczystosci.
+         * Zadnego bufora posredniego - piszemy wprost do wiersza warstwy.
+         */
+        if (nadpisz_puste && !alfa) {
+            skalowanie_wiersz_wycinek(wiersz, z, wiersz_dst, dst_w_u, dst_h_u,
+                                      pierwszy_x, liczba, filtr);
+            continue;
+        }
+
+        for (uint32_t i = 0; i < liczba; ++i) {
+            const uint32_t x = pierwszy_x + i;
+            const uint32_t pix = skalowanie_piksel(z, x, wiersz_dst, dst_w_u, dst_h_u, filtr);
+            if (pix == 0U) {
+                if (nadpisz_puste) wiersz[i] = 0U;
+                continue;
+            }
+            const uint32_t coverage = (pix >> 24) & 0xFFU;
+            if (alfa || (coverage != 0U && coverage != 255U)) {
+                compose_scaled_into(wiersz[i], pix, coverage);
+            } else {
+                wiersz[i] = pix;
+            }
+        }
+    }
+
+    if (!batch) zapamietaj_dirty_rysowania(lx0, ly0, lx1 - lx0, ly1 - ly0);
+    return true;
+}
+
+extern "C" bool bws_gui_blit_skalowany(const BwsBlitSkalowany* opis) {
+    if (!opis) return false;
+    return gui_blit_skalowany_region(*opis, false);
+}
+
+/*
+ * BWS57 mode 5 - batch skalowanych regionow. Wywolujacy (syscalls.cpp)
+ * sprawdzil deskryptory i zakresy Ring 3; tutaj walidujemy geometrie
+ * wzgledem warstwy i skladamy wszystkie regiony pod jedna blokada ekranu.
+ */
+extern "C" bool bws_gui_zastap_regiony_skalowane(
+    const BwsGuiRegionSkalowany* regions, uint32_t count, uint32_t generation,
+    uint32_t filtr, uint32_t tryb
+) {
+    auto* layer = pobierz_warstwe(aktualny_pid);
+    if (!regions || !count || count > BWS_GUI_BATCH_SKALOWANY_MAX || !layer ||
+        !layer->bufor_pikseli || !backbuffer || !aktywny_ekran ||
+        (generation && generation != grafika_generacja_ekranu()))
+        return false;
+    if (!skalowanie_filtr_poprawny(filtr) || tryb > SKALOWANIE_WYPELNIJ)
+        return false;
+
+    /* Najpierw cala walidacja, potem jakikolwiek zapis. */
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& r = regions[i];
+        if (!r.pixels || r.src_w == 0 || r.src_h == 0 ||
+            r.src_w > 8192 || r.src_h > 8192)
+            return false;
+        if (r.width < 1 || r.height < 1 || r.width > 8192 || r.height > 8192)
+            return false;
+        if (r.x < layer->x || r.y < layer->y ||
+            int64_t(r.x) + r.width > int64_t(layer->x) + layer->szerokosc ||
+            int64_t(r.y) + r.height > int64_t(layer->y) + layer->wysokosc)
+            return false;
+        uint64_t piksele = 0;
+        if (__builtin_mul_overflow((uint64_t)r.src_w, (uint64_t)r.src_h, &piksele))
+            return false;
+        total += piksele;
+        if (total > BWS_GUI_BATCH_PIXELS_MAX) return false;
+    }
+
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& r = regions[i];
+        BwsBlitSkalowany opis{};
+        opis.wersja = BWS_NOWOCZESNE_ABI_WERSJA;
+        opis.flagi = r.flagi | BWS_BLIT_ZAMIEN_REGION;
+        opis.filtr = filtr;
+        opis.tryb = tryb;
+        opis.dst_x = r.x;
+        opis.dst_y = r.y;
+        opis.dst_w = r.width;
+        opis.dst_h = r.height;
+        opis.src_w = r.src_w;
+        opis.src_h = r.src_h;
+        opis.piksele = r.pixels;
+        if (!gui_blit_skalowany_region(opis, true)) return false;
+    }
+
+    if (skladacz_obrazu_publikuj_klatke(aktualny_pid) &&
+        skladacz_obrazu_czy_widoczna(aktualny_pid))
+        bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_POKAZANE, aktualny_pid);
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& r = regions[i];
+        skladacz_obrazu_oznacz_dirty_rect_dokladny(r.x, r.y, r.width, r.height);
+    }
+    return true;
+}
+
 extern "C" bool bws_gui_zastap_region(int x,int y,int w,int h,const uint32_t* pixels) {
     return gui_blit_region(x,y,w,h,pixels,true);
 }

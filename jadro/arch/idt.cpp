@@ -26,6 +26,8 @@ extern void host_idt_irq_restore(unsigned long);
 #include "pzb.h"
 #include "stos_jadra.h"
 #include "wyjatek_uzytkownika.h"
+#include "jadro/posix/posix_abi.h"
+#include "jadro/posix/posix_jadro.h"
 #ifndef BURSZTYN_IDT_HOST_TEST
 #include "uklad_procesu.h"
 #endif
@@ -67,6 +69,15 @@ constexpr uint16_t SELEKTOR_KODU_JADRA = 0x08;
  * P=1, DPL=0, typ=0xE (64-bit interrupt gate).
  */
 constexpr uint8_t FLAGA_INTERRUPT_GATE_RING0 = 0x8E;
+
+/*
+ * P=1, DPL=3, typ=0xE - bramka wolywalna z Ring 3.
+ *
+ * Uzywana wylacznie dla wektora 0x80 (ABI SysV). Wszystkie pozostale wpisy
+ * pozostaja DPL=0: aplikacja nie moze wywolac wektora wyjatku CPU ani
+ * przerwania sprzetowego, zeby wstrzyknac sie w sciezke Ring 0.
+ */
+constexpr uint8_t FLAGA_INTERRUPT_GATE_RING3 = 0xEE;
 
 constexpr uint16_t LICZBA_WPISOW_IDT = 256;
 constexpr uint16_t LICZBA_AKTYWNYCH_ISR = 256;
@@ -866,6 +877,26 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         zatrzymaj_system();
     }
 
+    /*
+     * Bramka ABI SysV (int 0x80). Wektor programowy, wiec:
+     *
+     *   - nie ma bitu w rejestrze ISR LAPIC (EOI jest no-op),
+     *   - nie przechodzi przez obsluge IRQ/timera nizej,
+     *   - wynik trafia wprost do RAX ramy i IRETQ wraca do Ring 3.
+     *
+     * Sprawdzamy Ring 3, bo bramka ma DPL=3: wywolanie z Ring 0 byloby
+     * bledem w kodzie jadra, a nie zadanym przez aplikacje wywolaniem.
+     */
+    if (wektor64 == POSIX_WEKTOR) {
+        if ((stan->rejestr_cs & 3ULL) == 0ULL) {
+            /* Ring 0 nie uzywa tej bramki - to musi byc blad w kodzie. */
+            wypisz_awaryjnie("\n[PANIC] Bramka SysV wywolana z Ring 0.\n");
+            zatrzymaj_system();
+        }
+        stan->rax = posix_obsluz_bramke(stan);
+        return rsp;
+    }
+
     const uint8_t wektor =
         static_cast<uint8_t>(wektor64);
 
@@ -1038,7 +1069,8 @@ extern "C" void InicjalizujIDT() {
         UstawWpisIDT(
             static_cast<uint8_t>(i),
             adres_isr,
-            FLAGA_INTERRUPT_GATE_RING0);
+            i == POSIX_WEKTOR ? FLAGA_INTERRUPT_GATE_RING3
+                              : FLAGA_INTERRUPT_GATE_RING0);
     }
 
     wskaznik_idtr.rozmiar =
@@ -1066,10 +1098,28 @@ extern "C" void InicjalizujIDT() {
  * ========================================================================= */
 
 static_assert(IDT_PIERWSZY_WEKTOR_DYNAMICZNY > 47, "Dynamic MSI vectors must exclude PS/2 IRQ12 and fixed vectors");
+
+/*
+ * Wektor 0x80 jest bramka ABI SysV (DPL=3), a nie wektorem IRQ. Gdyby wpadl
+ * do puli MSI, sterownik moglby zainstalowac tam handler przerwania i (a)
+ * zniszczyc bramke uzytkownika, (b) wprowadzic do jadra wejscie z DPL=3 do
+ * obslugi sprzetu. Dlatego alokator i zwalnianie jawnie go pomijaja.
+ * Sprawdzamy to takze w idt_ustaw_handler_irq/zwolnij, zeby zaden przyszly
+ * wolajacy nie ominąl tej reguly.
+ */
+constexpr bool wektor_rezerwowany(uint8_t v) {
+    return v == POSIX_WEKTOR;
+}
+
+static_assert(POSIX_WEKTOR >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY &&
+              POSIX_WEKTOR <= IDT_OSTATNI_WEKTOR_DYNAMICZNY,
+              "Bramka SysV lezy w zakresie dynamicznym - musi byc jawnie pomijana");
+
 extern "C" int idt_alokuj_wektor_irq(void) {
     const uint64_t rflags = zapisz_i_wylacz_przerwania();
     int zaalokowany = -1;
     for (int v = IDT_PIERWSZY_WEKTOR_DYNAMICZNY; v <= IDT_OSTATNI_WEKTOR_DYNAMICZNY; ++v) {
+        if (wektor_rezerwowany(static_cast<uint8_t>(v))) continue;
         const int bajt = v / 8;
         const int bit = v % 8;
         if ((wektory_zaalokowane[bajt] & (1U << bit)) == 0) {
@@ -1090,6 +1140,8 @@ extern "C" bool idt_zwolnij_wektor_irq(uint8_t vector) {
     if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY) {
         return false;
     }
+    /* Bramka SysV nie jest wektorem IRQ i nie moze byc zwolniona. */
+    if (wektor_rezerwowany(vector)) return false;
     const uint64_t rflags = zapisz_i_wylacz_przerwania();
     const int bajt = vector / 8;
     const int bit = vector % 8;
@@ -1108,6 +1160,8 @@ extern "C" bool idt_zarejestruj_irq(uint8_t vector, IrqHandlerFn handler, void* 
     if (vector < IDT_PIERWSZY_WEKTOR_DYNAMICZNY || vector > IDT_OSTATNI_WEKTOR_DYNAMICZNY || !handler) {
         return false;
     }
+    /* Bramka SysV jest zarezerwowana dla ABI uzytkownika. */
+    if (wektor_rezerwowany(vector)) return false;
     const uint64_t rflags = zapisz_i_wylacz_przerwania();
     const int bajt = vector / 8;
     const int bit = vector % 8;

@@ -670,7 +670,14 @@ inline bool bur_v2_zastosuj_relokacje_danych(
         if (bur_v2_oblicz_wartosc_relokacji(n, r, baza_obrazu, &wartosc, &szerokosc) != BUR_V2_OK) {
             return false;
         }
-        const size_t off_w_danych = static_cast<size_t>(r.offset_w_obrazie - dane_start);
+        if (r.offset_w_obrazie < dane_start) return false;
+        const uint64_t off_w_danych64 = r.offset_w_obrazie - dane_start;
+        if (szerokosc == 0U ||
+            off_w_danych64 > n.dane_rozmiar_pamieci ||
+            szerokosc > n.dane_rozmiar_pamieci - off_w_danych64) {
+            return false;
+        }
+        const size_t off_w_danych = static_cast<size_t>(off_w_danych64);
         if (szerokosc == 8U) {
             uint64_t* cel64 = reinterpret_cast<uint64_t*>(bufor_danych_pamieci + off_w_danych);
             *cel64 = wartosc;

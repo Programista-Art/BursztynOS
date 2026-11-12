@@ -68,6 +68,7 @@
 #include "bws_pliki.h"
 #include "bws_api.h"
 #include "bws_gui_batch.h"
+#include "skalowanie.h"
 #include "bws_czcionka.h"
 #include "bws_nowoczesne.h"
 #include "bsf/asset_path.h"
@@ -197,6 +198,8 @@ bool bws_gui_blit(
 bool bws_gui_zastap_region(int,int,int,int,const uint32_t*);
 bool bws_gui_alpha_blit(int,int,int,int,const uint32_t*);
 bool bws_gui_zastap_regiony(const BwsGuiRegion*,uint32_t,uint32_t);
+bool bws_gui_zastap_regiony_skalowane(const BwsGuiRegionSkalowany*,uint32_t,uint32_t,
+                                      uint32_t,uint32_t);
 
 extern "C" void SerialLog(
     const char* str
@@ -3978,7 +3981,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
 
         case 57: {
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
-            if(arg4==4) {
+            if (arg4 == 4) {
                 if(arg2!=sizeof(BwsGuiBatch) || arg3)return 0;
                 BwsGuiBatch request{};
                 if(!skopiuj_z_przestrzeni_uzytkownika(&request,reinterpret_cast<const void*>(arg1),sizeof(request)) ||
@@ -4000,6 +4003,59 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                        !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<const void*>(r.pixels),n*4,false))return 0;
                 }
                 return bws_gui_zastap_regiony(regions,request.count,request.display_generation)?1:0;
+            }
+            if (arg4 == 5) {
+                /*
+                 * Batch skalowanych regionow (akceleracja 2D). Kontrakt
+                 * walidacji jest identyczny z trybem 4: najpierw deskryptory
+                 * i wszystkie mapowania Ring 3, potem jeden zapis.
+                 */
+                if (arg2 != sizeof(BwsGuiBatchSkalowany) || arg3) return 0;
+                BwsGuiBatchSkalowany request{};
+                if (!skopiuj_z_przestrzeni_uzytkownika(&request,
+                        reinterpret_cast<const void*>(arg1), sizeof(request)) ||
+                    !request.count || request.count > BWS_GUI_BATCH_SKALOWANY_MAX)
+                    return 0;
+                if (request.display_generation &&
+                    request.display_generation != grafika_generacja_ekranu())
+                    return 0;
+                if (!skalowanie_filtr_poprawny(request.filtr) ||
+                    request.tryb > SKALOWANIE_WYPELNIJ)
+                    return 0;
+                BlokadaEkranu blokada;
+                static BwsGuiRegionSkalowany regiony[BWS_GUI_BATCH_SKALOWANY_MAX];
+                if (!skopiuj_z_przestrzeni_uzytkownika(regiony,
+                        reinterpret_cast<const void*>(request.regions),
+                        request.count * sizeof(BwsGuiRegionSkalowany)))
+                    return 0;
+                uint64_t total = 0;
+                for (uint32_t i = 0; i < request.count; ++i) {
+                    const auto& r = regiony[i];
+                    if (r.width < 1 || r.height < 1 || r.width > 8192 ||
+                        r.height > 8192 || r.src_w == 0 || r.src_h == 0 ||
+                        r.src_w > 8192 || r.src_h > 8192 || !r.pixels ||
+                        r.zarezerwowane ||
+                        (r.flagi & ~(BWS_BLIT_PRZEZROCZYSTE_ZERO |
+                                     BWS_BLIT_ZAMIEN_REGION |
+                                     BWS_BLIT_ALFA_SOURCE_OVER |
+                                     BWS_BLIT_ZACHOWAJ_ASPECT)))
+                        return 0;
+                    uint64_t piksele = 0;
+                    if (__builtin_mul_overflow((uint64_t)r.src_w,
+                                               (uint64_t)r.src_h, &piksele))
+                        return 0;
+                    total += piksele;
+                    if (total > BWS_GUI_BATCH_PIXELS_MAX) return 0;
+                    const uint64_t bajty = piksele * 4ULL;
+                    if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(
+                            reinterpret_cast<const void*>(r.pixels), (size_t)bajty) ||
+                        !bws_vmm_sprawdz_zakres_uzytkownika(
+                            reinterpret_cast<const void*>(r.pixels), (size_t)bajty, false))
+                        return 0;
+                }
+                return bws_gui_zastap_regiony_skalowane(
+                    regiony, request.count, request.display_generation,
+                    request.filtr, request.tryb) ? 1ULL : 0ULL;
             }
             int x = gorne_i32(arg1);
             int y = dolne_i32(arg1);

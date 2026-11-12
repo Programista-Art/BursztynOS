@@ -23,7 +23,13 @@
 .aslr-test/
 .bws-test/
 .ssp-test/
+.posix-test/
+.elf-test/
+.blit-test/
 .tapety-sources.manifest
+
+# --- Zewnętrzne drzewo Chromium (setki GB źródeł, nigdy w repo) ---
+/zewnetrzne/chromium/
 
 # --- QEMU / dyski / logi ---
 *.img
@@ -102,3 +108,7 @@ boot*.log
 # Local integration verification outputs
 /.signature-test/
 /BursztynOS.iso
+
+# --- Artefakty pomiarow graficznych (zrzuty PPM, setki MB) ---
+/.graphics-perf/
+

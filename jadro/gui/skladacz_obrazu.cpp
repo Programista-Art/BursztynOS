@@ -46,6 +46,7 @@
 #include "desktop_modeset.h"
 #include "graphics_perf.h"
 #include "graphics_copy.h"
+#include "skalowanie.h"
 #include "display_mode_policy.h"
 #include "grafika.h"
 #include "gui_runtime_diag.h"
@@ -138,6 +139,13 @@ char tytul_okna[MAKS_WARSTW][48] = {};
 struct TitleCoverage {uint16_t width{},height{};uint32_t capacity{};uint8_t* alpha{};};
 // GUI coverage textures, never font data/parser objects. At most 64 KiB/layer.
 static TitleCoverage title_coverage[MAKS_WARSTW];
+
+/*
+ * Skala powierzchni warstwy (BWS99). Trzymana poza warstwa_obrazu, aby ABI
+ * kompozytora pozostalo zamrozone. src == 0 oznacza brak skalowania.
+ */
+struct SkalaWarstwy { int32_t src_w, src_h; uint32_t tryb; };
+static SkalaWarstwy skala_warstwy[MAKS_WARSTW] = {};
 
 /*
  * Steady-state budzet powierzchni.
@@ -1490,6 +1498,7 @@ void usun_warstwe(
     klatka_gotowa[pid] = false;
     stan_okna[pid] = GUI_OKNO_NORMALNE;
     tytul_okna[pid][0] = '\0';
+    skala_warstwy[pid] = {};
 
     uint32_t* bufor =
         warstwa.bufor_pikseli;
@@ -1576,6 +1585,90 @@ void zloz_wiersz_nieprzezroczysty(uint32_t* dst, const uint32_t* src, int count)
     for(;i<count;++i)if(src[i])dst[i]=src[i]&0xffffffU;
 }
 
+/*
+ * Skalowana powierzchnia warstwy.
+ *
+ * Bufor warstwy zawiera obraz src_w x src_h (gorny-lewy obszar alokacji);
+ * kompozytor probkuje go w caly prostokat warstwy. Wymagane, by
+ * alokacja >= src_w * src_h - sprawdza to wolujacy.
+ *
+ * Semantyka koloru jest identyczna ze sciezka 1:1: dokladne zero jest
+ * przezroczyste, a pulpit dodatkowo tlumi wybor zaznaczenia przez motyw.
+ */
+void zloz_warstwe_skalowana(
+    int indeks,
+    const warstwa_obrazu& w,
+    const ProstokatWidoczny& clip,
+    uint32_t src_w,
+    uint32_t src_h,
+    uint32_t tryb,
+    int ekran_szer,
+    int ekran_wys
+) {
+    const bool decorated = ma_dekoracje(indeks);
+    const bool desktop = w.z_order == 0;
+    const BursztynMotyw* desktop_theme = desktop ? motyw_pobierz_aktywny() : nullptr;
+    const WindowShape shape(w.szerokosc, w.wysokosc,
+                            stan_okna[indeks] == GUI_OKNO_ZMAKSYMALIZOWANE,
+                            ekran_skala(), *motyw_pobierz_aktywny());
+
+    SkalowanieZrodlo z{};
+    z.piksele = w.bufor_pikseli;
+    z.szerokosc = src_w;
+    z.wysokosc = src_h;
+
+    /*
+     * Przy zachowaniu proporcji tresc jest dopasowana do okna, a pozostaly
+     * obszar zostaje nietkniety (letterbox). To jedyne miejsce, gdzie tryb
+     * wplywa na wynik kompozycji.
+     */
+    int okno_x = 0, okno_y = 0;
+    uint32_t okno_w = static_cast<uint32_t>(w.szerokosc);
+    uint32_t okno_h = static_cast<uint32_t>(w.wysokosc);
+    if (tryb != SKALOWANIE_ROZCIAGNIJ) {
+        const SkalowanieProstokat p = skalowanie_dopasuj(
+            src_w, src_h, okno_w, okno_h, tryb);
+        if (p.szerokosc <= 0 || p.wysokosc <= 0) return;
+        okno_x = p.x;
+        okno_y = p.y;
+        okno_w = static_cast<uint32_t>(p.szerokosc);
+        okno_h = static_cast<uint32_t>(p.wysokosc);
+    }
+
+    const uint32_t filtr = skalowanie_filtr_dla(src_w, src_h, okno_w, okno_h);
+
+    for (int y = 0; y < clip.wys; ++y) {
+        const int dst_y = clip.dst_y + y;
+        uint32_t* dst_row = grafika_pobierz_wiersz_backbuffer(dst_y);
+        if (!dst_row) continue;
+        dst_row += clip.dst_x;
+
+        const int ly = dst_y - w.y - okno_y;
+        const bool w_obszarze = ly >= 0 && static_cast<uint32_t>(ly) < okno_h;
+
+        for (int x = 0; x < clip.szer; ++x) {
+            if (decorated && !desktop &&
+                !shape.client(clip.dst_x + x - w.x, dst_y - w.y)) {
+                continue;
+            }
+            if (!w_obszarze) continue;
+            const int lx = clip.dst_x + x - w.x - okno_x;
+            if (lx < 0 || static_cast<uint32_t>(lx) >= okno_w) continue;
+
+            const uint32_t kolor = skalowanie_piksel(
+                z,
+                static_cast<uint32_t>(lx),
+                static_cast<uint32_t>(ly),
+                okno_w, okno_h, filtr);
+            if (kolor == 0x00000000U) continue;
+
+            dst_row[x] = motyw_pulpit_skladaj(dst_row[x], kolor, desktop, desktop_theme);
+        }
+    }
+
+    zloz_dekoracje(indeks, {0, 0, ekran_szer, ekran_wys});
+}
+
 void zloz_warstwe(
     int indeks,
     int ekran_szer,
@@ -1599,6 +1692,34 @@ void zloz_warstwe(
             &clip)) {
 
         return;
+    }
+
+    /*
+     * Skalowanie powierzchni (BWS99). Deklaracja mowi: "ten bufor zawiera
+     * obraz src_w x src_h, pokaz go w calym prostokacie warstwy". Warunek
+     * bezpieczenstwa jest scisly - bufor musi miec dokladnie src_w x src_h
+     * pikseli, wiec probkowanie nie moze wyjsc poza alokacje. Sciezka 1:1
+     * pozostaje nietknieta, gdy deklaracji nie ma albo wymiary sa rowne.
+     */
+    {
+        const SkalaWarstwy skala = skala_warstwy[indeks];
+        if (skala.src_w > 0 && skala.src_h > 0) {
+            const uint32_t zrodlo_w = static_cast<uint32_t>(skala.src_w);
+            const uint32_t zrodlo_h = static_cast<uint32_t>(skala.src_h);
+            const uint64_t zaalokowane =
+                __atomic_load_n(&rozmiar_alokacji_warstwy[indeks], __ATOMIC_ACQUIRE) /
+                sizeof(uint32_t);
+            const uint64_t potrzebne = static_cast<uint64_t>(zrodlo_w) * zrodlo_h;
+            if (zrodlo_w <= 8192U && zrodlo_h <= 8192U) {
+                if (zaalokowane == potrzebne && potrzebne > 0) {
+                    zloz_warstwe_skalowana(indeks, w, clip, zrodlo_w, zrodlo_h,
+                                           skala.tryb, ekran_szer, ekran_wys);
+                    return;
+                }
+            }
+            /* Nieaktualna deklaracja: wyczysc ja i zloz warstwe jak dotad. */
+            skala_warstwy[indeks] = {};
+        }
     }
 
     const bool decorated=ma_dekoracje(indeks);
@@ -2588,6 +2709,44 @@ void skladacz_stan_max(int pid,bool max){
     if(pid_poprawny(pid)&&stan_okna[pid]!=GUI_OKNO_ZMINIMALIZOWANE)
         stan_okna[pid]=max?GUI_OKNO_ZMAKSYMALIZOWANE:GUI_OKNO_NORMALNE;
 }
+
+/* =========================================================================
+ * SKALA POWIERZCHNI WARSTWY (BWS99)
+ * ========================================================================= */
+
+bool skladacz_obrazu_ustaw_skale(int pid, int src_w, int src_h, uint32_t tryb) {
+    if (!pid_poprawny(pid)) return false;
+    if (src_w < 0 || src_h < 0 || src_w > 8192 || src_h > 8192) return false;
+    if ((src_w == 0) != (src_h == 0)) return false;
+    if (tryb > SKALOWANIE_WYPELNIJ) return false;
+    if (src_w > 0) {
+        const uint64_t potrzebne =
+            static_cast<uint64_t>(src_w) * static_cast<uint64_t>(src_h);
+        const uint64_t zaalokowane =
+            __atomic_load_n(&rozmiar_alokacji_warstwy[pid], __ATOMIC_ACQUIRE) /
+            sizeof(uint32_t);
+        /*
+         * Deklaracja musi opisac dokladnie istniejacy bufor. Inaczej
+         * probkowanie mogloby wyjsc poza alokacje, wiec odrzucamy ja.
+         */
+        if (potrzebne == 0 || potrzebne != zaalokowane) return false;
+    }
+    skala_warstwy[pid] = {static_cast<int32_t>(src_w), static_cast<int32_t>(src_h), tryb};
+    skladacz_obrazu_oznacz_dirty_warstwy(pid);
+    return true;
+}
+
+void skladacz_obrazu_pobierz_skale(int pid, int* src_w, int* src_h, uint32_t* tryb) {
+    if (src_w) *src_w = 0;
+    if (src_h) *src_h = 0;
+    if (tryb) *tryb = SKALOWANIE_ROZCIAGNIJ;
+    if (!pid_poprawny(pid)) return;
+    const SkalaWarstwy s = skala_warstwy[pid];
+    if (src_w) *src_w = s.src_w;
+    if (src_h) *src_h = s.src_h;
+    if (tryb) *tryb = s.tryb;
+}
+
 bool skladacz_przygotuj_ekran(const DisplayGeometry& next,ZmianaWarstwEkranu* z){
     const int sw=next.width,sh=next.height,work_h=next.work_height;
     const auto previous=grafika_geometria_ekranu();

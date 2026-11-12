@@ -24,6 +24,7 @@
 
 #include "scheduler.h"
 #include "fpu.h"
+#include "tls.h"
 #include "gui_runtime_diag.h"
 #include "pzb.h"
 #include "pamiec.h"
@@ -1300,6 +1301,12 @@ extern "C" uint64_t PrzelaczKontekst(
     }
 #endif
     fpu_switch_process(stary_pid, nastepny_pid);
+    /*
+     * TLS per proces (%fs): zapis IA32_FS_BASE wchodzacego procesu.
+     * Musi byc po zmianie CR3 i przed powrotem do Ring 3, zeby proces
+     * zobaczyl swoj TLS przy pierwszej instrukcji po IRETQ.
+     */
+    tls_przelacz(nastepny_pid);
     gui_perf_switch(nastepny_pid);
     aktualny_pid =
         nastepny_pid;

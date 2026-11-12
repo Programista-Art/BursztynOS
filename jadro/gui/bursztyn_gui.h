@@ -17,6 +17,7 @@
 #include "bws_api.h"
 #include "bws_gui_batch.h"
 #include "bws_nowoczesne.h"
+#include "skalowanie.h"
 #include "skladacz_obrazu.h"
 #include "legacy_ui.h"
 #include "motyw.h"
@@ -177,7 +178,6 @@ uint64_t ipc_create();
 bool ipc_send(uint64_t endpoint, const BwsIpcWyslij* wiadomosc);
 bool ipc_receive(uint64_t endpoint, BwsIpcOdbierz* wiadomosc);
 bool ipc_close(uint64_t endpoint);
-
 uint64_t file_watch(const char* sciezka, uint32_t maska);
 bool file_unwatch(uint64_t handle);
 
@@ -189,6 +189,32 @@ bool clipboard_set(const char* mime, const void* dane, uint64_t rozmiar);
 
 bool gui_ustaw_kursor(uint32_t typ);
 bool gui_ustaw_kursor_custom(const GuiCustomCursorInfo* info);
+
+/*
+ * BWS98 / BWS99 - akceleracja 2D.
+ *
+ * gui_blit_skalowany: jeden skalowany blit z bufora Ring 3 do warstwy
+ *   procesu. dst_* sa fizyczne; filtr to SkalowanieFiltr, flagi to BWS_BLIT_*,
+ *   tryb to SkalowanieTryb (uzywany tylko z BWS_BLIT_ZACHOWAJ_ASPECT).
+ *
+ * gui_ustaw_skale_warstwy: deklaracja "bufor warstwy zawiera obraz
+ *   src_w x src_h". Kompozytor sam probkuje go w caly prostokat warstwy,
+ *   wiec aplikacja nie placi za skalowanie w Ring 3.
+ *
+ * Oba wywolania wymagaja PRAWO_GUI. Skalowanie jest software'owe, ale za
+ * to bezposrednio w docelowa powierzchnie - GPU dostaje tylko gotowa klatke
+ * (transfer + flush regionow w istniejacej sciezce prezentacji).
+ */
+bool gui_blit_skalowany(int dst_x, int dst_y, int dst_w, int dst_h,
+                        const uint32_t* piksele, uint32_t src_w, uint32_t src_h,
+                        uint32_t filtr = SKALOWANIE_NEAREST,
+                        uint32_t flagi = BWS_BLIT_PRZEZROCZYSTE_ZERO,
+                        uint32_t tryb = SKALOWANIE_ROZCIAGNIJ);
+bool gui_blit_skalowany_regionu(const uint32_t* piksele, uint32_t src_w,
+                                uint32_t src_h, int dst_x, int dst_y,
+                                int dst_w, int dst_h,
+                                uint32_t filtr = SKALOWANIE_BILINEAR);
+bool gui_ustaw_skale_warstwy(int src_w, int src_h, uint32_t tryb = SKALOWANIE_ROZCIAGNIJ);
 
 uint64_t socket_create(uint32_t typ = BWS_SOCKET_TCP_IPV4);
 bool socket_connect(uint64_t handle, const uint8_t ipv4[4], uint16_t port);

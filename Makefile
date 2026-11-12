@@ -168,6 +168,7 @@ JADRO_INCLUDES := \
 	-Ijadro/siec \
 	-Ijadro/aktualizacja \
 	-Ijadro/diag \
+	-Ijadro/posix \
 	-Ijadro/rdzen
 
 # Wspólne -I dla harnessów host (g++ lokalny).
@@ -432,10 +433,16 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	vmm.o \
 	psf.o \
 	grafika.o \
+	elf_loader.o \
 	ekran_powitalny.o \
 	syscall.o \
 	syscalls.o \
 	bws_nowoczesne.o \
+	posix_dyspozytor.o \
+	posix_jadro.o \
+	watek_tls.o \
+	mmap.o \
+	mmap_jadro.o \
 	pci.o \
 	virtio_pci.o \
 	virtqueue.o \
@@ -613,6 +620,11 @@ kernel.o: jadro/rdzen/kernel.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 loader.o: jadro/fs/loader.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+# Walidacja i opis ELF64 (punkt 2.14). Osobny obiekt, bo jest reuzywany przez
+# fuzz/host testy i musi pozostac wolny od zaleznosci jadra.
+elf_loader.o: jadro/fs/elf_loader.cpp jadro/fs/elf_loader.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 podpis_paczki.o: jadro/fs/podpis_paczki.cpp jadro/fs/podpis_paczki.h jadro/aktualizacja/aktualizacja_klucz.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 missing_backend.o: jadro/gui/missing_backend.cpp
@@ -676,6 +688,26 @@ bws_nowoczesne.o: jadro/bws/bws_nowoczesne.cpp jadro/bws/bws_nowoczesne.h jadro/
 	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
 syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+# Bramka ABI SysV (int 0x80). Dyspozytor jest przenosny; posix_jadro.cpp
+# spina go z podsystemami jadra.
+posix_dyspozytor.o: jadro/posix/posix_dyspozytor.cpp jadro/posix/posix_dyspozytor.h jadro/posix/posix_abi.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+posix_jadro.o: jadro/posix/posix_jadro.cpp jadro/posix/posix_jadro.h jadro/posix/posix_dyspozytor.h jadro/posix/posix_abi.h jadro/bws/pzb.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+# TLS per proces (%fs). Obiekt nosi nazwe watek_tls.o, bo `tls.o` jest juz
+# zajety przez mbedTLS (jadro/siec/tls.cpp); kolizja nazw zerwala link.
+watek_tls.o: jadro/mm/tls.cpp jadro/mm/tls.h jadro/bws/pzb.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+# mmap: czysta arytmetyka okna + mapowanie ramek w jadrze.
+mmap.o: jadro/mm/mmap.cpp jadro/mm/mmap.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+mmap_jadro.o: jadro/mm/mmap_jadro.cpp jadro/mm/mmap_jadro.h jadro/mm/mmap.h jadro/mm/pamiec.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
@@ -1919,6 +1951,67 @@ motyw.o: jadro/gui/skladacz_obrazu.h
 shell_tmp.o: bursztyn_ui/widok_menu_popup.h
 grafika.o: jadro/gui/wm_input.h
 bursztyn_gui.o: jadro/gui/wm_belka_hit.h
+
+.PHONY: test-blit-skalowanie-host
+test-blit-skalowanie-host:
+	@mkdir -p .blit-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_blit_skalowanie_host.cpp -o .blit-test/test-blit-skalowanie
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .blit-test/test-blit-skalowanie
+
+# Wzgledny koszt filtrow skalowania. Nie jest gate'em: sluzy do uzasadnienia
+# polityki skalowanie_filtr_dla() i do wykrywania przypadkowych regresji kosztu.
+.PHONY: bench-blit-skalowanie
+bench-blit-skalowanie:
+	@mkdir -p .blit-test
+	g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic $(HOST_INCLUDES) testy/bench_blit_skalowanie.cpp -o .blit-test/bench-blit-skalowanie
+	.blit-test/bench-blit-skalowanie
+
+# Bramka ABI SysV (int 0x80): mapowanie rejestrow, konwencja errno, wartosci
+# skrajne. Host-only, wiec szybka i uruchamiana w kazdym gate'cie.
+.PHONY: test-posix-abi-host
+test-posix-abi-host:
+	@mkdir -p .posix-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_posix_abi_host.cpp jadro/posix/posix_dyspozytor.cpp -o .posix-test/test-posix-abi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-posix-abi
+
+# Bramka SysV w prawdziwym Ring 3: DPL=3, ABI rejestrow, errno, brak regresji BWS.
+.PHONY: test-posix-gate-qemu
+test-posix-gate-qemu: iso
+	python3 testy/test_posix_gate_qemu.py
+
+# Walidacja i opis ELF64: W^X, BSS, granice, odrzucanie wersji dynamicznych.
+.PHONY: test-elf-loader-host
+test-elf-loader-host:
+	@mkdir -p .elf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_elf_loader_host.cpp jadro/fs/elf_loader.cpp -o .elf-test/test-elf-loader
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .elf-test/test-elf-loader
+
+# Fuzz loadera ELF: mutacje poprawnego obrazu pod ASan/UBSan.
+.PHONY: fuzz-elf-loader
+fuzz-elf-loader:
+	@mkdir -p .elf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/fuzz/fuzz_elf_loader.cpp jadro/fs/elf_loader.cpp -o .elf-test/fuzz-elf-loader
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .elf-test/fuzz-elf-loader 20000
+
+# TLS per proces (%fs): izolacja baz, przelaczanie, walidacja adresu.
+.PHONY: test-tls-host
+test-tls-host:
+	@mkdir -p .posix-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_TLS_HOST_TEST=1 -fsanitize=address,undefined testy/test_tls_host.cpp jadro/mm/tls.cpp -o .posix-test/test-tls
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-tls
+
+# Okno adresowe mmap: brak kolizji z innymi zakresami, first-fit, flagi, W^X.
+.PHONY: test-mmap-host
+test-mmap-host:
+	@mkdir -p .posix-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_mmap_host.cpp jadro/mm/mmap.cpp -o .posix-test/test-mmap
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-mmap
+
+# Weryfikacja backendu Ozone bez pobierania Chromium: numery BWS, args.gn,
+# brak niedostepnych API, manifest PZB.
+.PHONY: test-chromium-backend
+test-chromium-backend:
+	python3 narzedzia/chromium/weryfikuj_backend.py
 
 .PHONY: test-wm-click-routing test-wm-dekoracje test-shell-host
 test-wm-click-routing:

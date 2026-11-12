@@ -1112,6 +1112,58 @@ bool gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t gene
     return bws_wywolaj(57,reinterpret_cast<uint64_t>(&batch),sizeof(batch),0,4)==1;
 }
 
+/*
+ * BWS98 - jeden skalowany blit do warstwy procesu.
+ *
+ * Aplikacja (Husarz, przyszlosc: Chromium) rysuje tresc w rozdzielczosci
+ * zrodla i oddaje ja jednym wywolaniem. Wspolrzedne docelowe sa fizyczne,
+ * tak jak reszta API graficznego (legacy_x/legacy_y konwertuja skale).
+ */
+bool gui_blit_skalowany(int dst_x, int dst_y, int dst_w, int dst_h,
+                        const uint32_t* piksele, uint32_t src_w, uint32_t src_h,
+                        uint32_t filtr, uint32_t flagi, uint32_t tryb) {
+    if (!piksele || dst_w <= 0 || dst_h <= 0 || src_w == 0 || src_h == 0)
+        return false;
+    BwsBlitSkalowany opis{};
+    opis.wersja = BWS_NOWOCZESNE_ABI_WERSJA;
+    opis.flagi = flagi;
+    opis.filtr = filtr;
+    opis.tryb = tryb;
+    opis.dst_x = legacy_x(dst_x);
+    opis.dst_y = legacy_y(dst_y);
+    opis.dst_w = legacy_w(dst_w);
+    opis.dst_h = legacy_h(dst_h);
+    opis.src_w = src_w;
+    opis.src_h = src_h;
+    opis.piksele = reinterpret_cast<uint64_t>(piksele);
+    return bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                       reinterpret_cast<uint64_t>(&opis), sizeof(opis), 0, 0) == 1ULL;
+}
+
+/*
+ * BWS99 - deklaracja skali powierzchni warstwy.
+ *
+ * Po tej deklaracji kompozytor sam probkuje bufor src_w x src_h w caly
+ * prostokat warstwy, wiec aplikacja nie musi skalowac w Ring 3.
+ * Wywolanie z src_w==0/src_h==0 wylacza skalowanie.
+ */
+bool gui_ustaw_skale_warstwy(int src_w, int src_h, uint32_t tryb) {
+    if (src_w < 0 || src_h < 0 || (src_w == 0) != (src_h == 0)) return false;
+    return bws_wywolaj(BWS_GUI_SKALA_WARSTWY,
+                       spakuj_dwa_i32(src_w, src_h), tryb, 0, 0) == 1ULL;
+}
+
+/*
+ * Wygodny wariant dla aplikacji rysujacej w skali logicznej: zrodlo ma
+ * wymiary okna powiekszone o skale DPI, a prostokat docelowy to okno.
+ */
+bool gui_blit_skalowany_regionu(const uint32_t* piksele, uint32_t src_w,
+                                uint32_t src_h, int dst_x, int dst_y,
+                                int dst_w, int dst_h, uint32_t filtr) {
+    return gui_blit_skalowany(dst_x, dst_y, dst_w, dst_h, piksele, src_w, src_h,
+                              filtr, BWS_BLIT_PRZEZROCZYSTE_ZERO, SKALOWANIE_ROZCIAGNIJ);
+}
+
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa) {
     return sciezka && nowa_nazwa &&
         bws_wywolaj(8, reinterpret_cast<uint64_t>(sciezka),

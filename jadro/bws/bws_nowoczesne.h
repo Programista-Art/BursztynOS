@@ -109,6 +109,52 @@ enum BwsSocketTyp : uint32_t {
     BWS_SOCKET_TCP_IPV4 = 1
 };
 
+/* =========================================================================
+ * BWS98/BWS99 - skalowany blit i skala warstwy
+ * ========================================================================= */
+
+/*
+ * Opis jednego skalowanego blitu z bufora Ring 3 do warstwy procesu.
+ *
+ * Bufor zrodla jest ZAWSZE ciagly (stride == src_w * 4). Kontrakt jest
+ * celowo waski: "przeskaluj caly obraz src_w x src_h do prostokata
+ * dst_w x dst_h". Przycinanie do warstwy robi jadro. Dzieki temu nie ma
+ * drugiej, ukrytej definicji wspolrzednych.
+ *
+ * dst_x/dst_y to wspolrzedne ekranu, tak jak w BWS57.
+ */
+struct BwsBlitSkalowany {
+    uint32_t wersja;        /* BWS_NOWOCZESNE_ABI_WERSJA */
+    uint32_t flagi;         /* BWS_BLIT_* */
+    uint32_t filtr;         /* SkalowanieFiltr */
+    uint32_t tryb;          /* SkalowanieTryb (tylko z ZACHOWAJ_ASPECT) */
+    int32_t dst_x;
+    int32_t dst_y;
+    int32_t dst_w;
+    int32_t dst_h;
+    uint32_t src_w;
+    uint32_t src_h;
+    uint32_t zarezerwowane;
+    uint32_t zarezerwowane2;
+    uint64_t piksele;
+};
+
+enum BwsBlitFlagi : uint32_t {
+    /* Domyslnie: piksel pusty (0x00000000) nie jest zapisywany. */
+    BWS_BLIT_PRZEZROCZYSTE_ZERO = 1U << 0,
+    /* Zamiast pomijac puste piksele, nadpisz caly prostokat (BWS57 tryb 2). */
+    BWS_BLIT_ZAMIEN_REGION = 1U << 1,
+    /* Zloz wynik metoda source-over zamiast nadpisywania. */
+    BWS_BLIT_ALFA_SOURCE_OVER = 1U << 2,
+    /* Uzyj trybu dopasowania (fit/cover) zamiast prostego rozciagniecia. */
+    BWS_BLIT_ZACHOWAJ_ASPECT = 1U << 3
+};
+
+#ifdef __cplusplus
+static_assert(sizeof(BwsBlitSkalowany) == 56, "ABI BwsBlitSkalowany");
+#endif
+
+
 enum BwsIoStatus : uint32_t {
     BWS_IO_OK = 0,
     BWS_IO_EOF = 1,

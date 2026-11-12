@@ -44,10 +44,11 @@ static void log_s(const char* s) {
 extern "C" __attribute__((noreturn)) void _start() {
     log_s("\n[BWS-ABUSE-QEMU] Start testow odpornosci BWS z nieuprzywilejowanego procesu Ring 3 (PZB_UZYTKOWNIK)\n");
 
-    /* 1. Regresja Bug #1: BWS 99 z 0xDEADBEEFCAFEULL NIGDY nie moze wywolac paniki jadra! */
-    const uint64_t r99 = bws_wywolaj(99ULL, 0xDEADBEEFCAFEULL, 0, 0, 0);
-    CHECK_BWS(r99 == UINT64_MAX, "Bug #1 regression failed: BWS 99 did not return UINT64_MAX");
-    log_s("[BWS-ABUSE-QEMU] 1/6 Regresja Bug #1 (BWS 99 + 0xDEADBEEFCAFEULL): OK\n");
+    /* 1. Regresja Bug #1: numer spoza tablicy BWS NIGDY nie moze wywolac paniki jadra! */
+    const uint64_t nieznany = BWS_PIERWSZY_WOLNY + 1000ULL;
+    const uint64_t r99 = bws_wywolaj(nieznany, 0xDEADBEEFCAFEULL, 0, 0, 0);
+    CHECK_BWS(r99 == UINT64_MAX, "Bug #1 regression failed: nieznany BWS nie zwrocil UINT64_MAX");
+    log_s("[BWS-ABUSE-QEMU] 1/6 Regresja Bug #1 (nieznany numer + 0xDEADBEEFCAFEULL): OK\n");
 
     /* 2. Wskazniki NULL, jadro, HHDM, niekanoniczne oraz guard page stosu Ring 3 */
     const uint64_t bad_ptrs[] = {
@@ -91,6 +92,69 @@ extern "C" __attribute__((noreturn)) void _start() {
     CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT, 0, (4096ULL << 32) | 4096ULL, 0x1081000ULL, 0) == 0,
               "BWS_GUI_BLIT(4096x4096) did not fail");
     log_s("[BWS-ABUSE-QEMU] 4/6 Odrzucanie przepelnien rozmiarow (sterta/blit): OK\n");
+
+    /*
+     * 4b. Skalowany blit (BWS 98) - nowa powierzchnia ataku. Kazdy deskryptor
+     *     z niepoprawnym rozmiarem, filtrem, trybem lub zakresem Ring 3 musi
+     *     byc odrzucony bez dotkniecia warstwy.
+     */
+    {
+        static uint8_t bufor_ataku[2048] = {};
+        BwsBlitSkalowany zle{};
+        zle.wersja = BWS_NOWOCZESNE_ABI_WERSJA;
+        zle.filtr = 99;
+        zle.dst_w = 16; zle.dst_h = 16; zle.src_w = 16; zle.src_h = 16;
+        zle.piksele = reinterpret_cast<uint64_t>(bufor_ataku);
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted an unknown filter");
+
+        zle.filtr = 0; /* SKALOWANIE_NEAREST */
+        zle.tryb = 99;
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted an unknown fit mode");
+
+        zle.tryb = 0;
+        zle.src_w = 0;
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted zero source width");
+
+        zle.src_w = 8193;
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted an oversized source width");
+
+        zle.src_w = 16;
+        zle.piksele = 0x10; /* niezmapowany Ring 3 */
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted an unmapped pixel buffer");
+
+        zle.piksele = reinterpret_cast<uint64_t>(bufor_ataku);
+        zle.flagi = 1U << 31; /* nieznana flaga */
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle), 0, 0) == 0,
+                  "BWS98 accepted an unknown flag bit");
+
+        zle.flagi = 0;
+        CHECK_BWS(bws_wywolaj(BWS_GUI_BLIT_SKALOWANY,
+                              reinterpret_cast<uint64_t>(&zle), sizeof(zle) - 1, 0, 0) == 0,
+                  "BWS98 accepted a truncated descriptor");
+
+        /* BWS99: deklaracja skali nie moze opisac buforu wiekszego niz warstwa. */
+        CHECK_BWS(bws_wywolaj(BWS_GUI_SKALA_WARSTWY,
+                              (8192ULL << 32) | 8192ULL, 0, 0, 0) == 0,
+                  "BWS99 accepted a scale larger than the layer buffer");
+        CHECK_BWS(bws_wywolaj(BWS_GUI_SKALA_WARSTWY,
+                              (16ULL << 32) | 0ULL, 0, 0, 0) == 0,
+                  "BWS99 accepted one zero dimension");
+        CHECK_BWS(bws_wywolaj(BWS_GUI_SKALA_WARSTWY,
+                              (16ULL << 32) | 16ULL, 99, 0, 0) == 0,
+                  "BWS99 accepted an unknown fit mode");
+        log_s("[BWS-ABUSE-QEMU] 4b/6 Walidacja BWS98/BWS99 (skalowany blit, skala warstwy): OK\n");
+    }
 
     /* 5. Egzekwowanie PZB i PRAWO_* dla operacji systemowych z PZB_UZYTKOWNIK */
     uint8_t process_list[2048] = {};

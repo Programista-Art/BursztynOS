@@ -1,0 +1,93 @@
+# Chromium GN args for Bursztyn OS. Target: headless_shell with Ozone backend.
+#
+# Nie jest to plik w drzewie Chromium - kopiuje go narzedzia/chromium/przygotuj.py.
+# Kazda flaga ma uzasadnienie; zmiana bez uzasadnienia to regresja.
+
+is_debug = false
+is_official_build = false
+
+# Toolchain: clang + libc++ wlasny, bez sysrootu (Bursztyn nie ma glibc).
+is_clang = true
+use_custom_libcxx = true
+use_sysroot = false
+use_lld = true
+is_component_build = false
+# Kanaly AVX/SSE w Chromium zakladaja OS wspierajacy pelny stan SSE w jadrze.
+# Bursztyn utrzymuje -mno-sse w Ring 0, ale Ring 3 ma SSE2 (przegladarka
+# i Husarz sa budowane z -msse2), wiec SSE2 zostaje wlaczone.
+enable_sse3 = false
+enable_avx = false
+enable_avx2 = false
+
+target_os = "bursztyn"
+target_cpu = "x64"
+
+# Ozone: jedyny backend graficzny.
+use_ozone = true
+ozone_platform_bursztyn = true
+ozone_platform_x11 = false
+ozone_platform_wayland = false
+ozone_platform_headless = true   # potrzebne dla headless_shell
+use_glib = false
+use_gtk = false
+use_x11 = false
+use_dbus = false
+use_udev = false
+use_libpci = false
+
+# Bez sandboxa w pierwszym etapie: seccomp-bpf i namespace'y wymagaja API,
+# ktorych Bursztyn jeszcze nie ma. Sandbox wraca po dodaniu clone/unshare.
+use_seccomp_bpf = false
+enable_sandbox = false
+
+# Siec: Chromium ma wlasny stos (URLLoader -> socket). Nasza warstwa POSIX
+# dostarcza socket/connect/send/recv; HTTP/2 i QUIC wymagaja UDP + TLS 1.3,
+# ktore mamy w jadrze (mbedTLS), ale nie w Ring 3. Wylaczamy dla etapu 1.
+enable_quic = false
+rtc_build = false
+enable_webrtc = false
+
+# Rzeczy zbedne w pierwszym celu (headless_shell).
+enable_nacl = false
+enable_pdf = false
+enable_print_preview = false
+enable_widevine = false
+enable_remoting = false
+enable_casting = false
+enable_plugins = false
+enable_media_router = false
+enable_web_speech = false
+enable_supervised_users = false
+
+# Rasteryzacja: Skia CPU. Ganesh/Graphite wymagaja GPU API (brak).
+skia_use_gl = false
+skia_use_vulkan = false
+skia_use_metal = false
+skia_use_dawn = false
+skia_enable_graphite = false
+
+# Czcionki: FreeType przez BSF. HarfBuzz jest potrzebny do shapingu tekstu;
+# BSF ma juz GSUB/GPOS, ale Chromium uzywa wlasnego - zostawiamy HarfBuzz
+# (nie konfliktuje, dziala na tej samej warstwie POSIX).
+use_freetype = true
+use_harfbuzz = true
+use_fontconfig = false   # brak fontconfig; czcionki przez BSF/PSF
+
+# ICU: Chromium wymaga ICU do i18n; BSF ma wlasne Unicode, ale ICU jest
+# niezalezne i kompiluje sie bez systemowych danych (icu_use_data_file=false
+# pakuje dane w binarke).
+icu_use_data_file = false
+
+# Kompresja i kryptografia: systemowe biblioteki nie istnieja, wiec Chromium
+# uzywa swoich (zlib, boringssl).
+use_system_zlib = false
+use_openssl = false          # BoringSSL wbudowany
+use_kerberos = false
+
+# Logi i crash reporting: wymagaja syslog/breakpad; wylaczone.
+enable_logging = true        # do seriala przez write(2)
+enable_crash_reporter = false
+use_cups = false
+
+# headless_shell: jedyny cel binarny etapu 1.
+enable_headless_shell = true

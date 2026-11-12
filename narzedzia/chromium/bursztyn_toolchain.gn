@@ -1,0 +1,34 @@
+# Bursztyn OS - toolchain GN dla Chromium.
+
+# Ten plik jest szablonem, ktory narzedzia/chromium/przygotuj.py kopiuje do
+# drzewa Chromium jako build/toolchain/bursztyn/BUILD.gn i dopina do
+# build/config/BUILDCONFIG.gn. Nie jest kompilowany przez Bursztyn OS.
+
+# Target triple i sysroot:
+#   Bursztyn OS nie ma sysrootu w rozumieniu glibc; cala libc dostarcza
+#   Chromium (use_custom_libcxx) + nasza warstwa POSIX (jadro/posix).
+#   Dlatego use_sysroot = false i is_clang = true bez --sysroot.
+
+declare_args() {
+  bursztyn_target_triple = "x86_64-bursztyn"
+  bursztyn_use_lld = true
+}
+
+bursztyn_toolchain("bursztyn") {
+  toolchain_args = {
+    current_os = "bursztyn"
+    current_cpu = "x64"
+    is_clang = true
+    use_custom_libcxx = true
+    use_sysroot = false
+    is_component_build = false
+    enable_nacl = false
+    use_ozone = true
+    ozone_platform_bursztyn = true
+    use_glib = false
+    rtc_build = false
+    use_lld = bursztyn_use_lld
+    target_os = "bursztyn"
+    target_cpu = "x64"
+  }
+}

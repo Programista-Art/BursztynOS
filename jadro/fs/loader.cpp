@@ -29,6 +29,9 @@
 #include "stos_jadra.h"
 #include "stack_protector.h"
 #include "bur_v2.h"
+#include "elf_loader.h"
+#include "tls.h"
+#include "jadro/posix/posix_jadro.h"
 #include "entropia.h"
 #include "uklad_procesu.h"
 UkladProcesu uklady_procesow[PZB_MAKS_PROCESOW]{};
@@ -529,6 +532,8 @@ static int zarezerwuj_slot_procesu(
 
         wyzeruj_znane_pola_procesu(proces);
         fpu_reset_process(pid);
+        /* Nowy proces nie dziedziczy TLS po poprzednim wlascicielu PID. */
+        tls_zwolnij_proces(pid);
         argument_startowy_procesu[pid][0] = '\0';
         proces.pid = static_cast<uint64_t>(pid);
 
@@ -570,6 +575,10 @@ static void zwolnij_rezerwacje_procesu(
 
     /* PID-y sa recyklingowane, wiec losowa baza stosu nie moze przetrwac. */
     g_baza_stosu_user[pid] = 0;
+    /* To samo dotyczy bazy TLS: nowy proces nie moze dostac cudzego %fs. */
+    tls_zwolnij_proces(pid);
+    /* Stany bramki SysV (mmap, TLS) rowniez nie moga przetrwac recyklingu. */
+    posix_zwolnij_proces(pid);
 
     __atomic_store_n(
         &proces.stan,
@@ -1569,6 +1578,81 @@ extern "C" bool bws_uruchom_program_z_pliku_z_argumentem(
         sciezka_pliku, bzl_poziom, flagi_praw, z_syscalla,
         argument_startowy);
 }
+
+/* =========================================================================
+ * ROZPOZNANIE FORMATU BINARKI
+ * ========================================================================= */
+
+extern "C" const char* loader_status_formatu(const uint8_t* obraz, size_t rozmiar) {
+    /*
+     * Jedyne miejsce, w ktorym loader rozroznia formaty. .bur pozostaje
+     * domyslny i jedyny wykonywalny; ELF64 jest rozpoznawany, walidowany i
+     * raportowany, ale jego mapowanie wymaga demand pagingu (punkt 2.18
+     * planu portu), bo segmenty ELF maja wlasne granice i BSS.
+     *
+     * Zwracamy konkretny status, zeby diagnostyka i testy mogly odroznic:
+     *
+     *   "bur"              - poprawny naglowek .bur (v1 albo v2),
+     *   "elf-ok:<n>seg"    - poprawny ELF64, gotowy do mapowania,
+     *   "elf:<blad>"       - ELF rozpoznany, ale odrzucony (powod),
+     *   "nieznany"         - zaden znany format.
+     *
+     * Decyzja jest czysta: nie alokuje, nie mapuje, nie zmienia stanu.
+     */
+    if (!obraz || rozmiar < 4) return "nieznany";
+
+    if (rozmiar >= sizeof(NaglowekBur)) {
+        const uint8_t bur_magia[4] = {
+            BUR_MAGIA_0, BUR_MAGIA_1, BUR_MAGIA_2, BUR_MAGIA_3
+        };
+        if (PorownajPamiec(obraz, bur_magia, sizeof(bur_magia))) return "bur";
+    }
+
+    if (rozmiar >= sizeof(Elf64_Ehdr) &&
+        obraz[0] == ELF_MAGIA[0] && obraz[1] == ELF_MAGIA[1] &&
+        obraz[2] == ELF_MAGIA[2] && obraz[3] == ELF_MAGIA[3]) {
+        const ElfStatus status = elf_waliduj(obraz, rozmiar);
+        if (status == ELF_OK) {
+            ElfObraz opis{};
+            if (elf_opisz(obraz, rozmiar, &opis) == ELF_OK) {
+                /*
+                 * Statyczny bufor statusu: loader nie alokuje przy
+                 * diagnostyce, a wynik jest natychmiast kopiowany przez
+                 * wolajacego. Jednordzeniowy model BWS serializuje dostep.
+                 */
+                static char bufor_statusu[64];
+                static const char prefiks[] = "elf-ok:";
+                size_t n = 0;
+                for (; prefiks[n] != '\0'; ++n) bufor_statusu[n] = prefiks[n];
+                uint32_t seg = opis.liczba_segmentow;
+                if (seg > 9) {
+                    bufor_statusu[n++] = '1';
+                    bufor_statusu[n++] = '0';
+                    bufor_statusu[n++] = '+';
+                } else {
+                    bufor_statusu[n++] = static_cast<char>('0' + seg);
+                }
+                static const char sufiksu[] = "seg";
+                for (size_t i = 0; sufiksu[i] != '\0' && n + 1 < sizeof(bufor_statusu); ++i)
+                    bufor_statusu[n++] = sufiksu[i];
+                bufor_statusu[n] = '\0';
+                return bufor_statusu;
+            }
+        }
+        static char bufor_bledu[64];
+        static const char prefiks[] = "elf:";
+        size_t n = 0;
+        for (; prefiks[n] != '\0'; ++n) bufor_bledu[n] = prefiks[n];
+        const char* opis_bledu = elf_status_opis(status);
+        for (size_t i = 0; opis_bledu[i] != '\0' && n + 1 < sizeof(bufor_bledu); ++i)
+            bufor_bledu[n++] = opis_bledu[i];
+        bufor_bledu[n] = '\0';
+        return bufor_bledu;
+    }
+
+    return "nieznany";
+}
+
 
 extern "C" bool loader_pobierz_argument_startowy(
     int pid,

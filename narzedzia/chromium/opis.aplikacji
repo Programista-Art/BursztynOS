@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Manifest paczki .cebula dla Chromium (headless_shell + Ozone backend).
+
+  Ten plik definiuje uprawnienia PZB i prawo BWS. Jest CELOWO waski:
+
+    - okna                 : jedyna warstwa GUI (BWS 33/98/99),
+    - pliki_czytaj/zapisz  : profil, cache, pobrane pliki,
+    - siec                 : HTTP/HTTPS przez BWS 28-30 i 79-83,
+    - uruchom_program      : NIE (Chromium nie uruchamia innych .bur),
+
+  poziom_zaufania = 4 oznacza PZB_UZYTKOWNIK: jadro nie pozwoli mu ruszyc
+  /system ani /jadro, a bramka SysV nie da dostepu do arch_prctl(GS).
+-->
+<aplikacja>
+  <nazwa>Chromium</nazwa>
+  <autor>Bursztyn OS</autor>
+  <wersja>0.1.0-headless</wersja>
+  <poziom_zaufania>4</poziom_zaufania>
+  <plik_startowy>headless_shell.bur</plik_startowy>
+  <uprawnienia>
+    <uprawnienie>okna</uprawnienie>
+    <uprawnienie>pliki_czytaj</uprawnienie>
+    <uprawnienie>pliki_zapisz</uprawnienie>
+    <uprawnienie>siec</uprawnienie>
+  </uprawnienia>
+</aplikacja>

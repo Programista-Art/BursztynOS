@@ -1,0 +1,46 @@
+# Ozone platform backend dla Bursztyn OS.
+#
+# Odpowiednik ui/ozone/platform/headless, ale zamiast pustej powierzchni
+# mapuje okno na warstwe BWS i prezentuje klatki przez BWS98.
+#
+# Ten plik jest kopiowany do drzewa Chromium przez narzedzia/chromium/przygotuj.py
+# jako ui/ozone/platform/bursztyn/BUILD.gn.
+
+import("//build/config/ozone.gni")
+import("//ui/ozone/ozone.gni")
+
+source_set("bursztyn") {
+  sources = [
+    "client_native_pixmap_factory_bursztyn.cc",
+    "client_native_pixmap_factory_bursztyn.h",
+    "ozone_platform_bursztyn.cc",
+    "ozone_platform_bursztyn.h",
+    "platform_event_source_bursztyn.cc",
+    "platform_event_source_bursztyn.h",
+    "platform_window_bursztyn.cc",
+    "platform_window_bursztyn.h",
+    "surface_factory_bursztyn.cc",
+    "surface_factory_bursztyn.h",
+    "surface_ozone_bursztyn.cc",
+    "surface_ozone_bursztyn.h",
+  ]
+
+  deps = [
+    "//base",
+    "//skia",
+    "//ui/events:events",
+    "//ui/events/keycodes:keycodes",
+    "//ui/events/ozone:events_ozone",
+    "//ui/events/ozone:events_ozone_layout",
+    "//ui/gfx",
+    "//ui/gfx/geometry",
+    "//ui/ozone:ozone_base",
+    "//ui/ozone/common",
+    "//ui/platform_window",
+  ]
+
+  # BWS jest dostepne tylko w Ring 3 jako zestaw funkcji C. Nie linkujemy
+  # bursztyn_gui.h (naglowek Ring 3 biblioteki) bezposrednio - mamy cienka
+  # warstwe posix_bws.h/cc, ktora deklaruje wylacznie uzywane funkcje.
+  include_dirs = [ "//third_party/bursztyn" ]
+}

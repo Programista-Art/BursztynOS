@@ -15,6 +15,7 @@
 #include "pzb.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
+#include "skalowanie.h"
 #include "grafika.h"
 #include "pamiec.h"
 #include "heap.h"
@@ -47,6 +48,11 @@ extern volatile bool ekran_zajety;
 extern "C" bool bws_gui_ustaw_kursor_ksztalt(int pid, uint32_t typ);
 extern "C" bool bws_gui_ustaw_kursor_custom(
     int pid, const GuiCustomCursorInfo* info, const uint32_t* piksele);
+extern "C" bool bws_gui_blit_skalowany(const BwsBlitSkalowany* opis);
+
+/* Wspolna, strona-po-stronie weryfikacja mapowan Ring 3 (syscalls.cpp). */
+extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(
+    const void* ptr, size_t rozmiar, bool zapis);
 
 namespace {
 
@@ -1189,6 +1195,70 @@ static bool czy_sciezka_menedzera_okien(const char* sciezka) {
 }
 
 /*
+ * Akceleracja 2D dla przegladarek (BWS 98 / 99).
+ *
+ * Bezpieczenstwo:
+ *  - deskryptor jest kopiowany do pamieci jadra przed uzyciem,
+ *  - bufor pikseli zostaje w Ring 3 i jest czytany wylacznie w oknie SMAP
+ *    wewnatrz bws_gui_blit_skalowany(),
+ *  - rozmiary sa sprawdzane przez warstwe BWS przed wywolaniem,
+ *  - operacja wymaga PRAWO_GUI, tak jak pozostale wywolania graficzne.
+ */
+bool skalowany_blit(const proces_t& proces, uint64_t a1, uint64_t a2,
+                    uint64_t a3, uint64_t a4) {
+    if (!ma_prawo(proces, PRAWO_GUI)) return false;
+    if (a1 == 0 || a2 != sizeof(BwsBlitSkalowany) || a3 || a4) return false;
+
+    BwsBlitSkalowany opis{};
+    if (!skopiuj_z_przestrzeni_uzytkownika(
+            &opis, reinterpret_cast<const void*>(a1), sizeof(opis)))
+        return false;
+    if (opis.wersja != BWS_NOWOCZESNE_ABI_WERSJA || opis.zarezerwowane ||
+        opis.zarezerwowane2)
+        return false;
+    if (opis.flagi & ~(BWS_BLIT_PRZEZROCZYSTE_ZERO | BWS_BLIT_ZAMIEN_REGION |
+                       BWS_BLIT_ALFA_SOURCE_OVER | BWS_BLIT_ZACHOWAJ_ASPECT))
+        return false;
+    if (opis.src_w == 0 || opis.src_h == 0 || opis.src_w > 8192 || opis.src_h > 8192 ||
+        opis.dst_w <= 0 || opis.dst_h <= 0 ||
+        opis.dst_w > 8192 || opis.dst_h > 8192)
+        return false;
+    if (!skalowanie_filtr_poprawny(opis.filtr)) return false;
+    if (opis.tryb > SKALOWANIE_WYPELNIJ) return false;
+
+    uint64_t piksele = 0;
+    uint64_t bajty = 0;
+    if (__builtin_mul_overflow((uint64_t)opis.src_w, (uint64_t)opis.src_h, &piksele) ||
+        __builtin_mul_overflow(piksele, 4ULL, &bajty))
+        return false;
+    if (piksele > 4ULL * 1024ULL * 1024ULL || bajty == 0 ||
+        bajty > 16ULL * 1024ULL * 1024ULL)
+        return false;
+    if (opis.piksele == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_odczytu(
+            reinterpret_cast<const void*>(opis.piksele), (size_t)bajty) ||
+        !bws_vmm_sprawdz_zakres_uzytkownika(
+            reinterpret_cast<const void*>(opis.piksele), (size_t)bajty, false))
+        return false;
+
+    GuardEkranu guard;
+    return bws_gui_blit_skalowany(&opis);
+}
+
+bool skala_warstwy_polecenie(const proces_t& proces, uint64_t a1, uint64_t a2,
+                             uint64_t a3) {
+    if (!ma_prawo(proces, PRAWO_GUI)) return false;
+    if (a3) return false;
+    const int src_w = static_cast<int32_t>(a1 >> 32U);
+    const int src_h = static_cast<int32_t>(a1);
+    const uint32_t tryb = static_cast<uint32_t>(a2);
+    GuardEkranu guard;
+    return skladacz_obrazu_ustaw_skale(static_cast<int>(proces.pid),
+                                       src_w, src_h, tryb) ? true : false;
+}
+
+
+/*
  * Diagnostyka HDA (BWS 89 / 90).
  *
  * Bezpieczenstwo:
@@ -1490,6 +1560,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
             return bws_hda_diag(*proces, a1, a2, a3, a4);
         case BWS_HDA_TEST:
             return bws_hda_test(*proces, a1, a2, a3, a4);
+        case BWS_GUI_BLIT_SKALOWANY:
+            return skalowany_blit(*proces, a1, a2, a3, a4);
+        case BWS_GUI_SKALA_WARSTWY:
+            return skala_warstwy_polecenie(*proces, a1, a2, a3);
         default: return UINT64_MAX;
     }
 }

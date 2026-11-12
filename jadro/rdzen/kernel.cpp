@@ -56,6 +56,7 @@ extern "C" void odblokuj_ekran();
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
 #include "stos_jadra.h"
+#include "tls.h"
 #include "motyw.h"
 #include "virtio_pci.h"
 #include "virtqueue.h"
@@ -2484,6 +2485,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
 
     BootTiming::mark("scheduler initialization begin");
+    /* TLS per proces musi miec czysta tablice przed pierwszym przelaczeniem. */
+    tls_zainicjalizuj();
     InicjalizujPlaniste(
         reinterpret_cast<uint64_t>(
             stack_top),

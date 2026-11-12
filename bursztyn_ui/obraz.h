@@ -2,6 +2,7 @@
 
 #include "kontrolka.h"
 #include "../obrazy/skalowanie.h"
+#include "skalowanie.h"
 
 namespace BursztynUI {
 
@@ -189,7 +190,9 @@ public:
                 break;
         }
 
-        // Rysowanie z próbkowaniem nearest-neighbor (bezpieczne, zero alokacji)
+        // Probkowanie: bilinear w interiorze (wszyscy sasiedzi nieprzezroczyci),
+        // nearest na krawedziach. Kontrakt koloru pozostaje bez zmian - wynik jest
+        // albo nieprzezroczystym RGB, albo markerem czerni, albo zerem.
         Prostokat clip = ctx.pobierz_przyciecie();
         Punkt offset = ctx.pobierz_przesuniecie();
 
@@ -205,26 +208,38 @@ public:
 
         if (render_x0 >= render_x1 || render_y0 >= render_y1 || dst_w <= 0 || dst_h <= 0) return;
 
+        const bool interpoluj = (img_w_ != dst_w || img_h_ != dst_h) && img_w_ <= 2048;
+
         // Zwarty bufor jednego wiersza na stosie: bez alokacji w paint.
         // BWS57 dostaje wylacznie fragment przeciety przez kontekst.
         uint32_t wiersz[2048];
         int render_w = render_x1 - render_x0;
         if (render_w > 2048) render_w = 2048;
         for (int py = render_y0; py < render_y1; ++py) {
-            int src_y = probka_obrazu(py - screen_dst_y, img_h_, dst_h);
-            if (src_y < 0) src_y = 0;
-            if (src_y >= img_h_) src_y = img_h_ - 1;
-
-            const uint32_t* src_line = piksele_ + (src_y * img_w_);
-
+            const uint32_t dy = static_cast<uint32_t>(py - screen_dst_y);
             for (int dx = 0; dx < render_w; ++dx) {
-                int px = render_x0 + dx;
-                int src_x = probka_obrazu(px - screen_dst_x, img_w_, dst_w);
-                if (src_x < 0) src_x = 0;
-                if (src_x >= img_w_) src_x = img_w_ - 1;
+                const int px = render_x0 + dx;
+                const uint32_t sx = static_cast<uint32_t>(px - screen_dst_x);
+                const uint32_t src_x = probka_obrazu(sx, img_w_, dst_w);
+                const uint32_t src_y = probka_obrazu(dy, img_h_, dst_h);
 
-                uint32_t c = src_line[src_x];
-                wiersz[dx] = (c & 0xFF000000U) != 0
+                uint32_t c = piksele_[static_cast<size_t>(src_y) * img_w_ + src_x];
+                const bool nieprzezroczysty = (c & 0xFF000000U) != 0U;
+
+                if (interpoluj && nieprzezroczysty) {
+                    const BursztynSkalowanieOs ox = bursztyn_skal_os(sx, dst_w, img_w_);
+                    const BursztynSkalowanieOs oy = bursztyn_skal_os(dy, dst_h, img_h_);
+                    const uint32_t p00 = piksele_[static_cast<size_t>(oy.i0) * img_w_ + ox.i0];
+                    const uint32_t p10 = piksele_[static_cast<size_t>(oy.i0) * img_w_ + ox.i1];
+                    const uint32_t p01 = piksele_[static_cast<size_t>(oy.i1) * img_w_ + ox.i0];
+                    const uint32_t p11 = piksele_[static_cast<size_t>(oy.i1) * img_w_ + ox.i1];
+                    if (p00 && p10 && p01 && p11) {
+                        c = bursztyn_skal_piksel_bilinear(piksele_, img_w_, img_h_,
+                                                           sx, dy, dst_w, dst_h);
+                    }
+                }
+
+                wiersz[dx] = nieprzezroczysty
                     ? ((c & 0x00FFFFFFU) ? (c & 0x00FFFFFFU) : 0x01000000U)
                     : SKLADACZ_PIKSEL_PRZEZROCZYSTY;
             }
