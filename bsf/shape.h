@@ -18,6 +18,11 @@ struct ShapeOptions {
   uint32_t language{};               // OpenType LangSys tag, 0 = default
   uint32_t features{FeatureDefault};
   uint64_t budget{OT::DefaultBudget};
+  // BSF 2.1: logical neighbours outside the run (0 = none). Only cursive
+  // joining reads them (HarfBuzz pre/post-context semantics); they are never
+  // shaped or emitted. Lets a run split by font, DOM node or inline element
+  // keep its contextual Arabic forms.
+  uint32_t context_before{}, context_after{};
 };
 struct ShapeReport {
   bool gsub{}, gpos{}, gpos_marks{}, legacy_kern{}, budget_failed{},

@@ -62,7 +62,13 @@ int main(){
   short_read=true;BSF::rescan();CHECK(BSF::enumerate()==0);short_read=false;BSF::rescan();CHECK(BSF::ready("Large Font0"));
   BSF::shutdown();fail_array_at=1024*1024;CHECK(!BSF::ready("Large Font0"));fail_array_at=0;BSF::rescan();CHECK(BSF::ready("Large Font0"));
  }
- BSF::shutdown();files["/czcionki/ttf/large.ttf"].push_back(0);BSF::rescan();CHECK(BSF::enumerate()==0);
+ // BSF 2.1 rejected files above MaxFile. BSF 2.2 reads such files per table
+ // (BWS 59 ranges), so they load with only their tables resident; files above
+ // MaxFontFile are still rejected.
+ BSF::shutdown();files["/czcionki/ttf/large.ttf"].push_back(0);BSF::rescan();CHECK(BSF::enumerate()==1);
+ {auto* g=BSF::glyph('A',20,false,"Large Font0");CHECK(g&&g->advance==advance&&g->width==w&&g->height==h);CHECK(!memcmp(g->alpha,pixels.data(),pixels.size()));
+  auto r=BSF::resources();CHECK(r.resident_bytes>0&&r.resident_bytes<seed.size()+4096&&r.peak_resident_bytes<=BSF::MaxResidentFontBytes);}
+ BSF::shutdown();files["/czcionki/ttf/large.ttf"].resize(size_t(BSF::MaxFontFile)+1);BSF::rescan();CHECK(BSF::enumerate()==0);
  CHECK(BSF::font_filename("Ω font.TTF",strlen("Ω font.TTF")));CHECK(!BSF::font_filename("../x.ttf",8));CHECK(!BSF::font_filename("\xff.ttf",5));
  BSF::shutdown();printf("BSF expanded catalog/large-file/budget/failure tests: %u checks PASS\n",checks);
 }

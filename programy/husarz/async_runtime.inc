@@ -110,6 +110,7 @@ void queue_images(Zakladka &z) {
     if (!browser_resources || !z.dokument) return;
     auto &d=*z.dokument;
     if (d.styles_dirty || z.work_pending || (z.pending_css && z.pending_css->count)) return;
+    queue_fonts(z);
     struct Scratch { ParsedUrl base{},css{}; char source[URL_POJEMNOSC]{}; Husarz::ResourceTask task{}; };
     auto *scratch=new Scratch; if (!scratch) return;
     if (!document_url_base(z.url,z.dokument,scratch->base)) { delete scratch; return; }
@@ -212,11 +213,13 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
     if (!z) { ++state.queue.discarded; resource_debug("discard",&task); co_return; }
     auto &payload=*state.payload;
     if(z->dokument){HUSARZ_COUNT(*z->dokument,resource_completions,1);}
-    if (payload.magic!=Husarz::AsyncMagic || payload.request!=task.request || payload.kind!=uint32_t(task.kind) || payload.size>sizeof(payload.raw)) {
+    if (payload.magic!=Husarz::AsyncMagic || payload.request!=task.request || payload.kind!=uint32_t(task.kind) ||
+        payload.size>(task.kind==Husarz::RequestKind::Font?Husarz::AsyncFontCapacity:sizeof(payload.raw))) {
         ++state.queue.discarded; co_return;
     }
     ++state.queue.completed;
     resource_debug("complete",&task);
+    if (task.kind==Husarz::RequestKind::Font) { webfont_apply(task,payload); co_return; }
     if (task.kind==Husarz::RequestKind::Html) {
         if (!payload.success) ustaw_tresc(*z,"Nie udało się pobrać strony.",false);
         else {
@@ -246,7 +249,7 @@ void finish_resource_task(const Husarz::ResourceTask &task,Husarz::ResourceEntry
             ~PendingImage(){if(entry && entry->cache && !entry->refs && !entry->pixels)entry->cache->remove(*entry);}
         } pending_image;
         if (payload.success && cache && (payload.size||task.kind==Husarz::RequestKind::Fetch) && payload.size<=Husarz::MaxResourceBytes) {
-            auto type=task.kind==Husarz::RequestKind::Css?Husarz::ResourceType::Css:task.kind==Husarz::RequestKind::Script?Husarz::ResourceType::Script:task.kind==Husarz::RequestKind::Fetch?Husarz::ResourceType::Fetch:Husarz::ResourceType::Image;
+            auto type=Husarz::resource_type(task.kind);
             entry=cache->insert(task.url,type,payload.raw,payload.size,gui_czas_monotoniczny_ns());
             if(entry) {
                 kopiuj_limit(entry->source_url,sizeof(entry->source_url),payload.url);
@@ -324,9 +327,9 @@ void async_receive() {
         if (normalized) kopiuj_limit(state.active.url,sizeof(state.active.url),url->text);
         delete url;
         if (!normalized) continue;
-        if (state.active.kind!=Husarz::RequestKind::Html&&!storage_task(state.active)) {
+        if (state.active.kind!=Husarz::RequestKind::Html&&state.active.kind!=Husarz::RequestKind::Font&&!storage_task(state.active)) {
             auto *cache=cache_resources();
-            auto type=state.active.kind==Husarz::RequestKind::Css?Husarz::ResourceType::Css:state.active.kind==Husarz::RequestKind::Script?Husarz::ResourceType::Script:state.active.kind==Husarz::RequestKind::Fetch?Husarz::ResourceType::Fetch:Husarz::ResourceType::Image;
+            auto type=Husarz::resource_type(state.active.kind);
             auto *entry=cache?cache->find(state.active.url,type,gui_czas_monotoniczny_ns()):nullptr;
             if (entry && (type!=Husarz::ResourceType::Image || entry->pixels)) { resource_debug("cache-hit",&state.active); finish_resource_task(state.active,entry); continue; }
         }

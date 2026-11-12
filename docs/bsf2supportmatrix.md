@@ -1,3 +1,71 @@
+# BSF support matrix — BSF 2.2 update 2026-11-12
+
+BSF 2.2 rows (branch `feature/bsf-2-2-font-formats`, from
+`feature/bsf-2-1-text-integration` @ `58131c0`) are marked **[2.2]**;
+evidence: `docs/bsf2-2-testreport.md`. Vocabulary: **Verified** (host tests
+with reference implementations; native where stated), **Implemented with
+limitations**, **Experimental**, **Partial**, **Not supported**, **Not
+tested on platform**. Earlier BSF 2.1/2.0 sections follow unchanged; where a
+2.2 row supersedes an older "Font formats" row, the 2.2 row applies.
+
+## [2.2] Font formats
+
+| Format | Status | Exactly what works |
+|---|---|---|
+| TrueType `glyf`/`loca` | **Verified** (unchanged) | bit-identical output to BSF 2.1 |
+| OpenType CFF 1.0 (`OTTO`, Type 2) | **Verified** (host: all outlines = FreeType; native: Husarz/Settings) | name-keyed and CID-keyed (FDArray/FDSelect), subrs, flex, seac, arithmetic ops; no hinting; FD FontMatrix not composed |
+| CFF2 | **Verified** (host) | default and variation instances (blend/vsindex), outlines = FreeType at 39 instances; no native page uses CFF2 |
+| TTC/OTC collections | **Verified** (host, native with a 246 KB subset collection) | every face separately selectable, shared tables shared in memory, lazy per-table loading for > 4 MiB; **files > 16 MiB cannot be installed natively** (no chunked write; boot import cap) |
+| WOFF 1.0 | **Verified** (host; native in Husarz) | zlib tables, bounds, ratio limits; WOFF collections not supported |
+| WOFF2 | **Verified** (host; native in Husarz) | Brotli, glyf/loca transform (incl. overlap bitmap), hmtx transform, null transforms; WOFF2 collections not supported |
+| Variable fonts — axis model (fvar/avar 1.0, named instances) | **Verified** (host) | generic axes ≤ 16; avar 2.0 not supported; STAT not interpreted |
+| Variable TrueType outlines (gvar, IUP, composites, phantoms) | **Verified** (host) | = FreeType at default/min/max/named/random instances |
+| Variation metrics (HVAR advances, gvar phantom fallback, MVAR hasc/hdsc/hlgp) | **Verified** (host, HarfBuzz rows) | other MVAR tags and VVAR not applied |
+| GPOS VariationIndex (ValueRecords, anchors) | **Verified** (host, 51/51 HarfBuzz rows) | |
+| GSUB/GPOS FeatureVariations | **Not supported** | default feature set at every instance |
+| Variable fonts in the UI/browser | **Partial** | API only (`set_variations`); catalog/Settings/Husarz use the default instance; no `font-variation-settings` |
+| COLRv0/CPAL | **Verified** (host vs FreeType) | layers, palettes, foreground; not exercised natively (no shipped COLRv0 font) |
+| COLRv1 | **Verified** (host vs Skia, mean diff 0.38 %; native emoji in Husarz) | all paint formats 1–32, Var* paints, all composite modes, ClipList |
+| CBDT/CBLC | **Verified** for PNG formats 17/18/19 (host = FreeType at strike size) | monochrome/raw CBDT formats not supported |
+| sbix | **Verified** for `png ` (host) | `jpg `/`tiff`/`pdf `/`mask` not decoded (outline fallback) |
+| OpenType-SVG | **Not supported** | |
+
+## [2.2] Emoji
+
+| Capability | Status | Notes |
+|---|---|---|
+| ZWJ sequences, skin tones, flags, keycaps, VS16 → one cluster, one colour glyph | **Verified** (host 22/22 HarfBuzz rows, runtime test; native screenshot) | requires font coverage (Noto Color Emoji COLRv1 shipped) |
+| Presentation selection (VS16/VS15, emoji vs text default) | **Implemented with limitations** | approximation of `Emoji_Presentation` (≥ U+1F000 pictographs); see `bsf2-2-color-fonts.md` |
+| Colour emoji in BursztynUI, Notepad, Husarz | **Verified** (host), native Husarz | Terminal grid draws no colour emoji (cells only) |
+
+## [2.2] System integration
+
+| Component | Status | Notes |
+|---|---|---|
+| Discovery of `/czcionki/{ttf,otf,ttc,otc}` | **Verified** (host; native catalog read from Settings) | |
+| Catalog metadata (formats, faces, axes, colour, status) | **Verified** (host) | |
+| Settings → Fonts details, coverage-aware previews, Terminal font list | **Implemented with limitations** | no separate font-info window, no axis sliders |
+| Refresh (new/removed/modified, disappearing selection) | **Verified** (host) | native refresh not automated in QEMU |
+| Separate system and Terminal fonts (Config v2, v1 migration) | **Verified** (host) | native persistence across reboot not automated |
+| Unified fallback (TrueType, CFF, collections, colour, web fonts) | **Verified** (host) | one resolver; variable faces at default instance |
+| Husarz `@font-face` | **Verified** (host), see native report | src order, formats, local(), weights, unicode-range, swap/optional, CORS (response side), isolation, release |
+| Indic / SE-Asian shaping | **Not supported** (unchanged) | glyph coverage ≠ shaping |
+
+## [2.2] Platforms
+
+| Environment | Status |
+|---|---|
+| UEFI QEMU 1280×720 | **Verified** — `--workload bsf22` 35/35, 0 GPU timeouts |
+| UEFI QEMU 1920×1080 | **Verified** — 35/35 |
+| BIOS QEMU | **Verified** — 35/35 |
+| Physical hardware, Windows QEMU, installed-disk boot | **Not tested** |
+
+# BSF support matrix — BSF 2.1 update 2026-11-12
+
+BSF 2.1 rows (branch `feature/bsf-2-1-text-integration`, from `test` @
+`544a51e`) are marked **[2.1]**; evidence: `docs/bsf2-1-testreport.md`.
+Earlier history follows.
+
 # BSF 2.0 support matrix — 2026-11-11 (stabilization update)
 
 Originally branch `feature/bsf-2-advanced-text-layout` (merged into `test`
@@ -63,15 +131,29 @@ Status vocabulary:
 | Variable fonts (`fvar avar gvar HVAR VVAR MVAR STAT`, CFF2 blends) | **Not supported** — `fvar`/`COLR`/`CPAL` table bytes are recorded on `Face` but never interpreted. |
 | Colour fonts (COLR/CPAL v0/v1, CBDT/CBLC, sbix) | **Not supported** |
 
+## BSF 2.1 additions
+
+| Capability | Status | Evidence / limits |
+|---|---|---|
+| **[2.1]** Paragraph-level direction across wrapped lines (shared `TextLayout`) | **Verified** (host) | `test-bsf21-layout-host`, `test-notepad-bidi-host` (continuation line starting with Latin stays RTL) |
+| **[2.1]** Line-aware carets (`caret_x_on`, `move_visual_on`, `line_edge`) | **Verified** (host, fuzzed) | 241,797 asserts incl. 1,500 random wrapped paragraphs; `fuzz_bsf21_editing` |
+| **[2.1]** CSS letter-/word-spacing in the layout (not inside graphemes/ligatures, not for cursive scripts) | **Verified** (host) | `test-bsf21-layout-host` |
+| **[2.1]** Cursive joining context across run / DOM-node boundaries | **Verified** (host) | `test-bsf21-layout-host` (glyph ids equal the joined word), `test-husarz-bidi-host` page 09 |
+| **[2.1]** Caller-owned layouts (`build_layout`), line drawing (`draw_layout_line`, italic) | **Verified** (host) | all 2.1 suites; native counters `owned_builds` (test report) |
+| **[2.1]** Unicode paragraph separators inside a Notepad line (U+2029 etc.) | **Partially verified** | handled by the layout (own paragraph level per part); host save/reopen sample; not a separate Notepad line count |
+
 ## Integration
 
 | Component | Status | Notes |
 |---|---|---|
+| **[2.1]** BursztynUI single-line field (`PoleTekstowe`) | **Verified** (host); native: see test report | visual Left/Right, Shift selection, multi-span highlight, Home/End, click/drag hit testing, scrolling, right alignment, direction API, password isolation (`test-bursztynui-bidi-host`). Native non-ASCII typing not injectable (QMP). |
+| **[2.1]** Notepad (`PoleWielowierszowe`) paragraph model | **Verified** (host); **Partially verified** natively | one direction per logical paragraph, RTL right alignment, explicit direction, affinity at soft wraps, terminating visual navigation across lines, multi-span selection, byte-exact clipboard/save/undo (`test-notepad-bidi-host`). Native: RTL text pasted through the real clipboard, BSF 2.1 paragraph layouts counted in the Notepad process (test report). No Notepad menu command for direction. |
+| **[2.1]** Husarz HTML/CSS bidi | **Verified** (host, 12 local pages + long/adversarial + fuzzer); native: see test report | CSS `direction`, `unicode-bidi` (all six values), `text-align:start/end`, HTML `dir=ltr/rtl/auto`, `bdi`, `bdo`, paragraph UAX #9 over inline content, L2 per line, shaped Arabic across inline elements, link hit testing, RTL forms with logical values. Limits: atomic inline boxes (inline-block, form controls) not reordered against text, RTL table column order not mirrored, intrinsic widths per cluster (`docs/bsf2-1-husarz.md`). |
 | BursztynUI (labels, buttons, menus, dialogs, single-line fields, lists, …) | **Partially verified** | All BSF text drawing goes through `CzcionkaUI::rysuj_bsf`; measurement through `measure_text/measure_prefix/hit_test`. Complex strings use one shared cached layout for both. Single-line fields: caret and hit-test are bidi-correct; selection highlight is a single x-range and arrow keys are logical (limitation). |
-| Notepad (`PoleWielowierszowe`) | **Partially verified** | Shaped wrapping, bidi caret, visual Left/Right, per-span bidi selection, grapheme Backspace/Delete, byte-exact save/reopen (host suite 60,662 checks). Each visual line resolves its own paragraph direction; RTL paragraphs are left-aligned. Native check: Notepad launches and accepts input; RTL editing natively is not yet automated (QMP cannot type non-ASCII). |
+| Notepad (`PoleWielowierszowe`) — BSF 2.0 row (superseded by the [2.1] row above) | **Partially verified** | Shaped wrapping, bidi caret, visual Left/Right, per-span bidi selection, grapheme Backspace/Delete, byte-exact save/reopen (host suite 60,662 checks). Each visual line resolves its own paragraph direction; RTL paragraphs are left-aligned. Native check: Notepad launches and accepts input; RTL editing natively is not yet automated (QMP cannot type non-ASCII). |
 | Settings → Fonts | **Verified** | Hebrew + Arabic samples drawn natively by BSF 2.0 (QEMU counters + screenshots). Font format / axes / writing-system info: **not added**. |
 | Terminal (Shell) | **Partial, by design** | Logical cell order is preserved; no visual reordering or shaping in the cell grid (keeps command text, paths and cursor addressing exact). |
-| Husarz browser | **Not integrated** | Its coroutine layout/paint pipeline still shapes per code point (with existing grapheme-correct forms). CSS `direction`/`unicode-bidi` unsupported. See `bsf2complextextediting.md`. |
+| Husarz browser — BSF 2.0 row (superseded by the [2.1] row above) | **Not integrated** (2.0) | Its coroutine layout/paint pipeline still shapes per code point (with existing grapheme-correct forms). CSS `direction`/`unicode-bidi` unsupported. See `bsf2complextextediting.md`. |
 | Calculator, snake, demos (demo_ui, kontrolki 2/3/4), system tests, sound test, wallpaper, splash | **Full engine** (since 2026-11-11) | Enabled after the desktop BMPs left the kernel image; calculator, snake and Kontrolki 4 launch, render and close natively (QEMU). `BSF_COMPLEX_TEXT=0` remains available as an explicit per-app opt-out; no app uses it. |
 
 ## Platform verification

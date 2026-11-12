@@ -33,8 +33,60 @@ class Settings : public Okno {
   ListaRozwijana *families{};
   ListaRozwijana *size{};
   PowierzchniaRysunkowa *preview{};
-  uint32_t ids[BSF::MaxFiles]{};
-  unsigned family_count{};
+  ListaRozwijana *terminal{};
+  Etykieta *details{};
+  uint32_t ids[BSF::MaxFiles]{}, terminal_ids[BSF::MaxFiles + 1]{};
+  unsigned family_count{}, terminal_count{};
+  char details_text[256]{};
+  static void append(char *out, size_t cap, const char *text) {
+    size_t n = 0;
+    while (n + 1 < cap && out[n]) ++n;
+    for (size_t i = 0; text[i] && n + 1 < cap; ++i) out[n++] = text[i];
+    out[n] = 0;
+  }
+  static void append_number(char *out, size_t cap, unsigned v) {
+    char d[12]; unsigned k = 0;
+    do { d[k++] = char('0' + v % 10); v /= 10; } while (v && k < 11);
+    char t[12]; unsigned j = 0; while (k) t[j++] = d[--k]; t[j] = 0;
+    append(out, cap, t);
+  }
+  const BSF::FontInfo *info_for(uint32_t id) {
+    for (unsigned i = 0; i < BSF::enumerate(); ++i)
+      if (BSF::info(i)->id == id) return BSF::info(i);
+    return nullptr;
+  }
+  // Format, outline technology, collection face, axes, colour tables and the
+  // writing systems this face itself covers (no fallback).
+  void update_details() {
+    int index = families->wybrany_indeks();
+    uint32_t id = index >= 0 && unsigned(index) < family_count ? ids[index] : 0;
+    const BSF::FontInfo *f = id ? info_for(id) : nullptr;
+    details_text[0] = 0;
+    if (!f) { append(details_text, sizeof details_text, "Bitmapowa czcionka awaryjna."); details->ustaw_tekst(details_text); return; }
+    static const char *outline[] = {"?", "TrueType", "OpenType CFF", "OpenType CFF2"};
+    append(details_text, sizeof details_text, f->outline < 4 ? outline[f->outline] : "?");
+    unsigned styles = 0;
+    for (unsigned i = 0; i < BSF::enumerate(); ++i) if (same_font_name(BSF::info(i)->family, f->family)) ++styles;
+    append(details_text, sizeof details_text, " · style: "); append_number(details_text, sizeof details_text, styles);
+    if (f->container == uint8_t(BSF::ContainerFormat::Collection)) {
+      append(details_text, sizeof details_text, " · kolekcja, twarz "); append_number(details_text, sizeof details_text, f->face_index + 1u);
+      append(details_text, sizeof details_text, "/"); append_number(details_text, sizeof details_text, f->face_count);
+    }
+    append(details_text, sizeof details_text, " · "); append_number(details_text, sizeof details_text, (f->file_size + 1023) / 1024);
+    append(details_text, sizeof details_text, " KiB");
+    if (f->axis_count) { append(details_text, sizeof details_text, " · osie: "); append_number(details_text, sizeof details_text, f->axis_count); }
+    if (f->color) append(details_text, sizeof details_text, " · tabele koloru");
+    if (f->status != BSF::FontOk) append(details_text, sizeof details_text, " · BŁĄD WALIDACJI");
+    struct Script { const char *name, *sample; } scripts[] = {
+        {"łac", "Zażółć"}, {"cyr", "Привет"}, {"gr", "Καλημέρα"}, {"hebr", "שלום"},
+        {"arab", "مرحبا"}, {"jap", "こんにちは"}, {"chiń", "你好"}, {"kor", "안녕"}};
+    append(details_text, sizeof details_text, " · pismo:");
+    for (auto &sc : scripts) {
+      size_t n = 0; while (sc.sample[n]) ++n;
+      if (BSF::face_covers(id, sc.sample, n)) { append(details_text, sizeof details_text, " "); append(details_text, sizeof details_text, sc.name); }
+    }
+    details->ustaw_tekst(details_text);
+  }
   void reload_fonts() {
     auto c=BSF::configuration(); families->wyczysc(); family_count=0;
     for(unsigned i=0;i<BSF::enumerate();++i){
@@ -50,6 +102,20 @@ class Settings : public Okno {
     }
     if(!family_count)families->dodaj_element("Bitmapowa czcionka awaryjna",0);
     if(families->wybrany_indeks()<0)families->ustaw_wybrany_indeks(0);
+    // Terminal: automatic, or a family whose regular face keeps the cell grid.
+    if (terminal) {
+      terminal->wyczysc(); terminal_count = 0;
+      terminal->dodaj_element("Automatyczna (stała szerokość)", 0); terminal_ids[terminal_count++] = 0;
+      uint32_t chosen = BSF::terminal_family();
+      for (unsigned j = 0; j < family_count; ++j)
+        if (BSF::terminal_suitable(ids[j])) {
+          terminal->dodaj_element(BSF::family_name(ids[j]), ids[j]);
+          if (ids[j] == chosen) terminal->ustaw_wybrany_indeks(int(terminal_count));
+          terminal_ids[terminal_count++] = ids[j];
+        }
+      if (terminal->wybrany_indeks() < 0) terminal->ustaw_wybrany_indeks(0);
+    }
+    if (details) update_details();
   }
   /* Strony: 0=System, 1=Energia, 2=Wyglad, 3=Motywy, 4=Czcionki, 5=Wsparcie. */
   void show(unsigned page) {
@@ -77,11 +143,14 @@ class Settings : public Okno {
     BSF::preview(id, sizes[si]);
     int px = ui_skaluj(sizes[si],preview->skala_dpi().procent());
     const char *lines[] = {"Bursztyn OS", "Zażółć gęślą jaźń",
+                           "The quick brown fox jumps over the lazy dog.",
                            "Привет мир · Привіт світ",
                            "Καλημέρα κόσμε · Αθήνα", "e\xcc\x81 a\xcc\x88 · Ґґ Єє Іі Її Ўў",
                            // BSF 2.0 bidi + shaping samples (wrapped by word).
                            "\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd (2026)",
-                           "\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645 \u0644\u0627"};
+                           "\u0645\u0631\u062d\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645 \u0644\u0627",
+                           // BSF 2.2: CJK needs no script-specific shaping.
+                           "こんにちは世界", "你好世界", "안녕하세요"};
     int column = preview->obszar().szerokosc / 2;
     for (unsigned weight = 0; weight < 2; ++weight) {
       int x = ui_skaluj(10,preview->skala_dpi().procent()) + int(weight) * column, y = ui_skaluj(8,preview->skala_dpi().procent());
@@ -92,10 +161,19 @@ class Settings : public Okno {
         size_t length = 0;
         while (line[length])
           ++length;
+        // A sample the selected face cannot render itself is not shown in a
+        // fallback font: the preview says so instead (BSF 2.2).
+        if (id && !BSF::face_covers(id, line, length)) {
+          ctx.rysuj_tekst_bsf({x, y}, "— brak glifów w tej czcionce —",
+                              motyw_kolor(MOTYW_KOLOR_TEKST_DRUGORZEDNY), ui_skaluj(12,preview->skala_dpi().procent()), false);
+          y += BSF::height(px) > 0 ? BSF::height(px) + 2 : 18;
+          continue;
+        }
 #if BSF_COMPLEX_TEXT
-        // Shaped/bidi samples wrap at spaces so one shaping run is never
-        // split inside a word (per-scalar splitting would break joining).
-        if (BSF::needs_complex_layout(line, length)) {
+        // Samples wrap at spaces so one shaping run is never split inside a
+        // word (per-scalar splitting would break joining). BSF 2.2: plain
+        // samples use the same word wrapping (no mid-word breaks).
+        {
           int limit = column - ui_skaluj(20,preview->skala_dpi().procent());
           char part[256]{};
           size_t start = 0;
@@ -206,6 +284,7 @@ public:
     font_page=root.fonts;placeholder=root.placeholder;placeholder_text=root.placeholder_text;
     auto* page=root.fonts;
     families=page->families;size=page->size;preview=page->preview;status=page->status;
+    terminal=page->terminal;details=page->details;
     for(unsigned i=0;i<6;++i){
       root.nav[i]->przy_kliknieciu([](Przycisk*,void* p){static_cast<Settings*>(p)->show(0);},this);
     }
@@ -223,14 +302,16 @@ public:
     reload_fonts();
     page->refresh->przy_kliknieciu([](Przycisk*,void* p){auto* self=static_cast<Settings*>(p);
       BSF::rescan();self->reload_fonts();auto limits=BSF::resources();
-      self->status->ustaw_tekst(limits.directory_error?"Nie odczytano katalogu fontów (limit 64 KiB).":limits.catalog_limit?"Osiągnięto limit katalogu: 128 fontów / 1024 wpisy.":"Odświeżono listę fontów.");
+      bool missing=BSF::configuration().family&&!self->info_for(BSF::configuration().family);
+      self->status->ustaw_tekst(limits.directory_error?"Nie odczytano katalogu fontów (limit 64 KiB).":limits.catalog_limit?"Osiągnięto limit katalogu: 128 fontów / 1024 wpisy.":
+        missing?"Wybrana czcionka zniknęła; używana jest czcionka domyślna.":"Odświeżono listę fontów.");
       self->przelicz_uklad();self->preview->uniewaznij();},this);
     page->install->przy_kliknieciu([](Przycisk*,void* p){auto* self=static_cast<Settings*>(p);
       auto result=BSF::install_font(self->font_page?static_cast<SettingsUI::FontPage*>(self->font_page)->import_path->tekst():nullptr);
       const char* message=result==BSF::InstallResult::Ok?"Zainstalowano font. Uruchom ponownie inne aplikacje, aby go wykryły.":
         result==BSF::InstallResult::Exists?"Font o tej nazwie pliku już istnieje; nie został zastąpiony.":
-        result==BSF::InstallResult::BadPath?"Podaj ścieżkę do pliku TTF (nazwa do 55 bajtów).":
-        result==BSF::InstallResult::InvalidFont?"Nie odczytano poprawnego, obsługiwanego TTF (limit 16 MiB).":"Nie udało się zainstalować fontu (uprawnienia lub błąd zapisu).";
+        result==BSF::InstallResult::BadPath?"Podaj ścieżkę do pliku .ttf, .otf, .ttc lub .otc (nazwa do 55 bajtów).":
+        result==BSF::InstallResult::InvalidFont?"Plik nie jest poprawnym, obsługiwanym fontem (każda twarz jest sprawdzana; limit 16 MiB).":"Nie udało się zainstalować fontu (uprawnienia lub błąd zapisu).";
       if(result==BSF::InstallResult::Ok)self->reload_fonts();self->status->ustaw_tekst(message);self->przelicz_uklad();self->preview->uniewaznij();
     },this);
     const char *labels[] = {"12 px", "14 px", "16 px",
@@ -247,6 +328,7 @@ public:
         this);
     families->przy_zmianie_wyboru(
         [](ListaRozwijana *, int, void *p) {
+          static_cast<Settings *>(p)->update_details();
           static_cast<Settings *>(p)->przelicz_uklad();
           static_cast<Settings *>(p)->preview->uniewaznij();
         },
@@ -265,6 +347,8 @@ public:
           int i = s.families->wybrany_indeks(), n = s.size->wybrany_indeks();
           c.family = i >= 0 && unsigned(i) < s.family_count ? s.ids[i] : 0;
           c.size = unsigned(sizes[n >= 0 && n < 6 ? n : 2]);
+          int t = s.terminal ? s.terminal->wybrany_indeks() : 0;
+          c.terminal_family = t >= 0 && unsigned(t) < s.terminal_count ? s.terminal_ids[t] : 0;
           s.status->ustaw_tekst(BSF::apply(c)
                                     ? "Zapisano ustawienia czcionki."
                                     : "Nie zapisano. Poprzednia czcionka jest aktywna.");

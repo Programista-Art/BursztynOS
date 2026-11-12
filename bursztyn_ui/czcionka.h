@@ -18,22 +18,48 @@
 
 namespace BursztynUI {
 
+// BSF 2.1: per-control base text direction (never global app state).
+// Automatyczny resolves the paragraph direction from the first strong
+// character (UAX #9 P2/P3); the explicit values override detection.
+enum class KierunekTekstu : uint8_t { Automatyczny = 0, OdLewej = 1, OdPrawej = 2 };
+
 class CzcionkaUI {
 public:
+#if defined(BSF_NATIVE)
+    // Mask functors with a color() member receive colour glyphs (BSF 2.2).
+    template<class M> static constexpr auto has_color(int) -> decltype(&M::color, bool()) { return true; }
+    template<class M> static constexpr bool has_color(...) { return false; }
+#endif
 #if defined(BSF_NATIVE)
     // BSF 2.0: complex text (bidi, joining scripts, marks) is drawn from the
     // same shaped layout that measure_text/measure_prefix/hit_test use. The
     // draw loop lives once in the runtime; this thunk only forwards masks.
     template<class Mask>
     static void bsf_mask_thunk(void* ctx,int x,int y,int w,int h,const uint8_t* alpha){(*static_cast<Mask*>(ctx))(x,y,w,h,alpha);}
+#if BSF_COMPLEX_TEXT
+    // BSF 2.2: colour glyphs (COLR/CPAL, CBDT, sbix). The mask functor also
+    // provides color(x,y,w,h,argb) (straight-alpha ARGB rows).
+    template<class Mask>
+    static void bsf_color_thunk(void* ctx,int x,int y,int w,int h,const uint32_t* argb){static_cast<Mask*>(ctx)->color(x,y,w,h,argb);}
+    template<class Mask>
+    static bool draw_color_layout(const BSF::TextLayout& L,size_t first,size_t lines,int x,int y,int px,Mask& mask,bool bold,bool italic,const char* family,uint32_t fg){
+        int h=BSF::height(px,family);if(h<=0)h=px;
+        for(size_t l=first;l<first+lines&&l<L.line_count();++l)
+            if(!BSF::draw_layout_line_color(L,l,x,y+int(l-first)*h,px,bold,italic,family,fg,&bsf_mask_thunk<Mask>,&bsf_color_thunk<Mask>,&mask))return false;
+        return true;
+    }
+#endif
     template<class Mask>
     static bool rysuj_bsf(const char* text,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
         if(!BSF::ready(family)||px<1||px>128)return false;
         size_t size=0;while(text&&text[size]&&size<65536)++size;
 #if BSF_COMPLEX_TEXT
         if(BSF::needs_complex_layout(text,size))
-            if(const auto* L=BSF::layout_text(text,size,px,bold,family))
+            if(const auto* L=BSF::layout_text(text,size,px,bold,family)){
+                if constexpr (has_color<Mask>(0))
+                    return draw_color_layout(*L,0,L->line_count(),x,y,px,mask,bold,false,family,mask.foreground);
                 return BSF::draw_layout(*L,x,y,px,bold,family,&bsf_mask_thunk<Mask>,&mask);
+            }
 #endif
         uint32_t previous=0,previous_face=0,cluster_face=0;size_t cluster_end=0,cluster_begin=0;BSF::MarkPen marks;marks.base=x;
         for(size_t at=0;at<size;){
@@ -51,6 +77,20 @@ public:
             else {int w=(szerokosc_znaku(cp)*px+8)/16,h=px;if(w>128)w=128;if(h>128)h=128;auto* a=new uint8_t[size_t(w)*h];if(a){const auto* bits=bitmapa_znaku(cp);for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)a[yy*w+xx]=(bits[yy*16/h]&(1u<<(15-xx*16/px)))?255:0;mask(x,y,w,h,a);delete[] a;}if(!mark)x+=(szerokosc_znaku(cp)+1)*px/16;}
             if(!mark){previous=cp;previous_face=id;}
         }return true;
+    }
+#endif
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    static BSF::BaseDirection kierunek_bsf(KierunekTekstu k) {
+        return k == KierunekTekstu::OdLewej ? BSF::BaseDirection::LTR
+             : k == KierunekTekstu::OdPrawej ? BSF::BaseDirection::RTL
+                                              : BSF::BaseDirection::Auto;
+    }
+    template<class Mask>
+    static bool rysuj_uklad_bsf(const BSF::TextLayout& uklad,size_t linia,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
+        if(!BSF::ready(family)||px<1||px>128)return false;
+        if constexpr (has_color<Mask>(0))
+            return draw_color_layout(uklad,linia,1,x,y,px,mask,bold,false,family,mask.foreground);
+        return BSF::draw_layout_line(uklad,linia,x,y,px,bold,false,family,&bsf_mask_thunk<Mask>,&mask);
     }
 #endif
     static constexpr int WYSOKOSC = 16;

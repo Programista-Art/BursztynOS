@@ -187,6 +187,13 @@ bool needs_complex_layout(const char *text, size_t bytes) {
       ++at;
       continue;
     }
+    // BSF 2.1 fast path: well-formed U+0080..U+02FF (Latin-1, Latin
+    // Extended, IPA, spacing modifiers — e.g. Polish letters) has no RTL,
+    // AN, explicit-control, joining or mark scalar, so skip the lookups.
+    if (c >= 0xC2 && c <= 0xCB && at + 1 < bytes && (uint8_t(text[at + 1]) & 0xC0) == 0x80) {
+      at += 2;
+      continue;
+    }
     if (!tables) {
       if (!unicode_layout_blob())
         return false; // no tables: legacy LTR path stays authoritative
@@ -203,6 +210,11 @@ bool needs_complex_layout(const char *text, size_t bytes) {
     if (j == Joining::R || j == Joining::D || j == Joining::L)
       return true;
     if (mark_category(cp))
+      return true;
+    // BSF 2.2: emoji (supplementary pictographs, regional indicators, skin
+    // tones, ZWJ sequences, keycaps) go through the shaped layout so GSUB
+    // emoji ligatures and colour glyphs apply.
+    if (cp >= 0x1f000 || cp == 0x200d || cp == 0x20e3)
       return true;
   }
   return false;

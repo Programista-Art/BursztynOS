@@ -105,7 +105,21 @@ int main(){
     CHECK(bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",0,(uint64_t)font_bytes,4)==5);CHECK(!memcmp(font_bytes,"font",4));
     CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/source/copied",0,(uint64_t)font_bytes,4));
     CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/../x.ttf",0,(uint64_t)font_bytes,4));
-    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",BSF::MaxFile,(uint64_t)font_bytes,4));
+    // BSF 2.2: collections are read per table, so the GUI-only read bound is
+    // MaxFontFile (64 MiB). Past EOF a read returns zero bytes (1); beyond the
+    // bound it is refused.
+    CHECK(bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",BSF::MaxFile,(uint64_t)font_bytes,4)==1);
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",BSF::MaxFontFile,(uint64_t)font_bytes,4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/ttf/Ω font.ttf",BSF::MaxFontFile-2,(uint64_t)font_bytes,4));
+    // New font directories accept exactly their own extension.
+    CHECK(utworz_katalog_z_pzb("/czcionki/otf",PZB_USLUGI));
+    CHECK(utworz_plik_z_pzb("/czcionki/otf/a.otf",PZB_USLUGI));CHECK(zapisz_do_pliku("/czcionki/otf/a.otf","OTTO",4));
+    CHECK(utworz_plik_z_pzb("/czcionki/otf/a.ttf",PZB_USLUGI));CHECK(zapisz_do_pliku("/czcionki/otf/a.ttf","true",4));
+    CHECK(bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/otf/a.otf",0,(uint64_t)font_bytes,4)==5);CHECK(!memcmp(font_bytes,"OTTO",4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/otf/a.ttf",0,(uint64_t)font_bytes,4));
+    CHECK(!bws_czytaj_fragment_pliku(gui,(uint64_t)"/czcionki/otc/../otf/a.otf",0,(uint64_t)font_bytes,4));
+    CHECK(bws_wylistuj_katalog(gui,(uint64_t)"/czcionki/otf",(uint64_t)listing.get(),BSF::DirectoryBytes));
+    CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/otf/new.otf"));
     CHECK(bws_wylistuj_katalog(gui,(uint64_t)"/czcionki/ttf",(uint64_t)listing.get(),BSF::DirectoryBytes));
     CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));
     gui.uprawnienia|=PRAWO_PLIKI_ZAPISZ;CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));

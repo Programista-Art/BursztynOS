@@ -107,6 +107,45 @@ inline Work paint_alpha_glyph_work(Surface& target,uint32_t cp,int x,int y,const
         for(int xx=0;xx<g.width&&target.budget;++xx){--target.budget;int tx=x+g.x+xx;if(tx<clip.x||tx>=int64_t(clip.x)+clip.width)continue;unsigned a=g.pixels[yy*g.width+xx];if(a)target.pixel(tx,ty,s.color,a*unsigned(s.color_alpha)*s.paint_opacity/(255*255));}
     }
 }
+#if HUSARZ_BIDI
+// BSF 2.1: glyph masks of a shaped fragment composited into the surface
+// (clip, damage, budget and opacity exactly as the per-glyph path).
+struct ShapedPaint { Surface *target; Clip clip; uint32_t color; unsigned alpha; };
+inline void shaped_mask(void *user, int x, int y, int w, int h, const uint8_t *a) {
+    auto &p = *static_cast<ShapedPaint *>(user);
+    for (int yy = 0; yy < h && p.target->budget; ++yy) {
+        int ty = y + yy;
+        if (ty < p.clip.y || ty >= int64_t(p.clip.y) + p.clip.height)
+            continue;
+        for (int xx = 0; xx < w && p.target->budget; ++xx) {
+            int tx = x + xx;
+            if (tx < p.clip.x || tx >= int64_t(p.clip.x) + p.clip.width)
+                continue;
+            unsigned v = a[yy * w + xx];
+            if (v)
+                p.target->pixel(tx, ty, p.color, v * p.alpha / 255);
+        }
+    }
+}
+// BSF 2.2: colour glyphs (emoji: COLR/CPAL, CBDT, sbix) keep their own
+// colours; only the element opacity applies.
+inline void shaped_color(void *user, int x, int y, int w, int h, const uint32_t *argb) {
+    auto &p = *static_cast<ShapedPaint *>(user);
+    for (int yy = 0; yy < h && p.target->budget; ++yy) {
+        int ty = y + yy;
+        if (ty < p.clip.y || ty >= int64_t(p.clip.y) + p.clip.height)
+            continue;
+        for (int xx = 0; xx < w && p.target->budget; ++xx) {
+            int tx = x + xx;
+            if (tx < p.clip.x || tx >= int64_t(p.clip.x) + p.clip.width)
+                continue;
+            uint32_t v = argb[yy * w + xx];
+            if (v >> 24)
+                p.target->pixel(tx, ty, v & 0xffffff, (v >> 24) * p.alpha / 255);
+        }
+    }
+}
+#endif
 // Replace an unavailable image's retained alt fragments only when fixed boxes,
 // line alignment, painted ink and scroll extent provably stay unchanged.
 inline bool publish_fixed_image_paint(Document &d,uint16_t id,Metrics metrics,Glyphs glyphs){
@@ -329,6 +368,46 @@ inline Work paint_control_text_work(Document &d,FormControl &c,Surface &target,i
         scan.next();
     }
     if(d.focused_control==c.node && c.reveal_caret){control_apply_geometry(d,c,metrics,g);c.reveal_caret=false;}
+#if HUSARZ_BIDI
+    if (const auto *L = control_layout(d, c, metrics)) {
+        // BSF 2.1: shaped/bidi value; selection highlight follows the
+        // visual spans of the logical selection on every line.
+        int lh = control_line_height(d, c, metrics);
+        unsigned a = selection_start(c), z = selection_end(c);
+        bool focused = d.focused_control == c.node;
+        BSF::TextLayout::Span spans[64];
+        size_t ns = focused && a < z ? L->selection(a, z, spans, 64) : 0;
+        int base_x = b.content_x - c.scroll_x, base_y = b.content_y - c.scroll_y - scroll;
+        for (size_t k = 0; k < ns; ++k) {
+            co_await WorkPoint{1};
+            int sh = control_line_shift(d, c, *L, spans[k].line);
+            int x0 = base_x + sh + int(spans[k].x0 / BSF::Fixed), x1 = base_x + sh + int((spans[k].x1 + BSF::Fixed - 1) / BSF::Fixed);
+            co_await target.rect_work(x0, base_y + int(spans[k].line) * lh, x1 - x0, lh, 0x245ac4, 255, clip);
+        }
+        for (size_t li = 0; li < L->line_count(); ++li) {
+            int y = base_y + int(li) * lh;
+            if (y >= int64_t(clip.y) + clip.height || y + lh <= clip.y)
+                continue;
+            co_await WorkPoint{work_units(L->lines()[li].glyph_end - L->lines()[li].glyph_begin + 1)};
+            int x = base_x + control_line_shift(d, c, *L, li);
+            ShapedPaint sp{&target, clip, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255};
+            BSF::draw_layout_line_color(*L, li, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family),
+                                        0xff000000u | s.color, shaped_mask, shaped_color, &sp);
+            for (size_t k = 0; k < ns; ++k) { // selected glyphs in white
+                if (spans[k].line != li)
+                    continue;
+                int x0 = x + int(spans[k].x0 / BSF::Fixed), x1 = x + int((spans[k].x1 + BSF::Fixed - 1) / BSF::Fixed);
+                ShapedPaint white{&target, intersect(clip, {x0, y, x1 - x0, lh}), 0xffffff, 255};
+                BSF::draw_layout_line(*L, li, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family), shaped_mask, &white);
+            }
+        }
+        if (focused) {
+            int caret_x = b.content_x + g.caret_x - c.scroll_x, caret_y = b.content_y + g.caret_y - c.scroll_y - scroll;
+            co_await target.rect_work(caret_x, caret_y, 1, font_height(metrics, s), s.color, s.color_alpha, clip);
+        }
+        co_return;
+    }
+#endif
     ControlTextWalker w(d,c,metrics);
     unsigned start=selection_start(c),end=selection_end(c);
     int caret_x=b.content_x+g.caret_x-c.scroll_x,caret_y=b.content_y+g.caret_y-c.scroll_y-scroll;
@@ -482,6 +561,23 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
             int x = f.x, y = f.y - scroll;BSF::MarkPen marks;marks.base=x;
             size_t p = 0;TextCluster cluster;
             const char *text = d.str(f.text);
+#if HUSARZ_BIDI
+            if ((f.flags & FragmentComplex) && f.length) {
+                // Shaped run: contextual forms, GSUB/GPOS, visual order of
+                // its (uniform) level; never per-code-point Arabic.
+                if (const auto *L = shaped_layout(text, f.length, s, f.level, f.context_before, f.context_after,
+                                                  (f.flags & FragmentOverride) != 0)) {
+                    co_await WorkPoint{work_units(L->glyph_count() + 1)};
+                    HUSARZ_COUNT(d, shaped_paints, 1);
+                    ShapedPaint sp{&target, fc, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255};
+                    BSF::draw_layout_line_color(*L, 0, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family),
+                                                0xff000000u | s.color, shaped_mask, shaped_color, &sp);
+                    if (s.underline)
+                        co_await target.rect_work(f.x, y + f.height - 1, f.width, 1, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255, fc);
+                    continue;
+                }
+            }
+#endif
             while (p < f.length && target.budget) { co_await WorkPoint{1};
                 if(p==cluster.end)cluster=text_cluster(text,f.length,p,metrics,s,p==0);
                 size_t used;

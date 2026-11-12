@@ -40,6 +40,9 @@ struct Loaded {
 };
 int main(int argc, char **argv) {
   const char *path = argc > 1 ? argv[1] : "testy/fixtures/bsf_shaping_oracle.tsv";
+  // --subset: a corpus that does not cover every lookup type (BSF 2.2 format
+  // corpora). Rows must still all be exact and none may be skipped.
+  bool subset_corpus = argc > 2 && !std::strcmp(argv[2], "--subset");
   bool verbose = std::getenv("BSF_SHAPING_VERBOSE") != nullptr;
   std::ifstream in(path);
   CHECK(in.good());
@@ -65,9 +68,43 @@ int main(int argc, char **argv) {
     Loaded *&font = fonts[f[1]];
     if (!font) {
       font = new Loaded;
-      font->bytes = file(f[1]);
+      // BSF 2.2: "path#face" selects a collection face, "@tag=value,..." a
+      // variation instance (user-space coordinates, as given to HarfBuzz).
+      std::string spec = f[1], axes;
+      unsigned index = 0;
+      size_t at = spec.find('@');
+      if (at != std::string::npos) {
+        axes = spec.substr(at + 1);
+        spec.resize(at);
+      }
+      at = spec.find('#');
+      if (at != std::string::npos) {
+        index = unsigned(std::strtoul(spec.c_str() + at + 1, nullptr, 10));
+        spec.resize(at);
+      }
+      font->bytes = file(spec);
       font->ok = !font->bytes.empty() &&
-                 font->face.open(font->bytes.data(), font->bytes.size(), uint32_t(fonts.size()));
+                 font->face.open_index(font->bytes.data(), font->bytes.size(),
+                                       index, uint32_t(fonts.size()));
+      if (font->ok && !axes.empty()) {
+        std::vector<VariationSetting> settings;
+        std::stringstream as(axes);
+        std::string kv;
+        while (std::getline(as, kv, ',')) {
+          size_t eq = kv.find('=');
+          if (eq != 4) {
+            font->ok = false;
+            break;
+          }
+          VariationSetting v;
+          v.tag = (uint32_t(uint8_t(kv[0])) << 24) | (uint32_t(uint8_t(kv[1])) << 16) |
+                  (uint32_t(uint8_t(kv[2])) << 8) | uint8_t(kv[3]);
+          v.value = std::strtod(kv.c_str() + 5, nullptr);
+          settings.push_back(v);
+        }
+        font->ok = font->ok && set_variations(font->face, settings.data(),
+                                              unsigned(settings.size()));
+      }
       if (font->ok)
         font->layout.open(font->face);
     }
@@ -162,7 +199,12 @@ int main(int argc, char **argv) {
       ++missing_types;
     }
   };
-  if (!skipped) {
+  if (subset_corpus) {
+    std::printf("Format corpus %s: lookup-type coverage asserted by the main "
+                "oracle corpus\n", path);
+    if (skipped)
+      std::fprintf(stderr, "format corpus rows skipped: %u\n", skipped);
+  } else if (!skipped) {
     std::printf("Lookup application counts over the oracle corpus:\n");
     for (unsigned t = 1; t < 9; ++t)
       report_type("GSUB", t, gsub_total[t]);
@@ -175,5 +217,7 @@ int main(int argc, char **argv) {
   std::printf("BSF shaping vs HarfBuzz oracle: %u/%u rows exact (%u glyphs), "
               "%u rows skipped (font unavailable), %u checks\n",
               exact, rows, glyphs, skipped, checks);
+  if (subset_corpus)
+    return exact == rows && !skipped ? 0 : 1;
   return exact == rows && !missing_types ? 0 : 1;
 }

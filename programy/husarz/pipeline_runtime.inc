@@ -96,8 +96,13 @@ Husarz::LayoutIdentity browser_identity(const Zakladka &z) {
 Husarz::Work build_browser_document(Husarz::DocumentJob &job, Zakladka &z) {
     const char *source =
         z.tresc && *z.tresc ? z.tresc : "Wpisz adres strony lub zapytanie i wybierz Przejdź.";
+    webfonts_current = z.fonts;
     co_await job.build(z.dokument, source, Husarz::length(source, HTML_POJEMNOSC), z.to_jest_html);
     auto &d = *job.result;
+    // BSF 2.2: a web font of this tab was registered since the last layout:
+    // recompute styles (font families re-resolve) and reflow this document.
+    if (z.fonts_changed)
+        d.styles_dirty = true;
     if (d.style_viewport_height != browser_viewport.height && d.has_viewport_units)
         d.styles_dirty = true;
     d.style_viewport_height = browser_viewport.height;
@@ -269,6 +274,10 @@ void browser_step_work() {
         z.dokument = job.result;
         job.result = nullptr;
         z.dokument_brudny = false;
+        if (z.fonts && z.fonts->navigation == z.navigation) {
+            z.fonts_changed = false;
+            z.fonts->laid_out = true;
+        }
         if (z.pending_css) {
             delete z.pending_css;
             z.pending_css = nullptr;

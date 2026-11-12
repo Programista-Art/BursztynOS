@@ -9,7 +9,17 @@ void shell_sync_font() {
     uint32_t gen=BSF::generation();int px=ui_skaluj(BSF::ui_size(),ui_skala_procent);
     if(gen==g_terminal_generation && px==g_terminal_px)return;
     g_terminal_generation=gen;g_terminal_px=px;
-    g_terminal_face=g_terminal_ttf?BSF::terminal_face(g_terminal_family[0]?g_terminal_family:nullptr):0;
+    // Session override (shell command "czcionka") first, then the persisted
+    // Terminal font (Settings, BSF 2.2 Config v2), then automatic monospace.
+    // A proportional or removed face never reaches the grid: terminal_face
+    // verifies equal ASCII advances and returns 0 otherwise.
+    g_terminal_face=0;
+    if(g_terminal_ttf){
+        const char* configured=nullptr;
+        if(!g_terminal_family[0]){uint32_t t=BSF::terminal_family();configured=t?BSF::family_name(t):nullptr;}
+        g_terminal_face=BSF::terminal_face(g_terminal_family[0]?g_terminal_family:configured);
+        if(!g_terminal_face&&configured)g_terminal_face=BSF::terminal_face(nullptr);
+    }
     g_terminal_cell=g_terminal_face?BSF::advance_face('M',g_terminal_face,px):ui_skaluj(10,ui_skala_procent);
     int height=g_terminal_face?BSF::height(px,BSF::family_name(g_terminal_face)):ui_skaluj(16,ui_skala_procent);
     if(g_terminal_cell<1){g_terminal_face=0;g_terminal_cell=ui_skaluj(10,ui_skala_procent);}

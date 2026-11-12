@@ -3,8 +3,16 @@
 #include <stdint.h>
 #include "limits.h"
 namespace BSF {
+// Font directories (BSF 2.2). Each directory accepts exactly one extension;
+// the outline format is still identified from validated data, never from
+// the extension.
+struct FontDirectory { const char* path; const char* ext; };
+constexpr FontDirectory FontDirectories[]={{"/czcionki/ttf","ttf"},{"/czcionki/otf","otf"},
+  {"/czcionki/ttc","ttc"},{"/czcionki/otc","otc"}};
+constexpr unsigned FontDirectoryCount=4;
+inline bool lower_equal(char a,char b){if(a>='A'&&a<='Z')a=char(a+32);return a==b;}
 // PSF names occupy 56 bytes including NUL. UTF-8 is validated, never normalized.
-inline bool font_filename(const char* name,size_t n){
+inline bool font_filename(const char* name,size_t n,const char* ext){
   if(!name||n<=4||n>55)return false;
   for(size_t at=0;at<n;){
     unsigned c=uint8_t(name[at]);
@@ -17,16 +25,27 @@ inline bool font_filename(const char* name,size_t n){
     at+=k;
   }
   const char* end=name+n-4;
-  return end[0]=='.'&&(end[1]=='t'||end[1]=='T')&&(end[2]=='t'||end[2]=='T')&&(end[3]=='f'||end[3]=='F');
+  return end[0]=='.'&&lower_equal(end[1],ext[0])&&lower_equal(end[2],ext[1])&&lower_equal(end[3],ext[2]);
+}
+inline bool font_filename(const char* name,size_t n){return font_filename(name,n,"ttf");}
+// Index of the font directory whose extension matches the file name.
+inline int font_directory_for(const char* name,size_t n){
+  for(unsigned d=0;d<FontDirectoryCount;++d)if(font_filename(name,n,FontDirectories[d].ext))return int(d);
+  return -1;
 }
 // Read-only public GUI assets. This never grants general filesystem access.
+// All four directory names have the same length ("/czcionki/xxx" = 13).
 inline bool trusted_asset(const char* path,bool directory=false){
   if(!path)return false;
-  const char prefix[]="/czcionki/ttf";
-  for(size_t i=0;i<sizeof(prefix)-1;++i)if(!path[i]||path[i]!=prefix[i])return false;
-  if(directory)return path[13]==0||(path[13]=='/'&&path[14]==0);
-  if(path[13]!='/')return false;
-  size_t n=0;while(n<=55&&path[14+n])++n;
-  return font_filename(path+14,n);
+  for(unsigned d=0;d<FontDirectoryCount;++d){
+    const char* prefix=FontDirectories[d].path;size_t i=0;
+    while(prefix[i]&&path[i]==prefix[i])++i;
+    if(prefix[i]||i!=13)continue;
+    if(directory)return path[13]==0||(path[13]=='/'&&path[14]==0);
+    if(path[13]!='/')return false;
+    size_t n=0;while(n<=55&&path[14+n])++n;
+    return font_filename(path+14,n,FontDirectories[d].ext);
+  }
+  return false;
 }
 }

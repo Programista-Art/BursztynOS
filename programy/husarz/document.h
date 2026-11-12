@@ -27,7 +27,8 @@ enum Limit : uint32_t {
     LimitText = 4096,
     LimitFragments = 8192,
     LimitGenerated = 16384,
-    LimitCssValue = 32768
+    LimitCssValue = 32768,
+    LimitBidi = 65536
 };
 inline void (*document_limit_log)(const char *){};
 struct CustomProperty {
@@ -145,7 +146,10 @@ inline int resolve(Length v, int basis, int font, int root, int automatic = 0) {
 }
 enum class Display : uint8_t { Inline, InlineBlock, Block, None, Table, RowGroup, Row, Cell };
 enum class WhiteSpace : uint8_t { Normal, Pre, PreWrap, NoWrap };
-enum class Align : uint8_t { Left, Center, Right };
+// Start/End resolve against the block's direction at line layout (CSS Text 3).
+enum class Align : uint8_t { Left, Center, Right, Start, End };
+// CSS Writing Modes 3 unicode-bidi (BSF 2.1).
+enum class UnicodeBidi : uint8_t { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext };
 enum class Vertical : uint8_t { Baseline, Top, Middle, Bottom };
 enum class Transform : uint8_t { None, Upper, Lower, Capitalize };
 enum class Position : uint8_t { Static, Relative, Absolute };
@@ -169,7 +173,11 @@ struct Style {
     int flex_grow{}, flex_shrink{1000};
     Length flex_basis{}, row_gap{0, Unit::Px}, column_gap{0, Unit::Px};
     WhiteSpace white{WhiteSpace::Normal};
-    Align align{Align::Left};
+    Align align{Align::Start};
+    // BSF 2.1: CSS direction (inherited; 0 ltr, 1 rtl) and unicode-bidi
+    // (not inherited). HTML dir/bdi/bdo map onto these in defaults().
+    uint8_t direction{};
+    UnicodeBidi unicode_bidi{UnicodeBidi::Normal};
     Vertical vertical{Vertical::Baseline};
     Overflow overflow_x{Overflow::Visible}, overflow_y{Overflow::Visible};
     Transform transform{Transform::None};
@@ -215,6 +223,8 @@ struct GeneratedBox {
 };
 struct FontFace {
     uint32_t family{}, sources{}, base_url{};
+    // BSF 2.2 descriptors (arena offsets of the raw values; 0 = absent).
+    uint32_t weight{}, style{}, stretch{}, unicode_range{}, display{};
 };
 struct Attribute {
     uint32_t name{}, value{};
@@ -266,7 +276,23 @@ struct Fragment {
     int x{}, y{}, width{}, height{};
     Clip clip{};
     uint16_t flow_node{};
+    // BSF 2.1: resolved bidi embedding level of the whole fragment (a word is
+    // split where the level changes), level of the collapsed space before it,
+    // and the paragraph level. gap is the space advance emitted before it on
+    // its line. context_* are the adjacent scalars of neighbouring fragments
+    // with no break between them (cursive joining across DOM nodes).
+    uint8_t level{}, gap_level{}, paragraph_level{}, flags{};
+    int gap{};
+    uint32_t context_before{}, context_after{};
 };
+// FragmentOverride: the level contradicts the strong characters (an
+// overridden run, CSS bidi-override); it is shaped inside LRO/RLO..PDF.
+enum FragmentFlags : uint8_t { FragmentComplex = 1, FragmentOverride = 2 };
+// Bidi level runs of text nodes (BSF 2.1, see bidi.h): run k covers bytes
+// [offset, next run's offset) of `node` at `level` in a paragraph of
+// `paragraph` level. Nodes without runs are level 0 in an LTR paragraph.
+struct TextLevelRun { uint32_t offset{}; uint16_t node{}; uint8_t level{}, paragraph{}; };
+constexpr uint32_t MaxBidiRuns = 16384, MaxBidiParagraph = 32768;
 struct Metrics {
     void *user{};
     int (*advance)(void *, uint32_t, int, bool, bool){};
@@ -526,6 +552,11 @@ struct Document {
             name = "TEXT_BYTES";
             maximum = MaxText;
             break;
+        case LimitBidi:
+            name = "BIDI_RUNS_OR_PARAGRAPH";
+            usage = bidi_run_count;
+            maximum = MaxBidiRuns;
+            break;
         }
         char line[160];
         size_t n = 0;
@@ -556,6 +587,13 @@ struct Document {
     Rule rules[MaxRules];
     Declaration declarations[MaxDeclarations];
     Fragment fragments[MaxFragments];
+    TextLevelRun bidi_runs[MaxBidiRuns];
+    uint32_t bidi_run_count{};
+    uint32_t bidi_first[MaxNodes]{}; // first run index + 1 (0 = none)
+    uint16_t bidi_count[MaxNodes]{};
+    bool has_bidi{};                 // any non-trivial paragraph in this layout
+    uint32_t bidi_paragraphs{}, bidi_limited{};
+    uint32_t bidi_revision{~0u}, bidi_style_generation{~0u}, style_generation{};
     Script scripts[MaxScripts];
     struct ComputedText {
         uint64_t hash{};
@@ -611,6 +649,12 @@ struct Document {
         for (auto &index : identity_index)
             index = 0;
         attr_count = rule_count = declaration_count = fragment_count = script_count = 0;
+        bidi_run_count = 0;
+        has_bidi = false;
+        bidi_revision = bidi_style_generation = ~0u;
+        bidi_paragraphs = bidi_limited = 0;
+        for (auto &first : bidi_first)
+            first = 0;
         for (auto &text : computed_text)
             text = {};
         arena_used = 1;

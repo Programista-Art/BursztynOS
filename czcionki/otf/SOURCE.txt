@@ -1,0 +1,6 @@
+Noto Sans (OpenType CFF), notofonts/latin-greek-cyrillic release NotoSans-v2.015,
+https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v2.015/NotoSans-v2.015.zip
+files NotoSans/unhinted/otf/NotoSans-{Regular,Bold}.otf, unmodified. License: SIL OFL 1.1 (LICENSE-NotoSans.txt).
+SHA-256:
+bfb44de2c2031c391ff856943fe8f105ebb5d725cb9a04d493d211d5bbd5c21b  NotoSans-Regular.otf
+ad862ec2c77ce672bd9013dc756d058e77b8b49f0a70f6c3be5148017c99c5ed  NotoSans-Bold.otf

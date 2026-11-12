@@ -83,6 +83,52 @@ public:
         if (czy_tryb_hasla_) uniewaznij();
     }
 
+    // BSF 2.1: base direction of this field (never global state).
+    // Automatyczny: first strong character decides; an RTL value is
+    // right-aligned while it fits and moves visually with Left/Right.
+    void ustaw_kierunek_tekstu(KierunekTekstu k) {
+        if (kierunek_ == k) return;
+        kierunek_ = k; dopasuj_przewiniecie(); uniewaznij();
+    }
+    KierunekTekstu kierunek_tekstu() const { return kierunek_; }
+    // Diagnostics (tests, observers): caret x relative to the text origin
+    // including alignment, base level, horizontal scroll and the visual
+    // selection spans (several for a mixed-direction selection).
+    int x_kursora() const { return szerokosc_tekstu_do(bajt_kursora_); }
+    uint8_t poziom_bazowy() const {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad()) return L->base_level();
+#endif
+        return 0;
+    }
+    bool czy_uklad_zlozony() const {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        return uklad() != nullptr;
+#else
+        return false;
+#endif
+    }
+    int przewiniecie() const { return przewiniecie_x_; }
+    size_t spany_zaznaczenia(int* x0, int* x1, size_t pojemnosc) const {
+        if (!czy_ma_zaznaczenie() || !pojemnosc) return 0;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad()) {
+            BSF::TextLayout::Span spans[64];
+            size_t ns = L->selection(poczatek_zaznaczenia(), koniec_zaznaczenia(), spans, 64), out = 0;
+            int shift = przesuniecie_wyrownania();
+            for (size_t k = 0; k < ns && out < pojemnosc; ++k, ++out) {
+                x0[out] = shift + int(spans[k].x0 / BSF::Fixed);
+                x1[out] = shift + int((spans[k].x1 + BSF::Fixed - 1) / BSF::Fixed);
+            }
+            return out;
+        }
+#endif
+        x0[0] = szerokosc_tekstu_do(poczatek_zaznaczenia());
+        x1[0] = szerokosc_tekstu_do(koniec_zaznaczenia());
+        if (x1[0] < x0[0]) { int t = x0[0]; x0[0] = x1[0]; x1[0] = t; }
+        return 1;
+    }
+
     // Limit znaków
     size_t maksymalna_liczba_znakow() const { return maksymalna_liczba_znakow_; }
     void ustaw_maksymalna_liczbe_znakow(size_t n) { maksymalna_liczba_znakow_ = n; }
@@ -331,6 +377,23 @@ public:
             char wyswietlany[MAKS_BUFOR];
             pobierz_tekst_do_wyswietlenia(wyswietlany, sizeof(wyswietlany));
 
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+            if (const auto* L = uklad()) {
+                // BSF 2.1: drawn from the same owned layout as caret, hit
+                // testing and the visual selection spans.
+                int px = ui_skaluj(BSF::ui_size(), skala.procent());
+                Punkt pt(klient_x - przewiniecie_x_ + przesuniecie_wyrownania(), klient_y);
+                int x0[64], x1[64]; size_t ns = spany_zaznaczenia(x0, x1, 64);
+                for (size_t k = 0; k < ns; ++k)
+                    ctx.rysuj_zaznaczenie(Prostokat(klient_x - przewiniecie_x_ + x0[k], klient_y - 2 * skala, x1[k] - x0[k], font_h + 4 * skala), motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
+                ctx.rysuj_linie_ukladu(pt, *L, 0, s.tekst, px);
+                for (size_t k = 0; k < ns; ++k) {
+                    ctx.dodaj_przyciecie(Prostokat(klient_x - przewiniecie_x_ + x0[k], klient_y, x1[k] - x0[k], font_h));
+                    ctx.rysuj_linie_ukladu(pt, *L, 0, motyw_kolor_tekstu_zaznaczenia(), px);
+                    ctx.zdejmij_przyciecie();
+                }
+            } else
+#endif
             if (czy_ma_zaznaczenie()) {
                 size_t sel_od = poczatek_zaznaczenia();
                 size_t sel_do = koniec_zaznaczenia();
@@ -471,6 +534,28 @@ public:
         if ((ctrl && klawisz_litery(e, 'y', 0x15)) ||
             (ctrl && shift && klawisz_litery(e, 'z', 0x2C))) {
             if (!czy_tylko_do_odczytu_) ponow();
+            e.obsluzone = true;
+            return;
+        }
+
+        // BSF 2.1: Left/Right move visually on a bidi/shaped value; with a
+        // selection and no Shift they collapse to its visually left/right
+        // side (logical start/end swapped in an RTL field).
+        if ((e.kod_klawisza == 0x4B || e.kod_klawisza == 0x4D) && czy_uklad_zlozony()) {
+            int dir = e.kod_klawisza == 0x4D ? 1 : -1;
+            bool rtl = (poziom_bazowy() & 1) != 0;
+            if (!shift && czy_ma_zaznaczenie()) {
+                bajt_kursora_ = ((dir > 0) != rtl) ? koniec_zaznaczenia() : poczatek_zaznaczenia();
+            } else {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+                bool moved = false;
+                size_t m = uklad()->move_visual_on(bajt_kursora_, 0, dir, &moved);
+                if (moved) bajt_kursora_ = m; // visual edge: stay
+#endif
+            }
+            if (!shift) bajt_kotwicy_ = bajt_kursora_;
+            dopasuj_przewiniecie();
+            uniewaznij();
             e.obsluzone = true;
             return;
         }
@@ -740,9 +825,53 @@ private:
         }
     }
 
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    // Owned layout of the value when it needs BSF 2.1 (bidi/shaping or an
+    // explicit RTL direction), else null. Password fields never lay out the
+    // real value (only mask characters are measured), so no plaintext enters
+    // a layout cache.
+    const BSF::TextLayout* uklad() const {
+        if (czy_tryb_hasla_ || !dlugosc_ || !BSF::ready()) return nullptr;
+        if (kierunek_ != KierunekTekstu::OdPrawej && !BSF::needs_complex_layout(bufor_, dlugosc_)) return nullptr;
+        int px = ui_skaluj(BSF::ui_size(), skala_dpi_.procent());
+        uint64_t h = UINT64_C(1469598103934665603);
+        for (size_t i = 0; i < dlugosc_; ++i) h = (h ^ uint8_t(bufor_[i])) * UINT64_C(1099511628211);
+        uint32_t gen = BSF::generation();
+        if (uklad_wazny_ && uklad_skrot_ == h && uklad_.bytes() == dlugosc_ && uklad_px_ == px &&
+            uklad_kierunek_ == uint8_t(kierunek_) && uklad_generacja_ == gen) {
+            bool rowne = true; const char* own = uklad_.text();
+            for (size_t i = 0; i < dlugosc_ && rowne; ++i) rowne = own[i] == bufor_[i];
+            if (rowne) return &uklad_;
+        }
+        uklad_wazny_ = false;
+        BSF::LayoutRequest r; r.px = px; r.direction = CzcionkaUI::kierunek_bsf(kierunek_);
+        if (!BSF::build_layout(uklad_, bufor_, dlugosc_, r)) return nullptr;
+        uklad_skrot_ = h; uklad_px_ = px; uklad_kierunek_ = uint8_t(kierunek_); uklad_generacja_ = gen; uklad_wazny_ = true;
+        return &uklad_;
+    }
+#endif
+    int szerokosc_klienta() const {
+        SkalaUI skala = skala_dpi_;
+        return obszar_.szerokosc - (wypelnienie_.lewy * skala + wypelnienie_.prawy * skala);
+    }
+    // Direction-aware alignment: an RTL value that fits is right-aligned.
+    int przesuniecie_wyrownania() const {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad()) {
+            if (!(L->base_level() & 1)) return 0;
+            int w = int((L->width() + BSF::Fixed / 2) / BSF::Fixed), kw = szerokosc_klienta() - 2 * skala_dpi_;
+            return kw > w ? kw - w : 0;
+        }
+#endif
+        return 0;
+    }
     int szerokosc_tekstu_do(size_t bajt_limit) const {
         SkalaUI skala = skala_dpi_;
         if (bajt_limit > dlugosc_) bajt_limit = dlugosc_;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad())
+            return przesuniecie_wyrownania() + int((L->caret_x_on(bajt_limit, 0) + BSF::Fixed / 2) / BSF::Fixed);
+#endif
         if (!czy_tryb_hasla_) {
             return CzcionkaUI::pozycja_x_z_bajtu(bufor_, bajt_limit, skala);
         } else {
@@ -760,6 +889,10 @@ private:
         SkalaUI skala = skala_dpi_;
         int pad_l = wypelnienie_.lewy * skala;
         int txt_rel_x = target_x - pad_l + przewiniecie_x_;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad())
+            return L->hit_test(int64_t(txt_rel_x - przesuniecie_wyrownania()) * BSF::Fixed, 0);
+#endif
         if (txt_rel_x <= 0) return 0;
 
         if (!czy_tryb_hasla_) {
@@ -815,6 +948,15 @@ private:
 
     int przewiniecie_x_{0};
     bool czy_zaznaczanie_mysza_{false};
+    KierunekTekstu kierunek_{KierunekTekstu::Automatyczny};
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    mutable BSF::TextLayout uklad_;
+    mutable uint64_t uklad_skrot_{0};
+    mutable int uklad_px_{0};
+    mutable uint8_t uklad_kierunek_{0};
+    mutable uint32_t uklad_generacja_{0};
+    mutable bool uklad_wazny_{false};
+#endif
 
     bool czy_tryb_hasla_{false};
     char znak_maskowania_{'*'};

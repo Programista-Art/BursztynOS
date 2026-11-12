@@ -1,11 +1,16 @@
-// Generic opaque Multiboot asset import. The kernel never opens TTF tables.
+// Generic opaque Multiboot asset import. The kernel never opens font tables;
+// the destination directory is chosen from the file extension only
+// (bsf/asset_path.h), and the bytes are copied verbatim.
 #include "limits.h"
+#include "asset_path.h"
 void bsf_import_fonts() {
   if (!g_multiboot_info_ptr)
     return;
-  if (!zapewnij_katalog_startowy("/czcionki") ||
-      !zapewnij_katalog_startowy("/czcionki/ttf"))
+  if (!zapewnij_katalog_startowy("/czcionki"))
     return;
+  for (unsigned d = 0; d < BSF::FontDirectoryCount; ++d)
+    if (!zapewnij_katalog_startowy(BSF::FontDirectories[d].path))
+      return;
   uint64_t mbi = g_multiboot_info_ptr;
   uint32_t total = *reinterpret_cast<const uint32_t *>(mbi);
   if (total < 16 || total > 1024 * 1024)
@@ -40,6 +45,12 @@ void bsf_import_fonts() {
         if (n + 4 >= cap || label[n + 4] || n < 5)
           safe = false;
         path[14 + n] = 0;
+        // .otf/.ttc/.otc go to their own directory; everything else (TTF
+        // fonts and license notices) keeps the BSF 2.1 location.
+        int directory = safe ? BSF::font_directory_for(path + 14, n) : -1;
+        if (directory > 0)
+          for (unsigned k = 0; k < 13; ++k)
+            path[k] = BSF::FontDirectories[directory].path[k];
         if (safe && bytes + end - start <= BSF::MaxLoadedBytes) {
           if (zapisz_plik_od_nowa(
               path, reinterpret_cast<const char *>(uintptr_t(start)),
