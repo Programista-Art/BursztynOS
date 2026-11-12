@@ -13,6 +13,10 @@ static void target(const uint8_t* data,size_t size) {
     if(bur_v2_waliduj_plik(copy.data(),copy.size(),ASLR_PIE_WINDOW_BASE)!=BUR_V2_OK)return;
     // Exercise production relocation writes in a bounded private DATA buffer.
     if(n.dane_rozmiar_pamieci>1024*1024)return;
+    // The validator only bounds reloc_przesuniecie when a relocation entry
+    // exists, so forming the pointer below would be undefined for an empty
+    // table with an arbitrary offset. Only call it when there is work to do.
+    if(n.reloc_liczba==0)return;
     std::vector<uint8_t> writable(n.dane_rozmiar_pamieci,0);
     memcpy(writable.data(),copy.data()+n.dane_przesuniecie,n.dane_rozmiar_pliku);
     assert(bur_v2_zastosuj_relokacje_danych(n,

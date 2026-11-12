@@ -264,9 +264,6 @@ constexpr uint64_t BSP_START_LBA = 0; // LBA względne; translacja wyłącznie w
 
 constexpr uint32_t DOMYSLNY_LIMIT_SEKTOROW_OPERACJI = 32U;
 
-constexpr uint64_t MAX_LOADER_BUF =
-    512ULL * 1024ULL;
-
 constexpr size_t MAKS_DLUGOSC_SCIEZKI = 512;
 
 constexpr size_t MAKS_BRUDNYCH_BLOKOW = 256;
@@ -357,17 +354,6 @@ bool ostatni_flush_ok = true;
 uint64_t brudne_bloki[MAKS_BRUDNYCH_BLOKOW] = {};
 size_t liczba_brudnych_blokow = 0;
 bool brudny_caly_system = false;
-
-/*
- * API loadera zachowuje dotychczasowy kontrakt zwracania statycznego
- * wskaznika. Bufor jest chroniony podczas wypelniania przez blokade PSF.
- *
- * Docelowo lepszym ABI bedzie:
- *   bool bsp_wczytaj_plik(..., void* dst, size_t cap, size_t* out)
- * albo obiekt/refcount, aby calkowicie usunac wspoldzielony bufor.
- */
-alignas(16)
-uint8_t bufor_wymiany_plikow[MAX_LOADER_BUF] = {};
 
 /*
  * Sektor do wstepnego odczytu superbloku.
@@ -4068,72 +4054,6 @@ extern "C" bool bsp_wczytaj_obraz_bur(const char* sciezka, BurObrazPliku* out,
     }
     out->dane = obraz;
     return true;
-}
-
-extern "C" uint8_t* bsp_wczytaj_plik_do_pamieci(
-    const char* sciezka,
-    uint64_t* rozmiar_wyj
-) {
-    if (!rozmiar_wyj) {
-        return nullptr;
-    }
-
-    *rozmiar_wyj = 0;
-
-    if (!psf_gotowy ||
-        !sciezka) {
-
-        return nullptr;
-    }
-
-    BlokadaPSF blokada;
-
-    const uint64_t id =
-        rozwiaz_sciezke(
-            sciezka,
-            nullptr,
-            false
-        );
-
-    if (id == 0) {
-        wypisz_log("[LOADER-DBG] id is 0");
-        return nullptr;
-    }
-
-    wezel_indeksowy* w =
-        pobierz_wezel(id);
-
-    if (!w ||
-        w->typ != TYP_PLIK) {
-        wypisz_log("[LOADER-DBG] not file");
-        return nullptr;
-    }
-
-    if (w->rozmiar_w_bajtach == 0) {
-        wypisz_log("[LOADER-DBG] rsz is 0");
-        return nullptr;
-    }
-
-    if (w->rozmiar_w_bajtach > MAX_LOADER_BUF) {
-        wypisz_log("[LOADER-DBG] rsz > MAX_LOADER_BUF");
-        return nullptr;
-    }
-
-    const uint32_t rsz = static_cast<uint32_t>(w->rozmiar_w_bajtach);
-    uint32_t odczytano = 0;
-    if (!czytaj_fragment_pliku_wewn(sciezka, 0, reinterpret_cast<char*>(bufor_wymiany_plikow), rsz, &odczytano)) {
-        wypisz_log("[LOADER-DBG] czytaj_fragment_pliku fail");
-        *rozmiar_wyj = 0;
-        return nullptr;
-    }
-    if (odczytano != rsz) {
-        wypisz_log("[LOADER-DBG] odczytano != rsz");
-        *rozmiar_wyj = 0;
-        return nullptr;
-    }
-
-    *rozmiar_wyj = rsz;
-    return bufor_wymiany_plikow;
 }
 
 /* =========================================================================

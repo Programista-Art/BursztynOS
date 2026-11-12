@@ -481,25 +481,6 @@ bool czytaj_fragment_pliku(
     uint32_t* odczytano
 );
 
-/*
- * Pomocniczy odczyt dla loadera programow .bur.
- *
- * Zwracany bufor jest wspoldzielonym buforem wewnetrznym PSF o aktualnym
- * limicie 512 KiB i pozostaje wazny tylko do kolejnego wywolania tej
- * funkcji / modyfikacji implementacji.
- *
- * rozmiar_wyj:
- *   po sukcesie zawiera dokladny rozmiar pliku,
- *   po bledzie jest ustawiany na 0.
- *
- * Docelowo bezpieczniejszym ABI bedzie API, w ktorym wywolujacy przekazuje
- * wlasny bufor.
- */
-uint8_t* bsp_wczytaj_plik_do_pamieci(
-    const char* sciezka,
-    uint64_t* rozmiar_wyj
-);
-
 /* Atomic, bounded executable snapshot; validates before allocation.
  * No shared temporary storage. A successful result must be freed with kfree. */
 struct BurObrazPliku;

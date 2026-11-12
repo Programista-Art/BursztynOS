@@ -382,8 +382,11 @@ int main(int argc, char** argv) {
     eng.add_seed(make_bws_seed(PZB_UZYTKOWNIK, PRAWO_SIEC, BWS_HTTP, 0x1001000ULL, 80, 0x1001100ULL, (0x1031000ULL << 32) | 4096ULL));
     eng.add_seed(make_bws_seed(PZB_ZAUFANE, PRAWA_ZNANE, BWS_ALOKUJ_STERTE, 0x10000ULL, 0, 0, 0));
 
-    // Regressions (including Bug #1: BWS 99 + 0xDEADBEEFCAFEULL)
-    eng.add_regression(make_bws_seed(PZB_PIASKOWNICA, PRAWA_BRAK, 99ULL, 0xDEADBEEFCAFEULL, 0, 0, 0));
+    // Regressions (including Bug #1: unknown BWS number + 0xDEADBEEFCAFEULL).
+    // The number must stay outside the dispatch table: 98/99 are now the 2D
+    // acceleration calls (BWS_GUI_BLIT_SKALOWANY / BWS_GUI_SKALA_WARSTWY).
+    constexpr uint64_t kNieznanyBws = BWS_PIERWSZY_WOLNY + 1000ULL;
+    eng.add_regression(make_bws_seed(PZB_PIASKOWNICA, PRAWA_BRAK, kNieznanyBws, 0xDEADBEEFCAFEULL, 0, 0, 0));
     eng.add_regression(make_bws_seed(PZB_UZYTKOWNIK, kUserRights, BWS_CZYTAJ_PLIK, 0x1001000ULL, GUARD_STOSU_USER, 4096ULL, 0));
 
     // Deterministic matrix check across all PZB levels (0..7) x BWS IDs (0..100)
@@ -398,7 +401,7 @@ int main(int argc, char** argv) {
     for (uint8_t pzb = 0; pzb <= 7; ++pzb) {
         p.poziom_zaufania = pzb;
         p.uprawnienia = PRAWA_ZNANE;
-        assert(wykonaj_fuzz_bws_jeden(p, 99ULL, 0xDEADBEEFCAFEULL, 0, 0, 0, nullptr, 0) == UINT64_MAX);
+        assert(wykonaj_fuzz_bws_jeden(p, BWS_PIERWSZY_WOLNY + 1000ULL, 0xDEADBEEFCAFEULL, 0, 0, 0, nullptr, 0) == UINT64_MAX);
         // Regresja Bug #6: BWS_ROZMIAR_PLIKU dla sciezki z ".." musi zwrocic 0 (blad), a nie 1ULL!
         assert(wykonaj_fuzz_bws_jeden(p, BWS_ROZMIAR_PLIKU, 0x1031000ULL, 0, 0, 0,
                                       reinterpret_cast<const uint8_t*>("/../../cytaty.txt\0"), 18) == 0ULL);
