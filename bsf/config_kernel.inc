@@ -10,12 +10,24 @@ static uint64_t bsf_config_request(proces_t *process, uint64_t command,
     initialized = true;
     BSF::Config stored{};
     active.checksum = BSF::checksum(active);
-    if (rozmiar_pliku("/system/bsf.cfg") == sizeof(stored) &&
+    uint64_t stored_size = rozmiar_pliku("/system/bsf.cfg");
+    if (stored_size == sizeof(stored) &&
         czytaj_z_pliku("/system/bsf.cfg", reinterpret_cast<char *>(&stored),
                        sizeof(stored)) &&
         BSF::valid(stored)) {
       active = stored;
       active.generation = 1;
+      active.checksum = BSF::checksum(active);
+    } else if (stored_size == BSF::ConfigV1Bytes) {
+      // BSF 2.1 record: keep the user's system font and size.
+      uint8_t v1[BSF::ConfigV1Bytes]{};
+      if (czytaj_z_pliku("/system/bsf.cfg", reinterpret_cast<char *>(v1),
+                         sizeof(v1)) &&
+          BSF::migrate_v1(v1, sizeof(v1), stored)) {
+        active = stored;
+        active.generation = 1;
+        active.checksum = BSF::checksum(active);
+      }
     }
   }
   if (command == 0)

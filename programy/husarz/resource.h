@@ -1,7 +1,7 @@
 #pragma once
 #include "url.h"
 namespace Husarz {
-enum class ResourceType : uint8_t { Html, Css, Image, Script, Fetch };
+enum class ResourceType : uint8_t { Html, Css, Image, Script, Fetch, Font };
 constexpr unsigned MaxCacheObjects = 32, MaxDocumentImages = 32;
 constexpr size_t MaxResourceBytes = 240 * 1024, MaxCacheRaw = 2 * 1024 * 1024;
 constexpr size_t MaxCacheDecoded = 16 * 1024 * 1024, MaxDocumentDecoded = 8 * 1024 * 1024;
@@ -10,6 +10,7 @@ struct ResourceCache;
 struct ResourceEntry {
     ResourceCache *cache{}; bool transient{};
     char content_type[96]{}, etag[128]{}, modified[128]{};
+    char allow_origin[128]{}; // BSF 2.2: Access-Control-Allow-Origin (fonts)
     char url[2048]{}, source_url[2048]{};
     ResourceType type{}; uint16_t status{200};
     uint8_t *raw{}; size_t size{};

@@ -34,6 +34,10 @@
 #include "../husarz/work_clock.h"
 #include "../husarz/resource.h"
 #include "../husarz/async.h"
+#include "../husarz/webfonts.h"
+#ifdef HUSARZ_WORKER_ONLY
+#include "../../bsf/webfont.h"
+#endif
 #include "../../obrazy/dekoder_obrazu.h"
 #include "../husarz/script.h"
 #include "../husarz/js_dom.h"
@@ -205,6 +209,8 @@ struct Zakladka {
     Husarz::Js::BrowserRuntime *javascript{};
     bool dokument_brudny;
     bool work_pending{};uint32_t resource_revision{};uint64_t navigation_started{};bool navigation_measured{};PendingCss *pending_css{};
+    // BSF 2.2 browser-scoped web fonts of the current navigation.
+    struct BrowserFonts *fonts{};bool fonts_changed{};
 
     bool to_jest_html;
     bool wczytana;
@@ -657,10 +663,12 @@ bool alokuj_tresc_zakladki(
     return true;
 }
 
+void webfonts_release(Zakladka &);
 void wyczysc_zakladke(
     Zakladka& z,
     bool zwolnij_tresc
 ) {
+    webfonts_release(z);
     if (zwolnij_tresc &&
         z.tresc) {
 
@@ -770,6 +778,7 @@ void zamknij_zakladke(
         return;
     }
 
+    webfonts_release(zakladki[indeks]);
     browser_cancel_work(zakladki[indeks].identity);delete zakladki[indeks].pending_css;zakladki[indeks].pending_css=nullptr;
     delete zakladki[indeks].javascript;zakladki[indeks].javascript=nullptr;
     delete zakladki[indeks].dokument;
@@ -3396,7 +3405,10 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
     if(!received)return nullptr;
     if(type==Husarz::ResourceType::Fetch&&!response.chunked&&response.body_len>Husarz::Js::BrowserRuntime::FetchBodyLimit)return nullptr;
     char mime[96]{}, directive[128]{}, content_length[32]{};
-    if (!znajdz_header(siec_bufor,header_size,"content-type",mime,sizeof(mime))&&type!=Husarz::ResourceType::Fetch) {resource_field("error","MIME_MISSING");return nullptr;}
+    if (!znajdz_header(siec_bufor,header_size,"content-type",mime,sizeof(mime))&&type!=Husarz::ResourceType::Fetch&&type!=Husarz::ResourceType::Font) {resource_field("error","MIME_MISSING");return nullptr;}
+    // BSF 2.2 web fonts: the signature decides the format; documents,
+    // scripts, stylesheets and images are never parsed as fonts.
+    if (type==Husarz::ResourceType::Font && !Husarz::font_mime_allowed(mime)) {resource_field("error","FONT_MIME_REJECTED");return nullptr;}
     if(type==Husarz::ResourceType::Fetch&&(response.kod>=300&&response.kod<400))return nullptr;
     resource_field("MIME",mime);
     if (type==Husarz::ResourceType::Css && !resource_mime_is(mime,"text/css")) {resource_field("error","MIME_REJECTED");return nullptr;}
@@ -3426,6 +3438,7 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
     if (entry) {
         kopiuj_limit(entry->source_url,sizeof(entry->source_url),url);
         kopiuj_limit(entry->content_type,sizeof(entry->content_type),mime);
+        if(!znajdz_header(siec_bufor,header_size,"access-control-allow-origin",entry->allow_origin,sizeof(entry->allow_origin)))entry->allow_origin[0]=0;
         znajdz_header(siec_bufor,header_size,"etag",entry->etag,sizeof(entry->etag));
         znajdz_header(siec_bufor,header_size,"last-modified",entry->modified,sizeof(entry->modified));
         entry->status=uint16_t(response.kod);entry->transient=transient||(type==Husarz::ResourceType::Fetch&&!http_kod_sukces(response.kod));
@@ -3442,8 +3455,11 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
     }
     return entry;
 }
+void webfont_apply(const Husarz::ResourceTask &,const Husarz::WorkerPayload &);
+void queue_fonts(Zakladka &);
 #include "../husarz/worker.inc"
 #include "../husarz/async_runtime.inc"
+#include "../husarz/webfont_runtime.inc"
 #include "../husarz/pipeline_runtime.inc"
 #include "../husarz/script_runtime.inc"
 
@@ -4065,7 +4081,7 @@ extern "C" {
 
 extern "C" [[noreturn]] void _start() {
 #if defined(BSF_NATIVE) && !defined(HUSARZ_WORKER_ONLY)
-    (void)BSF::enumerate();browser_font_generation=BSF::generation();Husarz::font_family_resolver=BSF::resolve_family;
+    (void)BSF::enumerate();browser_font_generation=BSF::generation();Husarz::font_family_resolver=browser_family_resolver;
 #endif
 
 #if HUSARZ_DEBUG_RESOURCES

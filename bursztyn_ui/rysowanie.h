@@ -239,24 +239,34 @@ public:
             if (pixels) {
               for (size_t i = 0; i < area; ++i)
                 static_cast<volatile uint32_t *>(pixels)[i] = 0;
-              const bool drawn = draw(
-                  pt.x + off.x, pt.y + off.y,
-                  [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
-                    for (int y = 0; y < h; ++y) {
-                      if (gy + y < visible.y || gy + y >= visible.dolny())
-                        continue;
-                      for (int x = 0; x < w; ++x) {
-                        if (gx + x < visible.x || gx + x >= visible.prawy())
-                          continue;
-                        auto &dst = pixels[size_t(gy + y - visible.y) *
-                                               visible.szerokosc +
-                                           gx + x - visible.x];
-                        unsigned a = alpha[y * w + x] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
-                        a += (dst >> 24) * (255 - a) / 255;
-                        dst = (a << 24) | (kolor & 0xffffff);
-                      }
+              // BSF 2.2: mask glyphs take the text colour; colour glyphs
+              // (emoji) are composited with their own ARGB pixels.
+              struct BufferSink {
+                uint32_t *pixels; const Prostokat &visible; uint32_t kolor, foreground;
+                void operator()(int gx, int gy, int w, int h, const uint8_t *alpha) const {
+                  for (int y = 0; y < h; ++y) {
+                    if (gy + y < visible.y || gy + y >= visible.dolny()) continue;
+                    for (int x = 0; x < w; ++x) {
+                      if (gx + x < visible.x || gx + x >= visible.prawy()) continue;
+                      auto &dst = pixels[size_t(gy + y - visible.y) * visible.szerokosc + gx + x - visible.x];
+                      unsigned a = alpha[y * w + x] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
+                      a += (dst >> 24) * (255 - a) / 255;
+                      dst = (a << 24) | (kolor & 0xffffff);
                     }
-                  });
+                  }
+                }
+                void color(int gx, int gy, int w, int h, const uint32_t *argb) const {
+                  for (int y = 0; y < h; ++y) {
+                    if (gy + y < visible.y || gy + y >= visible.dolny()) continue;
+                    for (int x = 0; x < w; ++x) {
+                      if (gx + x < visible.x || gx + x >= visible.prawy()) continue;
+                      auto &dst = pixels[size_t(gy + y - visible.y) * visible.szerokosc + gx + x - visible.x];
+                      dst = kolor_nad(dst, argb[y * w + x]);
+                    }
+                  }
+                }
+              } sink{pixels, visible, kolor, kolor | 0xff000000u};
+              const bool drawn = draw(pt.x + off.x, pt.y + off.y, sink);
               if (drawn) {
                 gui_blit_alpha(visible.x, visible.y, visible.szerokosc,
                                visible.wysokosc, pixels);
@@ -273,29 +283,34 @@ public:
       {
         Punkt off = pobierz_przesuniecie();
         Prostokat clip = pobierz_przyciecie();
-        if (draw(
-                pt.x + off.x, pt.y + off.y,
-                [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
-                  uint32_t row[BSF::MaxBitmap]{};
-                  for (int y = 0; y < h; ++y) {
-                    if (gy + y < clip.y || gy + y >= clip.dolny())
-                      continue;
-                    int left = gx < clip.x ? clip.x : gx,
-                        right = gx + w > clip.prawy() ? clip.prawy() : gx + w;
-                    for (int x = left; x < right; ++x) {
-                      unsigned a = alpha[y * w + x - gx] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
-                      row[x - left] = (a << 24) | (kolor & 0xffffff);
-                      if (cel_ && granice_celu_.zawiera(Punkt(x, gy + y))) {
-                        auto &dst = cel_[size_t(gy + y - granice_celu_.y) *
-                                             granice_celu_.szerokosc +
-                                         x - granice_celu_.x];
-                        dst = kolor_nad(dst, (a << 24) | (kolor & 0xffffff));
-                      }
-                    }
-                    if (!cel_ && !g_tlum_rysowanie_globalne && right > left)
-                      gui_blit_alpha(left, gy + y, right - left, 1, row);
-                  }
-                })) {
+        struct RowSink {
+          KontekstRysowania &ctx; const Prostokat &clip; uint32_t kolor, foreground;
+          void put(int gx, int gy, int w, int h, const uint8_t *alpha, const uint32_t *argb) const {
+            uint32_t row[BSF::MaxBitmap]{};
+            for (int y = 0; y < h; ++y) {
+              if (gy + y < clip.y || gy + y >= clip.dolny()) continue;
+              int left = gx < clip.x ? clip.x : gx, right = gx + w > clip.prawy() ? clip.prawy() : gx + w;
+              for (int x = left; x < right; ++x) {
+                uint32_t v;
+                if (argb) v = argb[y * w + x - gx];
+                else {
+                  unsigned a = alpha[y * w + x - gx] * ((kolor >> 24) ? (kolor >> 24) : 255) / 255;
+                  v = (a << 24) | (kolor & 0xffffff);
+                }
+                row[x - left] = v;
+                if (ctx.cel_ && ctx.granice_celu_.zawiera(Punkt(x, gy + y))) {
+                  auto &dst = ctx.cel_[size_t(gy + y - ctx.granice_celu_.y) * ctx.granice_celu_.szerokosc + x - ctx.granice_celu_.x];
+                  dst = kolor_nad(dst, v);
+                }
+              }
+              if (!ctx.cel_ && !g_tlum_rysowanie_globalne && right > left)
+                gui_blit_alpha(left, gy + y, right - left, 1, row);
+            }
+          }
+          void operator()(int gx, int gy, int w, int h, const uint8_t *alpha) const { put(gx, gy, w, h, alpha, nullptr); }
+          void color(int gx, int gy, int w, int h, const uint32_t *argb) const { put(gx, gy, w, h, nullptr, argb); }
+        } rows{*this, clip, kolor, kolor | 0xff000000u};
+        if (draw(pt.x + off.x, pt.y + off.y, rows)) {
           dodaj_pomiar_tekstu(Prostokat(pt.x + off.x, pt.y + off.y,
                                         advance,
                                         BSF::height(px))

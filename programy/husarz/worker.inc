@@ -86,6 +86,30 @@
                     }
                 }
                 delete parsed;
+            } else if (payload->kind==uint32_t(Husarz::RequestKind::Font)) {
+                // BSF 2.2: untrusted font bytes are downloaded, decompressed
+                // and reconstructed here, in the low-privilege worker; the
+                // browser receives a plain sfnt and validates it again.
+#ifdef HUSARZ_WORKER_ONLY
+                auto *entry=fetch_browser_resource(payload->url,Husarz::ResourceType::Font);
+                if (entry) {
+                    kopiuj_limit(payload->content_type,sizeof(payload->content_type),entry->content_type);
+                    kopiuj_limit(payload->allow_origin,sizeof(payload->allow_origin),entry->allow_origin);
+                    kopiuj_limit(payload->url,sizeof(payload->url),entry->source_url[0]?entry->source_url:entry->url);
+                    payload->status=entry->status;
+                    BSF::WebFontLimits limits; limits.max_input=Husarz::MaxResourceBytes; limits.max_output=Husarz::AsyncFontCapacity;
+                    BSF::DecodedWebFont decoded;
+                    auto result=BSF::decode_web_font(entry->raw,entry->size,decoded,limits);
+                    payload->height=uint32_t(result); // diagnostic status
+                    payload->width=uint32_t(decoded.container);
+                    if (result==BSF::WebFontStatus::Ok && decoded.size<=Husarz::AsyncFontCapacity) {
+                        memcpy(Husarz::font_area(*payload),decoded.bytes,decoded.size);
+                        payload->size=uint32_t(decoded.size); payload->success=1;
+                    }
+                    delete[] decoded.bytes;
+                }
+                delete resource_cache; resource_cache=nullptr;
+#endif
             } else if (payload->kind==uint32_t(Husarz::RequestKind::Css) || payload->kind==uint32_t(Husarz::RequestKind::Image) || payload->kind==uint32_t(Husarz::RequestKind::Script)||payload->kind==uint32_t(Husarz::RequestKind::Fetch)) {
                 auto type=payload->kind==uint32_t(Husarz::RequestKind::Css)?Husarz::ResourceType::Css:payload->kind==uint32_t(Husarz::RequestKind::Script)?Husarz::ResourceType::Script:payload->kind==uint32_t(Husarz::RequestKind::Fetch)?Husarz::ResourceType::Fetch:Husarz::ResourceType::Image;
                 auto *entry=fetch_browser_resource(payload->url,type);

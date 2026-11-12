@@ -1243,6 +1243,16 @@ inline Work parse_css_rules_work(Document &d, Span clean, uint32_t order, uint32
                             face.family = decl.value;
                         else if (equal(d.str(decl.name), "src"))
                             face.sources = decl.value;
+                        else if (equal(d.str(decl.name), "font-weight"))
+                            face.weight = decl.value;
+                        else if (equal(d.str(decl.name), "font-style"))
+                            face.style = decl.value;
+                        else if (equal(d.str(decl.name), "font-stretch"))
+                            face.stretch = decl.value;
+                        else if (equal(d.str(decl.name), "unicode-range"))
+                            face.unicode_range = decl.value;
+                        else if (equal(d.str(decl.name), "font-display"))
+                            face.display = decl.value;
                     }
                 } else
                     d.limit(LimitStylesheets);

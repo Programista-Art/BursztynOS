@@ -63,6 +63,7 @@ double square_root(double x) {
 #pragma GCC diagnostic pop
 namespace BSF {
 #include "unicode.inc"
+bool extended_pictographic(uint32_t cp) { return pictographic(cp); }
 
 static uint32_t tag(const char *s) {
   return (uint32_t(uint8_t(s[0])) << 24) | (uint32_t(uint8_t(s[1])) << 16) |
@@ -101,9 +102,138 @@ static void name(Bytes table, unsigned kind, char *out, unsigned cap) {
     if(valid && used){memcpy(out,decoded,used+1);best=rank;}
   }
 }
+static bool sfnt_version_ok(uint32_t v) {
+  return v == 0x10000 || v == tag("true") || v == tag("OTTO");
+}
+static bool memory_read(void *ctx, uint64_t off, size_t n, uint8_t *out) {
+  auto *b = static_cast<const Bytes *>(ctx);
+  if (off > b->n || n > b->n - off)
+    return false;
+  memcpy(out, b->p + off, n);
+  return true;
+}
+static uint32_t be32(const uint8_t *p) {
+  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
+         (uint32_t(p[2]) << 8) | p[3];
+}
+static bool reader_range(const FileReader &r, uint64_t off, size_t n,
+                         uint8_t *out) {
+  return r.read && off <= r.size && n <= r.size - off && r.read(r.ctx, off, n, out);
+}
+unsigned collection_faces(const FileReader &r) {
+  uint8_t h[12];
+  if (r.size < 12 || r.size > MaxFontFile || !reader_range(r, 0, 12, h))
+    return 0;
+  if (sfnt_version_ok(be32(h)))
+    return 1;
+  if (be32(h) != tag("ttcf"))
+    return 0;
+  unsigned major = (unsigned(h[4]) << 8) | h[5];
+  uint32_t n = be32(h + 8);
+  if ((major != 1 && major != 2) || !n || n > MaxCollectionFaces)
+    return 0;
+  uint64_t header = 12 + uint64_t(n) * 4 + (major == 2 ? 12 : 0);
+  if (header > r.size)
+    return 0;
+  return unsigned(n);
+}
+bool face_directory(const FileReader &r, unsigned index, TableDirectory &out) {
+  out = TableDirectory{};
+  unsigned faces = collection_faces(r);
+  if (!faces || index >= faces)
+    return false;
+  uint8_t h[16];
+  if (!reader_range(r, 0, 12, h))
+    return false;
+  uint64_t at = 0, reserved_end = 12;
+  if (be32(h) == tag("ttcf")) {
+    uint8_t o[4];
+    if (!reader_range(r, 12 + uint64_t(index) * 4, 4, o))
+      return false;
+    at = be32(o);
+    unsigned major = (unsigned(h[4]) << 8) | h[5];
+    reserved_end = 12 + uint64_t(faces) * 4 + (major == 2 ? 12 : 0);
+    if (at < reserved_end)
+      return false;
+  }
+  uint8_t d[12];
+  if (!reader_range(r, at, 12, d) || !sfnt_version_ok(be32(d)))
+    return false;
+  unsigned count = (unsigned(d[4]) << 8) | d[5];
+  if (!count || count > MaxTables)
+    return false;
+  uint8_t records[MaxTables * 16];
+  if (!reader_range(r, at + 12, size_t(count) * 16, records))
+    return false;
+  uint64_t dir_begin = at, dir_end = at + 12 + uint64_t(count) * 16;
+  out.version = be32(d);
+  out.count = count;
+  for (unsigned i = 0; i < count; ++i) {
+    const uint8_t *o = records + size_t(i) * 16;
+    uint32_t idtag = be32(o), off = be32(o + 8), len = be32(o + 12);
+    if (uint64_t(off) + len > r.size)
+      return false;
+    // Tables never overlap the collection header or this face's directory.
+    uint64_t lo = off, hi = uint64_t(off) + len;
+    if (len && ((lo < reserved_end) || (lo < dir_end && hi > dir_begin)))
+      return false;
+    for (unsigned j = 0; j < i; ++j) {
+      const auto &rec = out.records[j];
+      if (rec.tag == idtag)
+        return false; // duplicate tag
+      // Within one face two tables never share bytes (collections share
+      // tables only between faces).
+      if (len && rec.length && lo < uint64_t(rec.offset) + rec.length &&
+          uint64_t(rec.offset) < hi)
+        return false;
+    }
+    out.records[i] = {idtag, off, len};
+  }
+  return true;
+}
+unsigned collection_faces(Bytes file) {
+  FileReader r{memory_read, &file, file.n};
+  return collection_faces(r);
+}
+bool face_directory(Bytes file, unsigned index, TableDirectory &out) {
+  FileReader r{memory_read, &file, file.n};
+  return face_directory(r, index, out);
+}
 bool Face::open(const void *ptr, size_t size, uint32_t identity) {
+  return open_index(ptr, size, 0, identity);
+}
+bool Face::open_index(const void *ptr, size_t size, unsigned index,
+                      uint32_t identity) {
   Face next;
-  if (next.parse(ptr, size, identity)) {
+  if (!ptr || size < 12 || size > MaxFile) {
+    *this = Face{};
+    return false;
+  }
+  Bytes file{static_cast<const uint8_t *>(ptr), size};
+  TableDirectory dir;
+  TableSlice slices[MaxTables];
+  bool ok = face_directory(file, index, dir);
+  if (ok) {
+    for (unsigned i = 0; i < dir.count; ++i)
+      slices[i] = {dir.records[i].tag,
+                   file.sub(dir.records[i].offset, dir.records[i].length)};
+    ok = next.assemble(slices, dir.count, dir.version, identity);
+  }
+  if (ok) {
+    next.data = file;
+    next.collection_index = uint16_t(index);
+    next.collection_count = uint16_t(collection_faces(file));
+    *this = next;
+    return true;
+  }
+  *this = Face{};
+  return false;
+}
+bool Face::open_tables(const TableSlice *tables, unsigned count,
+                       uint32_t version, uint32_t identity, bool metadata) {
+  Face next;
+  if (tables && count && count <= MaxTables && sfnt_version_ok(version) &&
+      next.assemble(tables, count, version, identity, metadata)) {
     *this = next;
     return true;
   }
@@ -111,30 +241,29 @@ bool Face::open(const void *ptr, size_t size, uint32_t identity) {
   return false;
 }
 bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
+  return open_index(ptr, size, 0, identity);
+}
+bool Face::assemble(const TableSlice *tables, unsigned count, uint32_t version,
+                    uint32_t identity, bool metadata) {
   *this = Face{};
-  if (!ptr || size < 12 || size > MaxFile)
-    return false;
-  data = {static_cast<const uint8_t *>(ptr), size};
-  if (data.u32(0) != 0x10000 && data.u32(0) != tag("true"))
-    return false;
-  unsigned count = data.u16(4);
-  if (!count || count > MaxTables || !data.has(12, count * 16))
-    return false;
-  Bytes maxp{}, post{}, full_cmap{};
+  sfnt_version = version;
+  metadata_only = metadata;
+  Bytes full_cmap{};
+  // Outline payloads may be deferred in catalog (metadata) mode only.
+  auto deferrable = [](uint32_t t) {
+    return t == tag("glyf") || t == tag("loca") || t == tag("CFF ") ||
+           t == tag("CFF2") || t == tag("gvar") || t == tag("CBDT") ||
+           t == tag("sbix") || t == tag("GSUB") || t == tag("GPOS") ||
+           t == tag("GDEF") || t == tag("kern") || t == tag("COLR");
+  };
   for (unsigned i = 0; i < count; ++i) {
-    unsigned o = 12 + i * 16;
-    uint32_t idtag = data.u32(o), off = data.u32(o + 8), len = data.u32(o + 12);
-    if (!data.has(off, len) || off < 12 + count * 16)
+    uint32_t idtag = tables[i].tag;
+    Bytes t = tables[i].bytes;
+    if (t.n && !t.p && !(metadata && deferrable(idtag)))
       return false;
-    for (unsigned j = 0; j < i; ++j) {
-      unsigned p = 12 + j * 16;
-      uint32_t a = data.u32(p + 8), b = data.u32(p + 12);
-      if (data.u32(p) == idtag ||
-          (len && b && uint64_t(off) < uint64_t(a) + b &&
-           uint64_t(a) < uint64_t(off) + len))
+    for (unsigned j = 0; j < i; ++j)
+      if (tables[j].tag == idtag)
         return false;
-    }
-    Bytes t = data.sub(off, len);
     if (idtag == tag("head"))
       head = t;
     else if (idtag == tag("hhea"))
@@ -161,12 +290,38 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
       gsub = t;
     else if (idtag == tag("GPOS"))
       gpos = t;
+    else if (idtag == tag("CFF "))
+      cff = t;
+    else if (idtag == tag("CFF2"))
+      cff2 = t;
     else if (idtag == tag("fvar"))
       fvar = t;
+    else if (idtag == tag("avar"))
+      avar = t;
+    else if (idtag == tag("gvar"))
+      gvar = t;
+    else if (idtag == tag("HVAR"))
+      hvar = t;
+    else if (idtag == tag("VVAR"))
+      vvar = t;
+    else if (idtag == tag("MVAR"))
+      mvar = t;
+    else if (idtag == tag("STAT"))
+      stat = t;
     else if (idtag == tag("COLR"))
       colr = t;
     else if (idtag == tag("CPAL"))
       cpal = t;
+    else if (idtag == tag("CBDT"))
+      cbdt = t;
+    else if (idtag == tag("CBLC"))
+      cblc = t;
+    else if (idtag == tag("sbix"))
+      sbix = t;
+    else if (idtag == tag("vhea"))
+      vhea = t;
+    else if (idtag == tag("vmtx"))
+      vmtx = t;
     else if (idtag == tag("post"))
       post = t;
   }
@@ -177,18 +332,59 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
   glyphs = maxp.u16(4);
   metrics = hhea.u16(34);
   long_loca = head.s16(50) == 1;
-  if (head.s16(50) < 0 || head.s16(50) > 1 || units < 16 || units > 16384 ||
-      !glyphs || glyphs > MaxGlyphs || !metrics || metrics > glyphs)
+  if (units < 16 || units > 16384 || !glyphs || glyphs > MaxGlyphs ||
+      !metrics || metrics > glyphs)
     return false;
-  if (!hmtx.has(0, size_t(metrics) * 4 + size_t(glyphs - metrics) * 2) ||
-      !loca.has(0, size_t(glyphs + 1) * (long_loca ? 4 : 2)) || !glyf.p)
+  if (!hmtx.has(0, size_t(metrics) * 4 + size_t(glyphs - metrics) * 2))
     return false;
-  uint32_t previous = 0;
-  for (unsigned i = 0; i <= glyphs; ++i) {
-    uint32_t next = long_loca ? loca.u32(i * 4) : uint32_t(loca.u16(i * 2)) * 2;
-    if (next < previous || next > glyf.n)
+  // The outline technology is identified from validated table data, never
+  // from the file name: glyf/loca (TrueType), CFF2 or CFF.
+  color_tables = uint8_t((colr.n && cpal.n ? ColorCOLR : 0) |
+                         (cbdt.n && cblc.n ? ColorCBDT : 0) |
+                         (sbix.n ? ColorSbix : 0));
+  if (metadata) {
+    // Catalog mode: outline technology from the table set; full validation
+    // happens when the face is loaded for rendering.
+    if (glyf.n && loca.n && version != tag("OTTO"))
+      outline = OutlineFormat::TrueType;
+    else if (cff2.n)
+      outline = OutlineFormat::CFF2;
+    else if (cff.n)
+      outline = OutlineFormat::CFF;
+    else if ((cbdt.n && cblc.n) || sbix.n)
+      outline = OutlineFormat::Bitmap;
+    else
       return false;
-    previous = next;
+    glyf = loca = cff = cff2 = gvar = cbdt = sbix = gsub = gpos = gdef =
+        kern = colr = Bytes{};
+  } else if (glyf.p && loca.p && version != tag("OTTO")) {
+    if (head.s16(50) < 0 || head.s16(50) > 1 ||
+        !loca.has(0, size_t(glyphs + 1) * (long_loca ? 4 : 2)))
+      return false;
+    uint32_t previous = 0;
+    for (unsigned i = 0; i <= glyphs; ++i) {
+      uint32_t next =
+          long_loca ? loca.u32(i * 4) : uint32_t(loca.u16(i * 2)) * 2;
+      if (next < previous || next > glyf.n)
+        return false;
+      previous = next;
+    }
+    outline = OutlineFormat::TrueType;
+  } else if (cff2.p) {
+    if (!cff_face.open(cff2, glyphs, true))
+      return false;
+    outline = OutlineFormat::CFF2;
+  } else if (cff.p) {
+    if (!cff_face.open(cff, glyphs, false))
+      return false;
+    outline = OutlineFormat::CFF;
+  } else if ((cbdt.p && cblc.p) || sbix.p) {
+    outline = OutlineFormat::Bitmap; // colour strikes only (Noto Color Emoji)
+  } else
+    return false;
+  if (outline != OutlineFormat::TrueType && !metadata) {
+    loca = glyf = Bytes{};
+    long_loca = false;
   }
   ascent = hhea.s16(4);
   descent = hhea.s16(6);
@@ -197,11 +393,16 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
     return false;
   if (ascent - descent + (gap > 0 ? gap : 0) > int(units) * 4)
     return false;
+  // Advances are bounded so 16.16 layout arithmetic cannot overflow at the
+  // 128 px cap (32 em * 128 px = 4,096 px << 32,767 px). BSF 2.1 used 8 em,
+  // which rejected legitimate wide ligatures (Noto Naskh basmalah: 12.2 em).
   for (unsigned i = 0; i < metrics; ++i)
-    if (hmtx.u16(i * 4) > unsigned(units) * 8)
+    if (hmtx.u16(i * 4) > unsigned(units) * 32)
       return false;
   if (os2.has(0, 6))
     weight = os2.u16(4);
+  if (os2.has(0, 8) && os2.u16(6) >= 1 && os2.u16(6) <= 9)
+    width_class = os2.u16(6);
   if (weight < 100 || weight > 900)
     weight = 400;
   italic = (head.u16(44) & 2) != 0 || (os2.has(62, 2) && (os2.u16(62) & 1));
@@ -284,7 +485,58 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
   }
   if (!cmap.p)
     return false;
-  id = identity;
+  id = base_id = identity;
+  axis_count = 0;
+  if (fvar.p) {
+    // fvar 1.0: header 16 bytes, axis records 20 bytes, instance records
+    // axisCount*4+4 (or +6 with postScriptNameID).
+    if (!fvar.has(0, 16) || fvar.u16(0) != 1)
+      return false;
+    unsigned axes_at = fvar.u16(4), axes = fvar.u16(8), axis_size = fvar.u16(10),
+             instances = fvar.u16(12), instance_size = fvar.u16(14);
+    if (axis_size != 20 || axes_at < 16 ||
+        !fvar.has(axes_at, size_t(axes) * 20) ||
+        (instance_size != axes * 4 + 4 && instance_size != axes * 4 + 6) ||
+        !fvar.has(size_t(axes_at) + size_t(axes) * 20,
+                  size_t(instances) * instance_size))
+      return false;
+    for (unsigned a = 0; a < axes; ++a) {
+      size_t o = axes_at + size_t(a) * 20;
+      int32_t mn = int32_t(fvar.u32(o + 4)), df = int32_t(fvar.u32(o + 8)),
+              mx = int32_t(fvar.u32(o + 12));
+      if (mn > df || df > mx)
+        return false;
+    }
+    // Faces with more axes than the bounded model stay usable as their
+    // default instance only.
+    axis_count = axes <= MaxAxes ? uint8_t(axes) : 0;
+    if (avar.p && axis_count) {
+      if (!avar.has(0, 8) || avar.u16(0) != 1 || avar.u16(6) != axes)
+        avar = Bytes{};
+      else {
+        size_t at = 8;
+        for (unsigned a = 0; a < axes && avar.p; ++a) {
+          if (!avar.has(at, 2)) {
+            avar = Bytes{};
+            break;
+          }
+          unsigned n = avar.u16(at);
+          if (n > 256 || !avar.has(at + 2, size_t(n) * 4)) {
+            avar = Bytes{};
+            break;
+          }
+          for (unsigned k = 1; k < n; ++k)
+            if (avar.s16(at + 2 + k * 4) < avar.s16(at + 2 + (k - 1) * 4) ||
+                avar.s16(at + 4 + k * 4) < avar.s16(at + 4 + (k - 1) * 4)) {
+              avar = Bytes{}; // non-monotonic segment map: ignored
+              break;
+            }
+          at += 2 + size_t(n) * 4;
+        }
+      }
+    }
+  } else
+    avar = Bytes{};
   name(names, 1, family, sizeof(family));
   name(names, 2, style, sizeof(style));
   name(names, 16, family, sizeof(family));
@@ -292,7 +544,7 @@ bool Face::parse(const void *ptr, size_t size, uint32_t identity) {
   name(names, 4, full_name, sizeof(full_name));
   name(names, 6, postscript, sizeof(postscript));
   if (!family[0])
-    memcpy(family, "Unnamed TrueType", 17);
+    memcpy(family, "Unnamed Font", 13);
   return true;
 }
 unsigned Face::glyph(uint32_t cp) const {
@@ -332,7 +584,7 @@ unsigned Face::glyph(uint32_t cp) const {
   return 0;
 }
 bool Face::location(unsigned g, Bytes &out) const {
-  if (g >= glyphs)
+  if (g >= glyphs || outline != OutlineFormat::TrueType)
     return false;
   uint32_t a = long_loca ? loca.u32(g * 4) : loca.u16(g * 2) * 2,
            b = long_loca ? loca.u32(g * 4 + 4) : loca.u16(g * 2 + 2) * 2;
@@ -341,16 +593,19 @@ bool Face::location(unsigned g, Bytes &out) const {
   out = glyf.sub(a, b - a);
   return true;
 }
+// Advance of a variation instance (HVAR, or gvar phantom points); defined
+// with the variation code below.
+static unsigned variable_advance(const Face &, unsigned glyph, unsigned base);
 int Face::advance(unsigned g, int px) const {
   if (g >= glyphs || px < 1 || px > 128)
     return 0;
-  unsigned index = g < metrics ? g : metrics - 1;
-  return int((int64_t(hmtx.u16(index * 4)) * px + units / 2) / units);
+  return int((int64_t(advance_units(g)) * px + units / 2) / units);
 }
 unsigned Face::advance_units(unsigned g) const {
   if (g >= glyphs || !metrics)
     return 0;
-  return hmtx.u16((g < metrics ? g : metrics - 1) * 4);
+  unsigned base = hmtx.u16((g < metrics ? g : metrics - 1) * 4);
+  return variable() ? variable_advance(*this, g, base) : base;
 }
 int Face::bearing(unsigned g, int px) const {
   if (g >= glyphs)
@@ -417,9 +672,26 @@ struct Outline {
     v.y = short(y);
     v.cx = short(cx);
     v.cy = short(cy);
+    v.cx1 = v.cy1 = 0;
+    return true;
+  }
+  // Cubic Bézier segment (CFF/CFF2). stb's rasterizer flattens it by
+  // adaptive subdivision; control points are never joined by lines.
+  bool cubic(double x, double y, double c1x, double c1y, double c2x,
+             double c2y) {
+    if (c2x < -32767 || c2x > 32767 || c2y < -32767 || c2y > 32767 ||
+        !vertex(STBTT_vcubic, x, y, c1x, c1y))
+      return false;
+    auto &v = vertices[count - 1];
+    v.cx1 = short(c2x);
+    v.cy1 = short(c2y);
     return true;
   }
 };
+bool cff_outline(const Face &f, unsigned glyph, Outline &out, double precision);
+#include "variations.inc"
+#include "cff.inc"
+#include "inflate.inc"
 struct Transform {
   double a{1}, b{}, c{}, d{1}, x{}, y{};
 };
@@ -444,6 +716,28 @@ static bool outline(const Face &f, unsigned glyph, Outline &out, unsigned depth,
       return false;
     size_t at = 10;
     unsigned flags = 0;
+    // gvar: one delta "point" per component offset (+4 phantom points).
+    float *cdx = nullptr, *cdy = nullptr;
+    unsigned component = 0;
+    struct Owned {
+      float *&a, *&b;
+      ~Owned() { delete[] a; delete[] b; }
+    } owned{cdx, cdy};
+    if (f.variable() && f.gvar.p) {
+      unsigned n = 0;
+      size_t scan = 10;
+      unsigned fl = 0;
+      do {
+        if (!g.has(scan, 4) || ++n > 256)
+          return false;
+        fl = g.u16(scan);
+        scan += 4 + ((fl & 1) ? 4 : 2) + ((fl & 8) ? 2 : (fl & 64) ? 4 : (fl & 128) ? 8 : 0);
+      } while (fl & 32);
+      cdx = BSF_NEW float[n + 4];
+      cdy = BSF_NEW float[n + 4];
+      if (!cdx || !cdy || !gvar_glyph_deltas(f, glyph, n + 4, nullptr, 0, nullptr, nullptr, cdx, cdy))
+        return false;
+    }
     do {
       if (!g.has(at, 4))
         return false;
@@ -466,6 +760,11 @@ static bool outline(const Face &f, unsigned glyph, Outline &out, unsigned depth,
         y = int8_t(g.p[at + 1]);
         at += 2;
       }
+      if (cdx) {
+        x += floor_int(double(cdx[component]) + .5);
+        y += floor_int(double(cdy[component]) + .5);
+      }
+      ++component;
       Transform local;
       local.x = x;
       local.y = y;
@@ -601,6 +900,33 @@ static bool outline(const Face &f, unsigned glyph, Outline &out, unsigned depth,
   delete[] flags;
   if (!ok)
     return fail();
+  if (f.variable() && f.gvar.p) {
+    // gvar deltas for the outline points (+4 phantom points), IUP applied.
+    auto *ox = BSF_NEW int[count], *oy = BSF_NEW int[count];
+    auto *dx = BSF_NEW float[count + 4], *dy = BSF_NEW float[count + 4];
+    auto *ends = BSF_NEW uint16_t[unsigned(contours)];
+    ok = ox && oy && dx && dy && ends;
+    if (ok) {
+      for (unsigned i = 0; i < count; ++i) {
+        ox[i] = points[i].x;
+        oy[i] = points[i].y;
+      }
+      for (int c = 0; c < contours; ++c)
+        ends[c] = g.u16(10 + c * 2);
+      ok = gvar_glyph_deltas(f, glyph, count + 4, ends, unsigned(contours), ox, oy, dx, dy);
+      for (unsigned i = 0; ok && i < count; ++i) {
+        points[i].x = points[i].x + floor_int(double(dx[i]) + .5);
+        points[i].y = points[i].y + floor_int(double(dy[i]) + .5);
+      }
+    }
+    delete[] ox;
+    delete[] oy;
+    delete[] dx;
+    delete[] dy;
+    delete[] ends;
+    if (!ok)
+      return fail();
+  }
   out.points += count;
   out.contours += unsigned(contours);
   auto v = [&](int kind, Point p, Point c = Point{}) {
@@ -644,14 +970,62 @@ static bool outline(const Face &f, unsigned glyph, Outline &out, unsigned depth,
   delete[] points;
   return ok;
 }
-bool rasterize(const Face &f, unsigned id, int px, Glyph &result, uint8_t *mask,
-               size_t capacity) {
-  if (px < 1 || px > 128 || !mask || capacity < MaxBitmap * MaxBitmap)
+// CFF outlines carry fractional coordinates; they are kept in 1/precision
+// font units inside the 16-bit vertex format (TrueType stays at 1, which keeps
+// its output bit-identical to BSF 2.1).
+static double outline_precision(const Face &f) {
+  if (f.outline == OutlineFormat::TrueType)
+    return 1;
+  double p = 1;
+  while (p < 8 && double(f.units) * p * 2 * 4 <= 32767)
+    p *= 2;
+  return p;
+}
+static bool build_outline(const Face &f, unsigned id, Outline &shape,
+                          double &precision) {
+  precision = outline_precision(f);
+  if (f.metadata_only)
+    return false;
+  if (f.outline == OutlineFormat::TrueType)
+    return outline(f, id, shape, 0, {});
+  if (f.outline != OutlineFormat::CFF && f.outline != OutlineFormat::CFF2)
+    return false;
+  if (cff_outline(f, id, shape, precision))
+    return true;
+  if (precision == 1)
+    return false;
+  // A glyph extending past the sub-unit range is retried in whole units.
+  shape.count = shape.points = shape.contours = shape.dependencies = 0;
+  precision = 1;
+  return cff_outline(f, id, shape, precision);
+}
+bool glyph_path(const Face &f, unsigned id, const PathSink &sink) {
+  if (id >= f.glyphs || !sink.segment)
     return false;
   auto *shape = BSF_NEW Outline;
   if (!shape)
     return false;
-  bool ok = outline(f, id, *shape, 0, {});
+  double precision = 1;
+  bool ok = build_outline(f, id, *shape, precision);
+  for (unsigned i = 0; ok && i < shape->count; ++i) {
+    const auto &v = shape->vertices[i];
+    sink.segment(sink.ctx, v.type, v.x / precision, v.y / precision,
+                 v.cx / precision, v.cy / precision, v.cx1 / precision,
+                 v.cy1 / precision);
+  }
+  delete shape;
+  return ok;
+}
+bool rasterize(const Face &f, unsigned id, int px, Glyph &result, uint8_t *mask,
+               size_t capacity) {
+  if (px < 1 || px > 128 || !mask || capacity < MaxBitmap * MaxBitmap ||
+      id >= f.glyphs)
+    return false;
+  auto *shape = BSF_NEW Outline;
+  if (!shape)
+    return false;
+  double precision = 1;
+  bool ok = build_outline(f, id, *shape, precision);
   if (!ok) {
     delete shape;
     return false;
@@ -663,28 +1037,25 @@ bool rasterize(const Face &f, unsigned id, int px, Glyph &result, uint8_t *mask,
     return true;
   }
   int xmin = 32767, ymin = 32767, xmax = -32767, ymax = -32767;
+  auto extend = [&](int x, int y) {
+    if (x < xmin)
+      xmin = x;
+    if (x > xmax)
+      xmax = x;
+    if (y < ymin)
+      ymin = y;
+    if (y > ymax)
+      ymax = y;
+  };
   for (unsigned i = 0; i < shape->count; ++i) {
     auto &v = shape->vertices[i];
-    if (v.x < xmin)
-      xmin = v.x;
-    if (v.x > xmax)
-      xmax = v.x;
-    if (v.y < ymin)
-      ymin = v.y;
-    if (v.y > ymax)
-      ymax = v.y;
-    if (v.type == STBTT_vcurve) {
-      if (v.cx < xmin)
-        xmin = v.cx;
-      if (v.cx > xmax)
-        xmax = v.cx;
-      if (v.cy < ymin)
-        ymin = v.cy;
-      if (v.cy > ymax)
-        ymax = v.cy;
-    }
+    extend(v.x, v.y);
+    if (v.type == STBTT_vcurve || v.type == STBTT_vcubic)
+      extend(v.cx, v.cy);
+    if (v.type == STBTT_vcubic)
+      extend(v.cx1, v.cy1);
   }
-  double scale = double(px) / f.units;
+  double scale = double(px) / f.units / precision;
   int x = floor_int(xmin * scale), y = floor_int(-ymax * scale),
       w = ceil_int(xmax * scale) - x, h = ceil_int(-ymin * scale) - y;
   if (w < 0 || h < 0 || w > int(MaxBitmap) || h > int(MaxBitmap)) {
@@ -710,6 +1081,8 @@ bool rasterize(const Face &f, unsigned id, int px, Glyph &result, uint8_t *mask,
   delete shape;
   return ok;
 }
+#include "png.inc"
+#include "color.inc"
 Cache::~Cache() {
   delete[] slots_;
   delete[] storage_;
@@ -772,6 +1145,10 @@ const Glyph *Cache::get_glyph(const Face &face, unsigned id, int px,
   g.style = uint16_t(style);
   g.used = ++clock_;
   ++stats.rasterizations;
+  if (face.outline == OutlineFormat::CFF) ++stats.cff_rasterizations;
+  if (face.outline == OutlineFormat::CFF2) ++stats.cff2_rasterizations;
+  if (face.variable()) ++stats.variable_rasterizations;
+  if (face.browser_scope) ++stats.scoped_rasterizations;
   stats.bitmap_bytes += size_t(g.width) * g.height;
   return &g;
 }

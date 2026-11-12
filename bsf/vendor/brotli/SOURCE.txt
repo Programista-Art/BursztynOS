@@ -1,0 +1,14 @@
+Brotli decoder (subset), google/brotli v1.1.0
+https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz
+SHA-256 of the release tarball: e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff
+License: MIT (see LICENSE in this directory; notice preserved).
+
+Imported files (unmodified): c/dec/*, c/common/{constants,context,dictionary,
+platform,shared_dictionary,transform}.c and c/common/*.h,
+c/include/brotli/{decode.h,port.h,shared_dictionary.h,types.h}.
+The encoder is not imported.
+
+Bursztyn OS use: WOFF2 web-font decoding inside the Husarz browser process
+(Ring 3) only, through bsf/webfont.cpp, with caller-supplied bounded
+allocators (BrotliDecoderCreateInstance) and an exact expected output size.
+No Brotli code is linked into the kernel or into other applications.

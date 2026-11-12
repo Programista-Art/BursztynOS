@@ -68,6 +68,9 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/aktualizacje/przygotowanie",
         "/czcionki",
         "/czcionki/ttf",
+        "/czcionki/otf",
+        "/czcionki/ttc",
+        "/czcionki/otc",
         "/programy/ustawienia.cebula",
         "/ikonki"
 };

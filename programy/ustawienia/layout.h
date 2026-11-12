@@ -10,8 +10,8 @@ using namespace BursztynUI;
 constexpr int Padding=14,Gap=12,SmallGap=4;
 class FontPage : public Panel {
 public:
- Etykieta *heading,*family_label,*size_label,*status,*help;
- ListaRozwijana *families,*size;
+ Etykieta *heading,*family_label,*size_label,*status,*help,*terminal_label,*details;
+ ListaRozwijana *families,*size,*terminal;
  PowierzchniaRysunkowa* preview;
  WidokPrzewijany* preview_view;
  Przycisk *apply,*reset,*refresh,*install;
@@ -19,11 +19,13 @@ public:
  FontPage(){
   ustaw_uklad_automatyczny(false);ustaw_wypelnienie({0,0,0,0});
   heading=&dodaj<Etykieta>("Ustawienia czcionki");family_label=&dodaj<Etykieta>("Systemowa czcionka");size_label=&dodaj<Etykieta>("Rozmiar");
-  families=&dodaj<ListaRozwijana>();size=&dodaj<ListaRozwijana>();preview_view=&dodaj<WidokPrzewijany>();preview_view->ustaw_tryb_paska_poziomego(TrybPaskaPrzewijania::Nigdy);preview=&preview_view->dodaj<PowierzchniaRysunkowa>();
+  families=&dodaj<ListaRozwijana>();size=&dodaj<ListaRozwijana>();
+  terminal_label=&dodaj<Etykieta>("Czcionka terminala");terminal=&dodaj<ListaRozwijana>();details=&dodaj<Etykieta>("");
+  preview_view=&dodaj<WidokPrzewijany>();preview_view->ustaw_tryb_paska_poziomego(TrybPaskaPrzewijania::Nigdy);preview=&preview_view->dodaj<PowierzchniaRysunkowa>();
   apply=&dodaj<Przycisk>("Zastosuj");reset=&dodaj<Przycisk>("Przywróć domyślne");refresh=&dodaj<Przycisk>("Odśwież fonty");
-  import_label=&dodaj<Etykieta>("Plik TTF do zainstalowania");import_path=&dodaj<PoleTekstowe>("/uzytkownicy/font.ttf");install=&dodaj<Przycisk>("Zainstaluj TTF");
-  status=&dodaj<Etykieta>("Zastosuj zapisuje zmianę dla aplikacji.");help=&dodaj<Etykieta>("Terminal zachowuje czcionkę stałej szerokości.");
-  Etykieta* labels[]={heading,family_label,size_label,status,help,import_label};
+  import_label=&dodaj<Etykieta>("Plik fontu do zainstalowania (TTF, OTF, TTC, OTC)");import_path=&dodaj<PoleTekstowe>("/uzytkownicy/font.otf");install=&dodaj<Przycisk>("Zainstaluj font");
+  status=&dodaj<Etykieta>("Zastosuj zapisuje zmianę dla aplikacji.");help=&dodaj<Etykieta>("Terminal przyjmuje tylko czcionki o stałej szerokości znaków.");
+  Etykieta* labels[]={heading,family_label,size_label,status,help,import_label,terminal_label,details};
   for(auto* label:labels)label->ustaw_wypelnienie({0,0,0,0});
  }
  void rozmiesc(Prostokat r)override{
@@ -36,7 +38,13 @@ public:
   int family_width=w-gap-size_width;
   heading->rozmiesc({inset,inset,w,line});int y=inset+line+gap;
   family_label->rozmiesc({inset,y,family_width,line});size_label->rozmiesc({inset+family_width+gap,y,size_width,line});y+=line+small;
-  families->rozmiesc({inset,y,family_width,control});size->rozmiesc({inset+family_width+gap,y,size_width,control});y+=control+gap;
+  families->rozmiesc({inset,y,family_width,control});size->rozmiesc({inset+family_width+gap,y,size_width,control});y+=control+small;
+  // BSF 2.2: font details (format, outlines, collection face, axes, colour)
+  // and the separate Terminal font.
+  details->rozmiesc({inset,y,w,line});y+=line+gap;
+  int terminal_label_w=CzcionkaUI::zmierz_tekst("Czcionka terminala",s)+gap;if(terminal_label_w>w/3)terminal_label_w=w/3;
+  terminal_label->rozmiesc({inset,y+(control-line)/2,terminal_label_w,line});
+  terminal->rozmiesc({inset+terminal_label_w,y,family_width-terminal_label_w,control});y+=control+gap;
   int preview_line=BSF::height(ui_skaluj(24,s.procent()));
   if(preview_line<1)preview_line=28*s;
   int preview_h=7*(preview_line+2*s)+28*s;
@@ -47,7 +55,7 @@ public:
   const int sizes[]={12,14,16,18,20,24};int index=size->wybrany_indeks();if(index<0||index>5)index=2;
   int sample_line=BSF::height(ui_skaluj(sizes[index],s.procent()),families->wybrany_tekst());
   if(sample_line<1)sample_line=line;
-  int sample_height=8*(sample_line+2*s)+28*s;
+  int sample_height=12*(sample_line+2*s)+28*s;
   preview_view->ustaw_rozmiar_zawartosci({w-18*s,sample_height});
   preview->rozmiesc({0,0,w-18*s,sample_height});y+=preview_h+gap;
   int first=CzcionkaUI::zmierz_tekst("Zastosuj",s)+32*s;
@@ -56,7 +64,7 @@ public:
   if(first+second+third+2*gap>w){first=(w-2*gap)/3;second=first;third=w-2*gap-first-second;}
   apply->rozmiesc({inset,y,first,button});reset->rozmiesc({inset+first+gap,y,second,button});refresh->rozmiesc({inset+first+second+2*gap,y,third,button});y+=button+gap;
   import_label->rozmiesc({inset,y,w,line});y+=line+small;
-  int install_width=CzcionkaUI::zmierz_tekst("Zainstaluj TTF",s)+32*s;if(install_width>w/2)install_width=w/2;
+  int install_width=CzcionkaUI::zmierz_tekst("Zainstaluj font",s)+32*s;if(install_width>w/2)install_width=w/2;
   import_path->rozmiesc({inset,y,w-gap-install_width,control});install->rozmiesc({inset+w-install_width,y,install_width,control});y+=control+gap;
   status->rozmiesc({inset,y,w,line});help->rozmiesc({inset,y+line+small,w,line});
  }

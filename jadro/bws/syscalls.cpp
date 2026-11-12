@@ -3046,7 +3046,7 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     uint64_t end = 0;
     if (__builtin_add_overflow(offset, (uint64_t)len, &end)) return 0;
     if(!proces_ma_prawo(proces,PRAWO_PLIKI_CZYTAJ) &&
-       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)&&end<=BSF::MaxFile))return 0;
+       !(proces_ma_prawo(proces,PRAWO_GUI)&&BSF::trusted_asset(sciezka)&&end<=BSF::MaxFontFile))return 0;
 
     /*
      * PSF nie moze pisac bezposrednio do bufora Ring 3:

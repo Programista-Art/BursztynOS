@@ -189,6 +189,11 @@ bool Layout::open(const Face &f) {
   };
   gsub = header(f.gsub);
   gpos = header(f.gpos);
+  if (f.variable()) {
+    axes = f.axis_count;
+    for (unsigned a = 0; a < axes; ++a)
+      coords[a] = f.coords[a];
+  }
   return true;
 }
 unsigned Layout::glyph_class(unsigned g) const {
@@ -481,11 +486,27 @@ bool match_input(Context &c, const LookupInfo &l, const Matcher &m, Bytes values
     return false;
   int j = int(start);
   for (unsigned k = 1; k < count; ++k) {
-    j = next_index(c, l, j);
-    if (j < 0)
-      return false;
     size_t o = value_offset + size_t(first_implicit ? k - 1 : k) * 2;
-    if (!values.has(o, 2) || !m.match(c, c.buf.info[j].glyph, values.u16(o)))
+    if (!values.has(o, 2))
+      return false;
+    // HarfBuzz "skip maybe": a default ignorable (ZWJ, ZWNJ, VS) is skipped
+    // unless it is the expected input glyph (emoji ZWJ sequences).
+    int next = -1;
+    for (int t = j + 1; t < int(c.buf.len); ++t) {
+      if (!c.budget.spend())
+        return false;
+      const GlyphInfo &g = c.buf.info[t];
+      if (!skip(c, l, g, true)) {
+        next = t;
+        break;
+      }
+      if ((g.props & PropIgnorable) && !skip(c, l, g, false) && m.match(c, g.glyph, values.u16(o))) {
+        next = t;
+        break;
+      }
+    }
+    j = next;
+    if (j < 0 || !m.match(c, c.buf.info[j].glyph, values.u16(o)))
       return false;
     positions[k] = j;
   }
@@ -803,8 +824,21 @@ bool gsub_reverse(Context &c, const LookupInfo &l, Bytes s, unsigned i) {
 struct Value {
   int32_t xp{}, yp{}, xa{}, ya{};
 };
+// Layout of the lookup being applied (GPOS is not re-entrant; set by
+// position()). VariationIndex tables need its instance and GDEF store.
+const Layout *variation_layout{};
 int device_delta(Bytes d, unsigned ppem) {
   unsigned start = d.u16(0), end = d.u16(2), fmt = d.u16(4);
+  if (fmt == 0x8000) {
+    // VariationIndex: (outer, inner) into the GDEF ItemVariationStore.
+    const Layout *L = variation_layout;
+    if (!L || !L->axes || !L->var_store.p || !d.has(0, 6))
+      return 0;
+    float v = ivs_delta(L->var_store, start, end, L->coords, L->axes);
+    float r = v + .5f;
+    int q = int(r);
+    return q - (r < float(q));
+  }
   if (!ppem || fmt < 1 || fmt > 3 || ppem < start || ppem > end)
     return 0;
   unsigned idx = ppem - start, bits = 1u << fmt; // 2, 4, 8 bits
@@ -845,12 +879,41 @@ void add(GlyphPosition &p, const Value &v) {
   p.x_advance += v.xa;
   p.y_advance += v.ya;
 }
-bool anchor(Bytes a, int32_t &x, int32_t &y) {
+// Anchors are kept in 26.6 fixed point: VariationIndex deltas are
+// fractional, and (like HarfBuzz) rounding happens once per final value.
+int32_t round64(int32_t v) { return v >= 0 ? (v + 32) >> 6 : -((-v + 32) >> 6); }
+int32_t variation_delta64(Bytes device) {
+  const Layout *L = variation_layout;
+  if (!L || !L->axes || !L->var_store.p || !device.has(0, 6) || device.u16(4) != 0x8000)
+    return 0;
+  // Rounded per device table like HarfBuzz (floor(x + 0.5)).
+  float v = ivs_delta(L->var_store, device.u16(0), device.u16(2), L->coords, L->axes);
+  float r = v + .5f;
+  int32_t q = int32_t(r);
+  return (q - (r < float(q))) * 64;
+}
+bool anchor64(Bytes a, int32_t &x, int32_t &y) {
   unsigned fmt = a.u16(0);
   if (fmt < 1 || fmt > 3 || !a.has(0, 6))
     return false;
-  x = a.s16(2);
-  y = a.s16(4);
+  x = int32_t(a.s16(2)) * 64;
+  y = int32_t(a.s16(4)) * 64;
+  // Format 3 device/VariationIndex offsets: only VariationIndex applies
+  // (no ppem is requested by the layout, matching unhinted shaping).
+  if (fmt == 3 && a.has(0, 10)) {
+    unsigned dx = a.u16(6), dy = a.u16(8);
+    if (dx)
+      x += variation_delta64(at(a, dx));
+    if (dy)
+      y += variation_delta64(at(a, dy));
+  }
+  return true;
+}
+bool anchor(Bytes a, int32_t &x, int32_t &y) {
+  if (!anchor64(a, x, y))
+    return false;
+  x = round64(x);
+  y = round64(y);
   return true;
 }
 bool gpos_single(Context &c, Bytes s, unsigned i) {
@@ -896,8 +959,10 @@ bool gpos_pair(Context &c, const LookupInfo &l, Bytes s, unsigned i, int &next) 
       else if (second > g)
         lo = m + 1;
       else {
-        add(c.buf.pos[i], read_value(s, set, o + 2, f1, 0));
-        add(c.buf.pos[j], read_value(s, set, o + 2 + z1, f2, 0));
+        // Format 1 device/VariationIndex offsets are relative to the
+        // PairSet table (OpenType ValueRecord "parent table").
+        add(c.buf.pos[i], read_value(set, set, o + 2, f1, 0));
+        add(c.buf.pos[j], read_value(set, set, o + 2 + z1, f2, 0));
         next = z2 ? j + 1 : j;
         return true;
       }
@@ -977,9 +1042,13 @@ bool gpos_cursive(Context &c, const LookupInfo &l, Bytes s, unsigned i) {
   unsigned exit_off = s.u16(6 + cp * 4 + 2);
   if (!exit_off)
     return false;
-  int32_t ex, ey, nx, ny;
-  if (!anchor(at(s, exit_off), ex, ey) || !anchor(at(s, entry_off), nx, ny))
+  int32_t ex, ey, nx, ny, ey64, ny64;
+  if (!anchor64(at(s, exit_off), ex, ey64) || !anchor64(at(s, entry_off), nx, ny64))
     return false;
+  ex = round64(ex);
+  nx = round64(nx);
+  ey = 0;
+  ny = round64(ny64 - ey64); // y difference rounded once
   unsigned a = unsigned(pj), b = i; // a: previous (exit), b: current (entry)
   GlyphPosition *pos = c.buf.pos;
   if (!c.rtl) {
@@ -1013,13 +1082,14 @@ bool mark_anchor(Bytes mark_array, unsigned mark_index, unsigned &klass,
   if (mark_index >= n || !mark_array.has(2 + size_t(mark_index) * 4, 4))
     return false;
   klass = mark_array.u16(2 + mark_index * 4);
-  return anchor(at(mark_array, mark_array.u16(2 + mark_index * 4 + 2)), x, y);
+  return anchor64(at(mark_array, mark_array.u16(2 + mark_index * 4 + 2)), x, y);
 }
 void attach_mark(Context &c, unsigned mark, unsigned base, int32_t bx,
                  int32_t by, int32_t mx, int32_t my) {
   GlyphPosition &o = c.buf.pos[mark];
-  o.x_offset = bx - mx;
-  o.y_offset = by - my;
+  // 26.6 anchors (mark_anchor / anchor64): one rounding per offset.
+  o.x_offset = round64(bx - mx);
+  o.y_offset = round64(by - my);
   o.attach_type = AttachMark;
   o.attach_chain = int32_t(base) - int32_t(mark);
 }
@@ -1055,7 +1125,7 @@ bool gpos_mark_base(Context &c, Bytes s, unsigned i) {
   size_t o = 2 + (size_t(bi) * classes + klass) * 2;
   if (unsigned(bi) >= nb || !bases.has(o, 2) || !bases.u16(o))
     return false;
-  if (!anchor(at(bases, bases.u16(o)), bx, by))
+  if (!anchor64(at(bases, bases.u16(o)), bx, by))
     return false;
   attach_mark(c, i, unsigned(j), bx, by, mx, my);
   return true;
@@ -1096,7 +1166,7 @@ bool gpos_mark_lig(Context &c, Bytes s, unsigned i) {
   size_t o = 2 + (size_t(comp) * classes + klass) * 2;
   if (!attach.has(o, 2) || !attach.u16(o))
     return false;
-  if (!anchor(at(attach, attach.u16(o)), bx, by))
+  if (!anchor64(at(attach, attach.u16(o)), bx, by))
     return false;
   attach_mark(c, i, unsigned(j), bx, by, mx, my);
   return true;
@@ -1128,7 +1198,7 @@ bool gpos_mark_mark(Context &c, const LookupInfo &l, Bytes s, unsigned i) {
   size_t o = 2 + (size_t(m2) * classes + klass) * 2;
   if (unsigned(m2) >= arr.u16(0) || !arr.has(o, 2) || !arr.u16(o))
     return false;
-  if (!anchor(at(arr, arr.u16(o)), bx, by))
+  if (!anchor64(at(arr, arr.u16(o)), bx, by))
     return false;
   attach_mark(c, i, unsigned(j), bx, by, mx, my);
   return true;
@@ -1343,7 +1413,9 @@ bool position(const Layout &L, const Plan &plan, Buffer &buf, Budget &budget,
   bool ok = true;
   if (L.gpos.n) {
     Context c{L, buf, budget, stats, at(L.gpos, L.gpos.u16(8)), true, rtl};
+    variation_layout = &L;
     ok = run_lookups(c, plan.gpos, plan.gpos_count, 0, 255);
+    variation_layout = nullptr;
     if (!ok && stats)
       ++stats->budget_failures;
   }

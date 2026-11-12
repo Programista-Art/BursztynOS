@@ -127,6 +127,24 @@ inline void shaped_mask(void *user, int x, int y, int w, int h, const uint8_t *a
         }
     }
 }
+// BSF 2.2: colour glyphs (emoji: COLR/CPAL, CBDT, sbix) keep their own
+// colours; only the element opacity applies.
+inline void shaped_color(void *user, int x, int y, int w, int h, const uint32_t *argb) {
+    auto &p = *static_cast<ShapedPaint *>(user);
+    for (int yy = 0; yy < h && p.target->budget; ++yy) {
+        int ty = y + yy;
+        if (ty < p.clip.y || ty >= int64_t(p.clip.y) + p.clip.height)
+            continue;
+        for (int xx = 0; xx < w && p.target->budget; ++xx) {
+            int tx = x + xx;
+            if (tx < p.clip.x || tx >= int64_t(p.clip.x) + p.clip.width)
+                continue;
+            uint32_t v = argb[yy * w + xx];
+            if (v >> 24)
+                p.target->pixel(tx, ty, v & 0xffffff, (v >> 24) * p.alpha / 255);
+        }
+    }
+}
 #endif
 // Replace an unavailable image's retained alt fragments only when fixed boxes,
 // line alignment, painted ink and scroll extent provably stay unchanged.
@@ -373,7 +391,8 @@ inline Work paint_control_text_work(Document &d,FormControl &c,Surface &target,i
             co_await WorkPoint{work_units(L->lines()[li].glyph_end - L->lines()[li].glyph_begin + 1)};
             int x = base_x + control_line_shift(d, c, *L, li);
             ShapedPaint sp{&target, clip, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255};
-            BSF::draw_layout_line(*L, li, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family), shaped_mask, &sp);
+            BSF::draw_layout_line_color(*L, li, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family),
+                                        0xff000000u | s.color, shaped_mask, shaped_color, &sp);
             for (size_t k = 0; k < ns; ++k) { // selected glyphs in white
                 if (spans[k].line != li)
                     continue;
@@ -551,8 +570,8 @@ inline Work paint_work(Document &d, Surface &target, int scroll, Metrics metrics
                     co_await WorkPoint{work_units(L->glyph_count() + 1)};
                     HUSARZ_COUNT(d, shaped_paints, 1);
                     ShapedPaint sp{&target, fc, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255};
-                    BSF::draw_layout_line(*L, 0, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family),
-                                          shaped_mask, &sp);
+                    BSF::draw_layout_line_color(*L, 0, x, y, s.font, s.bold, s.italic, BSF::family_name(s.native_family),
+                                                0xff000000u | s.color, shaped_mask, shaped_color, &sp);
                     if (s.underline)
                         co_await target.rect_work(f.x, y + f.height - 1, f.width, 1, s.color, unsigned(s.paint_opacity) * s.color_alpha / 255, fc);
                     continue;

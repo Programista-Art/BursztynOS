@@ -211,6 +211,11 @@ bool needs_complex_layout(const char *text, size_t bytes) {
       return true;
     if (mark_category(cp))
       return true;
+    // BSF 2.2: emoji (supplementary pictographs, regional indicators, skin
+    // tones, ZWJ sequences, keycaps) go through the shaped layout so GSUB
+    // emoji ligatures and colour glyphs apply.
+    if (cp >= 0x1f000 || cp == 0x200d || cp == 0x20e3)
+      return true;
   }
   return false;
 }

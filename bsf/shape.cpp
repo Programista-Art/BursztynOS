@@ -356,9 +356,22 @@ bool shape(const Face &f, const OT::Layout &L, const uint32_t *cps,
   }
   // 6. Hidden default ignorables render as the zero-advance space glyph.
   unsigned space = f.glyph(' ');
-  for (unsigned i = 0; i < b.len; ++i)
-    if (b.info[i].props & OT::PropIgnorable)
-      b.info[i].glyph = uint16_t(space);
+  if (space) {
+    for (unsigned i = 0; i < b.len; ++i)
+      if (b.info[i].props & OT::PropIgnorable)
+        b.info[i].glyph = uint16_t(space);
+  } else {
+    // No space glyph (e.g. emoji fonts): delete hidden ignorables, as
+    // HarfBuzz does, instead of keeping visible .notdef entries.
+    unsigned kept = 0;
+    for (unsigned i = 0; i < b.len; ++i)
+      if (!(b.info[i].props & OT::PropIgnorable)) {
+        b.info[kept] = b.info[i];
+        b.pos[kept] = b.pos[i];
+        ++kept;
+      }
+    b.len = kept;
+  }
   if (o.rtl)
     b.reverse(0, b.len);
   return !r.budget_failed;

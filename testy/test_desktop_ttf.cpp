@@ -38,6 +38,10 @@ static uint64_t hook(uint64_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t) {
     return 1;
   }
   if (n == 6) {
+    // BSF 2.2 also scans the optional /czcionki/{otf,ttc,otc} directories;
+    // this fixture provides /czcionki/ttf only.
+    if (strcmp(reinterpret_cast<const char *>(a), "/czcionki/ttf"))
+      return 0;
     CHECK(!strcmp(reinterpret_cast<const char *>(a), "/czcionki/ttf"));
     ++directory_reads;
     if (directory.size() + 1 > c)

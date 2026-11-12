@@ -1,3 +1,65 @@
+# BSF support matrix — BSF 2.2 update 2026-11-12
+
+BSF 2.2 rows (branch `feature/bsf-2-2-font-formats`, from
+`feature/bsf-2-1-text-integration` @ `58131c0`) are marked **[2.2]**;
+evidence: `docs/bsf2-2-testreport.md`. Vocabulary: **Verified** (host tests
+with reference implementations; native where stated), **Implemented with
+limitations**, **Experimental**, **Partial**, **Not supported**, **Not
+tested on platform**. Earlier BSF 2.1/2.0 sections follow unchanged; where a
+2.2 row supersedes an older "Font formats" row, the 2.2 row applies.
+
+## [2.2] Font formats
+
+| Format | Status | Exactly what works |
+|---|---|---|
+| TrueType `glyf`/`loca` | **Verified** (unchanged) | bit-identical output to BSF 2.1 |
+| OpenType CFF 1.0 (`OTTO`, Type 2) | **Verified** (host: all outlines = FreeType; native: Husarz/Settings) | name-keyed and CID-keyed (FDArray/FDSelect), subrs, flex, seac, arithmetic ops; no hinting; FD FontMatrix not composed |
+| CFF2 | **Verified** (host) | default and variation instances (blend/vsindex), outlines = FreeType at 39 instances; no native page uses CFF2 |
+| TTC/OTC collections | **Verified** (host, native with a 246 KB subset collection) | every face separately selectable, shared tables shared in memory, lazy per-table loading for > 4 MiB; **files > 16 MiB cannot be installed natively** (no chunked write; boot import cap) |
+| WOFF 1.0 | **Verified** (host; native in Husarz) | zlib tables, bounds, ratio limits; WOFF collections not supported |
+| WOFF2 | **Verified** (host; native in Husarz) | Brotli, glyf/loca transform (incl. overlap bitmap), hmtx transform, null transforms; WOFF2 collections not supported |
+| Variable fonts — axis model (fvar/avar 1.0, named instances) | **Verified** (host) | generic axes ≤ 16; avar 2.0 not supported; STAT not interpreted |
+| Variable TrueType outlines (gvar, IUP, composites, phantoms) | **Verified** (host) | = FreeType at default/min/max/named/random instances |
+| Variation metrics (HVAR advances, gvar phantom fallback, MVAR hasc/hdsc/hlgp) | **Verified** (host, HarfBuzz rows) | other MVAR tags and VVAR not applied |
+| GPOS VariationIndex (ValueRecords, anchors) | **Verified** (host, 51/51 HarfBuzz rows) | |
+| GSUB/GPOS FeatureVariations | **Not supported** | default feature set at every instance |
+| Variable fonts in the UI/browser | **Partial** | API only (`set_variations`); catalog/Settings/Husarz use the default instance; no `font-variation-settings` |
+| COLRv0/CPAL | **Verified** (host vs FreeType) | layers, palettes, foreground; not exercised natively (no shipped COLRv0 font) |
+| COLRv1 | **Verified** (host vs Skia, mean diff 0.38 %; native emoji in Husarz) | all paint formats 1–32, Var* paints, all composite modes, ClipList |
+| CBDT/CBLC | **Verified** for PNG formats 17/18/19 (host = FreeType at strike size) | monochrome/raw CBDT formats not supported |
+| sbix | **Verified** for `png ` (host) | `jpg `/`tiff`/`pdf `/`mask` not decoded (outline fallback) |
+| OpenType-SVG | **Not supported** | |
+
+## [2.2] Emoji
+
+| Capability | Status | Notes |
+|---|---|---|
+| ZWJ sequences, skin tones, flags, keycaps, VS16 → one cluster, one colour glyph | **Verified** (host 22/22 HarfBuzz rows, runtime test; native screenshot) | requires font coverage (Noto Color Emoji COLRv1 shipped) |
+| Presentation selection (VS16/VS15, emoji vs text default) | **Implemented with limitations** | approximation of `Emoji_Presentation` (≥ U+1F000 pictographs); see `bsf2-2-color-fonts.md` |
+| Colour emoji in BursztynUI, Notepad, Husarz | **Verified** (host), native Husarz | Terminal grid draws no colour emoji (cells only) |
+
+## [2.2] System integration
+
+| Component | Status | Notes |
+|---|---|---|
+| Discovery of `/czcionki/{ttf,otf,ttc,otc}` | **Verified** (host; native catalog read from Settings) | |
+| Catalog metadata (formats, faces, axes, colour, status) | **Verified** (host) | |
+| Settings → Fonts details, coverage-aware previews, Terminal font list | **Implemented with limitations** | no separate font-info window, no axis sliders |
+| Refresh (new/removed/modified, disappearing selection) | **Verified** (host) | native refresh not automated in QEMU |
+| Separate system and Terminal fonts (Config v2, v1 migration) | **Verified** (host) | native persistence across reboot not automated |
+| Unified fallback (TrueType, CFF, collections, colour, web fonts) | **Verified** (host) | one resolver; variable faces at default instance |
+| Husarz `@font-face` | **Verified** (host), see native report | src order, formats, local(), weights, unicode-range, swap/optional, CORS (response side), isolation, release |
+| Indic / SE-Asian shaping | **Not supported** (unchanged) | glyph coverage ≠ shaping |
+
+## [2.2] Platforms
+
+| Environment | Status |
+|---|---|
+| UEFI QEMU 1280×720 | **Verified** — `--workload bsf22` 35/35, 0 GPU timeouts |
+| UEFI QEMU 1920×1080 | **Verified** — 35/35 |
+| BIOS QEMU | **Verified** — 35/35 |
+| Physical hardware, Windows QEMU, installed-disk boot | **Not tested** |
+
 # BSF support matrix — BSF 2.1 update 2026-11-12
 
 BSF 2.1 rows (branch `feature/bsf-2-1-text-integration`, from `test` @

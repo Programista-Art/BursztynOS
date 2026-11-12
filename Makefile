@@ -789,8 +789,10 @@ bsf2_props.o: bsf/unicode_props.cpp $(BSF2_HEADERS)
 	$(CXX) $(BSF2_FLAGS) -c $< -o $@
 bsf2_bidi.o: bsf/bidi.cpp $(BSF2_HEADERS)
 	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+# BSF 2.2: GPOS VariationIndex deltas use the float ItemVariationStore code
+# (same SSE policy as bsf_core.o).
 bsf2_otl.o: bsf/otl.cpp $(BSF2_HEADERS)
-	$(CXX) $(BSF2_FLAGS) -c $< -o $@
+	$(CXX) $(BSF2_FLAGS) -msse2 -mfpmath=sse -mno-avx -c $< -o $@
 bsf2_shape.o: bsf/shape.cpp $(BSF2_HEADERS)
 	$(CXX) $(BSF2_FLAGS) -c $< -o $@
 bsf2_layout.o: bsf/layout.cpp $(BSF2_HEADERS)
@@ -826,7 +828,8 @@ bursztyn_gui_minimal_base.o: jadro/gui/bursztyn_gui.cpp jadro/gui/bursztyn_gui.h
 bursztyn_gui_minimal.o: bursztyn_gui_minimal_base.o ring3_ssp.o
 	$(LD) -r bursztyn_gui_minimal_base.o ring3_ssp.o -o $@
 
-bsf_core.o: bsf/bsf.cpp bsf/bsf.h bsf/vendor/stb_truetype.h
+BSF_CORE_INCLUDES := bsf/cff.inc bsf/variations.inc bsf/inflate.inc bsf/png.inc bsf/color.inc
+bsf_core.o: bsf/bsf.cpp bsf/bsf.h bsf/vendor/stb_truetype.h $(BSF_CORE_INCLUDES)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -Os -fstack-usage -c $< -o $@
 
 bsf_runtime.o: bsf/runtime.cpp bsf/runtime.h bsf/config.h $(BSF2_HEADERS)
@@ -884,8 +887,20 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 husarz_worker_tmp.o: programy/przegladarka/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
 
-husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(PRZEGLADARKA_LINKER)
-	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o -o husarz_worker.elf
+# BSF 2.2: the resource worker decodes WOFF/WOFF2 (web fonts are parsed in
+# this separate low-privilege process; Brotli is linked nowhere else).
+# Vendored Brotli decoder (bsf/vendor/brotli, v1.1.0, MIT) — WOFF2 only.
+BROTLI_DEC_SOURCES := $(wildcard bsf/vendor/brotli/dec/*.c) $(addprefix bsf/vendor/brotli/common/,constants.c context.c dictionary.c platform.c shared_dictionary.c transform.c)
+RING3_CFLAGS = $(filter-out -std=gnu++17 -fno-rtti -fno-threadsafe-statics -fcheck-new $(WARN_CXX),$(RING3_FLAGS)) -std=gnu11 -w
+BROTLI_RING3_OBJECTS := $(patsubst bsf/vendor/brotli/%.c,.ring3-brotli/%.o,$(BROTLI_DEC_SOURCES))
+.ring3-brotli/%.o: bsf/vendor/brotli/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(RING3_CFLAGS) -Ibsf/vendor/brotli/include -Os -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -c $< -o $@
+webfont_ring3.o: bsf/webfont.cpp bsf/webfont.h bsf/bsf.h
+	$(CXX) $(RING3_FLAGS) -Ibsf/vendor/brotli/include -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Os -c $< -o $@
+HUSARZ_WORKER_FONT_OBJECTS := bsf_core.o webfont_ring3.o $(BROTLI_RING3_OBJECTS)
+husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(HUSARZ_WORKER_FONT_OBJECTS) $(PRZEGLADARKA_LINKER)
+	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(HUSARZ_WORKER_FONT_OBJECTS) -o husarz_worker.elf
 	$(BUR_CONVERT) husarz_worker.elf husarz_worker.bin
 	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
 
@@ -1131,7 +1146,7 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -2849,6 +2864,42 @@ test-bsf21-layout-host:
 	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf21_layout.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/bsf21-layout
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf21-layout
 
+# ---- BSF 2.2 font formats (host; FreeType/HarfBuzz are test-only oracles) --
+BSF22_SAN := -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie
+BSF22_ENV := ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1
+FREETYPE_CFLAGS = $(shell pkg-config --cflags freetype2)
+FREETYPE_LIBS = $(shell pkg-config --libs freetype2)
+.PHONY: test-bsf22-cff-host test-bsf22-shaping-host test-bsf22-host test-bsf22-collections-host
+test-bsf22-cff-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) $(FREETYPE_CFLAGS) testy/test_bsf22_cff.cpp bsf/bsf.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-cff
+	$(BSF22_ENV) .bsf-test/bsf22-cff
+# Same production shaper as test-bsf-shaping-host, BSF 2.2 format corpora.
+test-bsf22-shaping-host: test-bsf-shaping-host
+	$(BSF22_ENV) .bsf-test/shaping testy/fixtures/bsf22/shaping_cff.tsv --subset
+	$(BSF22_ENV) .bsf-test/shaping testy/fixtures/bsf22/shaping_variations.tsv --subset
+	$(BSF22_ENV) .bsf-test/shaping testy/fixtures/bsf22/shaping_emoji.tsv --subset
+test-bsf22-collections-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) -fcheck-new $(FREETYPE_CFLAGS) testy/test_bsf22_collections.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-collections
+	$(BSF22_ENV) .bsf-test/bsf22-collections
+.PHONY: test-bsf22-font-catalog-host
+test-bsf22-font-catalog-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) -fcheck-new $(FREETYPE_CFLAGS) testy/test_bsf22_font_catalog.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp bsf/terminal.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-font-catalog
+	$(BSF22_ENV) .bsf-test/bsf22-font-catalog
+# Vendored Brotli decoder (bsf/vendor/brotli, v1.1.0, MIT) — WOFF2 only.
+BROTLI_INCLUDES := -Ibsf/vendor/brotli/include
+BROTLI_HOST_OBJECTS := $(patsubst bsf/vendor/brotli/%.c,.bsf-test/brotli-host/%.o,$(BROTLI_DEC_SOURCES))
+.bsf-test/brotli-host/%.o: bsf/vendor/brotli/%.c
+	@mkdir -p $(dir $@)
+	gcc -std=c99 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer $(BROTLI_INCLUDES) -c $< -o $@
+.PHONY: test-bsf22-woff-host
+test-bsf22-woff-host: $(BROTLI_HOST_OBJECTS)
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) $(BROTLI_INCLUDES) $(FREETYPE_CFLAGS) testy/test_bsf22_woff.cpp bsf/webfont.cpp bsf/bsf.cpp $(BROTLI_HOST_OBJECTS) $(FREETYPE_LIBS) -o .bsf-test/bsf22-woff
+	$(BSF22_ENV) .bsf-test/bsf22-woff
+test-bsf22-host: test-bsf22-cff-host test-bsf22-shaping-host test-bsf22-collections-host test-bsf22-font-catalog-host test-bsf22-woff-host test-bsf22-husarz-webfonts-host test-bsf22-variations-host test-bsf22-color-host test-bsf22-emoji-host
+
 # BWS 51 (incl. command 2) boundary/negative tests on the production handler
 # source with a simulated Ring 3 address space, Ring 3 blob validation and the
 # desktop BMP Multiboot2 module validator.
@@ -2879,3 +2930,49 @@ fuzz-bsf21-smoke:
 	g++ $(BSF2_FUZZ_FLAGS) -fcoroutines -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) -Itesty testy/fuzz/fuzz_husarz_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .fuzz-build/bsf21/fuzz_husarz_bidi
 	$(BSF2_FUZZ_ENV) .fuzz-build/bsf21/fuzz_bsf21_editing --iterations=$(or $(BSF21_FUZZ_ITERS),4000) --corpus-out=.fuzz-corpus/bsf21/editing --metrics-out=.fuzz-build/bsf21/editing.json
 	$(BSF2_FUZZ_ENV) .fuzz-build/bsf21/fuzz_husarz_bidi --iterations=$(or $(BSF21_HUSARZ_FUZZ_ITERS),1500) --corpus-out=.fuzz-corpus/bsf21/husarz --metrics-out=.fuzz-build/bsf21/husarz.json
+
+.PHONY: test-bsf22-husarz-webfonts-host
+test-bsf22-husarz-webfonts-host: $(BROTLI_HOST_OBJECTS)
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) $(BROTLI_INCLUDES) testy/test_bsf22_husarz_webfonts.cpp bsf/webfont.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp $(BROTLI_HOST_OBJECTS) -Wl,--gc-sections -o .bsf-test/bsf22-husarz-webfonts
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf22-husarz-webfonts
+
+.PHONY: test-bsf22-variations-host
+test-bsf22-variations-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) $(FREETYPE_CFLAGS) testy/test_bsf22_variations.cpp bsf/bsf.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-variations
+	$(BSF22_ENV) .bsf-test/bsf22-variations
+
+.PHONY: test-bsf22-color-host
+test-bsf22-color-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) $(FREETYPE_CFLAGS) testy/test_bsf22_color.cpp bsf/bsf.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-color
+	$(BSF22_ENV) .bsf-test/bsf22-color
+
+.PHONY: test-bsf22-emoji-host
+test-bsf22-emoji-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BSF22_SAN) -fcheck-new $(FREETYPE_CFLAGS) testy/test_bsf22_emoji.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp $(FREETYPE_LIBS) -o .bsf-test/bsf22-emoji
+	$(BSF22_ENV) .bsf-test/bsf22-emoji
+
+# BSF 2.2 coverage-guided fuzzing: fonts (sfnt/collections/CFF/CFF2/gvar/
+# colour), WOFF/WOFF2 and PNG strikes. Iterations: BSF22_FUZZ_ITERS.
+.PHONY: fuzz-bsf22
+fuzz-bsf22: $(BROTLI_HOST_OBJECTS)
+	@mkdir -p .fuzz-build/bsf22 .fuzz-corpus/bsf22
+	g++ $(BSF2_FUZZ_FLAGS) -DBSF22_TARGET=1 testy/fuzz/fuzz_bsf22.cpp bsf/bsf.cpp -o .fuzz-build/bsf22/fuzz_bsf22_font
+	g++ $(BSF2_FUZZ_FLAGS) $(BROTLI_INCLUDES) -DBSF22_TARGET=2 testy/fuzz/fuzz_bsf22.cpp bsf/webfont.cpp bsf/bsf.cpp $(BROTLI_HOST_OBJECTS) -o .fuzz-build/bsf22/fuzz_bsf22_webfont
+	g++ $(BSF2_FUZZ_FLAGS) -DBSF22_TARGET=3 testy/fuzz/fuzz_bsf22.cpp bsf/bsf.cpp -o .fuzz-build/bsf22/fuzz_bsf22_png
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf22/fuzz_bsf22_font --iterations=$(or $(BSF22_FUZZ_ITERS),20000) --corpus-out=.fuzz-corpus/bsf22/font --metrics-out=.fuzz-build/bsf22/font.json
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf22/fuzz_bsf22_webfont --iterations=$(or $(BSF22_FUZZ_ITERS),20000) --corpus-out=.fuzz-corpus/bsf22/webfont --metrics-out=.fuzz-build/bsf22/webfont.json
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf22/fuzz_bsf22_png --iterations=$(or $(BSF22_FUZZ_ITERS),50000) --corpus-out=.fuzz-corpus/bsf22/png --metrics-out=.fuzz-build/bsf22/png.json
+
+.PHONY: bench-bsf22
+BROTLI_BENCH_OBJECTS := $(patsubst bsf/vendor/brotli/%.c,.bsf-test/brotli-o2/%.o,$(BROTLI_DEC_SOURCES))
+.bsf-test/brotli-o2/%.o: bsf/vendor/brotli/%.c
+	@mkdir -p $(dir $@)
+	gcc -std=c99 -O2 $(BROTLI_INCLUDES) -c $< -o $@
+bench-bsf22: $(BROTLI_BENCH_OBJECTS)
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) $(BROTLI_INCLUDES) -std=c++17 -O2 testy/bench_bsf22.cpp bsf/webfont.cpp bsf/bsf.cpp $(BSF2_SOURCES) $(BROTLI_BENCH_OBJECTS) -o .bsf-test/bench-bsf22
+	.bsf-test/bench-bsf22

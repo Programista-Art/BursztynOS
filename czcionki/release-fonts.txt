@@ -6,3 +6,9 @@ DejaVuSerifCondensed-Italic.ttf
 LICENSE-DejaVu.txt
 LICENSE-stb.txt
 SOURCE.txt
+# BSF 2.2: OpenType CFF (Noto Sans) and colour emoji (Noto Color Emoji COLRv1)
+otf/NotoSans-Regular.otf
+otf/NotoSans-Bold.otf
+otf/LICENSE-NotoSans.txt
+NotoColorEmoji-COLRv1.ttf
+LICENSE-NotoEmoji.txt

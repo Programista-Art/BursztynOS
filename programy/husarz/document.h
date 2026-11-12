@@ -223,6 +223,8 @@ struct GeneratedBox {
 };
 struct FontFace {
     uint32_t family{}, sources{}, base_url{};
+    // BSF 2.2 descriptors (arena offsets of the raw values; 0 = absent).
+    uint32_t weight{}, style{}, stretch{}, unicode_range{}, display{};
 };
 struct Attribute {
     uint32_t name{}, value{};

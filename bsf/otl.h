@@ -74,6 +74,9 @@ struct Layout {
   Bytes gdef{}, gsub{}, gpos{};
   Bytes glyph_classes{}, mark_classes{}, mark_sets{}, var_store{};
   uint16_t glyph_count{};
+  // BSF 2.2: variation instance of the face (VariationIndex device tables).
+  int16_t coords[MaxAxes]{};
+  uint8_t axes{};
   bool open(const Face &);
   bool has_gsub() const { return gsub.n != 0; }
   bool has_gpos() const { return gpos.n != 0; }
