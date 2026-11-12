@@ -60,6 +60,15 @@ struct LayoutOptions {
   uint32_t features{FeatureDefault};
   int64_t max_width{};  // 16.16; 0 = no wrapping
   bool align_to_direction{}; // right-align RTL paragraphs within max_width
+  // BSF 2.1 (all default to the BSF 2.0 behaviour):
+  // CSS letter-spacing, 16.16 px, added after every shaped cluster (never
+  // inside a grapheme or ligature); not applied to cursive (joining) scripts.
+  int32_t letter_spacing{};
+  // CSS word-spacing, 16.16 px, added to word-separator characters.
+  int32_t word_spacing{};
+  // Logical scalars just before/after the text (0 = none), e.g. the
+  // neighbouring DOM text node; used only for cursive joining context.
+  uint32_t context_before{}, context_after{};
 };
 struct LayoutStatistics {
   uint64_t runs{}, shaped_glyphs{}, fallback_searches{}, budget_failures{},
@@ -97,6 +106,19 @@ public:
   struct Span { uint32_t line; int64_t x0, x1; };
   size_t selection(size_t a, size_t b, Span *out, size_t capacity) const;
   uint8_t base_level() const { return base_level_; }
+  // ---- BSF 2.1 line-aware editing geometry ------------------------------
+  // A byte at a soft-wrap boundary is both the end of line k and the start
+  // of line k+1; these queries take the visual line explicitly so editors
+  // can keep a caret affinity. Results are grapheme boundaries.
+  int64_t caret_x_on(size_t byte, size_t line) const;
+  // One strictly visual step on `line` (no logical fallback). Returns the
+  // new byte and sets *moved; at the visual edge returns `byte`, moved=false.
+  size_t move_visual_on(size_t byte, size_t line, int direction, bool *moved) const;
+  // Leftmost (direction < 0) or rightmost (> 0) caret byte of a line.
+  size_t line_edge(size_t line, int direction) const;
+  // Monotonic build identity (never 0 for a built layout); lets callers
+  // detect a borrowed layout that was rebuilt or evicted.
+  uint32_t generation() const { return generation_; }
 
 private:
   const char *text_{};
@@ -109,6 +131,7 @@ private:
   size_t cluster_count_{}, cluster_cap_{};
   int64_t width_{};
   uint8_t base_level_{};
+  uint32_t generation_{};
   LayoutStatistics stats_{};
   // Caret table built once per layout: every displayable caret position of
   // each line (sorted by byte) plus an x-ordered index, so caret_x,
@@ -119,6 +142,7 @@ private:
   uint32_t *line_caret_begin_{}; // per line, range into carets_ (+1 entry)
   size_t caret_count_{};
   bool build_carets();
+  size_t nearest_on_line(size_t li, int64_t x, int direction, size_t exclude, bool *found) const;
   int64_t caret_x_scan(size_t byte, size_t line) const;
   size_t floor_boundary(size_t byte, size_t line) const;
   bool grow_glyphs(size_t);

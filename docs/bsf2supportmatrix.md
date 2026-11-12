@@ -1,3 +1,9 @@
+# BSF support matrix — BSF 2.1 update 2026-11-12
+
+BSF 2.1 rows (branch `feature/bsf-2-1-text-integration`, from `test` @
+`544a51e`) are marked **[2.1]**; evidence: `docs/bsf2-1-testreport.md`.
+Earlier history follows.
+
 # BSF 2.0 support matrix — 2026-11-11 (stabilization update)
 
 Originally branch `feature/bsf-2-advanced-text-layout` (merged into `test`
@@ -63,15 +69,29 @@ Status vocabulary:
 | Variable fonts (`fvar avar gvar HVAR VVAR MVAR STAT`, CFF2 blends) | **Not supported** — `fvar`/`COLR`/`CPAL` table bytes are recorded on `Face` but never interpreted. |
 | Colour fonts (COLR/CPAL v0/v1, CBDT/CBLC, sbix) | **Not supported** |
 
+## BSF 2.1 additions
+
+| Capability | Status | Evidence / limits |
+|---|---|---|
+| **[2.1]** Paragraph-level direction across wrapped lines (shared `TextLayout`) | **Verified** (host) | `test-bsf21-layout-host`, `test-notepad-bidi-host` (continuation line starting with Latin stays RTL) |
+| **[2.1]** Line-aware carets (`caret_x_on`, `move_visual_on`, `line_edge`) | **Verified** (host, fuzzed) | 241,797 asserts incl. 1,500 random wrapped paragraphs; `fuzz_bsf21_editing` |
+| **[2.1]** CSS letter-/word-spacing in the layout (not inside graphemes/ligatures, not for cursive scripts) | **Verified** (host) | `test-bsf21-layout-host` |
+| **[2.1]** Cursive joining context across run / DOM-node boundaries | **Verified** (host) | `test-bsf21-layout-host` (glyph ids equal the joined word), `test-husarz-bidi-host` page 09 |
+| **[2.1]** Caller-owned layouts (`build_layout`), line drawing (`draw_layout_line`, italic) | **Verified** (host) | all 2.1 suites; native counters `owned_builds` (test report) |
+| **[2.1]** Unicode paragraph separators inside a Notepad line (U+2029 etc.) | **Partially verified** | handled by the layout (own paragraph level per part); host save/reopen sample; not a separate Notepad line count |
+
 ## Integration
 
 | Component | Status | Notes |
 |---|---|---|
+| **[2.1]** BursztynUI single-line field (`PoleTekstowe`) | **Verified** (host); native: see test report | visual Left/Right, Shift selection, multi-span highlight, Home/End, click/drag hit testing, scrolling, right alignment, direction API, password isolation (`test-bursztynui-bidi-host`). Native non-ASCII typing not injectable (QMP). |
+| **[2.1]** Notepad (`PoleWielowierszowe`) paragraph model | **Verified** (host); **Partially verified** natively | one direction per logical paragraph, RTL right alignment, explicit direction, affinity at soft wraps, terminating visual navigation across lines, multi-span selection, byte-exact clipboard/save/undo (`test-notepad-bidi-host`). Native: RTL text pasted through the real clipboard, BSF 2.1 paragraph layouts counted in the Notepad process (test report). No Notepad menu command for direction. |
+| **[2.1]** Husarz HTML/CSS bidi | **Verified** (host, 12 local pages + long/adversarial + fuzzer); native: see test report | CSS `direction`, `unicode-bidi` (all six values), `text-align:start/end`, HTML `dir=ltr/rtl/auto`, `bdi`, `bdo`, paragraph UAX #9 over inline content, L2 per line, shaped Arabic across inline elements, link hit testing, RTL forms with logical values. Limits: atomic inline boxes (inline-block, form controls) not reordered against text, RTL table column order not mirrored, intrinsic widths per cluster (`docs/bsf2-1-husarz.md`). |
 | BursztynUI (labels, buttons, menus, dialogs, single-line fields, lists, …) | **Partially verified** | All BSF text drawing goes through `CzcionkaUI::rysuj_bsf`; measurement through `measure_text/measure_prefix/hit_test`. Complex strings use one shared cached layout for both. Single-line fields: caret and hit-test are bidi-correct; selection highlight is a single x-range and arrow keys are logical (limitation). |
-| Notepad (`PoleWielowierszowe`) | **Partially verified** | Shaped wrapping, bidi caret, visual Left/Right, per-span bidi selection, grapheme Backspace/Delete, byte-exact save/reopen (host suite 60,662 checks). Each visual line resolves its own paragraph direction; RTL paragraphs are left-aligned. Native check: Notepad launches and accepts input; RTL editing natively is not yet automated (QMP cannot type non-ASCII). |
+| Notepad (`PoleWielowierszowe`) — BSF 2.0 row (superseded by the [2.1] row above) | **Partially verified** | Shaped wrapping, bidi caret, visual Left/Right, per-span bidi selection, grapheme Backspace/Delete, byte-exact save/reopen (host suite 60,662 checks). Each visual line resolves its own paragraph direction; RTL paragraphs are left-aligned. Native check: Notepad launches and accepts input; RTL editing natively is not yet automated (QMP cannot type non-ASCII). |
 | Settings → Fonts | **Verified** | Hebrew + Arabic samples drawn natively by BSF 2.0 (QEMU counters + screenshots). Font format / axes / writing-system info: **not added**. |
 | Terminal (Shell) | **Partial, by design** | Logical cell order is preserved; no visual reordering or shaping in the cell grid (keeps command text, paths and cursor addressing exact). |
-| Husarz browser | **Not integrated** | Its coroutine layout/paint pipeline still shapes per code point (with existing grapheme-correct forms). CSS `direction`/`unicode-bidi` unsupported. See `bsf2complextextediting.md`. |
+| Husarz browser — BSF 2.0 row (superseded by the [2.1] row above) | **Not integrated** (2.0) | Its coroutine layout/paint pipeline still shapes per code point (with existing grapheme-correct forms). CSS `direction`/`unicode-bidi` unsupported. See `bsf2complextextediting.md`. |
 | Calculator, snake, demos (demo_ui, kontrolki 2/3/4), system tests, sound test, wallpaper, splash | **Full engine** (since 2026-11-11) | Enabled after the desktop BMPs left the kernel image; calculator, snake and Kontrolki 4 launch, render and close natively (QEMU). `BSF_COMPLEX_TEXT=0` remains available as an explicit per-app opt-out; no app uses it. |
 
 ## Platform verification

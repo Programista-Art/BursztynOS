@@ -1,6 +1,7 @@
 #pragma once
 #include "css.h"
 #include "forms.h"
+#include "bidi.h"
 #include "../../bsf/bsf.h"
 #if defined(BSF_NATIVE)
 #include "../../bsf/runtime.h"
@@ -12,6 +13,11 @@ struct Flow {
     MarginStrut previous_margin{};
     int row_height{}, column{}, columns{1};
     bool pending_space{};
+    // BSF 2.1: the collapsed space that pending_space stands for (its bidi
+    // level becomes the gap level of the next fragment).
+    uint16_t space_node{};
+    uint32_t space_offset{};
+    int pre_gap{}; // preserved white space advanced since the last fragment
 };
 inline int advance(Metrics m, uint32_t cp, const Style &s) {
 #if defined(BSF_NATIVE)
@@ -83,8 +89,261 @@ inline int cluster_width(const char* text,TextCluster c,Metrics m,const Style& s
         w=clamp64(int64_t(w)+cluster_step(m,transformed(cp,s.transform,first&&p==c.begin),s,c.face));p+=z;
     }return w;
 }
+#if HUSARZ_BIDI
+// ---- BSF 2.1 shaped text runs ------------------------------------------
+// Fragments that need complex layout (bidi level > 0, RTL/joining scripts,
+// marks, controls) are measured and painted from one BSF TextLayout with an
+// explicit direction equal to the fragment's (uniform) level parity, CSS
+// letter/word spacing and the cursive context of adjacent fragments. Plain
+// LTR fragments keep the per-cluster path and its exact geometry.
+inline bool fragment_complex(const char *text, size_t n, uint8_t level) {
+    return (level & 1) || BSF::needs_complex_layout(text, n);
+}
+// UAX #9 never gives L an odd level or R/AL an even one, so a conflict
+// means the run was overridden (bidi-override / isolate-override).
+inline bool fragment_overridden(const char *text, size_t n, uint8_t level) {
+    for (size_t p = 0; p < n;) {
+        size_t used;
+        uint32_t cp = utf8(text + p, n - p, used);
+        p += used ? used : 1;
+        unsigned k = strong_direction(cp);
+        if ((k == 1 && (level & 1)) || (k == 2 && !(level & 1)))
+            return true;
+    }
+    return false;
+}
+// Logical scalars next to a byte range (for joining context).
+inline uint32_t last_scalar(const char *text, size_t n) {
+    if (!n)
+        return 0;
+    size_t p = n - 1;
+    while (p && (uint8_t(text[p]) & 0xC0) == 0x80)
+        --p;
+    size_t used;
+    return utf8(text + p, n - p, used);
+}
+inline uint32_t first_scalar(const char *text, size_t n) {
+    if (!n)
+        return 0;
+    size_t used;
+    return utf8(text, n, used);
+}
+struct ShapedKey {
+    uint64_t hash{};
+    bool operator==(const ShapedKey &o) const { return hash == o.hash; }
+};
+inline uint64_t shaped_hash(const char *text, size_t n, const Style &s, uint8_t level, uint32_t before, uint32_t after,
+                            bool forced) {
+    uint64_t h = UINT64_C(1469598103934665603);
+    auto mix = [&](uint64_t v) { for (unsigned i = 0; i < 8; ++i) { h = (h ^ (v & 255)) * UINT64_C(1099511628211); v >>= 8; } };
+    for (size_t i = 0; i < n; ++i)
+        h = (h ^ uint8_t(text[i])) * UINT64_C(1099511628211);
+    mix(n); mix(uint64_t(s.font) | (uint64_t(s.bold) << 16) | (uint64_t(s.italic) << 17) | (uint64_t(level & 1) << 18) |
+               (uint64_t(uint8_t(s.transform)) << 20));
+    mix(s.native_family); mix(uint32_t(s.letter_spacing)); mix(uint32_t(s.word_spacing)); mix(before); mix(after);
+    mix(forced);
+    mix(BSF::generation());
+    return h ? h : 1;
+}
+// Transformed copy (text-transform keeps UTF-8 lengths for the mapped
+// letters, so byte offsets stay valid). Returns false if it does not fit.
+inline bool transformed_copy(const char *text, size_t n, Transform t, char *out, size_t cap) {
+    if (n > cap)
+        return false;
+    for (size_t p = 0; p < n;) {
+        size_t used;
+        uint32_t cp = utf8(text + p, n - p, used);
+        if (!used)
+            used = 1;
+        char b[4];
+        unsigned k = encode(transformed(cp, t, p == 0), b);
+        if (k != used) { // unexpected length change: keep the source bytes
+            for (size_t i = 0; i < used; ++i)
+                out[p + i] = text[p + i];
+        } else
+            for (unsigned i = 0; i < k; ++i)
+                out[p + i] = b[i];
+        p += used;
+    }
+    return true;
+}
+struct ShapedLayoutSlot {
+    BSF::TextLayout layout;
+    uint64_t hash{}, used{};
+    bool valid{};
+};
+constexpr unsigned ShapedWidthSlots = 1024, ShapedLayoutSlots = 32;
+struct ShapedWidth { uint64_t hash{}; int width{}; };
+inline ShapedWidth shaped_widths[ShapedWidthSlots];
+inline ShapedLayoutSlot shaped_layouts[ShapedLayoutSlots];
+inline uint64_t shaped_clock{}, shaped_width_hits{}, shaped_width_misses{}, shaped_layout_hits{}, shaped_layout_misses{};
+inline char shaped_buffer[MaxText];
+// Bounded per-process LRU of fragment layouts (exact text compare).
+inline const BSF::TextLayout *shaped_layout(const char *text, size_t n, const Style &s, uint8_t level, uint32_t before,
+                                            uint32_t after, bool forced = false) {
+    if (!n || n + 6 > MaxText || !BSF::ready())
+        return nullptr;
+    uint64_t h = shaped_hash(text, n, s, level, before, after, forced); // over the DOM bytes only
+    const char *source = text;
+    size_t prefix = forced ? 3 : 0;
+    if (s.transform != Transform::None || forced) {
+        if (!transformed_copy(text, n, s.transform, shaped_buffer + prefix, sizeof shaped_buffer - 6))
+            return nullptr;
+        source = shaped_buffer;
+    }
+    if (forced) { // LRO/RLO ... PDF: the run keeps its overridden direction
+        uint32_t open = (level & 1) ? 0x202E : 0x202D;
+        encode(open, shaped_buffer);
+        encode(0x202C, shaped_buffer + 3 + n);
+        n += 6;
+    }
+    ShapedLayoutSlot *victim = &shaped_layouts[0];
+    for (auto &slot : shaped_layouts) {
+        if (slot.valid && slot.hash == h && slot.layout.bytes() == n) {
+            bool same = true;
+            const char *own = slot.layout.text();
+            for (size_t i = 0; i < n && same; ++i)
+                same = own[i] == source[i];
+            if (same) {
+                slot.used = ++shaped_clock;
+                ++shaped_layout_hits;
+                return &slot.layout;
+            }
+        }
+        if (!slot.valid || (victim->valid && slot.used < victim->used))
+            victim = &slot;
+    }
+    ++shaped_layout_misses;
+    victim->valid = false;
+    BSF::LayoutRequest r;
+    r.px = s.font;
+    r.bold = s.bold;
+    r.italic = s.italic;
+    r.family = BSF::family_name(s.native_family);
+    r.direction = (level & 1) ? BSF::BaseDirection::RTL : BSF::BaseDirection::LTR;
+    r.letter_spacing = int32_t(clamp64(int64_t(s.letter_spacing) * BSF::Fixed, -INT32_MAX, INT32_MAX));
+    r.word_spacing = int32_t(clamp64(int64_t(s.word_spacing) * BSF::Fixed, -INT32_MAX, INT32_MAX));
+    r.context_before = before;
+    r.context_after = after;
+    if (!BSF::build_layout(victim->layout, source, n, r))
+        return nullptr;
+    victim->hash = h;
+    victim->used = ++shaped_clock;
+    victim->valid = true;
+    return &victim->layout;
+}
+// Shaped advance of a fragment in px (same layout paint will use).
+inline int shaped_width(const char *text, size_t n, const Style &s, uint8_t level, uint32_t before, uint32_t after,
+                        bool &ok, bool forced = false) {
+    ok = false;
+    uint64_t h = shaped_hash(text, n, s, level, before, after, forced) ^ 0x5bd1e995u;
+    auto &slot = shaped_widths[h % ShapedWidthSlots];
+    if (slot.hash == h) {
+        ++shaped_width_hits;
+        ok = true;
+        return slot.width;
+    }
+    ++shaped_width_misses;
+    const auto *L = shaped_layout(text, n, s, level, before, after, forced);
+    if (!L)
+        return 0;
+    int64_t w = (L->width() + BSF::Fixed / 2) / BSF::Fixed;
+    slot = {h, int(clamp64(w, 0, MaxDimension))};
+    ok = true;
+    return slot.width;
+}
+#endif
 inline int font_height(Metrics m, const Style &s) {
     return clamp64(m.family_height?m.family_height(m.user,s.font,s.native_family):m.height ? m.height(m.user, s.font) : s.font, 1, MaxFont * 2);
+}
+#if HUSARZ_BIDI
+// UAX #9 L2 for one formatted line: the line's fragments (logical order)
+// and the collapsed spaces between them are items with their resolved
+// levels; reversing them per L2 gives the visual order, and x positions are
+// reassigned inside the same horizontal extent. Fragments separated by
+// pen space that is not a recorded gap (inline-block or form-control boxes,
+// which are not fragments) form separate segments that are reordered
+// independently, so no box can overlap text (documented limitation).
+// Image fragments move with their boxes. Lines whose fragments are all
+// level 0 are left untouched.
+inline Work bidi_line_work(Document &d, Flow &f) {
+    constexpr unsigned MaxLineItems = 512;
+    uint32_t frag[MaxLineItems];
+    unsigned count = 0;
+    bool any = false;
+    for (uint32_t i = uint32_t(f.line_first); i < d.fragment_count; ++i) {
+        co_await WorkPoint{1};
+        if (d.fragments[i].flow_node != f.node)
+            continue;
+        if (count == MaxLineItems) {
+            d.limit(LimitBidi);
+            co_return;
+        }
+        frag[count++] = i;
+        any |= d.fragments[i].level != 0 || d.fragments[i].gap_level != 0;
+    }
+    if (!any || count < 1)
+        co_return;
+    uint8_t levels[MaxLineItems * 2];
+    int widths[MaxLineItems * 2];
+    int32_t owner[MaxLineItems * 2]; // fragment index or -1 for a gap
+    uint32_t order[MaxLineItems * 2];
+    for (unsigned k0 = 0; k0 < count;) {
+        unsigned k1 = k0 + 1;
+        while (k1 < count) {
+            const auto &p = d.fragments[frag[k1 - 1]], &q = d.fragments[frag[k1]];
+            if (int64_t(p.x) + p.width + q.gap != q.x)
+                break; // unexplained pen space: segment barrier
+            ++k1;
+        }
+        unsigned m = 0;
+        for (unsigned k = k0; k < k1; ++k) {
+            const auto &g = d.fragments[frag[k]];
+            if (k > k0 && g.gap) {
+                levels[m] = g.gap_level;
+                widths[m] = g.gap;
+                owner[m++] = -1;
+            }
+            levels[m] = g.level;
+            widths[m] = g.width;
+            owner[m++] = int32_t(frag[k]);
+        }
+        size_t visual = BSF::bidi_reorder(levels, m, order);
+        int x = d.fragments[frag[k0]].x;
+        for (size_t v = 0; v < visual; ++v) {
+            co_await WorkPoint{1};
+            unsigned item = order[v];
+            if (owner[item] >= 0) {
+                auto &g = d.fragments[uint32_t(owner[item])];
+                int dx = x - g.x;
+                g.x = x;
+                if (dx && !g.text && !g.length && d.tag(g.node, "img")) {
+                    auto &b = d.boxes[g.node];
+                    b.x = clamp64(int64_t(b.x) + dx, -MaxDimension);
+                    b.content_x = clamp64(int64_t(b.content_x) + dx, -MaxDimension);
+                }
+            }
+            x = clamp64(int64_t(x) + widths[item], -MaxDimension);
+        }
+        k0 = k1;
+    }
+}
+#endif
+// CSS text-align start/end against the block direction (or the paragraph
+// direction for unicode-bidi: plaintext).
+inline Align resolved_align(const Document &d, const Flow &f) {
+    const Style &s = d.styles[f.node];
+    Align a = s.align;
+    if (a != Align::Start && a != Align::End)
+        return a;
+    bool rtl = s.direction & 1;
+    if (s.unicode_bidi == UnicodeBidi::Plaintext)
+        for (uint32_t i = uint32_t(f.line_first); i < d.fragment_count; ++i)
+            if (d.fragments[i].flow_node == f.node) {
+                rtl = d.fragments[i].paragraph_level & 1;
+                break;
+            }
+    return (a == Align::Start) == rtl ? Align::Right : Align::Left;
 }
 inline Work finish_line_work(Document &d, Flow &f, bool force = false) {
     if (f.pen || force) {
@@ -92,7 +351,11 @@ inline Work finish_line_work(Document &d, Flow &f, bool force = false) {
         int extra = f.width - f.pen;
         if (extra < 0)
             extra = 0;
-        Align a = d.styles[f.node].align;
+#if HUSARZ_BIDI
+        if (d.has_bidi)
+            co_await bidi_line_work(d, f);
+#endif
+        Align a = resolved_align(d, f);
         int shift = a == Align::Center ? extra / 2 : a == Align::Right ? extra : 0;
         uint16_t moved = 0;
         for (uint32_t i = uint32_t(f.line_first); i < d.fragment_count; ++i) {
@@ -125,6 +388,7 @@ inline Work finish_line_work(Document &d, Flow &f, bool force = false) {
         f.line_height = 0;
         f.line_first = int(d.fragment_count);
         f.pending_space = false;
+        f.pre_gap = 0;
         f.previous_margin = MarginStrut();
     }
 }
@@ -148,6 +412,165 @@ inline void emit(Document &d, Flow &f, uint16_t id, uint32_t off, uint32_t len, 
     if (h > f.line_height)
         f.line_height = h;
 }
+#if HUSARZ_BIDI
+// One word [start, end) of text node `id` (no break opportunity inside):
+// split where the bidi level changes, measure every part from its shaped
+// layout (or the per-cluster path for plain LTR parts), join cursive
+// context with an adjacent fragment of the previous node, then place the
+// parts like an ordinary word (wrapping before it if needed).
+inline Work layout_word_bidi_work(Document &d, Flow &f, uint16_t id, uint32_t offset, size_t start, size_t end,
+                                  Metrics m, bool wrap, int cluster_sum) {
+    const Style &s = d.styles[id];
+    const char *text = d.str(offset);
+    struct Part { size_t a, b; uint8_t level, para; int width; bool complex, forced; };
+    constexpr unsigned MaxParts = 32;
+    Part parts[MaxParts];
+    unsigned np = 0;
+    for (size_t a = start; a < end && np < MaxParts;) {
+        co_await WorkPoint{1};
+        uint8_t para = 0, level = text_level(d, id, uint32_t(a), &para);
+        size_t b = text_level_end(d, id, uint32_t(a), uint32_t(end));
+        if (b <= a || np + 1 == MaxParts)
+            b = end;
+        // Never split a grapheme: advance to the first boundary >= b
+        // (linear in the part, no rescan from the node start).
+        size_t g = a;
+        while (g < b)
+            g = BSF::next_cluster(text, g, end);
+        b = g > end ? end : g;
+        if (b <= a)
+            b = end;
+        // Plain even-level LTR text can contain no R/AL, so no override scan.
+        bool complex = fragment_complex(text + a, b - a, level);
+        bool forced = (complex || (level & 1)) && fragment_overridden(text + a, b - a, level);
+        parts[np++] = {a, b, level, para, 0, forced || complex, forced};
+        a = b;
+    }
+    auto measure = [&](Part &q, uint32_t before, uint32_t after) {
+        if (q.complex) {
+            bool ok = false;
+            int w = shaped_width(text + q.a, q.b - q.a, s, q.level, before, after, ok, q.forced);
+            if (ok)
+                return w;
+            q.complex = false; // no usable face: per-cluster fallback
+        }
+        int w = 0;
+        for (size_t k = q.a; k < q.b;) {
+            auto c = text_cluster(text, q.b, k, m, s, k == start);
+            w = clamp64(int64_t(w) + cluster_width(text, c, m, s, k == start));
+            k = c.end;
+        }
+        return w;
+    };
+    int total = 0;
+    for (unsigned k = 0; k < np; ++k) {
+        co_await WorkPoint{1};
+        uint32_t before = k ? last_scalar(text + parts[k - 1].a, parts[k - 1].b - parts[k - 1].a) : 0;
+        uint32_t after = k + 1 < np ? first_scalar(text + parts[k + 1].a, parts[k + 1].b - parts[k + 1].a) : 0;
+        // One plain part: the per-cluster width the caller already summed.
+        parts[k].width = (np == 1 && !parts[k].complex && cluster_sum >= 0) ? cluster_sum
+                                                                             : measure(parts[k], before, after);
+        total = clamp64(int64_t(total) + parts[k].width);
+    }
+    int gap = f.pending_space ? advance(m, ' ', s) : 0;
+    uint8_t gap_level = (f.pending_space || f.pre_gap) ? text_level(d, f.space_node, f.space_offset) : 0;
+    int recorded_gap = f.pending_space ? gap : f.pre_gap; // preserved spaces are already in pen
+    f.pre_gap = 0;
+    if (wrap && f.pen && int64_t(f.pen) + gap + total > f.width) {
+        co_await finish_line_work(d, f);
+        gap = recorded_gap = 0;
+    }
+    // Cursive context with the previous fragment when nothing separates them
+    // (e.g. <b>مر</b>حبا): both sides are re-measured with their neighbour.
+    uint32_t context0 = 0;
+    if (!f.pending_space && !recorded_gap && d.fragment_count > uint32_t(f.line_first) && parts[0].complex) {
+        Fragment &prev = d.fragments[d.fragment_count - 1];
+        if (prev.flow_node == f.node && prev.length && prev.node != id && (prev.flags & FragmentComplex) &&
+            int64_t(prev.x) + prev.width == int64_t(f.x) + f.pen) {
+            const char *pt = d.str(prev.text);
+            uint32_t mine = first_scalar(text + parts[0].a, parts[0].b - parts[0].a);
+            bool ok = false;
+            int pw = shaped_width(pt, prev.length, d.styles[prev.node], prev.level, prev.context_before, mine, ok,
+                                  (prev.flags & FragmentOverride) != 0);
+            if (ok) {
+                f.pen = clamp64(int64_t(f.pen) + pw - prev.width);
+                prev.width = pw;
+                prev.context_after = mine;
+                context0 = last_scalar(pt, prev.length);
+                uint32_t after0 = np > 1 ? first_scalar(text + parts[1].a, parts[1].b - parts[1].a) : 0;
+                parts[0].width = measure(parts[0], context0, after0);
+            }
+        }
+    }
+    f.pending_space = false;
+    f.pen = clamp64(int64_t(f.pen) + gap);
+    auto place = [&](const Part &q, size_t a, size_t b, int width, uint32_t before, uint32_t after, bool first) {
+        if (d.fragment_count == MaxFragments) {
+            d.truncated = true;
+            return false;
+        }
+        emit(d, f, id, offset + uint32_t(a), uint32_t(b - a), width, m);
+        Fragment &g = d.fragments[d.fragment_count - 1];
+        g.level = q.level;
+        g.paragraph_level = q.para;
+        g.flags = uint8_t((q.complex ? FragmentComplex : 0) | (q.forced ? FragmentOverride : 0));
+        g.gap = first ? recorded_gap : 0;
+        g.gap_level = first ? gap_level : 0;
+        g.context_before = before;
+        g.context_after = after;
+        return true;
+    };
+    for (unsigned k = 0; k < np; ++k) {
+        co_await WorkPoint{1};
+        Part &q = parts[k];
+        uint32_t before = k ? last_scalar(text + parts[k - 1].a, parts[k - 1].b - parts[k - 1].a) : context0;
+        uint32_t after = k + 1 < np ? first_scalar(text + parts[k + 1].a, parts[k + 1].b - parts[k + 1].a) : 0;
+        // A word wider than the line breaks only between level parts...
+        if (wrap && k && f.pen && int64_t(f.pen) + q.width > f.width)
+            co_await finish_line_work(d, f);
+        if (!wrap || q.width <= f.width || BSF::next_cluster(text, q.a, q.b) >= q.b) {
+            if (!place(q, q.a, q.b, q.width, before, after, k == 0))
+                co_return;
+            continue;
+        }
+        // ...unless one part alone is wider than the line: emergency breaks
+        // at grapheme boundaries (as the per-cluster path), each chunk
+        // shaped with its neighbours as joining context.
+        size_t c0 = q.a;
+        bool first = k == 0;
+        while (c0 < q.b) {
+            co_await WorkPoint{1};
+            size_t c1 = c0;
+            int approx = 0;
+            while (c1 < q.b) {
+                auto c = text_cluster(text, q.b, c1, m, s, c1 == start);
+                int w = cluster_width(text, c, m, s, c1 == start);
+                if (c1 > c0 && int64_t(f.pen) + approx + w > f.width)
+                    break;
+                approx = clamp64(int64_t(approx) + w);
+                c1 = c.end;
+            }
+            if (c1 == c0)
+                c1 = BSF::next_cluster(text, c0, q.b);
+            uint32_t cb = c0 == q.a ? before : last_scalar(text + q.a, c0 - q.a);
+            uint32_t ca = c1 == q.b ? after : first_scalar(text + c1, q.b - c1);
+            int w = approx;
+            if (q.complex) {
+                bool ok = false;
+                int shaped = shaped_width(text + c0, c1 - c0, s, q.level, cb, ca, ok, q.forced);
+                if (ok)
+                    w = shaped;
+            }
+            if (!place(q, c0, c1, w, cb, ca, first))
+                co_return;
+            first = false;
+            c0 = c1;
+            if (c0 < q.b)
+                co_await finish_line_work(d, f);
+        }
+    }
+}
+#endif
 inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset, uint32_t size, Metrics m) {
     const Style &s = d.styles[id];
     const char *text = d.str(offset);
@@ -172,21 +595,54 @@ inline Work layout_text_work(Document &d, Flow &f, uint16_t id, uint32_t offset,
                     w *= 4;
                 if (wrap && f.pen && int64_t(f.pen) + w > f.width)
                     co_await finish_line_work(d, f);
+                if (!f.pre_gap) {
+                    f.space_node = id;
+                    f.space_offset = uint32_t(p);
+                }
+                if (f.pen)
+                    f.pre_gap = clamp64(int64_t(f.pre_gap) + w);
                 f.pen = clamp64(int64_t(f.pen) + w);
                 if (s.line > f.line_height)
                     f.line_height = s.line;
-            } else
+            } else {
+                if (f.pen > 0 && !f.pending_space) {
+                    f.space_node = id;
+                    f.space_offset = uint32_t(p);
+                }
                 f.pending_space = f.pen > 0;
+            }
             ++p;
             continue;
         }
         size_t start = p;
         int width = 0;
+#if HUSARZ_BIDI
+        if (m.family_advance && d.has_bidi) {
+            // Bidi document: find the word first; words that take the shaped
+            // path are not measured cluster by cluster here.
+            size_t q = p;
+            while (q < size && !text_space(text, size, q)) {
+                co_await WorkPoint{1};
+                q = BSF::next_cluster(text, q, size);
+            }
+            p = q;
+            co_await layout_word_bidi_work(d, f, id, offset, start, p, m, wrap, -1);
+            continue;
+        }
+#endif
+        // Plain LTR fast path (unchanged BSF 2.0 measurement).
         while (p < size && !text_space(text,size,p)) {
             co_await WorkPoint{1};
             auto c=text_cluster(text,size,p,m,s,p==start);
             width=clamp64(int64_t(width)+cluster_width(text,c,m,s,p==start));p=c.end;
         }
+#if HUSARZ_BIDI
+        // LTR document, complex word (marks, joining letters without RTL).
+        if (m.family_advance && BSF::needs_complex_layout(text + start, p - start)) {
+            co_await layout_word_bidi_work(d, f, id, offset, start, p, m, wrap, width);
+            continue;
+        }
+#endif
         int gap = f.pending_space ? advance(m, ' ', s) : 0;
         if (wrap && f.pen && int64_t(f.pen) + gap + width > f.width) {
             co_await finish_line_work(d, f);
@@ -1018,6 +1474,13 @@ inline Work reflow_work(Document &d, int width, Metrics metrics) {
         d.table_plan_revision = d.revision;
     }
     co_await plan_margins_work(d, width);
+    // BSF 2.1: bidi levels depend on DOM text and styles only, not on the
+    // width, so a resize reflow reuses them.
+    if (d.bidi_revision != d.revision || d.bidi_style_generation != d.style_generation) {
+        co_await resolve_bidi_work(d);
+        d.bidi_revision = d.revision;
+        d.bidi_style_generation = d.style_generation;
+    }
     d.fragment_count = 0;
     d.offset_x[0] = d.offset_y[0] = 0;
     for (unsigned i = 0; i < d.node_count; ++i) {

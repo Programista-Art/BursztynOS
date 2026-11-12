@@ -187,6 +187,13 @@ bool needs_complex_layout(const char *text, size_t bytes) {
       ++at;
       continue;
     }
+    // BSF 2.1 fast path: well-formed U+0080..U+02FF (Latin-1, Latin
+    // Extended, IPA, spacing modifiers — e.g. Polish letters) has no RTL,
+    // AN, explicit-control, joining or mark scalar, so skip the lookups.
+    if (c >= 0xC2 && c <= 0xCB && at + 1 < bytes && (uint8_t(text[at + 1]) & 0xC0) == 0x80) {
+      at += 2;
+      continue;
+    }
     if (!tables) {
       if (!unicode_layout_blob())
         return false; // no tables: legacy LTR path stays authoritative

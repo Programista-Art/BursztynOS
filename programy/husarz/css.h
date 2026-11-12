@@ -2,6 +2,9 @@
 #include "css_colors.h"
 #include "html.h"
 #include "user_agent.h"
+#if defined(BSF_NATIVE)
+#include "../../bsf/runtime.h"
+#endif
 namespace Husarz {
 // Bounded lexical scans share quote/comment/bracket handling. No regex engine.
 class CssTokenizer {
@@ -1407,6 +1410,8 @@ enum Property {
     PFlexBasis,
     PRowGap,
     PColumnGap,
+    PDirection,
+    PUnicodeBidi,
     PCount
 };
 struct Winner {
@@ -1493,7 +1498,9 @@ inline int property(const char *name) {
                                             "flex-shrink",
                                             "flex-basis",
                                             "row-gap",
-                                            "column-gap"};
+                                            "column-gap",
+                                            "direction",
+                                            "unicode-bidi"};
     for (int i = 0; i < PCount; ++i)
         if (equal(name, names[i]))
             return i;
@@ -1617,6 +1624,10 @@ inline bool valid_value(int p, Span v) {
         return value_is(v, "normal") || (css_length(v, l, false, true) && l.unit != Unit::Auto);
     case PWhite:
         return one_of(v, "normal|pre|pre-wrap|nowrap");
+    case PDirection:
+        return one_of(v, "ltr|rtl");
+    case PUnicodeBidi:
+        return one_of(v, "normal|embed|isolate|bidi-override|isolate-override|plaintext");
     case POverflowX:
     case POverflowY:
         return one_of(v, "visible|hidden|auto|scroll");
@@ -1896,6 +1907,95 @@ inline void offer_declaration(Document &d, Winner *winners, const Declaration &d
         }
     }
 }
+// ---- BSF 2.1: HTML directionality (HTML Living Standard "The dir
+// attribute", Rendering "Bidirectional text") mapped to the presentational
+// CSS level, so author direction/unicode-bidi declarations still win.
+//   [dir=ltr|rtl|auto] -> unicode-bidi: isolate, direction from the value;
+//   bdi -> isolate (auto direction unless dir says otherwise);
+//   bdo -> isolate-override; textarea/pre[dir=auto] -> plaintext.
+// dir=auto takes the first strong character of the element's text, skipping
+// bdi/script/style/textarea descendants and descendants with their own dir
+// (input/textarea use their value). The scan is bounded (MaxDirScan bytes,
+// MaxDirNodes nodes); with no strong character the direction is ltr.
+constexpr unsigned MaxDirScan = 4096, MaxDirNodes = 512;
+inline unsigned strong_direction(uint32_t cp) { // 0 none, 1 L, 2 R/AL
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    BSF::BidiClass c = BSF::bidi_class(cp);
+    return c == BSF::BidiClass::L ? 1 : (c == BSF::BidiClass::R || c == BSF::BidiClass::AL) ? 2 : 0;
+#else
+    // Conservative fallback without the Unicode tables (non-native hosts).
+    if ((cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF) ||
+        (cp >= 0x10800 && cp <= 0x10FFF) || (cp >= 0x1E800 && cp <= 0x1EFFF))
+        return 2;
+    if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || (cp >= 0xC0 && cp <= 0x24F && cp != 0xD7 && cp != 0xF7) ||
+        (cp >= 0x370 && cp <= 0x58F) || (cp >= 0x1E00 && cp <= 0x1FFF) || (cp >= 0x3040 && cp <= 0x9FFF))
+        return 1;
+    return 0;
+#endif
+}
+inline unsigned first_strong(const char *text, size_t size, unsigned &budget) {
+    for (size_t p = 0; p < size && budget;) {
+        size_t used;
+        uint32_t cp = utf8(text + p, size - p, used);
+        p += used ? used : 1;
+        --budget;
+        if (unsigned k = strong_direction(cp))
+            return k;
+    }
+    return 0;
+}
+inline bool dir_value(const Document &d, uint16_t id, const char *value) {
+    return equal_ci(d.attr(id, "dir"), length(d.attr(id, "dir"), 16), value);
+}
+inline uint8_t auto_direction(const Document &d, uint16_t id) {
+    unsigned budget = MaxDirScan;
+    if (d.tag(id, "input")) { // the value at style time; see docs/bsf2-1-husarz.md
+        const char *v = d.attr(id, "value");
+        return first_strong(v, length(v, MaxAttrLength), budget) == 2;
+    }
+    // Pre-order walk of the subtree with explicit sibling/parent links.
+    unsigned nodes = 0;
+    for (uint16_t n = d.nodes[id].first; n && nodes < MaxDirNodes && budget;) {
+        ++nodes;
+        const Node &node = d.nodes[n];
+        bool skip = !node.is_text && (d.tag(n, "bdi") || d.tag(n, "script") || d.tag(n, "style") ||
+                                      d.tag(n, "textarea") || d.has_attr(n, "dir"));
+        if (node.is_text) {
+            if (unsigned k = first_strong(d.str(node.text), node.text_length, budget))
+                return k == 2;
+        }
+        if (!node.is_text && !skip && node.first) {
+            n = node.first;
+            continue;
+        }
+        while (n && n != id && !d.nodes[n].next)
+            n = d.nodes[n].parent;
+        if (!n || n == id)
+            break;
+        n = d.nodes[n].next;
+    }
+    return 0;
+}
+inline void html_direction(const Document &d, uint16_t id, Style &s) {
+    if (!id || d.nodes[id].is_text)
+        return;
+    bool has_dir = d.has_attr(id, "dir");
+    bool ltr = has_dir && dir_value(d, id, "ltr"), rtl = has_dir && dir_value(d, id, "rtl"),
+         automatic = has_dir && dir_value(d, id, "auto");
+    bool bdi = d.tag(id, "bdi"), bdo = d.tag(id, "bdo");
+    if (ltr || rtl)
+        s.direction = rtl ? 1 : 0;
+    else if (automatic || (bdi && !has_dir))
+        s.direction = auto_direction(d, id);
+    if (ltr || rtl || automatic || bdi)
+        s.unicode_bidi = UnicodeBidi::Isolate;
+    if (automatic && (d.tag(id, "textarea") || d.tag(id, "pre")))
+        s.unicode_bidi = UnicodeBidi::Plaintext;
+    if (bdo)
+        s.unicode_bidi = UnicodeBidi::IsolateOverride;
+    if (d.tag(id, "html") || d.tag(id, "body"))
+        s.unicode_bidi = s.unicode_bidi == UnicodeBidi::Isolate ? UnicodeBidi::Normal : s.unicode_bidi;
+}
 inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     Style s;
     s.font = parent.font;
@@ -1909,6 +2009,7 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     s.underline = parent.underline;
     s.white = parent.white;
     s.align = parent.align;
+    s.direction = parent.direction;
     s.visible = parent.visible;
     s.letter_spacing = parent.letter_spacing;
     s.word_spacing = parent.word_spacing;
@@ -1918,6 +2019,7 @@ inline Style defaults(const Document &d, uint16_t id, const Style &parent) {
     s.border_collapse = parent.border_collapse;
     if (d.tag(id, "ol"))
         s.list_type = ListType::Decimal;
+    html_direction(d, id, s);
     const char *t = d.str(d.nodes[id].tag);
     if (!id || d.tag(id, "html") || d.tag(id, "body") || block_tag(t) || d.tag(id, "form") ||
         d.tag(id, "hr") || d.tag(id, "thead") || d.tag(id, "tbody") || d.tag(id, "tfoot") || d.tag(id, "li"))
@@ -2153,6 +2255,12 @@ inline void copy_property(Style &s, const Style &from, int p) {
     case PWhite:
         s.white = from.white;
         break;
+    case PDirection:
+        s.direction = from.direction;
+        break;
+    case PUnicodeBidi:
+        s.unicode_bidi = from.unicode_bidi;
+        break;
     case POverflowX:
         s.overflow_x = from.overflow_x;
         break;
@@ -2224,7 +2332,7 @@ inline void copy_property(Style &s, const Style &from, int p) {
 }
 inline bool inherited_property(int p) {
     return p == PColor || p == PVisibility || (p >= PFamily && p <= PWhite) || p == PLetter || p == PWord ||
-           p == PTransform || p == PList || p == PBorderSpacing || p == PCollapse;
+           p == PTransform || p == PList || p == PBorderSpacing || p == PCollapse || p == PDirection;
 }
 inline void apply_property(Style &s, const Style &parent, int p, Span v, int root, uint32_t offset,
                            int viewport_width = 800, int viewport_height = 600) {
@@ -2453,12 +2561,30 @@ inline void apply_property(Style &s, const Style &parent, int p, Span v, int roo
             s.italic = false;
         break;
     case PAlign:
-        if (value_is(v, "left") || value_is(v, "start"))
+        if (value_is(v, "left"))
             s.align = Align::Left;
+        else if (value_is(v, "start"))
+            s.align = Align::Start;
         else if (value_is(v, "center"))
             s.align = Align::Center;
-        else if (value_is(v, "right") || value_is(v, "end"))
+        else if (value_is(v, "right"))
             s.align = Align::Right;
+        else if (value_is(v, "end"))
+            s.align = Align::End;
+        break;
+    case PDirection:
+        if (value_is(v, "ltr"))
+            s.direction = 0;
+        else if (value_is(v, "rtl"))
+            s.direction = 1;
+        break;
+    case PUnicodeBidi:
+        s.unicode_bidi = value_is(v, "embed")              ? UnicodeBidi::Embed
+                         : value_is(v, "isolate")          ? UnicodeBidi::Isolate
+                         : value_is(v, "bidi-override")    ? UnicodeBidi::BidiOverride
+                         : value_is(v, "isolate-override") ? UnicodeBidi::IsolateOverride
+                         : value_is(v, "plaintext")        ? UnicodeBidi::Plaintext
+                                                           : UnicodeBidi::Normal;
         break;
     case PDecoration:
         if (value_is(v, "none"))
@@ -2867,6 +2993,7 @@ inline Work compute_styles_work(Document &d, bool indexed = true) {
         d.limit(LimitSelectorWork);
     co_await compute_generated_work(d);
     d.styles_dirty = false;
+    ++d.style_generation;
     d.style_revision = d.revision;
 }
 inline Work compute_generated_work(Document &d) {

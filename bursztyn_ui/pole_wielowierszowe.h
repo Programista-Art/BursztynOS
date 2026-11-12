@@ -78,6 +78,63 @@ public:
     void ustaw_tylko_do_odczytu(bool ro) { Kontrolka::ustaw_tylko_do_odczytu(ro); }
     bool czy_tylko_do_odczytu() const { return Kontrolka::czy_tylko_do_odczytu(); }
 
+    // BSF 2.1: base direction of every paragraph of this control.
+    // Automatyczny detects it once per logical paragraph (UAX #9 P2/P3);
+    // OdLewej/OdPrawej override detection. Alignment follows the paragraph
+    // direction (LTR left, RTL right) within the text view width.
+    void ustaw_kierunek_tekstu(KierunekTekstu k) {
+        if (kierunek_ == k) return;
+        kierunek_ = k;
+        przelicz_linie(); aktualizuj_przewijanie(); przewin_do_kursora(); uniewaznij();
+    }
+    KierunekTekstu kierunek_tekstu() const { return kierunek_; }
+    // Paragraph embedding level of the visual line holding the caret (0 LTR, 1 RTL).
+    uint8_t poziom_akapitu_kursora() const { return liczba_wizualnych_ ? linie_[linia_dla_bajtu(kursor_)].poziom : 0; }
+    size_t linia_wizualna_kursora() const { return linia_dla_bajtu(kursor_); }
+    bool afinicja_kursora_wstecz() const { return afinicja_wstecz_; }
+    // Diagnostics for tests: caret x in view coordinates, visual line ranges.
+    int x_kursora() const { return x_w_linii(linia_dla_bajtu(kursor_), kursor_); }
+    size_t poczatek_linii_wizualnej(size_t li) const { return li < liczba_wizualnych_ ? linie_[li].start : dlugosc_; }
+    size_t koniec_linii_wizualnej(size_t li) const { return li < liczba_wizualnych_ ? linie_[li].koniec : dlugosc_; }
+    uint8_t poziom_linii(size_t li) const { return li < liczba_wizualnych_ ? linie_[li].poziom : 0; }
+    int przesuniecie_linii(size_t li) const { return li < liczba_wizualnych_ ? linie_[li].przesuniecie : 0; }
+    bool linia_zlozona(size_t li) const { return li < liczba_wizualnych_ && linie_[li].zlozona; }
+    int wysokosc_jednej_linii() const { return wysokosc_linii(); }
+    // Visual selection rectangles of line li in view x (without scrolling):
+    // a mixed-direction selection yields several disjoint spans.
+    size_t spany_zaznaczenia(size_t li, int* x0, int* x1, size_t pojemnosc) const {
+        if (li >= liczba_wizualnych_ || !czy_ma_zaznaczenie()) return 0;
+        const Linia& ln = linie_[li];
+        size_t a = poczatek_zaznaczenia() > ln.start ? poczatek_zaznaczenia() : ln.start;
+        size_t b = koniec_zaznaczenia() < ln.koniec ? koniec_zaznaczenia() : ln.koniec;
+        if (a >= b) return 0;
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if (const auto* L = uklad_linii(li)) {
+            BSF::TextLayout::Span spans[128];
+            size_t ns = L->selection(a - ln.akapit, b - ln.akapit, spans, 128), out = 0;
+            for (size_t k = 0; k < ns && out < pojemnosc; ++k) {
+                if (spans[k].line != ln.linia_ukladu) continue;
+                x0[out] = ln.przesuniecie + int(spans[k].x0 / BSF::Fixed);
+                x1[out] = ln.przesuniecie + int((spans[k].x1 + BSF::Fixed - 1) / BSF::Fixed);
+                ++out;
+            }
+            return out;
+        }
+#endif
+        if (!pojemnosc) return 0;
+        x0[0] = ln.przesuniecie + szerokosc_fragmentu(ln.start, a);
+        x1[0] = ln.przesuniecie + szerokosc_fragmentu(ln.start, b);
+        return 1;
+    }
+    struct StatystykiUkladu { uint64_t trafienia{}, chybienia{}; };
+    StatystykiUkladu statystyki_ukladu() const {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        return {trafienia_ukladu_, chybienia_ukladu_};
+#else
+        return {};
+#endif
+    }
+
     void ustaw_zawijanie_wierszy(bool zawijaj) {
         if (zawijanie_ == zawijaj) return;
         zawijanie_ = zawijaj;
@@ -172,6 +229,7 @@ public:
         if (koniec > dlugosc_) koniec = dlugosc_;
         kotwica_ = granica_utf8(poczatek);
         kursor_ = granica_utf8(koniec);
+        afinicja_wstecz_ = false;
         przewin_do_kursora();
         uniewaznij_obszar(geometria().widok);
     }
@@ -274,9 +332,12 @@ public:
         }
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
 
-        size_t p = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y);
+        bool wstecz = false;
+        size_t p = bajt_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y, &wstecz);
         if (!e.czy_shift()) kotwica_ = p;
         kursor_ = p;
+        afinicja_wstecz_ = wstecz;
+        preferowane_x_ = x_w_linii(linia_dla_bajtu(kursor_), kursor_);
         zaznaczanie_ = true;
         przewin_do_kursora();
         uniewaznij_obszar(geometria().widok);
@@ -303,9 +364,11 @@ public:
                 }
             }
 
-            size_t p = bajt_z_punktu(local_x, local_y);
-            if (p != kursor_) {
+            bool wstecz = false;
+            size_t p = bajt_z_punktu(local_x, local_y, &wstecz);
+            if (p != kursor_ || wstecz != afinicja_wstecz_) {
                 kursor_ = p;
+                afinicja_wstecz_ = wstecz;
                 przewin_do_kursora();
                 uniewaznij_obszar(g.widok);
             }
@@ -373,35 +436,37 @@ public:
         if (k == 8) { if (!czy_tylko_do_odczytu_) usun_wstecz(); e.obsluzone = true; return; }
         if (k == 0x53U) { if (!czy_tylko_do_odczytu_) usun_w_przod(); e.obsluzone = true; return; }
         size_t stary = kursor_;
-        bool ruch = true;
+        bool ruch = true, pionowo = false, wstecz = false;
+        // Paragraph direction of the caret line decides which logical side
+        // Left/Right and Ctrl+Left/Right mean (RTL: Left goes forward).
+        bool rtl = (linie_[linia_dla_bajtu(kursor_)].poziom & 1) != 0;
         if (ctrl && (k == 0x47U)) kursor_ = 0;
         else if (ctrl && (k == 0x4FU)) kursor_ = dlugosc_;
-        else if (k == 0x4BU) {
+        else if (k == 0x4BU || k == 0x4DU) {
+            int dir = k == 0x4DU ? 1 : -1;
+            bool naprzod = (dir > 0) != rtl;
             if (!shift && czy_ma_zaznaczenie()) {
-                kursor_ = poczatek_zaznaczenia();
-            } else if (!ctrl && ruch_wizualny(-1)) {
+                kursor_ = naprzod ? koniec_zaznaczenia() : poczatek_zaznaczenia();
+            } else if (ctrl) {
+                kursor_ = naprzod ? nastepny_bajt(kursor_, true) : poprzedni_bajt(kursor_, true);
+            } else if (ruch_wizualny(dir, wstecz)) {
             } else {
-                kursor_ = poprzedni_bajt(kursor_, ctrl);
+                kursor_ = naprzod ? nastepny_bajt(kursor_, false) : poprzedni_bajt(kursor_, false);
             }
         }
-        else if (k == 0x4DU) {
-            if (!shift && czy_ma_zaznaczenie()) {
-                kursor_ = koniec_zaznaczenia();
-            } else if (!ctrl && ruch_wizualny(1)) {
-            } else {
-                kursor_ = nastepny_bajt(kursor_, ctrl);
-            }
-        }
-        else if (k == 0x48U) przesun_pionowo(-1);
-        else if (k == 0x50U) przesun_pionowo(1);
-        else if (k == 0x49U) przesun_pionowo(-liczba_widocznych_linii());
-        else if (k == 0x51U) przesun_pionowo(liczba_widocznych_linii());
+        else if (k == 0x48U) { przesun_pionowo(-1, wstecz); pionowo = true; }
+        else if (k == 0x50U) { przesun_pionowo(1, wstecz); pionowo = true; }
+        else if (k == 0x49U) { przesun_pionowo(-liczba_widocznych_linii(), wstecz); pionowo = true; }
+        else if (k == 0x51U) { przesun_pionowo(liczba_widocznych_linii(), wstecz); pionowo = true; }
+        // Home/End: logical start/end of the caret's visual line (shown at the
+        // right edge for RTL lines); End keeps the caret on that line.
         else if (k == 0x47U) kursor_ = linie_[linia_dla_bajtu(kursor_)].start;
-        else if (k == 0x4FU) kursor_ = linie_[linia_dla_bajtu(kursor_)].koniec;
+        else if (k == 0x4FU) { size_t li = linia_dla_bajtu(kursor_); kursor_ = linie_[li].koniec; wstecz = miekka_granica(li); }
         else ruch = false;
         if (ruch) {
+            afinicja_wstecz_ = wstecz && miekka_granica_bajtu(kursor_);
             if (!shift) kotwica_ = kursor_;
-            preferowane_x_ = x_w_linii(linia_dla_bajtu(kursor_), kursor_);
+            if (!pionowo) preferowane_x_ = x_w_linii(linia_dla_bajtu(kursor_), kursor_);
             przewin_do_kursora();
             uniewaznij_zaznaczenie(stary, kursor_);
             e.obsluzone = true; return;
@@ -412,7 +477,12 @@ public:
 private:
     // zlozona: the visual line needs BSF 2.0 layout (bidi/shaping); computed
     // once per rebuild so caret keys never rescan long lines.
-    struct Linia { size_t start{0}, koniec{0}, logiczna{0}; int szerokosc{0}; bool zlozona{false}; };
+    // A visual line. zlozona: drawn/edited through the paragraph layout
+    // (bidi/shaping); akapit/akapit_dl: its logical paragraph; linia_ukladu:
+    // the line index inside that paragraph's layout; poziom: paragraph
+    // embedding level (resolved once per paragraph); przesuniecie: alignment.
+    struct Linia { size_t start{0}, koniec{0}, logiczna{0}; int szerokosc{0}; bool zlozona{false};
+                   size_t akapit{0}, akapit_dl{0}; uint32_t linia_ukladu{0}; uint8_t poziom{0}; int przesuniecie{0}; };
     struct Geometria {
         Prostokat zewnetrzny;
         Prostokat wewnatrz_ramki;
@@ -533,6 +603,7 @@ private:
         liczba_wizualnych_ = 0; liczba_logicznych_ = 1; maks_szerokosc_ = 0;
         size_t start = 0, logiczna = 0;
         if (limit < 1) limit = 1;
+        limit_ukladu_ = limit;
         while (start <= dlugosc_ && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
             size_t koniec_log = start;
             while (koniec_log < dlugosc_ && bufor_[koniec_log] != '\n') ++koniec_log;
@@ -541,15 +612,19 @@ private:
             size_t p = start;
             if (p == koniec_log) dodaj_linie(p, p, logiczna, 0);
 #if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
-            // BSF 2.0: bidi/shaped paragraphs wrap using the same shaped
-            // advances that draw them (isolated-form metrics would differ).
-            if (p < koniec_log && BSF::ready() && BSF::needs_complex_layout(bufor_+start,koniec_log-start)) {
-                const auto* L=BSF::layout_text(bufor_+start,koniec_log-start,piksele_bsf(),false,nullptr,false,
-                    zawijanie_?int64_t(limit)*BSF::Fixed:0);
+            // BSF 2.1: one layout per logical paragraph. UAX #9 resolves the
+            // paragraph direction once, wraps with the shaped advances that
+            // draw it, then applies L1/L2 per visual line. Explicit direction
+            // overrides detection (an explicit RTL paragraph of plain ASCII
+            // also needs the bidi layout for punctuation and alignment).
+            if (p < koniec_log && BSF::ready() &&
+                (kierunek_ == KierunekTekstu::OdPrawej || BSF::needs_complex_layout(bufor_+start,koniec_log-start))) {
+                const auto* L=uklad_akapitu(start,koniec_log-start);
                 if (L) {
                     for(size_t k=0;k<L->line_count()&&liczba_wizualnych_<MAKS_LINII_WIZUALNYCH;++k){
                         const auto& vl=L->lines()[k];
-                        dodaj_linie(start+vl.byte_begin,start+vl.byte_end,logiczna,int((vl.width+BSF::Fixed/2)/BSF::Fixed));
+                        dodaj_linie(start+vl.byte_begin,start+vl.byte_end,logiczna,int((vl.width+BSF::Fixed/2)/BSF::Fixed),
+                                    true,start,koniec_log-start,uint32_t(k),vl.paragraph_level);
                     }
                     p = koniec_log;
                 }
@@ -583,43 +658,90 @@ private:
             start=nastepna_log+1; ++logiczna; ++liczba_logicznych_;
         }
         if (liczba_wizualnych_==0) dodaj_linie(0,0,0,0);
+        // Direction-aware alignment within the text view (wrapping) or the
+        // widest line (horizontal scrolling); LTR lines stay at x = 0.
+        int dostepna = zawijanie_ ? limit : (maks_szerokosc_ > limit ? maks_szerokosc_ : limit);
+        for (size_t i = 0; i < liczba_wizualnych_; ++i) {
+            Linia& ln = linie_[i];
+            ln.przesuniecie = (ln.poziom & 1) && dostepna > ln.szerokosc ? dostepna - ln.szerokosc : 0;
+        }
     }
-    void dodaj_linie(size_t a,size_t b,size_t log,int szer) {
+    void dodaj_linie(size_t a,size_t b,size_t log,int szer,bool zlozona=false,size_t akapit=0,size_t akapit_dl=0,uint32_t linia_ukladu=0,uint8_t poziom=0) {
         if (liczba_wizualnych_>=MAKS_LINII_WIZUALNYCH) return;
-        bool zlozona=false;
-#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
-        zlozona=b>a&&BSF::needs_complex_layout(bufor_+a,b-a);
-#endif
-        linie_[liczba_wizualnych_++]={a,b,log,szer,zlozona}; if(szer>maks_szerokosc_) maks_szerokosc_=szer;
+        Linia ln; ln.start=a; ln.koniec=b; ln.logiczna=log; ln.szerokosc=szer; ln.zlozona=zlozona;
+        ln.akapit=akapit; ln.akapit_dl=akapit_dl; ln.linia_ukladu=linia_ukladu; ln.poziom=poziom;
+        linie_[liczba_wizualnych_++]=ln; if(szer>maks_szerokosc_) maks_szerokosc_=szer;
     }
+    // A soft-wrap boundary: line li ends exactly where line li+1 starts.
+    bool miekka_granica(size_t li) const {
+        return li + 1 < liczba_wizualnych_ && linie_[li].koniec == linie_[li + 1].start && linie_[li].koniec > linie_[li].start;
+    }
+    bool miekka_granica_bajtu(size_t b) const {
+        for (size_t i = 0; i + 1 < liczba_wizualnych_; ++i) if (linie_[i].koniec == b) return miekka_granica(i);
+        return false;
+    }
+    // Caret line with affinity: a byte at a soft-wrap boundary belongs to the
+    // following line (downstream) unless the caret was placed at the end of
+    // the previous line (End, click past the line end, vertical move).
     size_t linia_dla_bajtu(size_t b) const {
-        for(size_t i=0;i<liczba_wizualnych_;++i) if(b>=linie_[i].start && b<=linie_[i].koniec) return i;
+        for(size_t i=0;i<liczba_wizualnych_;++i) if(b>=linie_[i].start && b<=linie_[i].koniec) {
+            if (b == linie_[i].koniec && miekka_granica(i) && !(b == kursor_ && afinicja_wstecz_)) return i + 1;
+            return i;
+        }
         return liczba_wizualnych_?liczba_wizualnych_-1:0;
     }
 #if defined(BSF_NATIVE)
     int piksele_bsf() const { return ui_skaluj(BSF::ui_size(),skala_dpi_.procent()); }
-    // Shared layout of one visual line when it needs bidi/shaping, else null.
+#if BSF_COMPLEX_TEXT
+    // Owned, bounded cache of paragraph layouts (LRU). Keyed by content, so
+    // an edit only rebuilds the edited paragraph; font configuration and
+    // catalog changes invalidate through BSF::generation().
+    const BSF::TextLayout* uklad_akapitu(size_t a,size_t n) const {
+        if(!n||n>BSF::MaxLayoutBytes||a+n>dlugosc_)return nullptr;
+        uint64_t h=UINT64_C(1469598103934665603);
+        for(size_t i=0;i<n;++i)h=(h^uint8_t(bufor_[a+i]))*UINT64_C(1099511628211);
+        int px=piksele_bsf();int64_t szer=zawijanie_?int64_t(limit_ukladu_)*BSF::Fixed:0;uint32_t gen=BSF::generation();
+        for(auto& u:uklady_){
+            if(!u.wazny||u.skrot!=h||u.dlugosc!=n||u.px!=px||u.szerokosc!=szer||u.kierunek!=uint8_t(kierunek_)||u.generacja!=gen)continue;
+            const char* own=u.uklad.text();bool rowne=true;for(size_t i=0;i<n&&rowne;++i)rowne=own[i]==bufor_[a+i];
+            if(!rowne)continue;
+            u.uzycie=++zegar_ukladu_;++trafienia_ukladu_;return &u.uklad;
+        }
+        ++chybienia_ukladu_;
+        UkladAkapitu* ofiara=&uklady_[0];
+        for(auto& u:uklady_)if(!u.wazny||(ofiara->wazny&&u.uzycie<ofiara->uzycie))ofiara=&u;
+        ofiara->wazny=false;
+        BSF::LayoutRequest r;r.px=px;r.max_width=szer;r.direction=CzcionkaUI::kierunek_bsf(kierunek_);
+        if(!BSF::build_layout(ofiara->uklad,bufor_+a,n,r))return nullptr;
+        ofiara->skrot=h;ofiara->dlugosc=n;ofiara->px=px;ofiara->szerokosc=szer;ofiara->kierunek=uint8_t(kierunek_);ofiara->generacja=gen;
+        ofiara->uzycie=++zegar_ukladu_;ofiara->wazny=true;return &ofiara->uklad;
+    }
+#endif
+    // Paragraph layout of a visual line when it is drawn through BSF 2.1,
+    // else null (legacy LTR path). Validated against the line's bytes.
     const BSF::TextLayout* uklad_linii(size_t li) const {
 #if !BSF_COMPLEX_TEXT
         (void)li;return nullptr;
 #else
         if(li>=liczba_wizualnych_||!linie_[li].zlozona||!BSF::ready())return nullptr;
-        size_t a=linie_[li].start,n=linie_[li].koniec-a;
-        if(!n)return nullptr;
-        return BSF::layout_text(bufor_+a,n,piksele_bsf());
+        const Linia& ln=linie_[li];
+        const auto* L=uklad_akapitu(ln.akapit,ln.akapit_dl);
+        if(!L||ln.linia_ukladu>=L->line_count())return nullptr;
+        const auto& vl=L->lines()[ln.linia_ukladu];
+        if(ln.akapit+vl.byte_begin!=ln.start||ln.akapit+vl.byte_end!=ln.koniec)return nullptr;
+        return L;
 #endif
     }
 #endif
     int x_w_linii(size_t li,size_t bajt) const {
         if(li>=liczba_wizualnych_) return 0;
         if(bajt<linie_[li].start) bajt=linie_[li].start;
+        if(bajt>linie_[li].koniec) bajt=linie_[li].koniec;
 #if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
-        if(const auto* L=uklad_linii(li)){
-            size_t off=bajt>linie_[li].koniec?linie_[li].koniec-linie_[li].start:bajt-linie_[li].start;
-            return int((L->caret_x(off)+BSF::Fixed/2)/BSF::Fixed);
-        }
+        if(const auto* L=uklad_linii(li))
+            return linie_[li].przesuniecie+int((L->caret_x_on(bajt-linie_[li].akapit,linie_[li].linia_ukladu)+BSF::Fixed/2)/BSF::Fixed);
 #endif
-        return szerokosc_fragmentu(linie_[li].start,bajt);
+        return linie_[li].przesuniecie+szerokosc_fragmentu(linie_[li].start,bajt);
     }
     int szerokosc_fragmentu(size_t a,size_t b) const {
 #if defined(BSF_NATIVE)
@@ -636,21 +758,34 @@ private:
 #endif
         int x=0; while(a<b && a<dlugosc_){uint32_t cp=0;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,a,&cp);if(!z)break;x+=CzcionkaUI::postep_znaku(cp,skala_dpi_);a+=z;} return x;
     }
-    size_t bajt_z_x(size_t li,int x) const {
+    // Hit test on visual line li at view x; *wstecz reports that the result
+    // is the end of li at a soft-wrap boundary (caret stays on li).
+    size_t bajt_z_x(size_t li,int x,bool* wstecz=nullptr) const {
+        if(wstecz)*wstecz=false;
         if(li>=liczba_wizualnych_) return dlugosc_;
+        size_t wynik=bajt_z_x_bez_afinicji(li,x-linie_[li].przesuniecie);
+        if(wstecz)*wstecz=wynik==linie_[li].koniec&&miekka_granica(li);
+        return wynik;
+    }
+    size_t bajt_z_x_bez_afinicji(size_t li,int x) const {
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        if(const auto* L=uklad_linii(li))
+            return linie_[li].akapit+L->hit_test(int64_t(x)*BSF::Fixed,linie_[li].linia_ukladu);
+#endif
 #if defined(BSF_NATIVE)
         if(BSF::ready())return linie_[li].start+BSF::hit_test(bufor_+linie_[li].start,x,ui_skaluj(BSF::ui_size(),skala_dpi_.procent()),false,nullptr,linie_[li].koniec-linie_[li].start);
 #endif
         size_t p=linie_[li].start; int px=0;
         while(p<linie_[li].koniec){uint32_t cp=0;size_t z=CzcionkaUI::dekoduj_utf8(bufor_,p,&cp);int k=CzcionkaUI::postep_znaku(cp,skala_dpi_);if(x<px+k/2)return p;px+=k;p+=z;}return linie_[li].koniec;
     }
-    size_t bajt_z_punktu(int x, int y) const {
+    size_t bajt_z_punktu(int x, int y, bool* wstecz = nullptr) const {
+        if (wstecz) *wstecz = false;
         if (dlugosc_ == 0 || liczba_wizualnych_ == 0) return 0;
         Geometria g = geometria();
         if (y < g.widok.y) {
             size_t li = static_cast<size_t>(pionowy_->wartosc());
             if (li >= liczba_wizualnych_) li = liczba_wizualnych_ - 1;
-            return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()));
+            return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()), wstecz);
         }
         int rel = (y - g.widok.y) / wysokosc_linii();
         if (rel < 0) rel = 0;
@@ -658,7 +793,7 @@ private:
         if (li >= liczba_wizualnych_) {
             return dlugosc_;
         }
-        return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()));
+        return bajt_z_x(li, x - g.widok.x + static_cast<int>(poziomy_->wartosc()), wstecz);
     }
     size_t granica_utf8(size_t b) const {
 #if defined(BSF_NATIVE)
@@ -676,51 +811,63 @@ private:
     }
     size_t poprzedni_bajt(size_t p,bool slowo) const { if(!p)return 0;p=poprzedni_klaster(p);if(slowo){while(p>0&&bufor_[p]==' ')p=poprzedni_klaster(p);while(p>0&&bufor_[poprzedni_klaster(p)]!=' '&&bufor_[poprzedni_klaster(p)]!='\n')p=poprzedni_klaster(p);}return p; }
     size_t nastepny_bajt(size_t p,bool slowo) const { if(p>=dlugosc_)return dlugosc_;p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);if(slowo){while(p<dlugosc_&&bufor_[p]!=' '&&bufor_[p]!='\n')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);while(p<dlugosc_&&bufor_[p]==' ')p=CzcionkaUI::nastepny_znak(bufor_,p,dlugosc_);}return p; }
-    // Left/Right on a bidi/shaped visual line move visually; false means the
-    // caret is at the visual edge, so the logical cross-line move applies.
-    bool ruch_wizualny(int dir){
+    // Left/Right on a line drawn through the paragraph layout move visually.
+    // At the visual edge the caret continues on the adjacent visual line in
+    // the reading order of the current paragraph (Right is forward in LTR,
+    // backward in RTL) and lands on the edge from which the same key keeps
+    // progressing (Right: leftmost caret, Left: rightmost). A backward
+    // crossing into a line of the opposite direction is refused: otherwise
+    // [LTR][RTL] paragraphs would form a cycle (LTR end -> RTL start -> LTR
+    // end ...). With this rule a held key moves monotonically through each
+    // run of same-direction lines and only enters a new run forward, so it
+    // always terminates and never revisits a position. false: legacy LTR
+    // line, logical move.
+    bool ruch_wizualny(int dir,bool& wstecz){
 #if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+        wstecz=false;
         size_t li=linia_dla_bajtu(kursor_);const auto* L=uklad_linii(li);if(!L)return false;
-        size_t a=linie_[li].start,n=linie_[li].koniec-a,off=kursor_-a;if(kursor_<a||off>n)return false;
-        size_t m=L->move_visual(off,dir);
-        if(m==off||m>n)return false;
-        // move_visual falls back to logical order at the visual edge; only a
-        // genuinely visual step is taken here.
-        int64_t x0=L->caret_x(off),x1=L->caret_x(m);
-        if(dir>0?x1<=x0:x1>=x0)return false;
-        kursor_=a+m;return true;
+        const Linia& ln=linie_[li];
+        bool moved=false;size_t m=L->move_visual_on(kursor_-ln.akapit,ln.linia_ukladu,dir,&moved);
+        if(moved){kursor_=ln.akapit+m;wstecz=kursor_==ln.koniec&&miekka_granica(li);return true;}
+        bool naprzod=(dir>0)!=((ln.poziom&1)!=0);
+        if(naprzod?li+1>=liczba_wizualnych_:li==0)return true; // document edge: stay
+        size_t nl=naprzod?li+1:li-1;
+        if(!naprzod&&((linie_[nl].poziom^ln.poziom)&1))return true;
+        if(const auto* N=uklad_linii(nl))kursor_=linie_[nl].akapit+N->line_edge(linie_[nl].linia_ukladu,-dir);
+        else kursor_=dir>0?linie_[nl].start:linie_[nl].koniec;
+        wstecz=kursor_==linie_[nl].koniec&&miekka_granica(nl);
+        return true;
 #else
-        (void)dir;return false;
+        (void)dir;wstecz=false;return false;
 #endif
     }
-    void przesun_pionowo(int delta){size_t li=linia_dla_bajtu(kursor_);int n=static_cast<int>(li)+delta;if(n<0)n=0;if(n>=static_cast<int>(liczba_wizualnych_))n=static_cast<int>(liczba_wizualnych_)-1;kursor_=bajt_z_x(static_cast<size_t>(n),preferowane_x_);}
+    void przesun_pionowo(int delta,bool& wstecz){size_t li=linia_dla_bajtu(kursor_);int n=static_cast<int>(li)+delta;if(n<0)n=0;if(n>=static_cast<int>(liczba_wizualnych_))n=static_cast<int>(liczba_wizualnych_)-1;kursor_=bajt_z_x(static_cast<size_t>(n),preferowane_x_,&wstecz);}
 
     void rysuj_linie(KontekstRysowania& ctx,size_t li,int y,const Geometria& g,const StylStanu& styl) {
         Linia ln=linie_[li]; int offx=static_cast<int>(poziomy_->wartosc());
-        size_t so=poczatek_zaznaczenia(), sd=koniec_zaznaczenia();
-        size_t a=so>ln.start?so:ln.start,b=sd<ln.koniec?sd:ln.koniec;
+        int x0=g.widok.x-offx;int h=CzcionkaUI::pobierz_wysokosc(skala_dpi_);
+        uint32_t kolor=czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY);
+        // Visual selection spans (several for mixed-direction selections).
+        int sx0[64],sx1[64];size_t ns=spany_zaznaczenia(li,sx0,sx1,64);
+        for(size_t k=0;k<ns;++k)ctx.rysuj_prostokat(Prostokat(x0+sx0[k],y,sx1[k]-sx0[k],h),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
 #if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
-        if(czy_ma_zaznaczenie()&&a<b)if(const auto* L=uklad_linii(li)){
-            // Mixed-direction selection is a set of visual spans.
-            BSF::TextLayout::Span spans[32];size_t ns=L->selection(a-ln.start,b-ln.start,spans,32);
-            int h=CzcionkaUI::pobierz_wysokosc(skala_dpi_);
-            for(size_t k=0;k<ns;++k){int x1=g.widok.x-offx+int(spans[k].x0/BSF::Fixed),x2=g.widok.x-offx+int((spans[k].x1+BSF::Fixed-1)/BSF::Fixed);
-                ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,h),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
-            size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
-            ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);
-            ns=L->selection(a-ln.start,b-ln.start,spans,32); // layout may be re-fetched by paint
-            for(size_t k=0;k<ns;++k){int x1=g.widok.x-offx+int(spans[k].x0/BSF::Fixed),x2=g.widok.x-offx+int((spans[k].x1+BSF::Fixed-1)/BSF::Fixed);
-                ctx.dodaj_przyciecie(Prostokat(x1,y,x2-x1,h));ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);ctx.zdejmij_przyciecie();}
+        if(const auto* L=uklad_linii(li)){
+            int px=piksele_bsf();
+            ctx.rysuj_linie_ukladu(Punkt(x0+ln.przesuniecie,y),*L,ln.linia_ukladu,kolor,px);
+            for(size_t k=0;k<ns;++k){
+                // The paint path may evict nothing here: the layout is owned.
+                ctx.dodaj_przyciecie(Prostokat(x0+sx0[k],y,sx1[k]-sx0[k],h));
+                ctx.rysuj_linie_ukladu(Punkt(x0+ln.przesuniecie,y),*L,ln.linia_ukladu,motyw_kolor_tekstu_zaznaczenia(),px);
+                ctx.zdejmij_przyciecie();
+            }
             return;
         }
 #endif
-        if(czy_ma_zaznaczenie()&&a<b){int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a);int x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);ctx.rysuj_prostokat(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)),motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));}
         size_t n=ln.koniec-ln.start;if(n>=pojemnosc_)n=pojemnosc_-1;for(size_t i=0;i<n;++i)roboczy_[i]=bufor_[ln.start+i];roboczy_[n]='\0';
-        ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,czy_wlaczona_?styl.tekst:motyw_kolor(MOTYW_KOLOR_WYLACZONY),skala_dpi_);
-        if(czy_ma_zaznaczenie()&&a<b){
-            int x1=g.widok.x-offx+szerokosc_fragmentu(ln.start,a),x2=g.widok.x-offx+szerokosc_fragmentu(ln.start,b);
-            ctx.dodaj_przyciecie(Prostokat(x1,y,x2-x1,CzcionkaUI::pobierz_wysokosc(skala_dpi_)));
-            ctx.rysuj_tekst(Punkt(g.widok.x-offx,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);ctx.zdejmij_przyciecie();
+        ctx.rysuj_tekst(Punkt(x0+ln.przesuniecie,y),roboczy_,kolor,skala_dpi_);
+        for(size_t k=0;k<ns;++k){
+            ctx.dodaj_przyciecie(Prostokat(x0+sx0[k],y,sx1[k]-sx0[k],h));
+            ctx.rysuj_tekst(Punkt(x0+ln.przesuniecie,y),roboczy_,motyw_kolor_tekstu_zaznaczenia(),skala_dpi_);ctx.zdejmij_przyciecie();
         }
     }
     void ustaw_tekst_bez_historii(const char* src){
@@ -780,6 +927,7 @@ private:
         dlugosc_ = dlugosc_ - usun + n;
         bufor_[dlugosc_] = '\0';
         kursor_ = kotwica_ = sel + n;
+        afinicja_wstecz_ = false;
 #if defined(BSF_NATIVE)
         kursor_=kotwica_=BSF::cluster_ceil(bufor_,dlugosc_,kursor_);
 #endif
@@ -797,6 +945,15 @@ private:
     void powiadom_zmiane(){if(cb_zmiana_)cb_zmiana_(this,bufor_,dane_zmiany_);if(cb_zmiana_wartosci_)cb_zmiana_wartosci_(this,dane_zmiany_wartosci_);}
     void uniewaznij_zaznaczenie(size_t,size_t){uniewaznij_obszar(geometria().widok);}
 
+    KierunekTekstu kierunek_{KierunekTekstu::Automatyczny};
+    bool afinicja_wstecz_{false};
+    int limit_ukladu_{1};
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    struct UkladAkapitu { BSF::TextLayout uklad; uint64_t skrot{},uzycie{}; size_t dlugosc{}; int px{}; int64_t szerokosc{}; uint8_t kierunek{}; uint32_t generacja{}; bool wazny{}; };
+    static constexpr unsigned SLOTY_UKLADU = 4;
+    mutable UkladAkapitu uklady_[SLOTY_UKLADU];
+    mutable uint64_t zegar_ukladu_{0},trafienia_ukladu_{0},chybienia_ukladu_{0};
+#endif
 #if defined(BSF_NATIVE)
     BSF::BoundaryIndex<> granice_;
     struct PunktPomiaru{size_t offset{size_t(-1)},line{};BSF::TextMetrics pen;};

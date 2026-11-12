@@ -18,6 +18,11 @@
 
 namespace BursztynUI {
 
+// BSF 2.1: per-control base text direction (never global app state).
+// Automatyczny resolves the paragraph direction from the first strong
+// character (UAX #9 P2/P3); the explicit values override detection.
+enum class KierunekTekstu : uint8_t { Automatyczny = 0, OdLewej = 1, OdPrawej = 2 };
+
 class CzcionkaUI {
 public:
 #if defined(BSF_NATIVE)
@@ -51,6 +56,18 @@ public:
             else {int w=(szerokosc_znaku(cp)*px+8)/16,h=px;if(w>128)w=128;if(h>128)h=128;auto* a=new uint8_t[size_t(w)*h];if(a){const auto* bits=bitmapa_znaku(cp);for(int yy=0;yy<h;++yy)for(int xx=0;xx<w;++xx)a[yy*w+xx]=(bits[yy*16/h]&(1u<<(15-xx*16/px)))?255:0;mask(x,y,w,h,a);delete[] a;}if(!mark)x+=(szerokosc_znaku(cp)+1)*px/16;}
             if(!mark){previous=cp;previous_face=id;}
         }return true;
+    }
+#endif
+#if defined(BSF_NATIVE) && BSF_COMPLEX_TEXT
+    static BSF::BaseDirection kierunek_bsf(KierunekTekstu k) {
+        return k == KierunekTekstu::OdLewej ? BSF::BaseDirection::LTR
+             : k == KierunekTekstu::OdPrawej ? BSF::BaseDirection::RTL
+                                              : BSF::BaseDirection::Auto;
+    }
+    template<class Mask>
+    static bool rysuj_uklad_bsf(const BSF::TextLayout& uklad,size_t linia,int x,int y,int px,Mask mask,bool bold=false,const char* family=nullptr) {
+        if(!BSF::ready(family)||px<1||px>128)return false;
+        return BSF::draw_layout_line(uklad,linia,x,y,px,bold,false,family,&bsf_mask_thunk<Mask>,&mask);
     }
 #endif
     static constexpr int WYSOKOSC = 16;

@@ -29,22 +29,34 @@ const Entry arabic_states[7][4] = {
     {{None, None, 0}, {None, Isol, 2}, {Isol, Isol, 1}, {Isol, Isol, 2}},
     {{None, None, 0}, {None, Isol, 2}, {None, Isol, 1}, {None, Isol, 2}},
 };
-void arabic_joining(OT::Buffer &b) {
+unsigned joining_column(Joining j) {
+  return j == Joining::L ? 1 : j == Joining::R ? 2
+         : (j == Joining::D || j == Joining::C) ? 3 : 0;
+}
+void arabic_joining(OT::Buffer &b, uint32_t before, uint32_t after) {
   unsigned prev = ~0u, state = 0;
+  // Pre-context only seeds the state (transparent context is ignored).
+  if (before && joining_type(before) != Joining::T)
+    state = arabic_states[0][joining_column(joining_type(before))].next;
   for (unsigned i = 0; i < b.len; ++i) {
     Joining j = joining_type(b.info[i].codepoint);
     if (j == Joining::T) {
       b.info[i].action = None;
       continue;
     }
-    unsigned col = j == Joining::L ? 1 : j == Joining::R ? 2
-                   : (j == Joining::D || j == Joining::C) ? 3 : 0;
+    unsigned col = joining_column(j);
     const Entry &e = arabic_states[state][col];
     if (e.prev != None && prev != ~0u)
       b.info[prev].action = e.prev;
     b.info[i].action = e.cur;
     prev = i;
     state = e.next;
+  }
+  // Post-context may only change the form of the last joining glyph.
+  if (after && joining_type(after) != Joining::T) {
+    const Entry &e = arabic_states[state][joining_column(joining_type(after))];
+    if (e.prev != None && prev != ~0u)
+      b.info[prev].action = e.prev;
   }
 }
 // Modified combining classes for mark reordering (Hebrew, Arabic, Thai,
@@ -299,7 +311,7 @@ bool shape(const Face &f, const OT::Layout &L, const uint32_t *cps,
   }
   ShapeClass klass = shape_class(o.script);
   if (klass == ShapeClass::Arabic) {
-    arabic_joining(b);
+    arabic_joining(b, o.context_before, o.context_after);
     for (unsigned i = 0; i < b.len; ++i)
       if (b.info[i].action)
         b.info[i].mask |= FormMask(b.info[i].action);

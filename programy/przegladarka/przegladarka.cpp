@@ -3060,7 +3060,7 @@ public:
                     Husarz::control_keep_caret(*d,*c,browser_metrics);przygotuj();e.obsluzone=true;return;
                 }
             }
-            if (c && (Husarz::control_vertical_key(*d,key,e.czy_shift(),browser_metrics) || Husarz::form_key(*d,key,e.czy_shift(),e.czy_ctrl(),&edited))) {
+            if (c && (Husarz::control_vertical_key(*d,key,e.czy_shift(),browser_metrics) || (!e.czy_ctrl() && Husarz::control_horizontal_key(*d,key,e.czy_shift(),browser_metrics)) || Husarz::form_key(*d,key,e.czy_shift(),e.czy_ctrl(),&edited))) {
                 if(edited)browser_script_event(*d,c->node,"input");
                 Husarz::control_keep_caret(*d,*c,browser_metrics);przygotuj(); e.obsluzone=true; return;
             }

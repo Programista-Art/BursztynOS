@@ -212,14 +212,16 @@ public:
     }
 
 #if defined(BSF_NATIVE)
-    bool rysuj_tekst_bsf(Punkt pt, const char *tekst, uint32_t kolor, int px,
-                         bool bold = false) {
+    // BSF 2.1: one masked-text renderer for both entry points. `draw(x, y,
+    // mask)` emits the glyph masks of the run; `advance` is its pixel width.
+    template <class Draw>
+    bool rysuj_maski_bsf(Punkt pt, uint32_t kolor, int px, int advance,
+                         Draw draw) {
       // Direct desktop canvases have no software target. Submit a whole
       // clipped text run instead of one syscall per scanline of each glyph.
       if (!cel_ && px >= 1 && px <= 128 && BSF::ready()) {
         const Punkt off = pobierz_przesuniecie();
         const Prostokat clip = pobierz_przyciecie();
-        const int advance = BSF::measure_text(tekst, px, bold);
         const int line = BSF::height(px);
         if (advance >= 0 && advance <= 65536 && line > 0) {
           const Prostokat run(pt.x + off.x - px, pt.y + off.y - px,
@@ -237,8 +239,8 @@ public:
             if (pixels) {
               for (size_t i = 0; i < area; ++i)
                 static_cast<volatile uint32_t *>(pixels)[i] = 0;
-              const bool drawn = CzcionkaUI::rysuj_bsf(
-                  tekst, pt.x + off.x, pt.y + off.y, px,
+              const bool drawn = draw(
+                  pt.x + off.x, pt.y + off.y,
                   [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
                     for (int y = 0; y < h; ++y) {
                       if (gy + y < visible.y || gy + y >= visible.dolny())
@@ -254,8 +256,7 @@ public:
                         dst = (a << 24) | (kolor & 0xffffff);
                       }
                     }
-                  },
-                  bold);
+                  });
               if (drawn) {
                 gui_blit_alpha(visible.x, visible.y, visible.szerokosc,
                                visible.wysokosc, pixels);
@@ -272,8 +273,8 @@ public:
       {
         Punkt off = pobierz_przesuniecie();
         Prostokat clip = pobierz_przyciecie();
-        if (CzcionkaUI::rysuj_bsf(
-                tekst, pt.x + off.x, pt.y + off.y, px,
+        if (draw(
+                pt.x + off.x, pt.y + off.y,
                 [&](int gx, int gy, int w, int h, const uint8_t *alpha) {
                   uint32_t row[BSF::MaxBitmap]{};
                   for (int y = 0; y < h; ++y) {
@@ -294,10 +295,9 @@ public:
                     if (!cel_ && !g_tlum_rysowanie_globalne && right > left)
                       gui_blit_alpha(left, gy + y, right - left, 1, row);
                   }
-                },
-                bold)) {
+                })) {
           dodaj_pomiar_tekstu(Prostokat(pt.x + off.x, pt.y + off.y,
-                                        BSF::measure_text(tekst, px, bold),
+                                        advance,
                                         BSF::height(px))
                                   .przeciecie(clip));
           return true;
@@ -306,6 +306,29 @@ public:
 
       return false;
     }
+#endif
+#if defined(BSF_NATIVE)
+    bool rysuj_tekst_bsf(Punkt pt, const char *tekst, uint32_t kolor, int px,
+                         bool bold = false) {
+      if (!BSF::ready()) return false;
+      return rysuj_maski_bsf(pt, kolor, px, BSF::measure_text(tekst, px, bold),
+                             [&](int x, int y, auto mask) {
+                               return CzcionkaUI::rysuj_bsf(tekst, x, y, px, mask, bold);
+                             });
+    }
+#if BSF_COMPLEX_TEXT
+    // BSF 2.1: one visual line of a caller-owned paragraph layout (the
+    // editor keeps paragraph-level bidi; alignment is applied by pt.x).
+    bool rysuj_linie_ukladu(Punkt pt, const BSF::TextLayout &uklad, size_t linia,
+                            uint32_t kolor, int px) {
+      if (linia >= uklad.line_count() || !BSF::ready()) return false;
+      const auto &l = uklad.lines()[linia];
+      int szer = int((l.width + l.x_shift + BSF::Fixed / 2) / BSF::Fixed);
+      return rysuj_maski_bsf(pt, kolor, px, szer, [&](int x, int y, auto mask) {
+        return CzcionkaUI::rysuj_uklad_bsf(uklad, linia, x, y, px, mask);
+      });
+    }
+#endif
 #endif
 
     void rysuj_tekst(Punkt pt, const char* tekst, uint32_t kolor, SkalaUI skala = 1) {

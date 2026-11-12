@@ -2478,6 +2478,18 @@ test-husarz-css-host:
 	g++ -std=c++17 -fcoroutines -O0 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie $(HOST_INCLUDES) testy/test_husarz_css_compat.cpp -o .husarz-test/css-compat
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .husarz-test/css-compat
 
+.PHONY: test-husarz-bidi-host
+test-husarz-bidi-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/test_husarz_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/husarz-bidi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/husarz-bidi
+
+.PHONY: bench-husarz-bidi
+bench-husarz-bidi:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -fcoroutines -O2 -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) testy/bench_husarz_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/bench-husarz-bidi
+	.bsf-test/bench-husarz-bidi
+
 .PHONY: test-bsf-host
 test-bsf-host:
 	@mkdir -p .bsf-test
@@ -2723,6 +2735,24 @@ test-notepad-unicode-host:
 	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
 
+.PHONY: test-notepad-bidi-host
+test-notepad-bidi-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. testy/test_notepad_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-bidi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-bidi
+
+.PHONY: test-bursztynui-bidi-host
+test-bursztynui-bidi-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. testy/test_bursztynui_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/bursztynui-bidi
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bursztynui-bidi
+
+.PHONY: bench-notepad-bidi
+bench-notepad-bidi:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O2 -fno-pie -no-pie -ffunction-sections -fdata-sections -I. testy/bench_notepad_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/bench-notepad-bidi
+	.bsf-test/bench-notepad-bidi
+
 .PHONY: fuzz-bsf-coverage-host
 fuzz-bsf-coverage-host:
 	@mkdir -p .bsf-test/fuzz-corpus
@@ -2813,6 +2843,11 @@ test-bsf-layout-host:
 bsf-shaping-oracle:
 	$(PYTHON) narzedzia/generate_bsf_shaping_oracle.py
 test-bsf2-host: test-bsf-bidi-host test-bsf-shaping-host test-bsf-layout-host test-bsf2-kernel-abi-host
+.PHONY: test-bsf21-layout-host
+test-bsf21-layout-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie testy/test_bsf21_layout.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .bsf-test/bsf21-layout
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/bsf21-layout
 
 # BWS 51 (incl. command 2) boundary/negative tests on the production handler
 # source with a simulated Ring 3 address space, Ring 3 blob validation and the
@@ -2835,3 +2870,12 @@ fuzz-bsf2-smoke:
 	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_bidi --iterations=$(or $(BSF2_FUZZ_ITERS),20000) --corpus-out=.fuzz-corpus/bsf2/bidi --metrics-out=.fuzz-build/bsf2/bidi.json
 	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_layout --iterations=$(or $(BSF2_FUZZ_ITERS),5000) --corpus-out=.fuzz-corpus/bsf2/layout --metrics-out=.fuzz-build/bsf2/layout.json
 	$(BSF2_FUZZ_ENV) .fuzz-build/bsf2/fuzz_bsf_otl --iterations=$(or $(BSF2_FUZZ_ITERS),3000) --corpus-out=.fuzz-corpus/bsf2/otl --metrics-out=.fuzz-build/bsf2/otl.json
+
+# BSF 2.1 editing and Husarz bidi fuzzers (ASan + UBSan + trace-pc).
+.PHONY: fuzz-bsf21-smoke
+fuzz-bsf21-smoke:
+	@mkdir -p .fuzz-build/bsf21 .fuzz-corpus/bsf21
+	g++ $(BSF2_FUZZ_FLAGS) testy/fuzz/fuzz_bsf21_editing.cpp $(BSF2_SOURCES) bsf/bsf.cpp -o .fuzz-build/bsf21/fuzz_bsf21_editing
+	g++ $(BSF2_FUZZ_FLAGS) -fcoroutines -fno-pie -no-pie -ffunction-sections -fdata-sections $(HOST_INCLUDES) -Itesty testy/fuzz/fuzz_husarz_bidi.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .fuzz-build/bsf21/fuzz_husarz_bidi
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf21/fuzz_bsf21_editing --iterations=$(or $(BSF21_FUZZ_ITERS),4000) --corpus-out=.fuzz-corpus/bsf21/editing --metrics-out=.fuzz-build/bsf21/editing.json
+	$(BSF2_FUZZ_ENV) .fuzz-build/bsf21/fuzz_husarz_bidi --iterations=$(or $(BSF21_HUSARZ_FUZZ_ITERS),1500) --corpus-out=.fuzz-corpus/bsf21/husarz --metrics-out=.fuzz-build/bsf21/husarz.json

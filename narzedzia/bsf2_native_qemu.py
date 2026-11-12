@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""BSF 2.0 native verification on the real Bursztyn OS ISO under QEMU.
+"""BSF 2.0 / 2.1 native verification on the real Bursztyn OS ISO under QEMU.
+
+--workload bsf21 (BSF 2.1) additionally serves testy/husarz_bidi/*.html over
+QEMU guestfwd (same bridge as testy/test_husarz_qemu.py), opens them in
+Husarz, reads the BSF counters and the Husarz shaped-run counters from the
+browser process, copies an RTL form value with the real clipboard (Tab,
+Ctrl+A, Ctrl+C), pastes it into Notepad, moves/selects with the arrows and
+reads Notepad's BSF counters (owned paragraph layouts prove the BSF 2.1 path).
 
 Boots the production ISO (UEFI or BIOS), waits for the native desktop,
 opens Settings -> Fonts (whose preview contains Hebrew + Arabic samples),
@@ -8,7 +15,7 @@ memory through the read-only ProcessObserver (QMP physical reads, no guest
 writes). Also launches Notepad and the Shell, and checks the serial log for
 kernel/user faults. Results: <out>/bsf2-native.json plus PNG screenshots.
 """
-import argparse, json, re, struct, subprocess, sys, tempfile, time
+import argparse, functools, http.server, json, re, shlex, struct, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +39,7 @@ def main():
     ap.add_argument('--video', help='request a guest mode WxH via a grub.cfg-only fixture ISO')
     ap.add_argument('--root', type=Path, default=ROOT,
                     help='build tree whose kernel/app ELFs match --iso (symbols)')
-    ap.add_argument('--workload', choices=('bsf2', 'apps'), default='bsf2',
+    ap.add_argument('--workload', choices=('bsf2', 'apps', 'bsf21'), default='bsf2',
                     help='apps: same Settings/Notepad/Shell sequence without BSF 2.0 '
                          'counters, for A/B runs against pre-BSF-2.0 commits')
     ap.add_argument('--tag', default='', help='output subdirectory suffix (parallel runs)')
@@ -96,9 +103,33 @@ def main():
     result = {'mode': mode, 'workload': a.workload, 'root': str(build), 'stage': 'boot', 'iso_sha256': subprocess.check_output(['sha256sum', str(a.iso)], text=True).split()[0],
               'checks': {}}
     deadline = time.monotonic() + a.timeout
+    requests = []
+    if a.workload == 'bsf21':
+        pages = ROOT / 'testy' / 'husarz_bidi'
+
+        class Pages(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, directory=str(pages), **kw)
+
+            def do_GET(self):
+                requests.append(self.path)
+                super().do_GET()
+
+            def log_message(self, *_):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Pages)
+        http_thread = __import__("threading").Thread(target=server.serve_forever, daemon=True)
+        http_thread.start()
+        bridge = shlex.join([sys.executable, str(ROOT / 'testy' / 'test_husarz_qemu.py'), '--bridge',
+                             str(server.server_port)])
+        cmd += ['-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge,
+                '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
     vm = subprocess.Popen(cmd, stdout=(out / 'qemu.log').open('w'), stderr=subprocess.STDOUT)
     q = None
     settings = None
+    if a.workload == 'bsf21':
+        pass
     try:
         def health():
             text = serial.read_text(errors='replace') if serial.exists() else ''
@@ -271,6 +302,12 @@ def main():
         else:
             result['stage'] = 'settings-fonts'
             bsf2_fonts_page(settings, click, wait, screenshot, health, result)
+        if a.workload == 'bsf21':
+            x, y, ww, hh = settings.window()
+            click(x + ww - 16, y + 12)
+            wait(lambda: not settings.pid(), 'Settings closed', 60, 1)
+            bsf21_browser_and_notepad(a, build, hmp, symbol, q, move, click, key, wait, screenshot, health,
+                                      launch, requests, result)
         # ---- Notepad and Shell open and accept input (regression smoke)
         result['stage'] = 'notepad'
         notepad = ProcessObserver(hmp, symbol, build / 'notatnik.elf', 'Notatnik')
@@ -291,7 +328,7 @@ def main():
         key('ret')
         time.sleep(2)
         screenshot('shell')
-        if a.workload == 'bsf2':
+        if a.workload in ('bsf2', 'bsf21'):
             # Apps that gained the BSF 2.0 engine once the desktop BMPs left
             # the kernel image: launch, render, close, no faults.
             for query, elf, title in (('kalkulator', 'kalkulator.elf', 'Kalkulator'),
@@ -348,6 +385,108 @@ def main():
     (out / 'bsf2-native.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
     return 0 if result.get('ok') else 1
+
+
+TEXT_STATS = ['layout_hits', 'layout_misses', 'layout_failures', 'shaped_runs', 'shaped_glyphs',
+              'fallback_searches', 'budget_failures', 'gsub_runs', 'gpos_runs', 'longest_run', 'layout_bytes',
+              'gsub_type_mask', 'gpos_type_mask', 'owned_builds']
+
+
+def text_stats(observer):
+    raw = observer.user(observer.address('BSF::(anonymous namespace)::text_stats'), 8 * len(TEXT_STATS))
+    return dict(zip(TEXT_STATS, struct.unpack('<%dQ' % len(TEXT_STATS), raw)))
+
+
+def bsf21_browser_and_notepad(a, build, hmp, symbol, q, move, click, key, wait, screenshot, health, launch,
+                              requests, result):
+    """Husarz pages from testy/husarz_bidi and Notepad RTL editing (BSF 2.1)."""
+    result['stage'] = 'husarz'
+    browser = ProcessObserver(hmp, symbol, build / 'przegladarka.elf', 'Husarz')
+    # Desktop "Husarz" icon (left column, 100% scale) -> context menu ->
+    # Open, the item test_husarz_qemu uses at +25,+15 from the click.
+    move(75, 285)
+    hmp('mouse_button 2'); time.sleep(.2); hmp('mouse_button 0'); time.sleep(1.5)
+    screenshot('husarz-context-menu')
+    click(100, 300)
+    wait(browser.pid, 'Husarz window', 240, 1)
+    time.sleep(8)
+    screenshot('husarz-open')
+
+    def navigate(name):
+        before = sum(r.lstrip('/').startswith(name) for r in requests)
+        key('ctrl', 'l')
+        time.sleep(.3)
+        for c in 'http://10.0.2.100/' + name:
+            if c == ':':
+                key('shift', 'semicolon')
+            else:
+                key({'/': 'slash', '.': 'dot', '-': 'minus'}.get(c, c))
+        key('ret')
+        wait(lambda: sum(r.lstrip('/').startswith(name) for r in requests) > before, 'HTTP ' + name, 240, 1)
+        time.sleep(12)  # cooperative layout + paint under TCG
+        health()
+
+    def husarz_counter(name):
+        return struct.unpack('<Q', browser.user(browser.address('Husarz::' + name), 8))[0]
+
+    pages = ['01-arabic-paragraph.html', '03-rtl-english-numbers.html', '04-nested-dir.html',
+             '07-unicode-bidi.html', '09-arabic-inline-shaping.html', '10-arabic-links.html',
+             '12-polish-english.html', '11-forms.html']
+    result['husarz_pages'] = {}
+    for page in pages:
+        result['stage'] = 'husarz-' + page
+        navigate(page)
+        screenshot('husarz-' + page[:-5])
+        result['husarz_pages'][page] = {
+            'text_stats': text_stats(browser),
+            'shaped_layout_misses': husarz_counter('shaped_layout_misses'),
+            'shaped_layout_hits': husarz_counter('shaped_layout_hits'),
+            'shaped_width_misses': husarz_counter('shaped_width_misses'),
+        }
+    first = result['husarz_pages'][pages[0]]
+    last = result['husarz_pages'][pages[-1]]
+    result['checks']['husarz_shaped_runs'] = first['text_stats']['shaped_runs'] > 0 and \
+        first['text_stats']['owned_builds'] > 0
+    result['checks']['husarz_shaped_paint'] = first['shaped_layout_misses'] + first['shaped_layout_hits'] > 0
+    result['checks']['husarz_no_layout_failures'] = last['text_stats']['layout_failures'] == 0
+    # Form: click the first control (dir=rtl, Hebrew; window-relative
+    # position of 11-forms.html at 100% scale); copy its value.
+    result['stage'] = 'husarz-form-copy'
+    bx, by, bw, bh = browser.window()
+    click(bx + 85, by + 133)
+    time.sleep(2)
+    for k in (('left',), ('left',), ('shift', 'left'), ('right',)):
+        key(*k)
+    screenshot('husarz-form-rtl-caret')
+    key('ctrl', 'a')
+    key('ctrl', 'c')
+    time.sleep(2)
+    screenshot('husarz-form-selected')
+    x, y, ww, hh = browser.window()
+    click(x + ww - 16, y + 12)
+    wait(lambda: not browser.pid(), 'Husarz closed', 90, 1)
+    # Notepad: paste the RTL value, navigate visually, select.
+    result['stage'] = 'notepad-rtl'
+    notepad = ProcessObserver(hmp, symbol, build / 'notatnik.elf', 'Notatnik')
+    launch('notatnik')
+    wait(notepad.pid, 'Notepad window', 240)
+    time.sleep(3)
+    x, y, ww, hh = notepad.window()
+    click(x + ww // 2, y + hh // 2)
+    before = text_stats(notepad)
+    key('ctrl', 'v')
+    time.sleep(3)
+    screenshot('notepad-rtl-pasted')
+    for k in [('left',)] * 4 + [('shift', 'left')] * 3 + [('end',), ('home',)]:
+        key(*k)
+    time.sleep(2)
+    screenshot('notepad-rtl-selection')
+    after = text_stats(notepad)
+    result['notepad_text_stats'] = {'before': before, 'after': after}
+    result['checks']['notepad_paragraph_layouts'] = after['owned_builds'] > before['owned_builds']
+    result['checks']['notepad_shaped'] = after['shaped_runs'] > before['shaped_runs']
+    result['checks']['notepad_no_layout_failures'] = after['layout_failures'] == 0
+    # Notepad stays open; the regular Notepad/Shell smoke steps follow.
 
 
 def bsf2_fonts_page(settings, click, wait, screenshot, health, result):

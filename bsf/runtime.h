@@ -92,6 +92,26 @@ const Glyph *glyph_id_face(uint32_t face, unsigned glyph, int px,
 using MaskCallback = void (*)(void *, int, int, int, int, const uint8_t *);
 bool draw_layout(const TextLayout &, int x, int y, int px, bool bold,
                  const char *family, MaskCallback, void *ctx);
+// ---- BSF 2.1 caller-owned layouts ------------------------------------------
+// Editors and the browser keep their own bounded caches of paragraph/run
+// layouts instead of borrowing the 4-slot shared cache. Same resolver,
+// shaping and counters as layout_text. A built layout stays valid until the
+// owner rebuilds it; owners must compare generation() (font configuration
+// and catalog epoch) before reuse.
+struct LayoutRequest {
+  int px{16};
+  bool bold{}, italic{};
+  const char *family{}; // CSS family list or null (system UI font)
+  int64_t max_width{};  // 16.16; 0 = no wrapping
+  BaseDirection direction{BaseDirection::Auto};
+  int32_t letter_spacing{}, word_spacing{}; // 16.16 px
+  uint32_t context_before{}, context_after{};
+};
+bool build_layout(TextLayout &, const char *text, size_t bytes, const LayoutRequest &);
+// Draw one visual line of a layout with its top-left at (x, y); x is the
+// layout's line origin (alignment is the caller's or the layout's x_shift).
+bool draw_layout_line(const TextLayout &, size_t line, int x, int y, int px,
+                      bool bold, bool italic, const char *family, MaskCallback, void *ctx);
 struct TextStatistics {
   uint64_t layout_hits{}, layout_misses{}, layout_failures{}, shaped_runs{},
       shaped_glyphs{}, fallback_searches{}, budget_failures{}, gsub_runs{},
@@ -100,6 +120,8 @@ struct TextStatistics {
   // Appended (keeps earlier field offsets for observers): union of
   // applied GSUB/GPOS lookup types, bit t = lookup type t.
   uint64_t gsub_type_mask{}, gpos_type_mask{};
+  // Appended (BSF 2.1): builds into caller-owned layouts (build_layout).
+  uint64_t owned_builds{};
 };
 TextStatistics text_statistics();
 } // namespace BSF

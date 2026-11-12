@@ -72,6 +72,12 @@ bool break_between(LineBreak before, LineBreak after) {
 uint8_t level_or(const uint8_t *levels, size_t i, uint8_t fallback) {
   return levels[i] == BidiRemoved ? fallback : levels[i];
 }
+// CSS Text 3 word-separator characters (word-spacing applies to these).
+bool word_separator(uint32_t cp) {
+  return cp == 0x20 || cp == 0xA0 || cp == 0x1361 || cp == 0x10100 ||
+         cp == 0x10101 || cp == 0x1039F || cp == 0x1091F;
+}
+uint32_t layout_generation_counter;
 } // namespace
 
 TextLayout::~TextLayout() { clear(); }
@@ -95,6 +101,7 @@ void TextLayout::clear() {
   cluster_count_ = cluster_cap_ = 0;
   width_ = 0;
   base_level_ = 0;
+  generation_ = 0;
   stats_ = LayoutStatistics{};
 }
 
@@ -207,7 +214,31 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
     return false;
   }
   auto glyph_level = [&](size_t s) { return level_or(bt.level, s, para[s]); };
+  // CSS spacing on glyphs [first, logical.n) of one run, in logical order:
+  // letter-spacing after the last glyph of each cluster (so never inside a
+  // grapheme or ligature, and skipped for cursive scripts), word-spacing on
+  // word separators. Both default to 0 (BSF 2.0 behaviour).
+  auto apply_spacing = [&](size_t first, bool cursive) {
+    if (!o.letter_spacing && !o.word_spacing)
+      return;
+    for (size_t i = first; i < logical.n; ++i) {
+      LayoutGlyph &g = logical[i];
+      if (g.flags & GlyphHidden)
+        continue;
+      int64_t add = 0;
+      if (o.word_spacing && word_separator(g.codepoint))
+        add += o.word_spacing;
+      bool last = i + 1 == logical.n || logical[i + 1].cluster != g.cluster;
+      if (o.letter_spacing && !cursive && last)
+        add += o.letter_spacing;
+      int64_t v = int64_t(g.advance) + add;
+      if (v < -int64_t(INT32_MAX)) v = -int64_t(INT32_MAX);
+      if (v > INT32_MAX) v = INT32_MAX;
+      g.advance = int32_t(v);
+    }
+  };
   auto emit_missing = [&](size_t s0, size_t s1, uint8_t level) {
+    size_t first = logical.n;
     for (size_t s = s0; s < s1; ++s) {
       LayoutGlyph g{};
       g.codepoint = bt.cp[s];
@@ -223,6 +254,7 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
       if (!logical.push(g))
         return false;
     }
+    apply_spacing(first, false);
     return true;
   };
   auto shape_run = [&](size_t s0, size_t s1, uint32_t face_id, uint8_t level,
@@ -242,6 +274,8 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
     so.rtl = level & 1;
     so.language = o.language;
     so.features = o.features;
+    so.context_before = s0 ? bt.cp[s0 - 1] : o.context_before;
+    so.context_after = s1 < n ? bt.cp[s1] : o.context_after;
     ShapeReport rep;
     bool ok = shape(*face, L, cps.p, clusters.p, cps.n, so, buf, &rep);
     ++stats_.runs;
@@ -259,6 +293,7 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
         return emit_missing(s0, s1, level);
     }
     // Store in logical order (shaper emits visual order for RTL).
+    size_t first = logical.n;
     for (unsigned k = 0; k < buf.len; ++k) {
       unsigned i = so.rtl ? buf.len - 1 - k : k;
       const OT::GlyphInfo &gi = buf.info[i];
@@ -281,6 +316,7 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
       if (!logical.push(g))
         return false;
     }
+    apply_spacing(first, shape_class(script_index) == ShapeClass::Arabic);
     return true;
   };
   const size_t run_limit = OT::MaxShapeGlyphs / 2;
@@ -516,6 +552,9 @@ bool TextLayout::build(const char *text, size_t bytes, const LayoutOptions &o,
     clear();
     return false;
   }
+  generation_ = ++layout_generation_counter;
+  if (!generation_)
+    generation_ = ++layout_generation_counter;
   return true;
 }
 
@@ -712,19 +751,11 @@ size_t TextLayout::move_logical(size_t byte, int direction) const {
   return direction > 0 ? next_cluster(text_, byte, bytes_)
                        : previous_cluster(text_, cluster_floor(text_, bytes_, byte));
 }
-size_t TextLayout::move_visual(size_t byte, int direction) const {
-  if (!line_count_)
-    return byte;
-  if (byte > bytes_)
-    byte = bytes_;
-  byte = floor_boundary(byte, line_of(byte));
-  size_t li = line_of(byte);
-  int64_t x = caret_x(byte);
-  // Offsets are displayed only at their primary caret, so visual movement
-  // goes to the nearest displayable caret strictly left/right of the
-  // current one (O(log k) on the x-ordered caret table). Ties prefer the
-  // logically closest offset. Monotone in x, hence always terminating;
-  // off the visual edge it continues logically in the paragraph direction.
+// Nearest displayable (owned) caret strictly left/right of x on line li
+// (O(log k) on the x-ordered caret table). Ties prefer the logically closest
+// offset to `exclude`. Monotone in x, hence always terminating.
+size_t TextLayout::nearest_on_line(size_t li, int64_t x, int direction, size_t byte,
+                                   bool *found_out) const {
   const uint32_t *ord = caret_x_order_;
   size_t first = line_caret_begin_[li], last = line_caret_begin_[li + 1];
   size_t lo = first, hi = last;
@@ -744,37 +775,108 @@ size_t TextLayout::move_visual(size_t byte, int direction) const {
     size_t best_dist = best > byte ? best - byte : byte - best;
     return !found || c.x != best_x || dist < best_dist;
   };
+  auto consider = [&](const CaretStop &c) {
+    if (!c.owned || c.byte == byte)
+      return true;
+    if (found && c.x != best_x)
+      return false;
+    if (better(c)) {
+      found = true;
+      best = c.byte;
+      best_x = c.x;
+    }
+    return true;
+  };
   if (direction > 0) {
-    for (size_t k = lo; k < last; ++k) {
-      const CaretStop &c = carets_[ord[k]];
-      if (!c.owned || c.byte == byte)
-        continue;
-      if (found && c.x != best_x)
+    for (size_t k = lo; k < last; ++k)
+      if (!consider(carets_[ord[k]]))
         break;
-      if (better(c)) {
-        found = true;
-        best = c.byte;
-        best_x = c.x;
-      }
-    }
   } else {
-    for (size_t k = lo; k-- > first;) {
-      const CaretStop &c = carets_[ord[k]];
-      if (!c.owned || c.byte == byte)
-        continue;
-      if (found && c.x != best_x)
+    for (size_t k = lo; k-- > first;)
+      if (!consider(carets_[ord[k]]))
         break;
-      if (better(c)) {
-        found = true;
-        best = c.byte;
-        best_x = c.x;
-      }
-    }
   }
+  *found_out = found;
+  return best;
+}
+size_t TextLayout::move_visual(size_t byte, int direction) const {
+  if (!line_count_)
+    return byte;
+  if (byte > bytes_)
+    byte = bytes_;
+  byte = floor_boundary(byte, line_of(byte));
+  size_t li = line_of(byte);
+  // Offsets are displayed only at their primary caret, so visual movement
+  // goes to the nearest displayable caret strictly left/right of the
+  // current one; off the visual edge it continues logically in the
+  // paragraph direction.
+  bool found = false;
+  size_t best = nearest_on_line(li, caret_x(byte), direction, byte, &found);
   if (found)
     return best;
   int logical = (lines_[li].paragraph_level & 1) ? -direction : direction;
   return move_logical(byte, logical);
+}
+int64_t TextLayout::caret_x_on(size_t byte, size_t li) const {
+  if (!line_count_)
+    return 0;
+  if (li >= line_count_)
+    li = line_count_ - 1;
+  const LayoutLine &L = lines_[li];
+  if (byte < L.byte_begin)
+    byte = L.byte_begin;
+  if (byte > L.byte_end)
+    byte = L.byte_end;
+  byte = floor_boundary(byte, li);
+  size_t lo = line_caret_begin_[li], hi = line_caret_begin_[li + 1];
+  while (lo < hi) {
+    size_t m = lo + (hi - lo) / 2;
+    if (carets_[m].byte < byte)
+      lo = m + 1;
+    else
+      hi = m;
+  }
+  if (lo < line_caret_begin_[li + 1] && carets_[lo].byte == byte)
+    return carets_[lo].x;
+  return caret_x_scan(byte, li);
+}
+size_t TextLayout::move_visual_on(size_t byte, size_t li, int direction, bool *moved) const {
+  bool found = false;
+  size_t best = byte;
+  if (line_count_ && direction) {
+    if (li >= line_count_)
+      li = line_count_ - 1;
+    const LayoutLine &L = lines_[li];
+    if (byte < L.byte_begin)
+      byte = L.byte_begin;
+    if (byte > L.byte_end)
+      byte = L.byte_end;
+    byte = floor_boundary(byte, li);
+    best = nearest_on_line(li, caret_x_on(byte, li), direction, byte, &found);
+  }
+  if (moved)
+    *moved = found;
+  return found ? best : byte;
+}
+size_t TextLayout::line_edge(size_t li, int direction) const {
+  if (!line_count_)
+    return 0;
+  if (li >= line_count_)
+    li = line_count_ - 1;
+  size_t first = line_caret_begin_[li], last = line_caret_begin_[li + 1];
+  if (first == last)
+    return lines_[li].byte_begin;
+  // Prefer an owned stop (a wrapped line's end is displayed on the next line).
+  if (direction > 0) {
+    for (size_t k = last; k-- > first;)
+      if (carets_[caret_x_order_[k]].owned)
+        return carets_[caret_x_order_[k]].byte;
+    return carets_[caret_x_order_[last - 1]].byte;
+  }
+  for (size_t k = first; k < last; ++k)
+    if (carets_[caret_x_order_[k]].owned)
+      return carets_[caret_x_order_[k]].byte;
+  return carets_[caret_x_order_[first]].byte;
 }
 size_t TextLayout::selection(size_t a, size_t b, Span *out, size_t capacity) const {
   if (a > b) {

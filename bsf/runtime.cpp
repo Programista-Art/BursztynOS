@@ -684,7 +684,51 @@ uint64_t text_hash(const char *t, size_t n) {
     h = (h ^ uint8_t(t[i])) * 1099511628211ull;
   return h;
 }
+bool build_resolved(TextLayout &layout, const char *text, size_t bytes,
+                    const LayoutRequest &r) {
+  ResolverContext ctx{r.bold, r.italic, r.family};
+  FontResolver fr;
+  fr.user = &ctx;
+  fr.run_face = resolver_run;
+  fr.cluster_face = resolver_cluster;
+  fr.face = resolver_face;
+  fr.fallback_advance = resolver_fallback;
+  LayoutOptions o;
+  o.px = r.px;
+  o.direction = r.direction;
+  o.max_width = r.max_width;
+  o.letter_spacing = r.letter_spacing;
+  o.word_spacing = r.word_spacing;
+  o.context_before = r.context_before;
+  o.context_after = r.context_after;
+  if (!layout.build(text, bytes, o, fr)) {
+    ++text_stats.layout_failures;
+    return false;
+  }
+  const LayoutStatistics &ls = layout.statistics();
+  text_stats.shaped_runs += ls.runs;
+  text_stats.shaped_glyphs += ls.shaped_glyphs;
+  text_stats.fallback_searches += ls.fallback_searches;
+  text_stats.budget_failures += ls.budget_failures;
+  text_stats.gsub_runs += ls.gsub_runs;
+  text_stats.gpos_runs += ls.gpos_runs;
+  text_stats.gsub_type_mask |= ls.gsub_type_mask;
+  text_stats.gpos_type_mask |= ls.gpos_type_mask;
+  if (ls.longest_run > text_stats.longest_run)
+    text_stats.longest_run = ls.longest_run;
+  return true;
+}
 } // namespace
+bool build_layout(TextLayout &layout, const char *text, size_t bytes,
+                  const LayoutRequest &r) {
+  if (!text || bytes > MaxLayoutBytes || r.px < 1 || r.px > 128) {
+    layout.clear();
+    return false;
+  }
+  init();
+  ++text_stats.owned_builds;
+  return build_resolved(layout, text, bytes, r);
+}
 const TextLayout *layout_text(const char *text, size_t bytes, int px, bool bold,
                               const char *family, bool italic, int64_t max_width,
                               BaseDirection direction) {
@@ -716,6 +760,8 @@ const TextLayout *layout_text(const char *text, size_t bytes, int px, bool bold,
     return &s.layout;
   }
   ++text_stats.layout_misses;
+  if (!layout_slots)
+    return nullptr;
   unsigned victim = 0;
   for (unsigned i = 1; i < LayoutSlots; ++i)
     if (!layout_slots[i].valid ||
@@ -725,32 +771,15 @@ const TextLayout *layout_text(const char *text, size_t bytes, int px, bool bold,
   if (s.valid)
     text_stats.layout_bytes -= s.layout.bytes() + s.layout.glyph_count() * sizeof(LayoutGlyph);
   s.valid = false;
-  ResolverContext ctx{bold, italic, family};
-  FontResolver fr;
-  fr.user = &ctx;
-  fr.run_face = resolver_run;
-  fr.cluster_face = resolver_cluster;
-  fr.face = resolver_face;
-  fr.fallback_advance = resolver_fallback;
-  LayoutOptions o;
-  o.px = px;
-  o.direction = direction;
-  o.max_width = max_width;
-  if (!s.layout.build(text, bytes, o, fr)) {
-    ++text_stats.layout_failures;
+  LayoutRequest request;
+  request.px = px;
+  request.bold = bold;
+  request.italic = italic;
+  request.family = family;
+  request.max_width = max_width;
+  request.direction = direction;
+  if (!build_resolved(s.layout, text, bytes, request))
     return nullptr;
-  }
-  const LayoutStatistics &ls = s.layout.statistics();
-  text_stats.shaped_runs += ls.runs;
-  text_stats.shaped_glyphs += ls.shaped_glyphs;
-  text_stats.fallback_searches += ls.fallback_searches;
-  text_stats.budget_failures += ls.budget_failures;
-  text_stats.gsub_runs += ls.gsub_runs;
-  text_stats.gpos_runs += ls.gpos_runs;
-  text_stats.gsub_type_mask |= ls.gsub_type_mask;
-  text_stats.gpos_type_mask |= ls.gpos_type_mask;
-  if (ls.longest_run > text_stats.longest_run)
-    text_stats.longest_run = ls.longest_run;
   text_stats.layout_bytes += bytes + s.layout.glyph_count() * sizeof(LayoutGlyph);
   s.hash = h;
   s.px = px;
@@ -775,12 +804,19 @@ int fixed_round(int64_t v) {
   return int(v >= 0 ? v / Fixed : -((-v + Fixed - 1) / Fixed));
 }
 } // namespace
-bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
-                 const char *family, MaskCallback mask, void *ctx) {
+namespace {
+// Lines [l0, l1) of a layout; line l is drawn with its top at
+// y + (l - l0) * line_h.
+bool draw_lines(const TextLayout &L, size_t l0, size_t l1, int x, int y, int line_h,
+                int px, bool bold, bool italic, const char *family,
+                MaskCallback mask, void *ctx) {
   if (!mask || px < 1 || px > 128)
     return false;
-  const int asc = ascent(px, family), h = height(px, family);
-  const int line_h = h > 0 ? h : px;
+  if (l1 > L.line_count())
+    l1 = L.line_count();
+  if (l0 >= l1)
+    return true;
+  const int asc = ascent(px, family);
   const size_t n = L.glyph_count();
   // Pass 1: base bitmap extents (fallback mark placement needs the base,
   // which follows the mark in RTL visual order).
@@ -788,22 +824,22 @@ bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
   Extent *ext = n ? new Extent[n] : nullptr;
   if (n && !ext)
     return false;
-  for (size_t l = 0; l < L.line_count(); ++l) {
+  for (size_t l = l0; l < l1; ++l) {
     const LayoutLine &line = L.lines()[l];
-    int base_y = y + int(l) * line_h + asc;
+    int base_y = y + int(l - l0) * line_h + asc;
     for (size_t i = line.glyph_begin; i < line.glyph_end; ++i) {
       const LayoutGlyph &g = L.glyphs()[i];
       ext[i] = Extent{};
       if (g.flags & (GlyphMark | GlyphHidden | GlyphMissing))
         continue;
-      if (const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold))
+      if (const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold, italic))
         ext[i] = {x + fixed_round(g.x + g.x_offset) + b->x,
                   base_y - fixed_round(g.y_offset) + b->y, b->width, b->height, true};
     }
   }
-  for (size_t l = 0; l < L.line_count(); ++l) {
+  for (size_t l = l0; l < l1; ++l) {
     const LayoutLine &line = L.lines()[l];
-    int top = y + int(l) * line_h, base_y = top + asc;
+    int top = y + int(l - l0) * line_h, base_y = top + asc;
     int above = 0, below = 0;
     uint32_t stacked = 0xffffffffu;
     for (size_t i = line.glyph_begin; i < line.glyph_end; ++i) {
@@ -831,7 +867,7 @@ bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
         delete[] a;
         continue;
       }
-      const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold);
+      const Glyph *b = glyph_id_face(g.face, g.glyph, px, bold, italic);
       if (!b)
         continue;
       int dx = gx + b->x, dy = gy + b->y;
@@ -863,6 +899,20 @@ bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
   }
   delete[] ext;
   return true;
+}
+} // namespace
+bool draw_layout(const TextLayout &L, int x, int y, int px, bool bold,
+                 const char *family, MaskCallback mask, void *ctx) {
+  const int h = height(px, family);
+  return draw_lines(L, 0, L.line_count(), x, y, h > 0 ? h : px, px, bold, false,
+                    family, mask, ctx);
+}
+bool draw_layout_line(const TextLayout &L, size_t line, int x, int y, int px,
+                      bool bold, bool italic, const char *family, MaskCallback mask,
+                      void *ctx) {
+  const int h = height(px, family);
+  return draw_lines(L, line, line + 1, x, y, h > 0 ? h : px, px, bold, italic,
+                    family, mask, ctx);
 }
 #endif
 void shutdown() {

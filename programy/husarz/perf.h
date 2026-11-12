@@ -11,6 +11,7 @@ struct Performance {
     uint64_t full_reflows{}, partial_reflows{}, full_paints{}, partial_paints{};
     uint64_t paint_candidates{}, paint_visible{}, paint_culled{}, dirty_rectangles{};
     uint64_t resource_completions{}, cache_hits{}, cache_misses{};
+    uint64_t shaped_paints{};
     uint64_t resize_received{}, resize_coalesced{}, slices{}, max_slice_work{},max_slice_ns{};
     uint64_t duration[unsigned(Stage::Count)]{}, maximum[unsigned(Stage::Count)]{};
 };
