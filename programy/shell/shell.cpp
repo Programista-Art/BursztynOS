@@ -30,6 +30,7 @@
  */
 
 #include "bursztyn_gui.h"
+#include "okno_geometria.h"
 #include "bws_nowoczesne.h"
 #include "bws_zdarzenia.h"
 #include "motyw.h"
@@ -157,6 +158,12 @@ int shell_screen_w = 1024, shell_screen_h = 768;
 bool shell_maximized = false;
 bool shell_minimized = false;
 int shell_restore_x = 20, shell_restore_y = 20, shell_restore_w = 700, shell_restore_h = 450;
+// Zmiana rozmiaru krawedziami/rogami (okno moze wychodzic poza ekran, do 2x).
+bool shell_resizing = false;
+uint8_t shell_resize_edges = 0;
+OknoGeometria::Prost shell_resize_start{0, 0, 0, 0};
+int shell_resize_mouse_x = 0, shell_resize_mouse_y = 0;
+uint64_t shell_resize_last_ns = 0;
 
 bool shell_drag = false;
 int shell_drag_mouse_x = 0;
@@ -589,6 +596,20 @@ int pobierz_znak_blokujaco() {
         const int max_linii = shell_page_rows();
         const int max_scroll = shell_max_scroll();
 
+        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && !shell_maximized && !shell_minimized) {
+            const uint8_t edge = OknoGeometria::krawedz_w_punkcie(e.x - shell_x, e.y - shell_y, shell_w, shell_h,
+                ui_skaluj(5, ui_skala_procent), ui_skaluj(14, ui_skala_procent));
+            if (edge) {
+                shell_resizing = true;
+                shell_resize_edges = edge;
+                shell_resize_start = {shell_x, shell_y, shell_w, shell_h};
+                shell_resize_mouse_x = e.x;
+                shell_resize_mouse_y = e.y;
+                shell_drag = false;
+                gui_ustaw_capture_myszy(true);
+                continue;
+            }
+        }
         if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
             gui_akcja_belki akcja = gui_hit_test_belki(e.x, e.y, shell_x, shell_y, shell_w);
             if (akcja == GUI_BELKA_ZAMKNIJ) gui_zakoncz_aplikacje();
@@ -662,6 +683,24 @@ int pobierz_znak_blokujaco() {
                 else { g_selection_end=shell_hit_output(e.x,e.y);shell_rysuj_terminal(); }
                 continue;
             }
+            if (shell_resizing) {
+                OknoGeometria::Ograniczenia lim{ui_skaluj(320, ui_skala_procent), ui_skaluj(200, ui_skala_procent),
+                    2 * shell_work_w, 2 * shell_work_h};
+                const OknoGeometria::Prost g = OknoGeometria::zmien_rozmiar(shell_resize_start, shell_resize_edges,
+                    OknoGeometria::do_i32(int64_t(e.x) - shell_resize_mouse_x),
+                    OknoGeometria::do_i32(int64_t(e.y) - shell_resize_mouse_y), lim);
+                const uint64_t now = gui_czas_monotoniczny_ns();
+                if ((g.x != shell_x || g.y != shell_y || g.w != shell_w || g.h != shell_h) &&
+                    (!now || !shell_resize_last_ns || now < shell_resize_last_ns || now - shell_resize_last_ns >= 33000000ULL)) {
+                    shell_x = g.x; shell_y = g.y; shell_w = g.w; shell_h = g.h;
+                    shell_logical_w = ui_odskaluj(shell_w, ui_skala_procent);
+                    shell_logical_h = ui_odskaluj(shell_h, ui_skala_procent);
+                    if (!gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h, 1)) gui_zakoncz_aplikacje();
+                    shell_rysuj_terminal();
+                    shell_resize_last_ns = now;
+                }
+                continue;
+            }
             if (shell_drag) {
                 const int nx = shell_drag_window_x + (e.x - shell_drag_mouse_x);
                 const int ny = shell_drag_window_y + (e.y - shell_drag_mouse_y);
@@ -688,6 +727,22 @@ int pobierz_znak_blokujaco() {
         } else if (e.typ == BWS_ZDARZENIE_MYSZ_UP) {
             if(g_select_drag) {
                 g_select_drag=false;gui_ustaw_capture_myszy(false);continue;
+            }
+            if (shell_resizing) {
+                shell_resizing = false;
+                gui_ustaw_capture_myszy(false);
+                const OknoGeometria::Prost g = OknoGeometria::zmien_rozmiar(shell_resize_start, shell_resize_edges,
+                    OknoGeometria::do_i32(int64_t(e.x) - shell_resize_mouse_x),
+                    OknoGeometria::do_i32(int64_t(e.y) - shell_resize_mouse_y),
+                    {ui_skaluj(320, ui_skala_procent), ui_skaluj(200, ui_skala_procent), 2 * shell_work_w, 2 * shell_work_h});
+                if (g.x != shell_x || g.y != shell_y || g.w != shell_w || g.h != shell_h) {
+                    shell_x = g.x; shell_y = g.y; shell_w = g.w; shell_h = g.h;
+                    shell_logical_w = ui_odskaluj(shell_w, ui_skala_procent);
+                    shell_logical_h = ui_odskaluj(shell_h, ui_skala_procent);
+                    if (!gui_ustaw_geometrie_okna(shell_x, shell_y, shell_w, shell_h, 1)) gui_zakoncz_aplikacje();
+                    shell_rysuj_terminal();
+                }
+                continue;
             }
             if (shell_drag) {
                 shell_drag = false;

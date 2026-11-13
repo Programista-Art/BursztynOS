@@ -176,6 +176,8 @@ bool gui_czekaj_na_zdarzenie(bws_zdarzenie*) { if(test_wait_observer)test_wait_o
 bool gui_czekaj_na_zdarzenie_z_timeoutem(bws_zdarzenie*, uint64_t) { if(test_wait_observer)test_wait_observer();return false; }
 static bool test_mouse_capture=false;
 void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
+static uint32_t test_cursor_shape=0;
+bool gui_ustaw_kursor(uint32_t shape) {test_cursor_shape=shape;return true;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
 bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
 void bws_przesun_warstwe(int, int) {}

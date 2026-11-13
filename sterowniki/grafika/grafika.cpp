@@ -735,6 +735,77 @@ static void zapamietaj_dirty_rysowania(int x,int y,int w,int h) {
     int y1=a.y+a.height>r.y+r.height?a.y+a.height:r.y+r.height;a={x0,y0,x1-x0,y1-y0};
 }
 
+/*
+ * Cien warstwy (tear-free prezentacja).
+ *
+ * Aplikacja rysuje do bufora warstwy wieloma osobnymi syscallami, a skladacz
+ * moze zlozyc te warstwe w kazdej chwili (ruch kursora, inne okno, zegar).
+ * Bez ochrony uzytkownik widzi polowicznie narysowana klatke: tlo wiersza
+ * wyczyszczone, tekst jeszcze nienarysowany (migotanie Eksploratora przy
+ * przewijaniu i wpisywaniu). Przy pierwszym rysowaniu po publikacji kopiujemy
+ * opublikowana tresc do cienia; skladacz czyta cien az do bws_gui_odswiez()
+ * wlasciciela, ktory konczy transakcje. Kopiowanie jest raz na klatke
+ * (pamiec grafiki ma wlasne sloty, patrz bufory_grafiki.h). Warstwa pulpitu
+ * (z_order 0) jest pomijana. Zawor bezpieczenstwa: cien starszy niz
+ * CIEN_MAKS_WIEK_NS (1 s) jest ignorowany, wiec aplikacja, ktora zapomni o
+ * odswiezeniu, nigdy nie zostanie zamrozona.
+ */
+struct CienWarstwy {
+    uint32_t* bufor;
+    size_t bajty;
+    uint64_t od_ns;
+    bool aktywny;
+};
+static CienWarstwy cien_warstwy[SKLADACZ_MAKS_WARSTW] = {};
+static constexpr uint64_t CIEN_MAKS_WIEK_NS = 1000ULL * 1000ULL * 1000ULL;
+
+static void cien_warstwy_zwolnij(int pid) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW) return;
+    CienWarstwy& c = cien_warstwy[pid];
+    __atomic_store_n(&c.aktywny, false, __ATOMIC_RELEASE);
+    uint32_t* stary = c.bufor;
+    c.bufor = nullptr; c.bajty = 0;
+    if (stary) bufor_grafiki_zwolnij(stary);
+}
+
+// Wolane przed pierwszym zapisem do warstwy aktualnego procesu w danej klatce.
+static void cien_warstwy_przed_rysowaniem() {
+#if defined(BURSZTYN_DIAG_NO_SHADOW) && BURSZTYN_DIAG_NO_SHADOW
+    return;   // tylko A/B w pomiarach: zachowanie sprzed poprawki (klatki rozdarte)
+#endif
+    const int pid = aktualny_pid;
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW) return;
+    CienWarstwy& c = cien_warstwy[pid];
+    if (__atomic_load_n(&c.aktywny, __ATOMIC_ACQUIRE)) return;
+    warstwa_obrazu* w = pobierz_warstwe(pid);
+    if (!w || !w->bufor_pikseli || w->z_order == 0 ||
+        w->szerokosc <= 0 || w->wysokosc <= 0 ||
+        !skladacz_obrazu_czy_widoczna(pid)) return;
+    const size_t bajty = static_cast<size_t>(w->szerokosc) * static_cast<size_t>(w->wysokosc) * sizeof(uint32_t);
+    if (c.bufor && c.bajty != bajty) cien_warstwy_zwolnij(pid);
+    if (!c.bufor) {
+        c.bufor = static_cast<uint32_t*>(bufor_grafiki_alokuj(bajty));
+        c.bajty = c.bufor ? bajty : 0;
+    }
+    if (!c.bufor) return;   // brak pamieci: zachowanie sprzed poprawki
+    const uint32_t* zrodlo = w->bufor_pikseli;
+    for (size_t i = 0; i < bajty / sizeof(uint32_t); ++i) c.bufor[i] = zrodlo[i];
+    c.od_ns = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
+    __atomic_store_n(&c.aktywny, true, __ATOMIC_RELEASE);
+}
+
+// Kompozytor: cien opublikowanej klatki, jesli wlasciciel jest w trakcie rysowania.
+extern "C" const uint32_t* bws_gui_cien_warstwy(int pid, size_t bajty) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW) return nullptr;
+    const CienWarstwy& c = cien_warstwy[pid];
+    if (!__atomic_load_n(&c.aktywny, __ATOMIC_ACQUIRE) || !c.bufor || c.bajty != bajty) return nullptr;
+    if (c.od_ns && hpet_dostepny()) {
+        const uint64_t now = czas_monotoniczny_ns();
+        if (now > c.od_ns && now - c.od_ns > CIEN_MAKS_WIEK_NS) return nullptr;
+    }
+    return c.bufor;
+}
+
 static uint64_t znacznik_zdarzenia() {
     return hpet_dostepny() ? czas_monotoniczny_ns() : scheduler_pobierz_tick();
 }
@@ -3676,6 +3747,7 @@ extern "C" void bws_gui_rysuj_okno(int x,
     if (skladacz_obrazu_ustaw_tytul(aktualny_pid, tytul_bezp))
         bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_TYTUL, aktualny_pid);
 
+    cien_warstwy_przed_rysowaniem();
     RysujProstokat(
         x,
         y,
@@ -3723,6 +3795,7 @@ extern "C" void bws_gui_wypisz_tekst(int x,
         return;
     }
 
+    cien_warstwy_przed_rysowaniem();
     const int szer_px = WypiszTekst(
         text_bezp,
         x,
@@ -3742,6 +3815,7 @@ extern "C" void bws_gui_wyczyscz_obszar(int x,
         return;
     }
 
+    cien_warstwy_przed_rysowaniem();
     RysujProstokat(
         x,
         y,
@@ -3751,6 +3825,12 @@ extern "C" void bws_gui_wyczyscz_obszar(int x,
     zapamietaj_dirty_rysowania(x,y,szer,wys);
 }
 
+// True while the owner has drawn into its layer since its last gui_odswiez():
+// the compositor would show a half-drawn frame (torn frame) if it read it now.
+extern "C" bool bws_gui_warstwa_w_trakcie_rysowania(int pid) {
+    return pid >= 0 && pid < static_cast<int>(SKLADACZ_MAKS_WARSTW) && ma_oczekujacy_dirty[pid];
+}
+
 extern "C" void bws_gui_odswiez() {
     if (!backbuffer || !aktywny_ekran)
         return;
@@ -3758,6 +3838,9 @@ extern "C" void bws_gui_odswiez() {
     if (!BwsProcesMaWarstwe())
         return;
 
+    // Koniec transakcji rysowania: od teraz skladacz czyta bufor na zywo.
+    if (aktualny_pid > 0 && aktualny_pid < SKLADACZ_MAKS_WARSTW)
+        __atomic_store_n(&cien_warstwy[aktualny_pid].aktywny, false, __ATOMIC_RELEASE);
     if(ma_oczekujacy_dirty[aktualny_pid]){
         const GuiDirtyRect r=oczekujacy_dirty[aktualny_pid];ma_oczekujacy_dirty[aktualny_pid]=false;
         if (skladacz_obrazu_publikuj_klatke(aktualny_pid) &&
@@ -3864,6 +3947,7 @@ extern "C" void bws_gui_wypisz_tekst_kolor(
         return;
     }
 
+    cien_warstwy_przed_rysowaniem();
     const int szer_px = WypiszTekst(
         text_bezp,
         x,
@@ -3886,6 +3970,7 @@ extern "C" void bws_gui_rysuj_prostokat(
         return;
     }
 
+    cien_warstwy_przed_rysowaniem();
     RysujProstokat(
         x,
         y,
@@ -3929,6 +4014,7 @@ static bool gui_blit_region(
      * SMAP: bufor pikseli nalezy do Ring 3. Cala petla kopiujaca musi
      * pozostac w oknie AC, inaczej pierwszy odczyt wywola #PF.
      */
+    cien_warstwy_przed_rysowaniem();
     OknoUzytkownika okno(piksele, (size_t)cnt * sizeof(uint32_t));
 
     for (int dy = ly0; dy < ly1; ++dy) {
@@ -4055,6 +4141,7 @@ extern "C" void bws_gui_ustaw_capture(bool stan) {
 }
 
 extern "C" void bws_gui_usun_stan_procesu(int pid) {
+    cien_warstwy_zwolnij(pid);
     if(pid>0&&pid<SKLADACZ_MAKS_WARSTW){
         ma_oczekujacy_dirty[pid]=false;
         uint32_t* stare = kursory_procesow[pid].piksele;

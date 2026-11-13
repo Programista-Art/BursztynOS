@@ -85,6 +85,8 @@ bool wylistuj_katalog_uzytkownika(const char* sciezka,
 
 /* BWS 10: uruchomienie .bur przez loader i kontrole PZB. */
 bool uruchom_program_uzytkownika(const char* sciezka);
+// Kod przyczyny ostatniej odmowy BWS 10 (uruchamianie::KodBledu), 0 = brak.
+uint8_t pobierz_blad_uruchomienia();
 
 /* Rozszerzenie BWS 10: uruchamia program z ograniczonym argumentem sciezki. */
 bool uruchom_program_z_argumentem_uzytkownika(const char* program,

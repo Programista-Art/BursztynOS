@@ -5,6 +5,7 @@
  */
 #include "bursztyn_gui.h"
 #include "ui_skala.h"
+#include "okno_geometria.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -229,6 +230,11 @@ bool zmaksymalizowane = false;
 
 bool dragging_window = false;
 int drag_off_x = 0;
+bool resizing_window = false;
+uint8_t resize_edges = 0;
+OknoGeometria::Prost resize_start{0, 0, 0, 0};
+int resize_mouse_x = 0, resize_mouse_y = 0;
+uint64_t resize_last_ns = 0;
 int drag_off_y = 0;
 
 bool panning_image = false;
@@ -391,12 +397,23 @@ void ogranicz_geometrie() {
     if (max_h < 1) max_h = screen_h;
     if (win_w < WIN_MIN_W) win_w = WIN_MIN_W;
     if (win_h < WIN_MIN_H) win_h = WIN_MIN_H;
-    if (win_w > max_w) win_w = max_w;
-    if (win_h > max_h) win_h = max_h;
-    if (win_x < 0) win_x = 0;
-    if (win_y < 0) win_y = 0;
-    if (win_x + win_w > max_w) win_x = max_w - win_w;
-    if (win_y + win_h > max_h) win_y = max_h - win_h;
+    if (zmaksymalizowane) {
+        if (win_w > max_w) win_w = max_w;
+        if (win_h > max_h) win_h = max_h;
+        if (win_x < 0) win_x = 0;
+        if (win_y < 0) win_y = 0;
+        if (win_x + win_w > max_w) win_x = max_w - win_w;
+        if (win_y + win_h > max_h) win_y = max_h - win_h;
+        return;
+    }
+    // Okno moze byc rozciagniete do 2x ekranu i wychodzic poza obszar roboczy;
+    // pasek tytulu pozostaje uchwytny (okno_geometria.h).
+    if (win_w > 2 * max_w) win_w = 2 * max_w;
+    if (win_h > 2 * max_h) win_h = 2 * max_h;
+    const OknoGeometria::Prost p = OknoGeometria::przytnij_ruch({win_x, win_y, win_w, win_h}, {0, 0, max_w, max_h},
+        ui_skaluj(96, ui_skala_procent), belka_h(), belka_h() / 2);
+    win_x = p.x;
+    win_y = p.y;
 }
 
 bool utworz_warstwe() {
@@ -1678,6 +1695,42 @@ extern "C" __attribute__((noreturn)) void _start() {
                 }
             }
 
+            if (klik && !zminimalizowane && !zmaksymalizowane) {
+                const uint8_t edge = OknoGeometria::krawedz_w_punkcie(mx - win_x, my - win_y, win_w, win_h,
+                    ui_skaluj(5, ui_skala_procent), ui_skaluj(14, ui_skala_procent));
+                if (edge) {
+                    resizing_window = true;
+                    resize_edges = edge;
+                    resize_start = {win_x, win_y, win_w, win_h};
+                    resize_mouse_x = mx;
+                    resize_mouse_y = my;
+                    dragging_window = false;
+                    panning_image = false;
+                    gui_ustaw_capture_myszy(true);
+                    klik = false;   // nie uruchamiaj przyciskow/belki
+                }
+            }
+
+            if (resizing_window && lewy && ev.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
+                OknoGeometria::Ograniczenia lim{WIN_MIN_W, WIN_MIN_H, 2 * screen_w, 2 * work_h(screen_h)};
+                const OknoGeometria::Prost g = OknoGeometria::zmien_rozmiar(resize_start, resize_edges,
+                    OknoGeometria::do_i32(int64_t(mx) - resize_mouse_x),
+                    OknoGeometria::do_i32(int64_t(my) - resize_mouse_y), lim);
+                const uint64_t now = gui_czas_monotoniczny_ns();
+                if ((g.x != win_x || g.y != win_y || g.w != win_w || g.h != win_h) &&
+                    (!now || !resize_last_ns || now < resize_last_ns || now - resize_last_ns >= 33000000ULL)) {
+                    win_x = g.x; win_y = g.y; win_w = g.w; win_h = g.h;
+                    ogranicz_geometrie();
+                    if (!gui_ustaw_geometrie_okna(win_x, win_y, win_w, win_h, 1)) gui_zakoncz_aplikacje();
+                    uniewaznij_cache_rozmiaru();
+                    kontrolka_hover = Kontrolka::BRAK;
+                    redraw = true;
+                    redraw_controls = true;
+                    pelne = true;
+                    resize_last_ns = now;
+                }
+            }
+
             if (klik && !zminimalizowane) {
                 bool wOknie = (mx >= win_x && mx < win_x + win_w && my >= win_y && my < win_y + win_h);
                 if (wOknie) {
@@ -1770,16 +1823,12 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
 
             if (dragging_window && lewy) {
-                int nx = mx - drag_off_x;
-                int ny = my - drag_off_y;
-                int maxX = screen_w - win_w;
-                int maxY = work_h(screen_h) - win_h;
-                if (maxX < 0) maxX = 0;
-                if (maxY < 0) maxY = 0;
-                if (nx < 0) nx = 0;
-                if (ny < 0) ny = 0;
-                if (nx > maxX) nx = maxX;
-                if (ny > maxY) ny = maxY;
+                // Swobodny ruch poza ekran; pasek tytulu pozostaje uchwytny.
+                const OknoGeometria::Prost moved = OknoGeometria::przytnij_ruch(
+                    {OknoGeometria::do_i32(int64_t(mx) - drag_off_x), OknoGeometria::do_i32(int64_t(my) - drag_off_y), win_w, win_h},
+                    {0, 0, screen_w, work_h(screen_h)}, ui_skaluj(96, ui_skala_procent), belka_h(), belka_h() / 2);
+                int nx = moved.x;
+                int ny = moved.y;
                 if (nx != win_x || ny != win_y) {
                     win_x = nx;
                     win_y = ny;
@@ -1814,6 +1863,10 @@ extern "C" __attribute__((noreturn)) void _start() {
                 if (kontrolka_wcisnieta != Kontrolka::BRAK) {
                     kontrolka_wcisnieta = Kontrolka::BRAK;
                     redraw_controls = true;
+                }
+                if (resizing_window) {
+                    resizing_window = false;
+                    gui_ustaw_capture_myszy(false);
                 }
                 if (dragging_window || panning_image) {
                     dragging_window = false;

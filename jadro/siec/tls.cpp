@@ -1583,3 +1583,58 @@ extern "C" bool kernel_siec_pobierz_https(
 
     return sukces;
 }
+
+/* =========================================================================
+ * DIAGNOSTYKA: koszt kryptografii handshake'u (tylko BURSZTYN_DIAG_TLS_COST)
+ *
+ * Mierzy w gosciu rzeczywisty czas jednego ECDHE (gen+shared) dla P-256 i
+ * P-384 oraz najdluzszy odcinek bez oddania CPU (tiki odroczone). Wynik w
+ * logu szeregowym: [TLS COST] ...
+ * ========================================================================= */
+#if defined(BURSZTYN_DIAG_TLS_COST) && BURSZTYN_DIAG_TLS_COST
+#include "mbedtls/ecp.h"
+static int tls_diag_rng(void* state, unsigned char* out, size_t len) {
+    uint64_t* s = static_cast<uint64_t*>(state);
+    for (size_t i = 0; i < len; ++i) {
+        *s = *s * 6364136223846793005ULL + 1442695040888963407ULL;
+        out[i] = static_cast<unsigned char>(*s >> 56);
+    }
+    return 0;
+}
+// Zachowuje koszt jednego handshake'u (gen + shared) bez logu; wolane z
+// siec_operacja_rozpocznij przy kazdym zadaniu HTTP w buildzie diagnostycznym.
+extern "C" void tls_diag_symuluj_handshake() {
+    mbedtls_ecp_group grp; mbedtls_mpi d; mbedtls_ecp_point Q, P;
+    mbedtls_ecp_group_init(&grp); mbedtls_mpi_init(&d); mbedtls_ecp_point_init(&Q); mbedtls_ecp_point_init(&P);
+    uint64_t seed = czas_monotoniczny_ns();
+    if (mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) == 0 &&
+        mbedtls_ecp_gen_keypair(&grp, &d, &Q, tls_diag_rng, &seed) == 0)
+        (void)mbedtls_ecp_mul(&grp, &P, &d, &Q, tls_diag_rng, &seed);
+    mbedtls_ecp_group_free(&grp); mbedtls_mpi_free(&d); mbedtls_ecp_point_free(&Q); mbedtls_ecp_point_free(&P);
+}
+extern "C" void tls_diag_koszt_krypto() {
+    const mbedtls_ecp_group_id ids[] = {MBEDTLS_ECP_DP_SECP256R1, MBEDTLS_ECP_DP_SECP384R1};
+    const char* nazwy[] = {"P-256", "P-384"};
+    for (int k = 0; k < 2; ++k) {
+        mbedtls_ecp_group grp; mbedtls_mpi d, z; mbedtls_ecp_point Q;
+        mbedtls_ecp_group_init(&grp); mbedtls_mpi_init(&d); mbedtls_mpi_init(&z); mbedtls_ecp_point_init(&Q);
+        uint64_t seed = 12345;
+        char buf[160];
+        if (mbedtls_ecp_group_load(&grp, ids[k]) != 0) { wypisz_log("[TLS COST] load failed"); continue; }
+        const uint64_t t0 = czas_monotoniczny_ns();
+        const int r1 = mbedtls_ecp_gen_keypair(&grp, &d, &Q, tls_diag_rng, &seed);
+        const uint64_t t1 = czas_monotoniczny_ns();
+        mbedtls_ecp_point P; mbedtls_ecp_point_init(&P);
+        const int r2 = mbedtls_ecp_mul(&grp, &P, &d, &Q, tls_diag_rng, &seed);
+        const uint64_t t2 = czas_monotoniczny_ns();
+        mbedtls_ecp_point_free(&P);
+        unsigned n = 0;
+        auto add = [&](const char* t) { while (*t && n + 1 < sizeof(buf)) buf[n++] = *t++; };
+        auto num = [&](uint64_t v) { char tmp[24]; unsigned i = 0; do { tmp[i++] = char('0' + v % 10); v /= 10; } while (v); while (i && n + 1 < sizeof(buf)) buf[n++] = tmp[--i]; };
+        add("[TLS COST] "); add(nazwy[k]); add(" keygen_us="); num((t1 - t0) / 1000);
+        add(" mul_us="); num((t2 - t1) / 1000); add(" rc="); num(uint64_t(r1 == 0 && r2 == 0 ? 0 : 1));
+        buf[n] = 0; wypisz_log(buf);
+        mbedtls_ecp_group_free(&grp); mbedtls_mpi_free(&d); mbedtls_mpi_free(&z); mbedtls_ecp_point_free(&Q);
+    }
+}
+#endif

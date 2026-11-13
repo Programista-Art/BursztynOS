@@ -2,6 +2,7 @@
 #include "bursztyn_gui.h"
 #include "plik_popup_ui.h"
 #include "desktop_entries.h"
+#include "okno_geometria.h"
 #include "../../bursztyn_ui/menu_tekstowe.h"
 #include "../../bursztyn_ui/pasek_przewijania.h"
 #include "../../bursztyn_ui/tabela_wirtualna.h"
@@ -1446,10 +1447,22 @@ private:
             set_status("Loader: ścieżka .bur przekracza 63 bajty.");
             return;
         }
-        if (uruchom_program_uzytkownika(path))
+        if (uruchom_program_uzytkownika(path)) {
             set_status("Program przekazano do loadera BWS10.");
-        else
-            set_status("BWS10: odmowa PZB, błąd loadera lub program już działa.");
+        } else {
+            switch (pobierz_blad_uruchomienia()) {
+            case 2: set_status("Nie można uruchomić: brak pliku programu albo dostępu do odczytu."); break;
+            case 3: set_status("Nie można uruchomić: to nie jest poprawny program Bursztyn OS."); break;
+            case 4: set_status("Nie można uruchomić: weryfikacja integralności programu nie powiodła się."); break;
+            case 5: set_status("Program już działa — użyj jego okna."); break;
+            case 6: set_status("Nie można uruchomić: brak zasobów systemu."); break;
+            case 7: set_status("Ten program nie ma uprawnienia do uruchamiania aplikacji."); break;
+            case 8: set_status("Odmowa: aplikacja wymaga wyższego poziomu zaufania."); break;
+            case 9: set_status("Nie można uruchomić: niepoprawna ścieżka programu."); break;
+            case 10: set_status("Nie można uruchomić: nie udało się utworzyć procesu."); break;
+            default: set_status("Nie można uruchomić programu (kod nieznany)."); break;
+            }
+        }
     }
 
     void run_package(const char* package, bool directory) {
@@ -1518,10 +1531,22 @@ public:
         if (available_h < 1) available_h = screen_h;
         const int effective_min_w = screen_w < MIN_W ? screen_w : MIN_W;
         const int effective_min_h = available_h < MIN_H ? available_h : MIN_H;
-        w = clamp_int(w, effective_min_w, screen_w);
-        h = clamp_int(h, effective_min_h, available_h);
-        x = clamp_int(x, 0, screen_w - w);
-        y = clamp_int(y, 0, available_h - h);
+        if (maximized) {
+            w = clamp_int(w, effective_min_w, screen_w);
+            h = clamp_int(h, effective_min_h, available_h);
+            x = clamp_int(x, 0, screen_w - w);
+            y = clamp_int(y, 0, available_h - h);
+            return;
+        }
+        // Okno moze wychodzic poza ekran (rozciagniete do 2x, przesuniete
+        // czesciowo poza obszar roboczy); pasek tytulu pozostaje uchwytny.
+        w = clamp_int(w, effective_min_w, 2 * screen_w);
+        h = clamp_int(h, effective_min_h, 2 * available_h);
+        const OknoGeometria::Prost p = OknoGeometria::przytnij_ruch(
+            {x, y, w, h}, {0, 0, screen_w, available_h}, ui_skaluj(96, ui_skala_procent),
+            ui_skaluj(28, ui_skala_procent), ui_skaluj(28, ui_skala_procent) / 2);
+        x = p.x;
+        y = p.y;
     }
 
     bool create_layer() {
@@ -2724,10 +2749,34 @@ extern "C" __attribute__((noreturn)) void _start() {
     int item_drag_start_x = 0;
     int item_drag_start_y = 0;
     char item_drag_path[PATH_CAP] = {};
+    // Zmiana rozmiaru krawedziami/rogami (jedna realokacja warstwy na ~33 ms).
+    bool resizing = false;
+    uint8_t resize_edges = 0;
+    OknoGeometria::Prost resize_start{0, 0, 0, 0}, resize_pending_rect{0, 0, 0, 0};
+    int resize_start_x = 0, resize_start_y = 0;
+    bool resize_pending = false;
+    uint64_t resize_last_ns = 0;
+    uint32_t edge_cursor = 0;
+    auto apply_resize = [&]() {
+        if (!resize_pending) return;
+        resize_pending = false;
+        const OknoGeometria::Prost g = resize_pending_rect;
+        if (g.x == window.x && g.y == window.y && g.w == window.w && g.h == window.h) return;
+        view.close_transient();
+        window.x = g.x; window.y = g.y; window.w = g.w; window.h = g.h;
+        window.clamp();
+        if (!gui_ustaw_geometrie_okna(window.x, window.y, window.w, window.h, 1))
+            model.set_status("Błąd: nie można zmienić rozmiaru okna.");
+        model.clamp_scroll(view.visible_rows());
+        view.draw_full(true);
+        resize_last_ns = gui_czas_monotoniczny_ns();
+    };
 
     while (!quit) {
         bws_zdarzenie event{};
-        if (!gui_czekaj_na_zdarzenie(&event)) continue;
+        if (resize_pending) {
+            if (!gui_czekaj_na_zdarzenie_z_timeoutem(&event, 1)) { apply_resize(); continue; }
+        } else if (!gui_czekaj_na_zdarzenie(&event)) continue;
         if(event.typ==BWS_ZDARZENIE_MOTYW_ZMIENIONY) {view.theme_refresh();continue;}
         if (event.typ == BWS_ZDARZENIE_EKRAN) {
             view.close_transient();
@@ -2854,6 +2903,27 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
             continue;
         }
+        if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH && resizing && left_button) {
+            OknoGeometria::Ograniczenia lim{};
+            lim.min_w = window.screen_w < MIN_W ? window.screen_w : MIN_W;
+            lim.min_h = work_h(window.screen_h) < MIN_H ? work_h(window.screen_h) : MIN_H;
+            lim.max_w = 2 * window.screen_w;
+            lim.max_h = 2 * work_h(window.screen_h);
+            resize_pending_rect = OknoGeometria::zmien_rozmiar(resize_start, resize_edges,
+                OknoGeometria::do_i32(int64_t(mx) - resize_start_x),
+                OknoGeometria::do_i32(int64_t(my) - resize_start_y), lim);
+            resize_pending = true;
+            const uint64_t now = gui_czas_monotoniczny_ns();
+            if (!now || !resize_last_ns || now < resize_last_ns || now - resize_last_ns >= 33000000ULL) apply_resize();
+            continue;
+        }
+        if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH && !dragging && !resizing && !item_drag_candidate && !left_button &&
+            !window.maximized && !window.minimized) {
+            const uint8_t edge = OknoGeometria::krawedz_w_punkcie(mx - window.x, my - window.y, window.w, window.h,
+                ui_skaluj(5, ui_skala_procent), ui_skaluj(14, ui_skala_procent));
+            const uint32_t shape = edge ? OknoGeometria::kursor_dla_krawedzi(edge) : 0;
+            if (shape != edge_cursor) { edge_cursor = shape; (void)gui_ustaw_kursor(shape); }
+        }
         if (event.typ == BWS_ZDARZENIE_MYSZ_RUCH && dragging && left_button) {
             window.x = mx - drag_x;
             window.y = my - drag_y;
@@ -2870,6 +2940,13 @@ extern "C" __attribute__((noreturn)) void _start() {
                 item_dragging = true;
             if (item_dragging)
                 (void)gui_aktualizuj_drag(item_drag_path, mx, my, false);
+            continue;
+        }
+        if (event.typ == BWS_ZDARZENIE_MYSZ_UP && resizing) {
+            resizing = false;
+            gui_ustaw_capture_myszy(false);
+            apply_resize();
+            view.register_drop_targets();
             continue;
         }
         if (event.typ == BWS_ZDARZENIE_MYSZ_UP && item_drag_candidate) {
@@ -2903,6 +2980,22 @@ extern "C" __attribute__((noreturn)) void _start() {
         if (event.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
             item_drag_candidate = false;
             item_dragging = false;
+            if (!window.maximized && !window.minimized) {
+                const uint8_t edge = OknoGeometria::krawedz_w_punkcie(mx - window.x, my - window.y, window.w, window.h,
+                    ui_skaluj(5, ui_skala_procent), ui_skaluj(14, ui_skala_procent));
+                if (edge) {
+                    view.close_transient();
+                    resizing = true;
+                    resize_edges = edge;
+                    resize_start = {window.x, window.y, window.w, window.h};
+                    resize_start_x = mx;
+                    resize_start_y = my;
+                    resize_pending = false;
+                    dragging = false;
+                    gui_ustaw_capture_myszy(true);
+                    continue;
+                }
+            }
             const gui_akcja_belki title_action = gui_hit_test_belki(
                 mx, my, window.x, window.y, window.w);
             if (title_action == GUI_BELKA_ZAMKNIJ) {

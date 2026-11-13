@@ -648,6 +648,20 @@ static int znajdz_nastepny_proces(
 
 } // namespace
 
+bool scheduler_czy_inny_gotowy() {
+    if (!pid_poprawny(aktualny_pid)) return false;
+    for (int krok = 1; krok < MAKS_PROCESOW; ++krok) {
+        const int kandydat = (aktualny_pid + krok) % MAKS_PROCESOW;
+        if (proces_moze_byc_uruchomiony(kandydat)) return true;
+    }
+    return false;
+}
+
+extern "C" uint64_t g_ostatni_bws;
+void scheduler_zarejestruj_odroczony_tick() {
+    gui_perf_deferred_tick(scheduler_czy_inny_gotowy(), g_ostatni_bws);
+}
+
 bool scheduler_czeka_w_sieci(int pid) {
     return pid>0 && pid<MAKS_PROCESOW && __atomic_load_n(&jawne_czekanie_sieci[pid],__ATOMIC_ACQUIRE);
 }

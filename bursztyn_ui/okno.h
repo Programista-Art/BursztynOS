@@ -8,6 +8,7 @@
 #include "menu_kontekstowe.h"
 #include "polecenie_ui.h"
 #include "bursztyn_gui.h"
+#include "okno_geometria.h"
 
 namespace BursztynUI {
 
@@ -68,7 +69,7 @@ public:
     }
 
     bool czy_wymaga_odrysowania() const {
-        return czy_brudne_ || !brudny_obszar_klienta_.czy_pusty() ||
+        return czy_brudne_ || ma_oczekujaca_geometrie_ || !brudny_obszar_klienta_.czy_pusty() ||
                (kontrolka_glowna_ && kontrolka_glowna_->czy_brudna()) ||
                popupy_.czy_brudny();
     }
@@ -193,19 +194,134 @@ public:
             int target_h = ui_skaluj(logiczna_wysokosc_, skala_dpi_.procent());
             szerokosc_ = target_w > work.szerokosc ? work.szerokosc : target_w;
             wysokosc_ = target_h > work.wysokosc ? work.wysokosc : target_h;
-        } else {
-            if (szerokosc_ > work.szerokosc) szerokosc_ = work.szerokosc;
-            if (wysokosc_ > work.wysokosc) wysokosc_ = work.wysokosc;
+            if (szerokosc_ < 1) szerokosc_ = 1;
+            if (wysokosc_ < 1) wysokosc_ = 1;
+            int max_x = work.prawy() - szerokosc_;
+            int max_y = work.dolny() - wysokosc_;
+            if (max_x < work.x) max_x = work.x;
+            if (max_y < work.y) max_y = work.y;
+            x_ = przytnij(x_, work.x, max_x);
+            y_ = przytnij(y_, work.y, max_y);
+            return;
         }
+        // Okno mozna rozciagnac poza ekran (do 2x ekranu, limit kompozytora) i
+        // przesunac czesciowo poza obszar roboczy; wymagamy tylko, by pasek
+        // tytulu pozostal uchwytny (odzyskanie po zmianie rozdzielczosci).
+        const int limit_w = work.szerokosc > 0 ? 2 * work.szerokosc : 1;
+        const int limit_h = work.wysokosc > 0 ? 2 * work.wysokosc : 1;
+        if (szerokosc_ > limit_w) szerokosc_ = limit_w;
+        if (wysokosc_ > limit_h) wysokosc_ = limit_h;
         if (szerokosc_ < 1) szerokosc_ = 1;
         if (wysokosc_ < 1) wysokosc_ = 1;
+        przytnij_pozycje_do_odzyskania(work);
+    }
 
-        int max_x = work.prawy() - szerokosc_;
-        int max_y = work.dolny() - wysokosc_;
-        if (max_x < work.x) max_x = work.x;
-        if (max_y < work.y) max_y = work.y;
-        x_ = przytnij(x_, work.x, max_x);
-        y_ = przytnij(y_, work.y, max_y);
+    // Pasek tytulu zawsze uchwytny: >= 96 px (skalowanych) w poziomie, gorna
+    // krawedz co najwyzej polowe paska nad obszarem roboczym.
+    void przytnij_pozycje_do_odzyskania(const Prostokat& work) {
+        const int belka = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
+        const OknoGeometria::Prost p = OknoGeometria::przytnij_ruch(
+            {x_, y_, szerokosc_, wysokosc_}, {work.x, work.y, work.szerokosc, work.wysokosc},
+            ui_skaluj(96, skala_dpi_.procent()), belka, belka / 2);
+        x_ = p.x;
+        y_ = p.y;
+    }
+
+    // ---- zmiana rozmiaru krawedziami i rogami -------------------------
+    bool czy_zmiana_rozmiaru() const { return czy_zmiana_rozmiaru_; }
+    // Aplikacje o ukladzie niestandardowym moga zablokowac zmiane rozmiaru.
+    void ustaw_zmiane_rozmiaru_dozwolona(bool dozwolona) { zmiana_rozmiaru_dozwolona_ = dozwolona; }
+    // Minimalny rozmiar w pikselach logicznych (domyslnie 320x200, ale nie
+    // wiecej niz rozmiar poczatkowy okna, zeby uklady stalych kontrolek byly bezpieczne).
+    void ustaw_minimalny_rozmiar(int lw, int lh) { min_logiczna_szerokosc_ = lw; min_logiczna_wysokosc_ = lh; }
+
+    void minimalny_rozmiar_pikseli(int& w, int& h) const {
+        int lw = min_logiczna_szerokosc_ > 0 ? min_logiczna_szerokosc_
+                 : (logiczna_szerokosc_ < 320 ? logiczna_szerokosc_ : 320);
+        int lh = min_logiczna_wysokosc_ > 0 ? min_logiczna_wysokosc_
+                 : (logiczna_wysokosc_ < 200 ? logiczna_wysokosc_ : 200);
+        w = ui_skaluj(lw, skala_dpi_.procent());
+        h = ui_skaluj(lh, skala_dpi_.procent());
+    }
+
+    uint8_t krawedz_w_punkcie_okna(int lokalny_x, int lokalny_y) const {
+        if (!zmiana_rozmiaru_dozwolona_ || czy_zmaksymalizowane_ || czy_zminimalizowane_) return 0;
+        return OknoGeometria::krawedz_w_punkcie(lokalny_x, lokalny_y, szerokosc_, wysokosc_,
+            ui_skaluj(5, skala_dpi_.procent()), ui_skaluj(14, skala_dpi_.procent()));
+    }
+
+    // Zwraca true, gdy kursor jest w strefie chwytania (kursor zmiany rozmiaru ustawiony).
+    bool aktualizuj_kursor_krawedzi(int lokalny_x, int lokalny_y) {
+        if (popupy_.czy_otwarty()) return false;
+        const uint8_t krawedz = krawedz_w_punkcie_okna(lokalny_x, lokalny_y);
+        if (krawedz) {
+            const uint32_t kursor = OknoGeometria::kursor_dla_krawedzi(krawedz);
+            if (kursor != kursor_krawedzi_) { kursor_krawedzi_ = kursor; (void)gui_ustaw_kursor(kursor); }
+            return true;
+        }
+        if (kursor_krawedzi_ != 0) { kursor_krawedzi_ = 0; (void)gui_ustaw_kursor(0); }
+        return false;
+    }
+
+    bool rozpocznij_zmiane_rozmiaru(int mx, int my) {
+        const uint8_t krawedz = krawedz_w_punkcie_okna(mx - x_, my - y_);
+        if (!krawedz) return false;
+        czy_zmiana_rozmiaru_ = true;
+        krawedzie_zmiany_ = krawedz;
+        geometria_startowa_ = {x_, y_, szerokosc_, wysokosc_};
+        start_zmiany_x_ = mx;
+        start_zmiany_y_ = my;
+        ma_oczekujaca_geometrie_ = false;
+        czy_przeciagane_ = false;
+        kontrolka_przechwytujaca_ = nullptr;
+        gui_ustaw_capture_myszy(true);
+        return true;
+    }
+
+    void obsluz_ruch_zmiany_rozmiaru(int mx, int my) {
+        OknoGeometria::Ograniczenia lim{};
+        int mw = 0, mh = 0;
+        minimalny_rozmiar_pikseli(mw, mh);
+        const Prostokat work = pobierz_obszar_roboczy();
+        lim.min_w = mw; lim.min_h = mh;
+        lim.max_w = work.szerokosc > 0 ? 2 * work.szerokosc : mw;
+        lim.max_h = work.wysokosc > 0 ? 2 * work.wysokosc : mh;
+        const OknoGeometria::Prost nowa = OknoGeometria::zmien_rozmiar(
+            geometria_startowa_, krawedzie_zmiany_,
+            OknoGeometria::do_i32(int64_t(mx) - start_zmiany_x_),
+            OknoGeometria::do_i32(int64_t(my) - start_zmiany_y_), lim);
+        // Pozycja krawedzi zakotwiczonej moze wyjsc poza ekran, ale pasek tytulu zostaje uchwytny.
+        const OknoGeometria::Prost p = OknoGeometria::przytnij_ruch(nowa,
+            {work.x, work.y, work.szerokosc, work.wysokosc}, ui_skaluj(96, skala_dpi_.procent()),
+            WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_, WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_ / 2);
+        oczekujaca_geometria_ = p;
+        ma_oczekujaca_geometrie_ = true;
+        czy_brudne_ = true;   // wymusza przejscie rysuj(), ktore zastosuje geometrie raz na klatke
+    }
+
+    // Wspolne dla klatki: wiele zdarzen ruchu daje jedna realokacje warstwy.
+    void zastosuj_oczekujaca_geometrie() {
+        if (!ma_oczekujaca_geometrie_) return;
+        ma_oczekujaca_geometrie_ = false;
+        const OknoGeometria::Prost g = oczekujaca_geometria_;
+        if (g.x == x_ && g.y == y_ && g.w == szerokosc_ && g.h == wysokosc_) return;
+        popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
+        x_ = g.x; y_ = g.y; szerokosc_ = g.w; wysokosc_ = g.h;
+        logiczna_szerokosc_ = ui_odskaluj(szerokosc_, skala_dpi_.procent());
+        logiczna_wysokosc_ = ui_odskaluj(wysokosc_, skala_dpi_.procent());
+        if (!g_tlum_operacje_systemowe)
+            gui_ustaw_geometrie_okna(x_, y_, szerokosc_, wysokosc_, 1);
+        brudny_obszar_klienta_ = Prostokat();
+        przelicz_uklad();
+        czy_brudne_ = true;
+    }
+
+    void zakoncz_zmiane_rozmiaru() {
+        if (!czy_zmiana_rozmiaru_) return;
+        czy_zmiana_rozmiaru_ = false;
+        krawedzie_zmiany_ = 0;
+        zastosuj_oczekujaca_geometrie();
+        popupy_.ustaw_geometrie_wlasciciela(Prostokat(x_, y_, szerokosc_, wysokosc_), pobierz_obszar_roboczy());
     }
 
     Kontrolka* kontrolka_glowna() const { return kontrolka_glowna_; }
@@ -377,6 +493,7 @@ public:
 
     void rysuj(KontekstRysowania& ctx, bool wymus = false) {
         if (czy_zminimalizowane_) return;
+        zastosuj_oczekujaca_geometrie();
         bool pelne = czy_brudne_ || wymus;
         if (!pelne && !czy_wymaga_odrysowania()) return;
         ObszaryBrudne regiony;
@@ -425,7 +542,7 @@ public:
 
     void minimalizuj() {
         popupy_.zamknij(PowodZamknieciaPopup::WlascicielZminimalizowany);
-        czy_przeciagane_ = false;
+        czy_przeciagane_ = false; czy_zmiana_rozmiaru_ = false; ma_oczekujaca_geometrie_ = false;
 #if BURSZTYN_DIAG_GEOM_TRACE
         int vx = 0, vy = 0, vw = 0, vh = 0;
         gui_pobierz_widoczna_geometrie(&vx, &vy, &vw, &vh);
@@ -444,7 +561,7 @@ public:
 
     void przelacz_maksymalizacje() {
         popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
-        czy_przeciagane_ = false;
+        czy_przeciagane_ = false; czy_zmiana_rozmiaru_ = false; ma_oczekujaca_geometrie_ = false;
         if (!g_tlum_operacje_systemowe) {
             gui_ustaw_capture_myszy(false);
         }
@@ -518,7 +635,7 @@ public:
                 const uint32_t scale=gui_pobierz_monitor(0,&current)?current.scale_x1000/10:surowe_zdarzenie.kod;
                 if (!ui_skala_poprawna(scale)) break;
                 popupy_.zamknij(PowodZamknieciaPopup::ZmianaGeometrii);
-                zwolnij_przechwycenie_myszy(); czy_przeciagane_ = false; kontrolka_najechana_ = nullptr;
+                zwolnij_przechwycenie_myszy(); czy_przeciagane_ = false; czy_zmiana_rozmiaru_ = false; ma_oczekujaca_geometrie_ = false; kontrolka_najechana_ = nullptr;
                 ui_skala_procent = scale;
                 skala_dpi_ = ui_skala();
                 if (czy_zmaksymalizowane_) {
@@ -557,17 +674,18 @@ public:
                     pe.timestamp = surowe_zdarzenie.timestamp;
                     if (popupy_.obsluz_ruch(pe)) return;
                 }
+                if (czy_zmiana_rozmiaru_) {
+                    obsluz_ruch_zmiany_rozmiaru(mx, my);
+                    return;
+                }
                 if (czy_przeciagane_) {
-                    int nx = mx - przesuniecie_ciagniecia_x_;
-                    int ny = my - przesuniecie_ciagniecia_y_;
-
                     Prostokat work = pobierz_obszar_roboczy();
-                    int max_pos_x = work.prawy() - szerokosc_;
-                    int max_pos_y = work.dolny() - wysokosc_;
-                    if (max_pos_x < work.x) max_pos_x = work.x;
-                    if (max_pos_y < work.y) max_pos_y = work.y;
-                    nx = przytnij(nx, work.x, max_pos_x);
-                    ny = przytnij(ny, work.y, max_pos_y);
+                    const int stary_x = x_, stary_y = y_;
+                    x_ = static_cast<int>(OknoGeometria::do_i32(int64_t(mx) - przesuniecie_ciagniecia_x_));
+                    y_ = static_cast<int>(OknoGeometria::do_i32(int64_t(my) - przesuniecie_ciagniecia_y_));
+                    przytnij_pozycje_do_odzyskania(work);
+                    const int nx = x_, ny = y_;
+                    x_ = stary_x; y_ = stary_y;
 
                     if (nx != x_ || ny != y_) {
                         x_ = nx;
@@ -580,6 +698,7 @@ public:
                     return;
                 }
 
+                if (!kontrolka_przechwytujaca_ && aktualizuj_kursor_krawedzi(lokalny_x, lokalny_y)) break;
                 if (kontrolka_przechwytujaca_) {
                     ZdarzenieMyszki me;
                     me.typ = TypZdarzenia::RuchMyszy;
@@ -623,6 +742,7 @@ public:
                     pe.timestamp = surowe_zdarzenie.timestamp;
                     if (popupy_.obsluz_wcisniecie(pe)) return;
                 }
+                if (surowe_zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN && rozpocznij_zmiane_rozmiaru(mx, my)) return;
                 if (my >= y_ && my < y_ + belka_h && mx >= x_ && mx < x_ + szerokosc_) {
                     gui_akcja_belki akcja = gui_hit_test_belki(mx, my, x_, y_, szerokosc_);
                     if (akcja == GUI_BELKA_ZAMKNIJ) {
@@ -714,6 +834,10 @@ public:
                 }
                 // Zwolnienie przycisku zawsze kończy systemowe i lokalne capture.
                 gui_ustaw_capture_myszy(false);
+                if (czy_zmiana_rozmiaru_) {
+                    zakoncz_zmiane_rozmiaru();
+                    break;
+                }
                 if (czy_przeciagane_) {
                     czy_przeciagane_ = false;
                 }
@@ -961,6 +1085,17 @@ protected:
     bool czy_przeciagane_{false};
     int przesuniecie_ciagniecia_x_{0};
     int przesuniecie_ciagniecia_y_{0};
+    bool czy_zmiana_rozmiaru_{false};
+    bool zmiana_rozmiaru_dozwolona_{true};
+    uint8_t krawedzie_zmiany_{0};
+    uint32_t kursor_krawedzi_{0};
+    OknoGeometria::Prost geometria_startowa_{0, 0, 0, 0};
+    OknoGeometria::Prost oczekujaca_geometria_{0, 0, 0, 0};
+    bool ma_oczekujaca_geometrie_{false};
+    int start_zmiany_x_{0};
+    int start_zmiany_y_{0};
+    int min_logiczna_szerokosc_{0};
+    int min_logiczna_wysokosc_{0};
     uint32_t* bufor_regionu_{nullptr};
     size_t pojemnosc_regionu_{0};
     bool czy_brudne_{true};

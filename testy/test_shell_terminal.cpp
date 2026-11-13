@@ -62,6 +62,7 @@ bool clipboard_set(const char* mime,const void* data,uint64_t n) {
     assert(!strcmp(mime,"text/plain"));assert(n);copied=static_cast<const char*>(data);return true;
 }
 void gui_ustaw_capture_myszy(bool) {}
+uint64_t gui_czas_monotoniczny_ns() { return 0; }
 bool gui_ustaw_geometrie_okna(int,int,int,int,int) { return true; }
 void bws_przesun_warstwe(int,int) {}
 bool gui_minimalizuj_okno() { return true; }

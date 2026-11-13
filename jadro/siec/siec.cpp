@@ -50,6 +50,7 @@
  */
 
 #include "siec.h"
+#include "gui_runtime_diag.h"
 #include "http_origin.h"
 #include "scheduler.h"
 #include "network_lease.h"
@@ -77,12 +78,52 @@ void wypisz_log(
  * ========================================================================= */
 
 static NetworkLease operacja_sieci;
+#if defined(BURSZTYN_DIAG_TLS_COST) && BURSZTYN_DIAG_TLS_COST
+extern "C" void tls_diag_symuluj_handshake();
+bool siec_operacja_rozpocznij(){
+    const bool ok=operacja_sieci.acquire(aktualny_pid);
+    // diag: model kosztu handshake'u na kazde zadanie; 8 powtorzen = ~10 handshake'ow
+    // sieci (TLS 1.2 ECDHE: gen+shared+weryfikacja certyfikatu) skondensowane w
+    // jednym zadaniu, zeby efekt byl mierzalny na krotkim fixture'ze.
+    if(ok)for(int i=0;i<8;++i)tls_diag_symuluj_handshake();
+    return ok;
+}
+#else
 bool siec_operacja_rozpocznij(){return operacja_sieci.acquire(aktualny_pid);}
+#endif
 void siec_operacja_zakoncz(){(void)operacja_sieci.release(aktualny_pid);}
 bool siec_operacja_trwa(){return operacja_sieci.busy();}
 void siec_odstap_w_czekaniu(){
     if(operacja_sieci.owned_by(aktualny_pid))scheduler_odstap_w_czekaniu_sieci();
     else asm volatile("pause" ::: "memory");
+}
+
+/*
+ * Kooperacyjny punkt oddawania CPU dla dlugich obliczen kryptograficznych w
+ * jadrze (mbedtls bignum). Handshake TLS to dziesiatki-setki ms bez przerwy w
+ * jednym syscallu, a scheduler nie przelacza procesu w srodku SYSCALL; bez tego
+ * Menedzer Okien i kursor czekaja na kazdy handshake. Oddajemy CPU co tik zegara
+ * (nie czesciej), i tylko gdy jakis inny proces jest gotowy - dzieki temu
+ * handshake na bezczynnym systemie nie traci czasu na zbedny HLT. Oddawanie
+ * dziala tylko dla wlasciciela dzierzawy sieci (siec_odstap_w_czekaniu).
+ */
+extern "C" void bursztyn_crypto_yield_point(void) {
+#if defined(BURSZTYN_DIAG_NO_YIELD) && BURSZTYN_DIAG_NO_YIELD
+    return;   // tylko A/B w pomiarach: zachowanie sprzed poprawki
+#endif
+    static uint64_t ostatni_tik = 0;
+    const uint64_t tik = scheduler_pobierz_tick();
+    if (tik == ostatni_tik) return;
+    ostatni_tik = tik;
+    if (!operacja_sieci.owned_by(aktualny_pid) || !scheduler_czy_inny_gotowy()) return;
+#if BURSZTYNDIAGGUIRUNTIME
+    {
+        uint64_t rflags = 0;
+        asm volatile("pushfq; popq %0" : "=r"(rflags));
+        gui_perf_add(0, (rflags & (1ULL << 9)) ? GP_YIELD_HLT : GP_YIELD_SKIP);
+    }
+#endif
+    scheduler_odstap_w_czekaniu_sieci();
 }
 
 namespace {

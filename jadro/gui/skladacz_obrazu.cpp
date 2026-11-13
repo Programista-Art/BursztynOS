@@ -132,6 +132,10 @@ uint64_t rozmiar_alokacji_warstwy[
 bool widocznosc_warstwy[MAKS_WARSTW] = {};
 // Registration permits drawing; only an explicit completed frame permits composition.
 bool klatka_gotowa[MAKS_WARSTW] = {};
+// Po zmianie rozmiaru zywego okna: warstwa niesie skopiowana, ostatnio opublikowana
+// tresc, wiec jest skladana, zanim aplikacja opublikuje klatke w nowym rozmiarze.
+bool tresc_zachowana[MAKS_WARSTW] = {};
+bool g_zachowaj_tresc_przy_zmianie = false;
 uint32_t generacja_okna[MAKS_WARSTW] = {};
 uint32_t stan_okna[MAKS_WARSTW] = {};
 char tytul_okna[MAKS_WARSTW][48] = {};
@@ -640,7 +644,7 @@ bool warstwa_bufor_spojny(
 
 bool warstwa_ma_spojny_bufor(int indeks) {
     return pid_poprawny(indeks) && widocznosc_warstwy[indeks] &&
-           klatka_gotowa[indeks] && warstwa_bufor_spojny(indeks);
+           (klatka_gotowa[indeks] || tresc_zachowana[indeks]) && warstwa_bufor_spojny(indeks);
 }
 
 /* =========================================================================
@@ -963,15 +967,15 @@ bool wymiary_mieszcza_sie_na_ekranie(
     }
 
     /*
-     * Powierzchnia wieksza od fizycznego ekranu nie wnosi obecnie wartosci,
-     * a moze bardzo latwo wyczerpac 16-MiB heap kernela.
-     *
-     * Po wprowadzeniu scrollowalnych/offscreen surfaces polityke mozna
-     * rozszerzyc razem z dedykowanym allocatorem grafiki.
+     * Okno moze byc wieksze od ekranu (uzytkownik rozciaga je poza krawedz, a
+     * kompozytor przycina do framebuffera), ale nie dowolnie: do 2x wymiaru
+     * ekranu na osi. Bufory warstw pochodza z dedykowanego allocatora grafiki
+     * (64 MiB na slot), wiec 2x2 dla 2560x1440 (59 MiB) miesci sie w slocie;
+     * calkowita pamiec warstw nadal ogranicza MAKS_PAMIEC_WARSTW.
      */
     return
-        szer <= ekran_szer &&
-        wys <= ekran_wys;
+        szer <= 2 * ekran_szer &&
+        wys <= 2 * ekran_wys;
 }
 
 void wyczysc_bufor_pikseli(
@@ -1085,6 +1089,10 @@ int utworz_warstwe(
         skladacz_obrazu_oznacz_dirty_rect(p_geom.x,p_geom.y,p_geom.width,p_geom.height);
     }
     const bool nowe_okno = !warstwa_bufor_spojny(pid);
+    // Zmiana rozmiaru zywego okna (zmien_geometrie_warstwy): zachowujemy
+    // ostatnia opublikowana tresc (lewy gorny rog) i widocznosc, wiec okno nie
+    // znika na czas ponownego rysowania (brak migniecia przy rozciaganiu).
+    const bool zachowaj_tresc = g_zachowaj_tresc_przy_zmianie && !nowe_okno && (klatka_gotowa[pid] || tresc_zachowana[pid]);
 
     const uint64_t stare_bajty =
         __atomic_load_n(
@@ -1149,6 +1157,7 @@ int utworz_warstwe(
         );
 
         klatka_gotowa[pid] = false;
+        tresc_zachowana[pid] = false;
         widocznosc_warstwy[pid] = true;
         if (nowe_okno) {
             if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
@@ -1207,6 +1216,15 @@ int utworz_warstwe(
         nowy_bufor,
         liczba_pikseli
     );
+    if (zachowaj_tresc && stary_bufor && stary_szer > 0 && stary_wys > 0) {
+        const int kw = stary_szer < szer ? stary_szer : szer;
+        const int kh = stary_wys < wys ? stary_wys : wys;
+        for (int row = 0; row < kh; ++row) {
+            const uint32_t* from = stary_bufor + static_cast<size_t>(row) * static_cast<size_t>(stary_szer);
+            uint32_t* to = nowy_bufor + static_cast<size_t>(row) * static_cast<size_t>(szer);
+            for (int col = 0; col < kw; ++col) to[col] = from[col];
+        }
+    }
 
     /*
      * Dopiero teraz odpublikowujemy stara warstwe.
@@ -1254,6 +1272,7 @@ int utworz_warstwe(
     );
 
     klatka_gotowa[pid] = false;
+    tresc_zachowana[pid] = zachowaj_tresc;
     widocznosc_warstwy[pid] = true;
     if (nowe_okno) {
         if (++generacja_okna[pid] == 0) ++generacja_okna[pid];
@@ -1384,7 +1403,10 @@ bool zmien_geometrie_warstwy(
 
     /* utworz_warstwe najpierw alokuje i zeruje nowy bufor, a dopiero potem
      * atomowo odpublikowuje stary. Jego sciezka bledu nie zmienia warstwy. */
-    if (utworz_warstwe(pid, x, y, szer, wys, z_order) < 0)
+    g_zachowaj_tresc_przy_zmianie = true;
+    const int wynik_zmiany = utworz_warstwe(pid, x, y, szer, wys, z_order);
+    g_zachowaj_tresc_przy_zmianie = false;
+    if (wynik_zmiany < 0)
         return false;
 
     widocznosc_warstwy[pid] = widoczna;
@@ -1488,6 +1510,7 @@ void usun_warstwe(
     );
     widocznosc_warstwy[pid] = false;
     klatka_gotowa[pid] = false;
+    tresc_zachowana[pid] = false;
     stan_okna[pid] = GUI_OKNO_NORMALNE;
     tytul_okna[pid][0] = '\0';
 
@@ -1730,7 +1753,12 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     int x1=w.x+w.width<r.x+r.width?w.x+w.width:r.x+r.width;
     int y1=w.y+w.height<r.y+r.height?w.y+w.height:r.y+r.height;
     if(x0>=x1||y0>=y1||!w.buffer)return;
-    const bool decorated=ma_dekoracje(w.pid) && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
+    const bool zywa_warstwa=w.pid>0 && w.pid<MAKS_WARSTW && w.buffer==tablica_warstw[w.pid].bufor_pikseli;
+    // Wlasciciel jest w trakcie rysowania: skladamy ostatnia opublikowana klatke.
+    const uint32_t* const cien=(zywa_warstwa&&w.z!=0&&bws_gui_cien_warstwy)?bws_gui_cien_warstwy(w.pid,size_t(w.width)*size_t(w.height)*sizeof(uint32_t)):nullptr;
+    if(w.z!=0&&zywa_warstwa&&bws_gui_warstwa_w_trakcie_rysowania&&bws_gui_warstwa_w_trakcie_rysowania(w.pid))gui_perf_add(0,cien?GP_SHADOW_COMPOSE:GP_TORN_COMPOSE);
+    const uint32_t* const bufor=cien?cien:w.buffer;
+    const bool decorated=ma_dekoracje(w.pid) && zywa_warstwa;
     const bool desktop=w.z==0;
     const BursztynMotyw* desktop_theme=desktop?motyw_pobierz_aktywny():nullptr;
     const WindowShape shape(w.width,w.height,decorated && stan_okna[w.pid]==GUI_OKNO_ZMAKSYMALIZOWANE,ekran_skala(),*motyw_pobierz_aktywny());
@@ -1738,7 +1766,7 @@ void zloz_snapshot_region(const LayerRenderInfo& w,const GuiDirtyRect& r) {
     for(int py=y0;py<y1;++py){
         uint64_t first=(uint64_t)(py-w.y)*(uint32_t)w.width+(uint32_t)(x0-w.x);
         uint64_t len=(uint32_t)row_w;if(first>w.pixels||len>w.pixels-first)return;
-        const uint32_t* src=w.buffer+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
+        const uint32_t* src=bufor+first;uint32_t* dst=grafika_pobierz_wiersz_backbuffer(py)+x0;
         // The root surface is usually empty above the wallpaper. Skip whole
         // transparent groups while retaining straight alpha for actual ink.
         if(desktop){
@@ -2345,10 +2373,14 @@ uint64_t skladacz_obrazu_id_okna(int pid) {
            static_cast<uint32_t>(pid);
 }
 
+// Weak: testy hosta linkuja kompozytor bez loadera/grafiki.
+extern "C" __attribute__((weak)) void loader_perf_pierwsza_klatka(int pid);
 bool skladacz_obrazu_publikuj_klatke(int pid) {
     if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid)) return false;
     if (klatka_gotowa[pid]) return false;
     klatka_gotowa[pid] = true;
+    tresc_zachowana[pid] = false;
+    if (loader_perf_pierwsza_klatka) loader_perf_pierwsza_klatka(pid);
     if (widocznosc_warstwy[pid]) {
         const auto& w = tablica_warstw[pid];
         skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);

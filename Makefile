@@ -274,6 +274,24 @@ ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_LOADER_PERF)),)
 	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_LOADER_PERF=1
 endif
 
+# Pomiar kosztu kryptografii handshake'u w gosciu ([TLS COST] w logu szeregowym).
+BURSZTYN_DIAG_TLS_COST ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_TLS_COST)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_TLS_COST=1
+endif
+
+# A/B pomiarow: wylacza kooperacyjne oddawanie CPU w obliczeniach TLS.
+BURSZTYN_DIAG_NO_YIELD ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_NO_YIELD)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_NO_YIELD=1
+endif
+
+# A/B pomiarow: wylacza cien warstwy (tear-free prezentacje).
+BURSZTYN_DIAG_NO_SHADOW ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_NO_SHADOW)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_NO_SHADOW=1
+endif
+
 # Diagnostyczny 16 KiB stos jadra (reprodukcja historycznego overflow).
 # Wylacznie do kontrolowanych testow: make iso BURSZTYN_DIAG_STOS16K=1
 BURSZTYN_DIAG_STOS16K ?= 0
@@ -1987,9 +2005,9 @@ GUI_PERF_BUILD_CONFIG := .build-config/gui-perf
 gui-perf-build-config-force:
 $(GUI_PERF_BUILD_CONFIG): gui-perf-build-config-force
 	@mkdir -p .build-config
-	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF) tlscost=$(BURSZTYN_DIAG_TLS_COST) noyield=$(BURSZTYN_DIAG_NO_YIELD) noshadow=$(BURSZTYN_DIAG_NO_SHADOW)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
 
-scheduler.o syscalls.o grafika.o skladacz_obrazu.o loader.o kernel.o virtio_input.o: jadro/gui/gui_runtime_diag.h $(GUI_PERF_BUILD_CONFIG)
+scheduler.o syscalls.o grafika.o skladacz_obrazu.o loader.o kernel.o virtio_input.o idt.o tls.o siec.o: jadro/gui/gui_runtime_diag.h $(GUI_PERF_BUILD_CONFIG)
 shell_tmp.o: programy/shell/shell_runtime_diag.h
 
 virtio_input.o: jadro/gui/gui_runtime_diag.h
@@ -3001,6 +3019,18 @@ bench-bsf22: $(BROTLI_BENCH_OBJECTS)
 
 # Kernel compressed application blobs (jadro/rdzen/blob_skompresowany.h):
 # decoder vs zlib on every built application binary + corruption tests.
+.PHONY: test-window-geometry-host
+test-window-geometry-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_okno_geometria.cpp -o .bsf-test/oknogeo
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/oknogeo
+
+.PHONY: test-launch-policy-host
+test-launch-policy-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Ijadro/bws testy/test_uruchamianie_polityka.cpp -o .bsf-test/launchpolicy
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/launchpolicy
+
 .PHONY: test-kernel-blobz-host
 test-kernel-blobz-host:
 	@mkdir -p .bsf-test

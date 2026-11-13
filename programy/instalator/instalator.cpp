@@ -246,7 +246,7 @@ public:
 };
 }
 extern "C" __attribute__((noreturn)) void _start(){
-    AplikacjaGUI app;Okno window("Instalator Bursztyn OS",840,570);
+    AplikacjaGUI app;Okno window("Instalator Bursztyn OS",840,570);window.ustaw_zmiane_rozmiaru_dozwolona(false); // kreator o stalym ukladzie
     auto*wizard=new Wizard(&window);window.ustaw_kontrolke_glowna(wizard);wizard->start();window.wysrodkuj();
     app.uruchom(window);gui_zakoncz_aplikacje();
 }

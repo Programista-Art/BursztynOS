@@ -58,6 +58,7 @@
 #include <stdbool.h>
 
 #include "pzb.h"
+#include "uruchamianie_polityka.h"
 #include "tapety_format.h"
 #include "zegar-rtc.h"
 #include "grafika.h"
@@ -1790,17 +1791,22 @@ __attribute__((noinline)) uint64_t bws_rtc(
  * URUCHAMIANIE PROGRAMU
  * ========================================================================= */
 
-__attribute__((noinline)) uint64_t bws_uruchom(
+uint8_t g_blad_uruchomienia[PZB_MAKS_PROCESOW] = {};
+
+__attribute__((noinline)) uint64_t bws_uruchom_impl(
     proces_t& rodzic,
     uint64_t arg1,
-    uint64_t arg2
+    uint64_t arg2,
+    uint8_t& kod
 ) {
+    kod = uruchamianie::BLAD_UPRAWNIENIE;
     if (!proces_ma_prawo(
             rodzic,
             PRAWO_URUCHOM_PROGRAM)) {
 
         return 0;
     }
+    kod = uruchamianie::BLAD_ARGUMENT;
 
     char sciezka[
         MAX_SCIEZKA_PROGRAMU_BWS] = {};
@@ -1871,15 +1877,37 @@ __attribute__((noinline)) uint64_t bws_uruchom(
     // Only the trusted system manager can grant display settings privileges.
     if(rowna_sciezka(sciezka,"/programy/ekran.cebula/ekran.bur")) {
         if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
-            !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG))return 0;
+            !pzb_ma_prawa(&rodzic,PRAWO_SYSTEM_CONFIG)){kod=uruchamianie::BLAD_ZAUFANIE;return 0;}
         poziom_dziecka=PZB_ZAUFANE;wymagane=PRAWO_GUI|PRAWO_SYSTEM_CONFIG;
+    }
+    /*
+     * Wbudowane aplikacje systemowe o podwyzszonym zaufaniu (Ustawienia,
+     * Diagnostyka, Test dzwieku, Aktualizacje): poziom i prawa pochodza z
+     * kernelowej tablicy, nie z manifestu na dysku, wiec Eksplorator (i kazdy
+     * rodzic z PRAWO_URUCHOM_PROGRAM) uruchamia je tak samo jak pulpit, bez
+     * wlasnych podwyzszonych uprawnien. Obce sciezki nie sa tu rozpoznawane.
+     */
+    const auto* aplikacja_systemowa =
+        uruchamianie::znajdz_aplikacje_systemowa(sciezka);
+    const bool delegowane = aplikacja_systemowa &&
+        uruchamianie::rodzic_moze_delegowac(
+            rodzic.poziom_zaufania, znane_prawa(rodzic));
+    // Rodzic bez pelnego zaufania: plik musi byc identyczny z wbudowanym wzorcem.
+    const bool wymagaj_wbudowanego = delegowane &&
+        !(pzb_ma_co_najmniej_poziom(&rodzic, PZB_ZAUFANE) &&
+          pzb_ma_prawa(&rodzic, PRAWO_SYSTEM_CONFIG));
+    if (delegowane) {
+        poziom_dziecka = aplikacja_systemowa->poziom;
+        wymagane = aplikacja_systemowa->prawa;
+        prawa_dziecka |= aplikacja_systemowa->prawa;
     }
     // Walidacja manifestu opis.aplikacji z paczki .cebula
     PakietManifest manifest{};
-    if (pakiet_wczytaj_manifest(sciezka, &manifest)) {
+    if (!delegowane && pakiet_wczytaj_manifest(sciezka, &manifest)) {
         if (manifest.poziom_zaufania < PZB_UZYTKOWNIK || (manifest.uprawnienia & PRAWO_SYSTEM_CONFIG)) {
             if (!pzb_ma_co_najmniej_poziom(&rodzic, PZB_ZAUFANE) ||
                 !pzb_ma_prawa(&rodzic, PRAWO_SYSTEM_CONFIG)) {
+                kod = uruchamianie::BLAD_ZAUFANIE;
                 return 0;
             }
         }
@@ -1887,12 +1915,12 @@ __attribute__((noinline)) uint64_t bws_uruchom(
         wymagane = manifest.uprawnienia;
         prawa_dziecka |= manifest.uprawnienia;
     }
-    if(rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
+    if(!delegowane && rowna_sciezka(sciezka,"/programy/aktualizacje.cebula/aktualizacje.bur")) {
 #if BURSZTYN_OTA_TRACE
         SerialLog("[OTA TRACE] Launching aktualizacje app\n");
 #endif
         if(!pzb_ma_co_najmniej_poziom(&rodzic,PZB_ZAUFANE)||
-            !pzb_ma_prawa(&rodzic,PRAWO_GUI))return 0;
+            !pzb_ma_prawa(&rodzic,PRAWO_GUI)){kod=uruchamianie::BLAD_ZAUFANIE;return 0;}
         poziom_dziecka=PZB_USLUGI;
         wymagane=PRAWO_GUI|PRAWO_PLIKI_CZYTAJ|PRAWO_PLIKI_ZAPISZ|PRAWO_SYSTEM_CONFIG|PRAWO_SIEC;
     }
@@ -1919,20 +1947,44 @@ __attribute__((noinline)) uint64_t bws_uruchom(
         const int istniejacy = loader_przekaz_argument_uruchomionemu(
             sciezka, argument);
         if (istniejacy > 0) {
+            kod = uruchamianie::BLAD_BRAK;
             bws_zdarzenie zdarzenie{};
             zdarzenie.typ = BWS_ZDARZENIE_OTWORZ_PLIK;
             zdarzenie.timestamp = scheduler_pobierz_tick();
             return scheduler_dodaj_zdarzenie(istniejacy, &zdarzenie)
                 ? 1ULL : 0ULL;
         }
-        return bws_uruchom_program_z_pliku_z_argumentem(
-                   sciezka, poziom_dziecka, prawa_dziecka, false, argument)
-            ? 1ULL : 0ULL;
+        const bool ok = wymagaj_wbudowanego
+            ? bws_uruchom_program_wbudowany(sciezka, poziom_dziecka, prawa_dziecka, false, argument)
+            : bws_uruchom_program_z_pliku_z_argumentem(
+                sciezka, poziom_dziecka, prawa_dziecka, false, argument);
+        kod = loader_ostatni_blad();
+        return ok ? 1ULL : 0ULL;
     }
 
-    return bws_uruchom_program_z_pliku(
-               sciezka, poziom_dziecka, prawa_dziecka, false)
-        ? 1ULL : 0ULL;
+    const bool ok = wymagaj_wbudowanego
+        ? bws_uruchom_program_wbudowany(sciezka, poziom_dziecka, prawa_dziecka, false, nullptr)
+        : bws_uruchom_program_z_pliku(
+            sciezka, poziom_dziecka, prawa_dziecka, false);
+    kod = loader_ostatni_blad();
+    return ok ? 1ULL : 0ULL;
+}
+
+__attribute__((noinline)) uint64_t bws_uruchom(
+    proces_t& rodzic,
+    uint64_t arg1,
+    uint64_t arg2
+) {
+    uint8_t kod = uruchamianie::BLAD_NIEZNANY;
+    const uint64_t wynik = bws_uruchom_impl(rodzic, arg1, arg2, kod);
+    if (rodzic.pid < PZB_MAKS_PROCESOW)
+        g_blad_uruchomienia[rodzic.pid] = wynik ? uruchamianie::BLAD_BRAK : kod;
+    return wynik;
+}
+
+/* BWS 99: kod przyczyny ostatniego nieudanego BWS 10 danego procesu. */
+__attribute__((noinline)) uint64_t bws_ostatni_blad_uruchomienia(proces_t& proces) {
+    return proces.pid < PZB_MAKS_PROCESOW ? g_blad_uruchomienia[proces.pid] : 0;
 }
 
 /* =========================================================================
@@ -3251,6 +3303,9 @@ static uint64_t obsluga_wywolan_systemowych_impl(
     if (nr_funkcji == BWS_HTTP64 || nr_funkcji == BWS_HTTPS64)
         return bws_http_common(proces, nr_funkcji == BWS_HTTPS64,
             arg1, arg2, arg3, arg4, true);
+    if (nr_funkcji == 99) return UINT64_MAX;   // zarezerwowany (regresja Bug #1)
+    if (nr_funkcji == BWS_OSTATNI_BLAD_URUCHOMIENIA)
+        return bws_ostatni_blad_uruchomienia(proces);
     if (nr_funkcji == BWS_ZAPISZ_FRAGMENT_PLIKU)
         return bws_zapisz_fragment_pliku(proces, arg1, arg2, arg3, arg4);
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&

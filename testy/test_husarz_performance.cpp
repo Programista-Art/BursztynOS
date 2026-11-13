@@ -34,10 +34,14 @@ int main(){
     CHECK(diagnostic_driver.cpu>0 && diagnostic_stats.duration[unsigned(Stage::Html)]>0);
     WorkDriver budget_driver;budget_driver.allow_clock=false;budget_driver.clock=budget_clock;
     {auto task=diagnostic_timing(diagnostic_stats);
-        CHECK(!task.step(budget_driver) && budget_driver.units==ClockPollWork);
+        // Pipeline jobs (allow_clock=false, native RDTSC clock) poll every
+        // NativeClockPollWork units so the 2 ms wall budget holds when one unit
+        // costs ~0.1-0.5 ms (TCG); jobs on the syscall perf clock keep ClockPollWork.
+        CHECK(!task.step(budget_driver) && budget_driver.units==NativeClockPollWork);
         while(!task.step(budget_driver)){};
     }
-    CHECK(budget_driver.maximum==ClockPollWork);
+    CHECK(budget_driver.maximum==NativeClockPollWork);
+    CHECK(NativeClockPollWork<ClockPollWork && NativeClockPollWork>=1);
     perf_clock=nullptr;
     WorkClock timer;timer.sample(1000000,3000000);CHECK(!timer.valid);timer.sample(11000000,33000000);CHECK(timer.valid);CHECK(timer.read(36000000)==12000000);
     timer.sample(21000000,1000);CHECK(!timer.valid);

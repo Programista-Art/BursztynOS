@@ -183,6 +183,19 @@ struct AplikacjaPulpitu {int x,y;TypIkonyAplikacji typ_ikony;};
 void rysuj_ikone_aplikacji(const AplikacjaPulpitu&);
 void uruchom_lub_aktywuj(const char*,const char*);
 
+// Natychmiastowa informacja zwrotna po kliknieciu ikony: kursor "zajety" do
+// pierwszego okna uruchomionej aplikacji (zdarzenie OKNO_POKAZANE) albo 3 s.
+bool g_kursor_zajety=false;
+uint64_t g_kursor_zajety_od=0;
+void kursor_zajety_wlacz(){
+    g_kursor_zajety=true;g_kursor_zajety_od=gui_czas_monotoniczny_ns();
+    (void)gui_ustaw_kursor(GUI_CURSOR_WAIT);
+}
+void kursor_zajety_wylacz(){
+    if(!g_kursor_zajety)return;
+    g_kursor_zajety=false;(void)gui_ustaw_kursor(GUI_CURSOR_ARROW);
+}
+
 struct WpisPulpitu {
     char nazwa[PULPIT_NAZWA_CAP];
     bool folder;
@@ -2167,7 +2180,7 @@ void uruchom_program_gui(const char* sciezka) {
     // implementacja w grafika.cpp uzywa jednej globalnej flagi, a aplikacje
     // GUI i tak ustawiaja ten tryb na true po starcie.
     gui_ustaw_przejecie_myszy(true);
-    bws_wywolaj(10, (uint64_t)sciezka);
+    if (bws_wywolaj(10, (uint64_t)sciezka) == 1ULL) kursor_zajety_wlacz();
 }
 
 void otworz_wpis_pulpitu(int indeks) {
@@ -2661,6 +2674,11 @@ extern "C" __attribute__((noreturn)) void _start() {
         const bool lifecycle =
             zdarzenie.typ >= BWS_ZDARZENIE_OKNO_UTWORZONE &&
             zdarzenie.typ <= BWS_ZDARZENIE_OKNO_TYTUL;
+        if (g_kursor_zajety) {
+            const uint64_t teraz=gui_czas_monotoniczny_ns();
+            if (zdarzenie.typ==BWS_ZDARZENIE_OKNO_POKAZANE || (teraz && g_kursor_zajety_od && teraz-g_kursor_zajety_od>3000000000ULL))
+                kursor_zajety_wylacz();
+        }
         if (lifecycle || sygnatura_okien() != stara_sygnatura) {
             RysujTaskbar();
             wm_gui_odswiez();

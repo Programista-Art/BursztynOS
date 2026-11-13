@@ -54,13 +54,19 @@ struct Suspend {
 #define HUSARZ_PROGRESS(s,c,n) ((void)0)
 #endif
 constexpr unsigned MaxSliceWork=2048;
+// Pipeline jobs use the calibrated user-mode RDTSC clock (a few cycles), so they
+// poll often enough that the 2 ms wall budget is honoured even when one unit
+// costs ~0.1-0.5 ms (TCG, slow hosts); measured overshoot with 128: 55-105 ms
+// per slice. Jobs that fall back to perf_clock (a BWS60 syscall, perf builds
+// only: allow_clock) keep the coarse interval.
 constexpr unsigned ClockPollWork=128;
+constexpr unsigned NativeClockPollWork=16;
 struct WorkPoint {
     uint32_t units;
     static bool poll_clock(WorkDriver &w)noexcept {
         // The calibrated budget clock is user-mode RDTSC, so poll in small
         // work increments without putting BWS60 syscalls in hot loops.
-        w.next_clock=w.units+ClockPollWork;return w.clock()-w.started>=2000000;
+        w.next_clock=w.units+(w.allow_clock?ClockPollWork:NativeClockPollWork);return w.clock()-w.started>=2000000;
     }
     bool await_ready()const noexcept {
         auto &w=*running_work;
@@ -141,7 +147,7 @@ struct Work {
         void *old_context=perf_context;perf_context=&w;
         perf_context_time=[](void *p)->uint64_t{auto &v=*static_cast<WorkDriver*>(p);return v.cpu+(v.active&&v.perf_started&&perf_clock?perf_clock()-v.perf_started:0);};
 #endif
-        auto *previous=running_work;running_work=&w;w.units=0;w.next_clock=ClockPollWork;w.exhausted=false;w.started=w.clock?w.clock():0;w.active=true;
+        auto *previous=running_work;running_work=&w;w.units=0;w.next_clock=w.allow_clock?ClockPollWork:NativeClockPollWork;w.exhausted=false;w.started=w.clock?w.clock():0;w.active=true;
 #if HUSARZ_PERF
         w.perf_started=perf_clock?perf_clock():0;
 #endif

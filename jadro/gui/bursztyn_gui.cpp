@@ -631,6 +631,10 @@ bool uruchom_program_uzytkownika(const char* sciezka) {
         0, 0, 0) == 1ULL;
 }
 
+uint8_t pobierz_blad_uruchomienia() {
+    return static_cast<uint8_t>(bws_wywolaj(100, 0, 0, 0, 0)); // BWS_OSTATNI_BLAD_URUCHOMIENIA
+}
+
 bool uruchom_program_z_argumentem_uzytkownika(const char* program,
                                                const char* argument) {
     if (!program || !argument) return false;

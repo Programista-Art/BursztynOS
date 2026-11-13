@@ -979,6 +979,7 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         return next_rsp;
     }
 
+    scheduler_zarejestruj_odroczony_tick();
     /*
      * Jezeli timer przerwal zwykly kod Ring 0, pozostajemy w tym samym
      * kontekscie. BWS38 i jawny HLT sieci sa bezpieczne: scheduler zapisuje

@@ -11,6 +11,9 @@ constexpr unsigned MaxFiles=128,MaxExaminedFiles=1024,DirectoryBytes=64*1024;
 constexpr unsigned MaxFontFile=64u*1024*1024;
 // Plain sfnt files up to this size keep the BSF 2.1 whole-file load path.
 constexpr unsigned SmallFontFile=4u*1024*1024;
+// Plain sfnt files up to this size are catalogued from the whole file (cheaper than
+// several ranged reads); larger ones from their metadata tables.
+constexpr unsigned TinyFontFile=64u*1024;
 // Per-process resident font table bytes (one CJK face is ~16 MB of tables).
 constexpr unsigned MaxResidentFontBytes=40u*1024*1024;
 }

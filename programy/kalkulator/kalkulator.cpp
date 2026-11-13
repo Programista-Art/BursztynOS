@@ -491,7 +491,10 @@ static KalkulatorAppState g_kalkulator;
 class OknoKalkulatora : public Okno {
 public:
     explicit OknoKalkulatora(const char* tytul, int szer = 300, int wys = 380)
-        : Okno(tytul, szer, wys) {}
+        : Okno(tytul, szer, wys) {
+        // Stale proporcje przyciskow: okno mozna powiekszac, ale nie zmniejszac.
+        ustaw_minimalny_rozmiar(szer, wys);
+    }
 
     void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
         if (ev.typ == BWS_ZDARZENIE_KLAWISZ || ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY) {

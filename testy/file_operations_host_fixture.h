@@ -108,6 +108,7 @@ bool usun_prefiks_schowka_plikow(uint64_t gen,uint32_t count) {
 }
 bool uruchom_program_z_argumentem_uzytkownika(const char* app,const char* path) {++launches;launched_app=app;launched_file=path;return true;}
 bool uruchom_program_uzytkownika(const char* path) {++launches;launched_app=path;return true;}
+uint8_t pobierz_blad_uruchomienia() {return 0;}
 wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char*) {return OTWORZ_PLIK_URUCHOMIONO;}
 bool czytaj(const char*,void*,uint32_t,uint32_t*) {return false;}
 bool czytaj_plik(const char*,char*,uint32_t) {return false;}

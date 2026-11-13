@@ -179,17 +179,21 @@ uint32_t face_identity(const char* path,unsigned index){
   return identity(key);
 }
 bool known_id(uint32_t id){for(unsigned i=0;i<count;++i)if(catalog[i].id==id)return true;return false;}
-// Plain sfnt files up to MaxFile keep the BSF 2.1 whole-file path; small
-// collections are read whole too (one shared buffer for all their faces).
-// Larger collections and files above MaxFile use per-table ranged reads.
+// Catalog scan policy (runs in EVERY process at its first text draw).
+// Measured on the native desktop: whole-file reads + full validation of 7 fonts
+// cost 7.6 MB of I/O and 440-810 ms per app start under TCG, the dominant part of
+// click-to-first-frame. Only tiny plain sfnt files (and small collections) are
+// read whole; every other file is catalogued from its metadata tables by
+// ranged reads. Nothing is trusted less: load() re-reads and fully validates
+// the file (open_index) before a single glyph is drawn from it, and marks it
+// failed when validation does not pass.
 bool whole_file(const char* path,uint32_t size){
   if(size>MaxFile)return false;
-  if(size<=SmallFontFile)return true;
   uint8_t head[4]{};
-  // Plain sfnt check via a ranged read; a reader without BWS 59 support
-  // falls back to the whole-file path.
+  // A reader without BWS 59 support falls back to the whole-file path.
   if(!read_range(path,0,4,head))return true;
-  return !(head[0]=='t'&&head[1]=='t'&&head[2]=='c'&&head[3]=='f');
+  const bool collection=head[0]=='t'&&head[1]=='t'&&head[2]=='c'&&head[3]=='f';
+  return collection?size<=SmallFontFile:size<=TinyFontFile;
 }
 // Opens one face of a large file / collection from its metadata tables read
 // by range (outline payload is validated at first render) and calls `use`
@@ -268,7 +272,24 @@ void examine(const char* path,unsigned directory){
   }
   if(!any)wypisz("[BSF] Rejected font; fallback retained.\n");
 }
+#if BURSZTYNDIAGGUIRUNTIME
+void init_impl();
+// App-start trace (diag builds): per-process cost of building the font catalog.
 void init() {
+  if (initialized) return;
+  const uint64_t t0 = gui_czas_monotoniczny_ns();
+  init_impl();
+  const uint64_t t1 = gui_czas_monotoniczny_ns();
+  char line[128]{};unsigned n=0;
+  auto text=[&](const char* v){while(*v&&n+1<sizeof(line))line[n++]=*v++;};
+  auto num=[&](uint64_t v){char d[24];unsigned c=0;do{d[c++]=char('0'+v%10);v/=10;}while(v);while(c&&n+1<sizeof(line))line[n++]=d[--c];};
+  text("[APP START] bsf_catalog_us=");num((t1-t0)/1000);text(" fonts=");num(count);text(" io_bytes=");num(resource_info.io_bytes);text("\n");
+  wypisz(line);
+}
+void init_impl() {
+#else
+void init() {
+#endif
   if (initialized)
     return;
   initialized = true;

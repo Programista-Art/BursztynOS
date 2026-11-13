@@ -503,6 +503,10 @@ void scheduler_czekaj_na_zdarzenie(int pid, uint64_t timeout_ticki = 0);
 // Explicit safe point, called only after network polling has released its locks.
 void scheduler_odstap_w_czekaniu_sieci();
 bool scheduler_czeka_w_sieci(int pid);
+// True when some other process is ready to run (used by diagnostics/yield points).
+bool scheduler_czy_inny_gotowy();
+// Timer tick that left the current Ring 0 syscall running (diagnostics only).
+void scheduler_zarejestruj_odroczony_tick();
 bool scheduler_zuzyj_wygasly_timeout_zdarzenia(int pid);
 void scheduler_usun_zdarzenia_procesu(int pid);
 void scheduler_czekaj_na_klawiature(int pid);

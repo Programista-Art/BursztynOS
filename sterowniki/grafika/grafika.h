@@ -190,6 +190,8 @@ void bws_gui_wyczyscz_obszar(int x,
                              int wys);
 
 void bws_gui_odswiez();
+__attribute__((weak)) bool bws_gui_warstwa_w_trakcie_rysowania(int pid);
+__attribute__((weak)) const uint32_t* bws_gui_cien_warstwy(int pid, size_t bajty);
 
 void bws_gui_pobierz_mysz(int* x,
                           int* y,

@@ -13,6 +13,9 @@
 #include <stddef.h>
 
 /* Platforma */
+/* Kooperacyjny punkt oddawania CPU w mnozeniach bignum (patrz bignum.c). */
+#define BURSZTYN_CRYPTO_YIELD
+
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY
 #define MBEDTLS_PLATFORM_NO_STD_FUNCTIONS

@@ -135,7 +135,10 @@ enum BwsNumer : uint64_t {
      * PZB co BWS 3; pozwala kopiowac pliki > 16 MiB bez bufora calego pliku.
      */
     BWS_ZAPISZ_FRAGMENT_PLIKU = 98,
-    BWS_PIERWSZY_WOLNY = 99
+    /* 99 jest zarezerwowany jako trwale nieprawidlowy (historyczna regresja Bug #1:
+     * BWS 99 + 0xDEADBEEFCAFE); dispatcher zawsze zwraca dla niego UINT64_MAX. */
+    BWS_OSTATNI_BLAD_URUCHOMIENIA = 100,
+    BWS_PIERWSZY_WOLNY = 101
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

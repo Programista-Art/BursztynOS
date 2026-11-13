@@ -212,6 +212,16 @@ extern "C" void bur_formatuj_blad(char*, size_t, const char*, const BurObrazPlik
  *   false - blad walidacji, brak zasobow, zla sciezka albo uruchomiona
  *           juz instancja tego samego programu.
  */
+extern "C" uint8_t loader_ostatni_blad(void);
+
+// Zgodnosc pliku z aplikacja wbudowana w obraz (implementacja w kernel.cpp).
+extern "C" bool kernel_wbudowany_zgodny(const char* sciezka, const uint8_t* dane, uint64_t rozmiar);
+// Jak bws_uruchom_program_z_pliku[_z_argumentem], ale wymaga zgodnosci z wzorcem
+// wbudowanym; argument_startowy moze byc nullptr.
+extern "C" bool bws_uruchom_program_wbudowany(
+    const char* sciezka_pliku, uint8_t bzl_poziom, uint64_t flagi_praw,
+    bool z_syscalla, const char* argument_startowy);
+
 extern "C" bool bws_uruchom_program_z_pliku(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,

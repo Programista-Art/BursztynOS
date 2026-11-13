@@ -8,7 +8,16 @@ enum GuiPerfMetric { GP_CPU_NS,GP_IDLE_NS,GP_WAKE,GP_WAIT,GP_BWS,GP_MOVE,GP_TIME
     GP_PRESENT,GP_CURSOR,GP_COPY,GP_PRESENT_NS,GP_PRESENT_MAX_NS,
     GP_LOCK_NS,GP_LOCK_MAX_NS,GP_COMPOSE_NS,GP_COPY_NS,GP_GPU_NS,GP_GPU_MAX_NS,GP_PRECISE,
     GP_BWS_REFRESH,GP_FRAME_PRESENT,GP_FRAME_INTERVAL_NS,GP_FRAME_INTERVAL_MAX_NS,
-    GP_INPUT_PRESENT_NS,GP_INPUT_PRESENT_MAX_NS,GP_METRICS };
+    GP_INPUT_PRESENT_NS,GP_INPUT_PRESENT_MAX_NS,
+    // Timer ticks that could not switch away from a Ring 0 syscall while another
+    // process was ready, and the longest uninterrupted run of such ticks.
+    GP_DEFERRED_TICKS,GP_DEFERRED_RUN_MAX_NS,
+    // Compositions that read a layer whose owner was mid-draw (torn frames).
+    GP_TORN_COMPOSE,
+    // Compositions served from the layer shadow (a torn frame prevented).
+    GP_SHADOW_COMPOSE,
+    // Cooperative crypto yield points: HLT yields performed / skipped (interrupts masked).
+    GP_YIELD_HLT,GP_YIELD_SKIP,GP_METRICS };
 #if BURSZTYNDIAGGUIRUNTIME
 #include "scheduler.h"
 #include "sterowniki/czas/hpet.h"
@@ -44,7 +53,18 @@ inline void gui_perf_close_idle(uint64_t now) {
     gui_perf_runnable = false;
     gui_perf_run_start = now;
 }
+inline uint64_t gui_perf_deferred_start=0;
+inline uint64_t gui_perf_deferred_by_nr[256]{};
+inline void gui_perf_deferred_tick(bool other_ready,uint64_t syscall_nr=0){
+    if(!other_ready){gui_perf_deferred_start=0;return;}
+    __atomic_add_fetch(&gui_perf_deferred_by_nr[syscall_nr&255U],1ULL,__ATOMIC_RELAXED);
+    const uint64_t now=gui_perf_now();if(!now)return;
+    gui_perf_add(0,GP_DEFERRED_TICKS);
+    if(!gui_perf_deferred_start)gui_perf_deferred_start=now;
+    gui_perf_max(0,GP_DEFERRED_RUN_MAX_NS,now-gui_perf_deferred_start);
+}
 inline void gui_perf_switch(int pid){
+    gui_perf_deferred_start=0;
     const uint64_t now=gui_perf_now();
     gui_perf_close_idle(now);
     gui_perf_charge();
@@ -98,7 +118,8 @@ inline void gui_perf_report(){
     const char* names[]={"cpu_ns","idle_ns","wake","wait","bws_gui","move_requested","timer_requested","dirty",
         "present","cursor_present","copy","present_ns","present_max_ns","lock_wait_ns","lock_wait_max_ns",
         "compose_ns","copy_ns","gpu_ns","gpu_max_ns","precise_requested","bws_refresh","frame_present",
-        "frame_interval_ns","frame_interval_max_ns","input_present_ns","input_present_max_ns"};
+        "frame_interval_ns","frame_interval_max_ns","input_present_ns","input_present_max_ns",
+        "deferred_ticks","deferred_run_max_ns","torn_compose","shadow_compose","yield_hlt","yield_skip"};
     for(unsigned pid=0;pid<MAKS_PROCESOW;++pid){
         uint64_t sample[GP_METRICS]{};bool nonzero=false;
         for(unsigned i=0;i<GP_METRICS;++i){sample[i]=__atomic_exchange_n(&gui_perf_counts[pid][i],0,__ATOMIC_RELAXED);nonzero|=sample[i]!=0;}
@@ -111,6 +132,21 @@ inline void gui_perf_report(){
         for(unsigned i=0;i<GP_METRICS;++i){text(" ");text(names[i]);text("=");num(sample[i]);}
         text("\n");klog_serial(buf);
     }
+    {   // Which syscall was running when ticks could not preempt it (top 4).
+        uint64_t top[4]{},nrs[4]{};
+        for(unsigned nr=0;nr<256;++nr){
+            uint64_t v=__atomic_exchange_n(&gui_perf_deferred_by_nr[nr],0,__ATOMIC_RELAXED);
+            for(unsigned k=0;k<4;++k)if(v>top[k]){for(unsigned j=3;j>k;--j){top[j]=top[j-1];nrs[j]=nrs[j-1];}top[k]=v;nrs[k]=nr;break;}
+        }
+        if(top[0]){
+            char buf[160]{};unsigned n=0;
+            auto text=[&](const char* s){while(*s&&n+1<sizeof(buf))buf[n++]=*s++;};
+            auto num=[&](uint64_t v){char tmp[24];unsigned i=0;do{tmp[i++]=char('0'+v%10);v/=10;}while(v);while(i&&n+1<sizeof(buf))buf[n++]=tmp[--i];};
+            text("[GUI PERF] deferred_by_syscall");
+            for(unsigned k=0;k<4&&top[k];++k){text(" bws");num(nrs[k]);text("=");num(top[k]);}
+            text("\n");klog_serial(buf);
+        }
+    }
 }
 #else
 inline uint64_t gui_perf_now(){return 0;}
@@ -121,6 +157,7 @@ inline void gui_perf_block(int){}
 inline void gui_perf_idle_begin(){}
 inline void gui_perf_idle_end(){}
 inline void gui_perf_mark_input(){}
+inline void gui_perf_deferred_tick(bool,uint64_t=0){}
 inline void gui_perf_frame_presented(){}
 inline void gui_perf_report(){}
 #endif

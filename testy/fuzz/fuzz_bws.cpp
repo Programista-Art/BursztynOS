@@ -159,7 +159,8 @@ static uint64_t wykonaj_fuzz_bws_jeden(
 ) {
     /* Regresja Bug #1: wywolanie spoza zakresu 1..93 (w tym BWS 99 z 0xDEADBEEFCAFEULL)
        zwraca UINT64_MAX bez zadnej akcji uprzywilejowanej i bez paniki! */
-    if (nr_funkcji == 0 || nr_funkcji >= BWS_PIERWSZY_WOLNY) {
+    // 99 jest zarezerwowany jako trwale nieprawidlowy (patrz bws_api.h), tak jak w dispatcherze.
+    if (nr_funkcji == 0 || nr_funkcji == 99 || nr_funkcji >= BWS_PIERWSZY_WOLNY) {
         return UINT64_MAX;
     }
 

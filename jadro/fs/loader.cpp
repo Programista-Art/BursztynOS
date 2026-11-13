@@ -15,6 +15,7 @@
 #include "loader.h"
 #include "podpis_paczki.h"
 #include "pzb.h"
+#include "uruchamianie_polityka.h"
 #include "pamiec.h"
 #include "test_dzwieku_trace.h"
 
@@ -99,6 +100,7 @@ constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 constexpr uint64_t MASKA_STRONY = ROZMIAR_STRONY - 1ULL;
 
 #if BURSZTYN_DEBUG_LOADER_PERF
+static uint64_t g_launch_start_ns[PZB_MAKS_PROCESOW] = {};
 static uint64_t loader_perf_now() {
     return hpet_dostepny() ? czas_monotoniczny_ns() : 0;
 }
@@ -132,8 +134,29 @@ static void loader_perf_log(int pid, uint64_t rozmiar,
     text(" map_us="); number((map_end - map_start) / 1000ULL);
     line[n] = '\0';
     wypisz_log(line);
+    if (pid >= 0 && pid < static_cast<int>(PZB_MAKS_PROCESOW)) g_launch_start_ns[pid] = total_start;
 }
 #endif
+
+/* Pomiar startu aplikacji: czas od wejscia do loadera do pierwszej opublikowanej
+ * klatki okna (wolane z kompozytora). Bez BURSZTYN_DEBUG_LOADER_PERF pusta. */
+extern "C" void loader_perf_pierwsza_klatka(int pid) {
+#if BURSZTYN_DEBUG_LOADER_PERF
+    if (pid < 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW) || !g_launch_start_ns[pid]) return;
+    const uint64_t now = loader_perf_now();
+    if (now < g_launch_start_ns[pid]) { g_launch_start_ns[pid] = 0; return; }
+    char line[96]{};
+    size_t n = 0;
+    auto text = [&](const char* v) { while (*v && n + 1 < sizeof(line)) line[n++] = *v++; };
+    auto number = [&](uint64_t v) { char d[24]{}; size_t c = 0; do { d[c++] = char('0' + v % 10); v /= 10; } while (v && c < sizeof(d)); while (c && n + 1 < sizeof(line)) line[n++] = d[--c]; };
+    text("[APP LAUNCH] pid="); number(static_cast<uint64_t>(pid));
+    text(" loader_to_first_frame_us="); number((now - g_launch_start_ns[pid]) / 1000ULL);
+    wypisz_log(line);
+    g_launch_start_ns[pid] = 0;
+#else
+    (void)pid;
+#endif
+}
 
 #ifndef BURSZTYN_LOADER_HOST_TEST
 constexpr size_t MAKS_DLUGOSC_SCIEZKI = 64;
@@ -1014,12 +1037,17 @@ static void posprzataj_przestrzen_po_bledzie(
 } // namespace
 
 namespace {
+// Przyczyna ostatniego niepowodzenia loadera (kod bezpieczny dla Ring 3).
+uint8_t g_ostatni_blad_loadera = 0;
 struct ProbaUruchomienia {
     char sciezka[MAKS_DLUGOSC_SCIEZKI]{};
     BurObrazPliku obraz{};
     bool sukces{false};
     ProbaUruchomienia() { obraz.blad = "invalid-launch-arguments"; }
     ~ProbaUruchomienia() {
+        g_ostatni_blad_loadera = sukces
+            ? uruchamianie::BLAD_BRAK
+            : uruchamianie::klasyfikuj_blad_loadera(obraz.blad);
         if (!sukces) {
             char rekord[640];
             bur_formatuj_blad(rekord, sizeof(rekord), sciezka, obraz);
@@ -1067,7 +1095,8 @@ static bool uruchom_program_z_pliku_impl(
     uint8_t bzl_poziom,
     uint64_t flagi_praw,
     bool z_syscalla,
-    const char* argument_startowy
+    const char* argument_startowy,
+    bool wymagaj_wbudowanego = false
 ) {
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_total_start = loader_perf_now();
@@ -1175,6 +1204,23 @@ static bool uruchom_program_z_pliku_impl(
     const uint64_t rozmiar_pliku = proba.obraz.rozmiar;
     const uint8_t* bufor_pliku = proba.obraz.dane;
     const NaglowekBur& naglowek = proba.obraz.naglowek;
+
+#ifndef BURSZTYN_LOADER_HOST_TEST
+    /*
+     * Delegowany start aplikacji systemowej o podwyzszonym zaufaniu (BWS 10 od
+     * rodzica bez pelnego zaufania): plik musi byc bajt w bajt aplikacja
+     * wbudowana w obraz jadra, bo etykieta PZB pliku w /programy jest
+     * zapisywalna przez zwykly proces.
+     */
+    if (wymagaj_wbudowanego &&
+        !kernel_wbudowany_zgodny(bezpieczna_sciezka, bufor_pliku, rozmiar_pliku)) {
+        proba.obraz.blad = "signature-builtin-mismatch";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+#else
+    (void)wymagaj_wbudowanego;
+#endif
 
     /*
      * Integralnosc binarki.
@@ -1547,6 +1593,8 @@ static bool uruchom_program_z_pliku_impl(
     return true;
 }
 
+extern "C" uint8_t loader_ostatni_blad(void) { return g_ostatni_blad_loadera; }
+
 extern "C" bool bws_uruchom_program_z_pliku(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
@@ -1555,6 +1603,19 @@ extern "C" bool bws_uruchom_program_z_pliku(
 ) {
     return uruchom_program_z_pliku_impl(
         sciezka_pliku, bzl_poziom, flagi_praw, z_syscalla, nullptr);
+}
+
+extern "C" bool bws_uruchom_program_wbudowany(
+    const char* sciezka_pliku,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    bool z_syscalla,
+    const char* argument_startowy
+) {
+    if (argument_startowy && argument_startowy[0] == '\0') return false;
+    return uruchom_program_z_pliku_impl(
+        sciezka_pliku, bzl_poziom, flagi_praw, z_syscalla,
+        argument_startowy, true);
 }
 
 extern "C" bool bws_uruchom_program_z_pliku_z_argumentem(

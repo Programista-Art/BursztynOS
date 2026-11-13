@@ -1470,9 +1470,20 @@ void mpi_mul_hlp(size_t i,
 /*
  * Baseline multiplication: X = A * B  (HAC 14.12)
  */
+/* Bursztyn OS: wielkie mnozenia ECP/RSA oddaja CPU innym procesom na granicy
+ * tiku zegara (patrz bursztyn_crypto_yield_point w jadro/siec/siec.cpp). Punkt
+ * jest na poczatku funkcji, przed jakakolwiek alokacja mbedtls. */
+#if defined(BURSZTYN_CRYPTO_YIELD)
+void bursztyn_crypto_yield_point(void);
+#define BURSZTYN_CRYPTO_YIELD_POINT() bursztyn_crypto_yield_point()
+#else
+#define BURSZTYN_CRYPTO_YIELD_POINT() ((void) 0)
+#endif
+
 int mbedtls_mpi_mul_mpi(mbedtls_mpi *X, const mbedtls_mpi *A, const mbedtls_mpi *B)
 {
     int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
+    BURSZTYN_CRYPTO_YIELD_POINT();
     size_t i, j;
     mbedtls_mpi TA, TB;
     int result_is_zero = 0;
