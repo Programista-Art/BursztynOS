@@ -16,6 +16,8 @@ writes). Also launches Notepad and the Shell, and checks the serial log for
 kernel/user faults. Results: <out>/bsf2-native.json plus PNG screenshots.
 """
 import argparse, functools, http.server, json, re, shlex, struct, subprocess, sys, tempfile, threading, time
+
+REQUEST_ORIGINS = []  # (path, Origin header or None) seen by the bsf22 page server
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,6 +169,7 @@ def main():
 
             def do_GET(self):
                 requests.append(self.path)
+                REQUEST_ORIGINS.append((self.path, self.headers.get('Origin')))
                 super().do_GET()
 
             def log_message(self, *_):
@@ -681,6 +684,13 @@ def bsf22_browser(a, build, hmp, symbol, move, click, key, wait, screenshot, hea
     result['checks']['webfont_released_on_navigation'] = r['10-emoji.html']['total']['web']['released'] >= 6 and \
         r['10-emoji.html']['total']['bsf']['scoped_released'] >= 6
     result['checks']['webfont_not_in_catalog'] = True  # catalog is per process; Settings list read before
+    # BSF 2.2: font fetches are CORS requests and carry the document origin
+    # (kernel BWS_HTTP64_ORIGIN path); pages and other resources do not.
+    fo = [(p, o) for p, o in REQUEST_ORIGINS if '/fonts/' in p or '/cors-' in p]
+    po = [(p, o) for p, o in REQUEST_ORIGINS if p.endswith('.html')]
+    r['origins'] = {'font': sorted({o or '' for _, o in fo}), 'page': sorted({o or '' for _, o in po})}
+    result['checks']['webfont_origin_header'] = bool(fo) and bool(po) and \
+        all(o and re.fullmatch(r'http://[0-9a-z.\-]+(:[0-9]+)?', o) for _, o in fo) and all(not o for _, o in po)
     x, y, ww, hh = browser.window()
     click(x + ww - 16, y + 12)
     wait(lambda: not browser.pid(), 'Husarz closed', 90, 1)

@@ -401,10 +401,15 @@ bool CffFace::open(Bytes table, unsigned glyphs, bool cff2) {
     } else if (fd_array.count != 1)
       return false; // CFF2 without FDSelect uses FD 0 only
     // Every FD must have a usable Private DICT (validated now, used later).
+    cached_privates = 0;
     for (unsigned fd = 0; fd < fd_array.count; ++fd) {
       CffPrivate p{};
       if (!private_for(fd, p, nullptr, 0))
         return false;
+      if (fd < CachedPrivates) {
+        privates[fd] = p;
+        cached_privates = uint8_t(fd + 1);
+      }
     }
   } else if (cid || cff2)
     return false;
@@ -417,6 +422,8 @@ bool CffFace::open(Bytes table, unsigned glyphs, bool cff2) {
     CffPrivate p{};
     if (!parse_private(private_dict, private_at, p, nullptr, 0))
       return false;
+    privates[0] = p;
+    cached_privates = 1;
   }
   if (!cff2 && !cid && charset_at > 2) {
     // Custom charset, used only to resolve seac accent components.
@@ -473,6 +480,10 @@ bool CffFace::parse_private(Bytes dict, uint32_t dict_at, CffPrivate &out,
 }
 bool CffFace::private_for(unsigned fd, CffPrivate &out,
                           const int16_t *coords, unsigned axes) const {
+  if (fd < cached_privates) {
+    out = privates[fd];
+    return true;
+  }
   if (!fd_array.present)
     return parse_private(private_dict,
                          uint32_t(private_dict.p ? private_dict.p - table.p : 0),

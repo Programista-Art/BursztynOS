@@ -854,7 +854,8 @@ shell_blob.o: shell_tmp.o bsf_terminal.o bursztyn_gui.o programy/shell/shell_bsf
 	$(LD) -T $(call bur_linker,programy/shell/shell_bsf_linker.ld) $(RING3_LDFLAGS) \
 		shell_tmp.o bsf_terminal.o bursztyn_gui.o -o shell.elf
 	$(BUR_CONVERT) shell.elf shell.bin
-	$(LD) -r -b binary shell.bin -o shell_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py shell.bin shell.bin.bz
+	$(LD) -r -b binary shell.bin.bz -o shell_blob.o
 
 # ============================================================================
 # 13. PRZEGLADARKA HUSSAR .bur
@@ -882,7 +883,8 @@ przegladarka_blob.o: przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o
 	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) \
 		przegladarka_tmp.o bursztyn_gui.o image_ring3.o btp_ring3.o -o przegladarka.elf
 	$(BUR_CONVERT) przegladarka.elf przegladarka.bin
-	$(LD) -r -b binary przegladarka.bin -o przegladarka_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py przegladarka.bin przegladarka.bin.bz
+	$(LD) -r -b binary przegladarka.bin.bz -o przegladarka_blob.o
 
 husarz_worker_tmp.o: programy/przegladarka/przegladarka.cpp Makefile $(wildcard programy/husarz/*.h) $(wildcard programy/husarz/*.inc)
 	$(CXX) $(RING3_FLAGS) -msse2 -mfpmath=sse -mno-avx -fcoroutines -fcheck-new -DHUSARZ_DEBUG_RESOURCES=$(HUSARZ_RESOURCE_DEBUG) -DHUSARZ_PERF=$(HUSARZ_PERF) -DHUSARZ_WORKER_ONLY=1 -Wno-unused-function -I. -Os -fstack-usage -ffunction-sections -fdata-sections -c $< -o $@
@@ -902,7 +904,8 @@ HUSARZ_WORKER_FONT_OBJECTS := bsf_core.o webfont_ring3.o $(BROTLI_RING3_OBJECTS)
 husarz_worker_blob.o: husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(HUSARZ_WORKER_FONT_OBJECTS) $(PRZEGLADARKA_LINKER)
 	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) husarz_worker_tmp.o bursztyn_gui_minimal.o image_ring3.o btp_ring3.o $(HUSARZ_WORKER_FONT_OBJECTS) -o husarz_worker.elf
 	$(BUR_CONVERT) husarz_worker.elf husarz_worker.bin
-	$(LD) -r -b binary husarz_worker.bin -o husarz_worker_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py husarz_worker.bin husarz_worker.bin.bz
+	$(LD) -r -b binary husarz_worker.bin.bz -o husarz_worker_blob.o
 
 # ============================================================================
 # 14. NOTATNIK .bur
@@ -915,7 +918,8 @@ notatnik_blob.o: notatnik_tmp.o bursztyn_gui.o $(NOTATNIK_LINKER)
 	$(LD) --gc-sections -T $(call bur_linker,$(NOTATNIK_LINKER)) $(RING3_LDFLAGS) \
 		notatnik_tmp.o bursztyn_gui.o -o notatnik.elf
 	$(BUR_CONVERT) notatnik.elf notatnik.bin
-	$(LD) -r -b binary notatnik.bin -o notatnik_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py notatnik.bin notatnik.bin.bz
+	$(LD) -r -b binary notatnik.bin.bz -o notatnik_blob.o
 
 # ============================================================================
 # 15. EKSPLORATOR PLIKOW .bur
@@ -928,7 +932,8 @@ eksplorator_blob.o: eksplorator_tmp.o bursztyn_gui.o $(EKSPLORATOR_LINKER)
 	$(LD) -T $(call bur_linker,$(EKSPLORATOR_LINKER)) $(RING3_LDFLAGS) \
 		eksplorator_tmp.o bursztyn_gui.o -o eksplorator.elf
 	$(BUR_CONVERT) eksplorator.elf eksplorator.bin
-	$(LD) -r -b binary eksplorator.bin -o eksplorator_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py eksplorator.bin eksplorator.bin.bz
+	$(LD) -r -b binary eksplorator.bin.bz -o eksplorator_blob.o
 
 # ============================================================================
 # 16. KALKULATOR .bur
@@ -941,7 +946,8 @@ kalkulator_blob.o: kalkulator_tmp.o $(BSF_APP_GUI) $(KALKULATOR_LINKER)
 	$(LD) --gc-sections -T $(call bur_linker,$(KALKULATOR_LINKER)) $(RING3_LDFLAGS) \
 		kalkulator_tmp.o $(BSF_APP_GUI) -o kalkulator.elf
 	$(BUR_CONVERT) kalkulator.elf kalkulator.bin
-	$(LD) -r -b binary kalkulator.bin -o kalkulator_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py kalkulator.bin kalkulator.bin.bz
+	$(LD) -r -b binary kalkulator.bin.bz -o kalkulator_blob.o
 
 # Test
 test_tmp.o: programy/test/test.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
@@ -951,7 +957,8 @@ test_blob.o: test_tmp.o ekran_format_ring3.o btp_ring3.o $(BSF_APP_GUI) programy
 	$(LD) --gc-sections -T $(call bur_linker,programy/test/test_linker.ld) $(RING3_LDFLAGS) \
 		test_tmp.o ekran_format_ring3.o btp_ring3.o $(BSF_APP_GUI) -o test.elf
 	$(BUR_CONVERT) test.elf test.bin
-	$(LD) -r -b binary test.bin -o test_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py test.bin test.bin.bz
+	$(LD) -r -b binary test.bin.bz -o test_blob.o
 
 # BursztynUI Demo
 demo_ui_tmp.o: programy/demo_ui/demo_ui.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
@@ -961,7 +968,8 @@ demo_ui_blob.o: demo_ui_tmp.o $(BSF_APP_GUI) programy/demo_ui/demo_ui_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
 		demo_ui_tmp.o $(BSF_APP_GUI) -o demo_ui.elf
 	$(BUR_CONVERT) demo_ui.elf demo_ui.bin
-	$(LD) -r -b binary demo_ui.bin -o demo_ui_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py demo_ui.bin demo_ui.bin.bz
+	$(LD) -r -b binary demo_ui.bin.bz -o demo_ui_blob.o
 
 # BursztynUI Kontrolki 2
 kontrolki2_tmp.o: programy/kontrolki2/kontrolki2.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
@@ -971,7 +979,8 @@ kontrolki2_blob.o: kontrolki2_tmp.o $(BSF_APP_GUI) programy/demo_ui/demo_ui_link
 	$(LD) --gc-sections -T $(call bur_linker,programy/demo_ui/demo_ui_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki2_tmp.o $(BSF_APP_GUI) -o kontrolki2.elf
 	$(BUR_CONVERT) kontrolki2.elf kontrolki2.bin
-	$(LD) -r -b binary kontrolki2.bin -o kontrolki2_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py kontrolki2.bin kontrolki2.bin.bz
+	$(LD) -r -b binary kontrolki2.bin.bz -o kontrolki2_blob.o
 
 # BursztynUI Kontrolki 3. Zaleznosc wildcard wymusza przebudowe aplikacji
 # po zmianie dowolnej publicznej kontrolki; analogiczna zaleznosc test_tmp.o
@@ -983,7 +992,8 @@ kontrolki3blob.o: kontrolki3tmp.o $(BSF_APP_GUI) programy/kontrolki3/kontrolki3_
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki3/kontrolki3_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki3tmp.o $(BSF_APP_GUI) -o kontrolki3.elf
 	$(BUR_CONVERT) kontrolki3.elf kontrolki3.bin
-	$(LD) -r -b binary kontrolki3.bin -o kontrolki3blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py kontrolki3.bin kontrolki3.bin.bz
+	$(LD) -r -b binary kontrolki3.bin.bz -o kontrolki3blob.o
 
 # BursztynUI Kontrolki 4 - Showroom nowych komponentow retained-mode.
 kontrolki4tmp.o: programy/kontrolki4/kontrolki4.cpp jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
@@ -993,7 +1003,8 @@ kontrolki4blob.o: kontrolki4tmp.o $(BSF_APP_GUI) programy/kontrolki4/kontrolki4_
 	$(LD) --gc-sections -T $(call bur_linker,programy/kontrolki4/kontrolki4_linker.ld) $(RING3_LDFLAGS) \
 		kontrolki4tmp.o $(BSF_APP_GUI) -o kontrolki4.elf
 	$(BUR_CONVERT) kontrolki4.elf kontrolki4.bin
-	$(LD) -r -b binary kontrolki4.bin -o kontrolki4blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py kontrolki4.bin kontrolki4.bin.bz
+	$(LD) -r -b binary kontrolki4.bin.bz -o kontrolki4blob.o
 
 # Obrazy testowe pulpitu (test.bmp, test1.bmp) nie sa linkowane do jadra:
 # narzedzia/package_desktop_images.py dodaje je jako moduly Multiboot2
@@ -1022,7 +1033,8 @@ snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(RING3_STD_LINKER)
 	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
 		snake_tmp.o $(BSF_APP_GUI) -o snake.elf
 	$(BUR_CONVERT) snake.elf snake.bin
-	$(LD) -r -b binary snake.bin -o snake_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py snake.bin snake.bin.bz
+	$(LD) -r -b binary snake.bin.bz -o snake_blob.o
 
 # Przegladarka Obrazow
 przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp jadro/gui/bursztyn_gui.h
@@ -1032,7 +1044,8 @@ przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_S
 	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
 		przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
 	$(BUR_CONVERT) przegladarka_obrazow.elf przegladarka_obrazow.bin
-	$(LD) -r -b binary przegladarka_obrazow.bin -o przegladarka_obrazow_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py przegladarka_obrazow.bin przegladarka_obrazow.bin.bz
+	$(LD) -r -b binary przegladarka_obrazow.bin.bz -o przegladarka_obrazow_blob.o
 
 # Aktualizacje Systemu
 aktualizacje_tmp.o: programy/aktualizacje/aktualizacje.cpp jadro/gui/bursztyn_gui.h jadro/bws/bws_ota.h $(wildcard bursztyn_ui/*.h)
@@ -1042,7 +1055,8 @@ aktualizacje_blob.o: aktualizacje_tmp.o bursztyn_gui.o $(AKTUALIZACJE_LINKER)
 	$(LD) -T $(call bur_linker,$(AKTUALIZACJE_LINKER)) $(RING3_LDFLAGS) \
 		aktualizacje_tmp.o bursztyn_gui.o -o aktualizacje.elf
 	$(BUR_CONVERT) aktualizacje.elf aktualizacje.bin
-	$(LD) -r -b binary aktualizacje.bin -o aktualizacje_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py aktualizacje.bin aktualizacje.bin.bz
+	$(LD) -r -b binary aktualizacje.bin.bz -o aktualizacje_blob.o
 
 
 # Test dźwięku — diagnostyka HDA
@@ -1061,7 +1075,8 @@ test_dzwieku_blob.o: test_dzwieku_tmp.o $(BSF_APP_GUI) programy/test_dzwieku/tes
 		test_dzwieku_tmp.o $(BSF_APP_GUI) -o test_dzwieku.elf
 	$(BUR_CONVERT) test_dzwieku.elf test_dzwieku.bin
 	$(PYTHON) testy/test_dzwieku_size.py test_dzwieku.bin
-	$(LD) -r -b binary test_dzwieku.bin -o test_dzwieku_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py test_dzwieku.bin test_dzwieku.bin.bz
+	$(LD) -r -b binary test_dzwieku.bin.bz -o test_dzwieku_blob.o
 
 ustawienia_tmp.o: programy/ustawienia/ustawienia.cpp $(wildcard programy/ustawienia/*.h) $(wildcard bursztyn_ui/*.h) bsf/runtime.h
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
@@ -1079,7 +1094,8 @@ repro_blob.o: repro_tmp.o $(BSF_APP_GUI) programy/repro/repro_linker.ld
 	$(LD) -T $(call bur_linker,programy/repro/repro_linker.ld) $(RING3_LDFLAGS) \
 		repro_tmp.o $(BSF_APP_GUI) -o repro.elf
 	$(BUR_CONVERT) repro.elf repro.bin
-	$(LD) -r -b binary repro.bin -o repro_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py repro.bin repro.bin.bz
+	$(LD) -r -b binary repro.bin.bz -o repro_blob.o
 
 # ============================================================================
 # 16. MENEDZER OKIEN .bur
@@ -1092,7 +1108,8 @@ menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o ima
 	$(LD) -T $(call bur_linker,$(MENEDZER_OKIEN_LINKER)) $(RING3_LDFLAGS) \
 		menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o -o menedzer_okien.elf
 	$(BUR_CONVERT) menedzer_okien.elf menedzer_okien.bin
-	$(LD) -r -b binary menedzer_okien.bin -o menedzer_okien_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py menedzer_okien.bin menedzer_okien.bin.bz
+	$(LD) -r -b binary menedzer_okien.bin.bz -o menedzer_okien_blob.o
 
 # ============================================================================
 # 17. DZWIEK WAV OSADZONY W JADRZE
@@ -1337,7 +1354,8 @@ instalator_tmp.o: programy/instalator/instalator.cpp jadro/gui/instalator_format
 instalator_blob.o: instalator_tmp.o bursztyn_gui.o programy/instalator/instalator_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/instalator/instalator_linker.ld) $(RING3_LDFLAGS) instalator_tmp.o bursztyn_gui.o -o instalator.elf
 	$(BUR_CONVERT) instalator.elf instalator.bin
-	$(LD) -r -b binary instalator.bin -o $@
+	$(PYTHON) narzedzia/kompresuj_blob.py instalator.bin instalator.bin.bz
+	$(LD) -r -b binary instalator.bin.bz -o $@
 
 $(ISO): check-kernel $(KERNEL) $(TAPETY_PAK) $(GRUB_CFG) narzedzia/verifyreleasemetadata.py
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR) --xorriso=$(XORRISO)
@@ -1889,7 +1907,8 @@ tapety_blob.o: tapety_tmp.o btp_ring3.o image_ring3.o $(BSF_APP_GUI) programy/ta
 	$(LD) --gc-sections -T $(call bur_linker,programy/tapety/tapety_linker.ld) $(RING3_LDFLAGS) tapety_tmp.o btp_ring3.o image_ring3.o $(BSF_APP_GUI) -o tapety.elf
 	$(BUR_CONVERT) tapety.elf tapety.bin
 	$(PYTHON) testy/test_tapety_size.py tapety.bin
-	$(LD) -r -b binary tapety.bin -o $@
+	$(PYTHON) narzedzia/kompresuj_blob.py tapety.bin tapety.bin.bz
+	$(LD) -r -b binary tapety.bin.bz -o $@
 
 $(filter %tmp.o %_tmp.o,$(wildcard *.o)): obrazy/skalowanie.h
 
@@ -1905,7 +1924,8 @@ ekran_tmp.o: programy/ekran/ekran.cpp programy/ekran/klient.h programy/ekran/ekr
 ekran_blob.o: ekran_tmp.o $(BSF_APP_GUI) programy/ekran/ekran_linker.ld
 	$(LD) --gc-sections -T $(call bur_linker,programy/ekran/ekran_linker.ld) $(RING3_LDFLAGS) ekran_tmp.o $(BSF_APP_GUI) -o ekran.elf
 	$(BUR_CONVERT) ekran.elf ekran.bin
-	$(LD) -r -b binary ekran.bin -o $@
+	$(PYTHON) narzedzia/kompresuj_blob.py ekran.bin ekran.bin.bz
+	$(LD) -r -b binary ekran.bin.bz -o $@
 $(filter %_tmp.o,$(OBJS)) bursztyn_gui.o: jadro/gui/ui_skala.h
 
 ekran_format_ring3.o: jadro/gui/ekran_format.cpp jadro/gui/ekran_format.h
@@ -2360,7 +2380,8 @@ diagnostyka_tmp.o: programy/diagnostyka/diagnostyka.cpp programy/diagnostyka/mod
 diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagnostyka_linker.ld
 	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/diagnostyka/diagnostyka_linker.ld) $(RING3_LDFLAGS) diagnostyka_tmp.o bursztyn_gui.o -o diagnostyka.elf
 	$(BUR_CONVERT) diagnostyka.elf diagnostyka.bin
-	$(LD) -r -b binary diagnostyka.bin -o diagnostyka_blob.o
+	$(PYTHON) narzedzia/kompresuj_blob.py diagnostyka.bin diagnostyka.bin.bz
+	$(LD) -r -b binary diagnostyka.bin.bz -o diagnostyka_blob.o
 
 .PHONY: test-diagnostyka-systemu-host
 test-diagnostyka-systemu-host:
@@ -2475,7 +2496,8 @@ fpu_probe_tmp.o: programy/fpu_probe.cpp jadro/arch/fpu.h jadro/gui/bursztyn_gui.
 fpu_probe_blob.o: fpu_probe_tmp.o bursztyn_gui_minimal.o $(PRZEGLADARKA_LINKER)
 	$(LD) --defsym=HUSARZ_WORKER_BUILD=1 --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_LINKER)) $(RING3_LDFLAGS) fpu_probe_tmp.o bursztyn_gui_minimal.o -o fpu_probe.elf
 	$(BUR_CONVERT) fpu_probe.elf fpu_probe.bin
-	$(LD) -r -b binary fpu_probe.bin -o $@
+	$(PYTHON) narzedzia/kompresuj_blob.py fpu_probe.bin fpu_probe.bin.bz
+	$(LD) -r -b binary fpu_probe.bin.bz -o $@
 
 .PHONY: test-kernel-simd
 test-kernel-simd: $(KERNEL)
@@ -2976,3 +2998,11 @@ bench-bsf22: $(BROTLI_BENCH_OBJECTS)
 	@mkdir -p .bsf-test
 	g++ $(HOST_INCLUDES) $(BROTLI_INCLUDES) -std=c++17 -O2 testy/bench_bsf22.cpp bsf/webfont.cpp bsf/bsf.cpp $(BSF2_SOURCES) $(BROTLI_BENCH_OBJECTS) -o .bsf-test/bench-bsf22
 	.bsf-test/bench-bsf22
+
+# Kernel compressed application blobs (jadro/rdzen/blob_skompresowany.h):
+# decoder vs zlib on every built application binary + corruption tests.
+.PHONY: test-kernel-blobz-host
+test-kernel-blobz-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_blob_skompresowany.cpp -lz -o .bsf-test/blobz
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz

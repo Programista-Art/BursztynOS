@@ -46,6 +46,7 @@
  */
 
 #include "siec.h"
+#include "http_origin.h"
 #include "network_device.h"
 #include "grafika.h"
 #include "sterowniki/czas/hpet.h"
@@ -278,8 +279,10 @@ bool zbuduj_zadanie_http(
     const char* sciezka,
     char* wynik,
     size_t pojemnosc,
-    size_t* dlugosc
+    size_t* dlugosc,
+    const char* origin = nullptr
 ) {
+    if (origin && !http_origin_poprawny(origin)) return false;
     if (!domena ||
         !sciezka ||
         !wynik ||
@@ -323,6 +326,9 @@ bool zbuduj_zadanie_http(
             pojemnosc,
             &p,
             domena) ||
+        (origin &&
+         (!dopisz_tekst(wynik, pojemnosc, &p, "\r\nOrigin: ") ||
+          !dopisz_tekst(wynik, pojemnosc, &p, origin))) ||
         !dopisz_tekst(
             wynik,
             pojemnosc,
@@ -1158,7 +1164,8 @@ extern "C" bool kernel_siec_pobierz_https(
     const char* domena,
     const char* sciezka,
     char* bufor,
-    uint32_t max_dlugosc
+    uint32_t max_dlugosc,
+    const char* origin
 ) {
     /*
      * Stan eksportowany przez syscall/TLS status jest zerowany zanim
@@ -1443,7 +1450,8 @@ extern "C" bool kernel_siec_pobierz_https(
                 sciezka,
                 zadanie,
                 sizeof(zadanie),
-                &dlugosc_zadania)) {
+                &dlugosc_zadania,
+                origin)) {
 
             wypisz_log(
                 "[TLS] Zadanie HTTP przekracza limit lub jest niepoprawne."

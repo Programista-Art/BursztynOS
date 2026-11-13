@@ -158,6 +158,9 @@ void webfont_queue(Zakladka &z, unsigned index) {
         task.tab = z.identity; task.navigation = z.navigation; task.document = d.generation;
         task.kind = Husarz::RequestKind::Font; task.node = uint16_t(index);
         if (!base || !ustaw_url_z_location(task.url, sizeof(task.url), source.value, s->base)) continue;
+        // Fonts are CORS requests: send the document origin (servers that
+        // vary Access-Control-Allow-Origin on it, e.g. CDNs, need it).
+        Husarz::Origin::parse(z.url).serialize(task.origin, sizeof(task.origin));
         if (!browser_resources->queue.push(task)) { d.limit(Husarz::LimitStylesheets); break; }
         f.state = WebFontQueued; ++f.source; ++z.fonts->requests; ++webfont_counters.requests;
         webfonts_debug("font-request", task.url);

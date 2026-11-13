@@ -191,6 +191,27 @@ bool whole_file(const char* path,uint32_t size){
   if(!read_range(path,0,4,head))return true;
   return !(head[0]=='t'&&head[1]=='t'&&head[2]=='c'&&head[3]=='f');
 }
+// Opens one face of a large file / collection from its metadata tables read
+// by range (outline payload is validated at first render) and calls `use`
+// while the table buffers are alive. Shared by catalog scans and install.
+template<class Use>
+bool with_large_face(const char* path,const TableDirectory& dir,uint32_t id,Use use){
+  TableSlice slices[MaxTables];unsigned n=0;uint8_t* owned[MaxTables]{};unsigned owned_count=0;size_t budget=0;bool ok=true;
+  for(unsigned t=0;t<dir.count&&ok;++t){
+    const auto& r=dir.records[t];
+    if(!render_table(r.tag))continue;
+    if(!metadata_table(r.tag)){slices[n++]={r.tag,Bytes{nullptr,r.length}};continue;}
+    if(r.length>MaxFile||budget+r.length>8u*1024*1024){ok=false;break;}
+    auto* buf=r.length?new uint8_t[r.length]:nullptr;
+    if(r.length&&(!buf||!read_range(path,r.offset,r.length,buf))){delete[] buf;ok=false;break;}
+    owned[owned_count++]=buf;budget+=r.length;slices[n++]={r.tag,Bytes{buf,r.length}};
+  }
+  Face f;
+  ok=ok&&f.open_tables(slices,n,dir.version,id,true);
+  if(ok)use(f);
+  for(unsigned k=0;k<owned_count;++k)delete[] owned[k];
+  return ok;
+}
 // Catalog entries for every usable face of one font file.
 void examine(const char* path,unsigned directory){
   uint32_t size=0;
@@ -237,23 +258,13 @@ void examine(const char* path,unsigned directory){
     }
     if(repeated)continue;
     if(remembered<4)previous[remembered++]=dir;else{previous[index%4]=dir;}
-    TableSlice slices[MaxTables];unsigned n=0;uint8_t* owned[MaxTables]{};unsigned owned_count=0;size_t budget=0;bool ok=true;
-    for(unsigned t=0;t<dir.count&&ok;++t){
-      const auto& r=dir.records[t];
-      if(!render_table(r.tag))continue;
-      if(!metadata_table(r.tag)){slices[n++]={r.tag,Bytes{nullptr,r.length}};continue;}
-      if(r.length>MaxFile||budget+r.length>8u*1024*1024){ok=false;break;}
-      auto* buf=r.length?new uint8_t[r.length]:nullptr;
-      if(r.length&&(!buf||!read_range(path,r.offset,r.length,buf))){delete[] buf;ok=false;break;}
-      owned[owned_count++]=buf;budget+=r.length;slices[n++]={r.tag,Bytes{buf,r.length}};
-    }
-    const uint32_t id=face_identity(path,index);Face f;
-    if(ok&&!known_id(id)&&f.open_tables(slices,n,dir.version,id,true)){
+    const uint32_t id=face_identity(path,index);
+    bool ok=!known_id(id)&&with_large_face(path,dir,id,[&](Face& f){
       f.collection_index=uint16_t(index);f.collection_count=uint16_t(faces);
       fill_info(catalog[count++],f,path,directory,size,collection?ContainerFormat::Collection:ContainerFormat::SFNT);
       if(collection)++resource_info.collection_faces;any=true;
-    }else ++resource_info.rejected;
-    for(unsigned k=0;k<owned_count;++k)delete[] owned[k];
+    });
+    if(!ok)++resource_info.rejected;
   }
   if(!any)wypisz("[BSF] Rejected font; fallback retained.\n");
 }
@@ -700,6 +711,34 @@ const ColorGlyph *color_glyph_id_face(uint32_t id, unsigned glyph, int px, uint3
   return &c.g;
 }
 int emoji_presentation(const char *t, size_t n) { return emoji_presentation_scan(t, n); }
+// Files above MaxFile (large TTC/OTC, up to MaxFontFile): every face is
+// validated from its metadata tables by range (as the catalog scan does),
+// then the file is copied in 1 MiB pieces (BWS 59 read, BWS 98 write) without
+// a whole-file buffer. Any failure removes the partial target.
+InstallResult install_large_font(const char* source,const char* target,uint32_t size){
+  PathReader pr{source};FileReader fr{path_read,&pr,size};
+  unsigned faces=collection_faces(fr);if(!faces)return InstallResult::InvalidFont;
+  for(unsigned i=0;i<faces;++i){
+    TableDirectory dir;
+    if(!face_directory(fr,i,dir)||!with_large_face(source,dir,0xffffffffu-i,[](Face&){}))return InstallResult::InvalidFont;
+  }
+  constexpr uint32_t Piece=1024u*1024u;
+  auto* buf=new uint8_t[Piece];if(!buf)return InstallResult::IO;
+  // Only a target created here is ever removed on failure.
+  if(!utworz(target)){delete[] buf;return InstallResult::IO;}
+  bool ok=true;
+  for(uint32_t off=0;ok&&off<size;){
+    uint32_t n=size-off<Piece?size-off:Piece;
+    ok=read_range(source,off,n,buf)&&
+       bws_wywolaj(98,reinterpret_cast<uint64_t>(target),off,reinterpret_cast<uint64_t>(buf),n)==1;
+    off+=n;
+  }
+  delete[] buf;
+  uint32_t written=0;
+  if(ok)ok=pobierz_rozmiar_pliku(target,&written)&&written==size;
+  if(!ok){bws_wywolaj(7,reinterpret_cast<uint64_t>(target),0,0,0);return InstallResult::IO;}
+  rescan();return InstallResult::Ok;
+}
 InstallResult install_font(const char* source){
   if(!source)return InstallResult::BadPath;
   size_t length=0,base=0;while(length<1024&&source[length]){if(source[length]=='/')base=length+1;++length;}
@@ -710,7 +749,10 @@ InstallResult install_font(const char* source){
   byte_copy(target+14,source+base,length-base);target[14+length-base]=0;
   uint32_t existing=0;if(pobierz_rozmiar_pliku(target,&existing))return InstallResult::Exists;
   init();for(unsigned i=0;i<MaxFaces;++i)if(loaded[i].active())evict(i);
-  uint32_t size=0;auto* bytes=read(source,size);
+  uint32_t size=0;
+  if(!pobierz_rozmiar_pliku(source,&size)||size<12||size>MaxFontFile)return InstallResult::InvalidFont;
+  if(size>MaxFile)return install_large_font(source,target,size);
+  auto* bytes=read(source,size);
   if(!bytes)return InstallResult::InvalidFont;
   // Every face of the file must pass full validation (collections included).
   Bytes file{bytes,size};unsigned faces=collection_faces(file);bool valid_font=faces>0;

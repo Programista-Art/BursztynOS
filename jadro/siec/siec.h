@@ -637,7 +637,8 @@ bool kernel_siec_pobierz_http(
     const char* domena,
     const char* sciezka,
     char* bufor,
-    uint32_t max_dlugosc
+    uint32_t max_dlugosc,
+    const char* origin = nullptr /* BSF 2.2: naglowek Origin (CORS), opcjonalny */
 );
 
 /*
@@ -648,7 +649,8 @@ bool kernel_siec_pobierz_https(
     const char* domena,
     const char* sciezka,
     char* bufor,
-    uint32_t max_dlugosc
+    uint32_t max_dlugosc,
+    const char* origin = nullptr
 );
 
 bool kernel_tls_certyfikat_zaufany();

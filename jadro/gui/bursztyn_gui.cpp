@@ -721,6 +721,17 @@ bool bws_siec_dns(const char* domena,
         0, 0) == 1ULL;
 }
 
+uint32_t bws_siec_pobierz_bajty_origin(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity, const char* origin) {
+    if (!origin) return bws_siec_pobierz_bajty(https, ip, domain, path, buffer, capacity);
+    if (!ip || !domain || !path || !buffer || capacity<2 || capacity>256*1024) return 0;
+    BwsBuforSieci64Origin req{{reinterpret_cast<uint64_t>(buffer),capacity,BWS_HTTP64_COUNTED|BWS_HTTP64_ORIGIN},
+                              reinterpret_cast<uint64_t>(origin)};
+    uint64_t result=bws_wywolaj(https?BWS_HTTPS64:BWS_HTTP64,
+        reinterpret_cast<uint64_t>(ip),reinterpret_cast<uint64_t>(domain),
+        reinterpret_cast<uint64_t>(path),reinterpret_cast<uint64_t>(&req));
+    return result>1 && result<=capacity ? uint32_t(result-1) : 0;
+}
+
 uint32_t bws_siec_pobierz_bajty(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity) {
     if (!ip || !domain || !path || !buffer || capacity<2 || capacity>256*1024) return 0;
     if (reinterpret_cast<uint64_t>(buffer)>UINT32_MAX) {

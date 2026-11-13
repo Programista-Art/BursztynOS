@@ -50,6 +50,7 @@
  */
 
 #include "siec.h"
+#include "http_origin.h"
 #include "scheduler.h"
 #include "network_lease.h"
 #include "network_device.h"
@@ -4082,8 +4083,10 @@ bool zbuduj_http_get(
     const char* sciezka,
     char* wynik,
     size_t pojemnosc,
-    size_t* dlugosc
+    size_t* dlugosc,
+    const char* origin = nullptr
 ) {
+    if (origin && !http_origin_poprawny(origin)) return false;
     if (!domena ||
         !sciezka ||
         !wynik ||
@@ -4130,6 +4133,9 @@ bool zbuduj_http_get(
             pojemnosc,
             &p,
             domena) ||
+        (origin &&
+         (!dopisz_tekst(wynik, pojemnosc, &p, "\r\nOrigin: ") ||
+          !dopisz_tekst(wynik, pojemnosc, &p, origin))) ||
         !dopisz_tekst(
             wynik,
             pojemnosc,
@@ -4152,7 +4158,8 @@ extern "C" bool kernel_siec_pobierz_http(
     const char* domena,
     const char* sciezka,
     char* bufor,
-    uint32_t max_dlugosc
+    uint32_t max_dlugosc,
+    const char* origin
 ) {
     if (!cel_ip ||
         !domena ||
@@ -4223,7 +4230,8 @@ extern "C" bool kernel_siec_pobierz_http(
             sciezka,
             request,
             sizeof(request),
-            &request_len)) {
+            &request_len,
+            origin)) {
 
         tcp_gniazdo_zamknij();
 

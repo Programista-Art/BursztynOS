@@ -33,13 +33,26 @@ int ceil_int(double x) {
   int i = int(x);
   return i + (x > i);
 }
+// Correctly rounded IEEE square root (SSE2 sqrtsd; Ring 3 has no libm).
+// Used by cubic flattening (4 calls per subdivision), CFF `sqrt` and COLR
+// gradients. Negative, zero and NaN inputs give 0.
 double square_root(double x) {
-  if (x <= 0)
+  if (!(x > 0))
     return 0;
-  double r = x > 1 ? x : 1;
-  for (unsigned i = 0; i < 32; ++i)
-    r = (r + x / r) * .5;
+#if defined(__SSE2__)
+  double r;
+  __asm__("sqrtsd %1, %0" : "=x"(r) : "x"(x));
   return r;
+#else
+  double r = x > 1 ? x : 1;
+  for (unsigned i = 0; i < 64; ++i) {
+    double n = (r + x / r) * .5;
+    if (n >= r)
+      break;
+    r = n;
+  }
+  return r;
+#endif
 }
 } // namespace
 #define STBTT_STATIC

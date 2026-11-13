@@ -91,7 +91,8 @@
                 // and reconstructed here, in the low-privilege worker; the
                 // browser receives a plain sfnt and validates it again.
 #ifdef HUSARZ_WORKER_ONLY
-                auto *entry=fetch_browser_resource(payload->url,Husarz::ResourceType::Font);
+                payload->request_origin[sizeof(payload->request_origin)-1]=0;
+                auto *entry=fetch_browser_resource(payload->url,Husarz::ResourceType::Font,payload->request_origin);
                 if (entry) {
                     kopiuj_limit(payload->content_type,sizeof(payload->content_type),entry->content_type);
                     kopiuj_limit(payload->allow_origin,sizeof(payload->allow_origin),entry->allow_origin);

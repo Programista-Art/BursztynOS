@@ -261,7 +261,7 @@ int main(){
  for(int px:{12,16,20,24})for(unsigned dpi:{100U,125U,150U,200U}){
   auto config=BSF::configuration();config.size=px;CHECK(BSF::apply(config));
   SettingsUI::Body body;body.ustaw_skale_dpi(SkalaUI::procent(dpi));
-  CHECK(!strcmp(body.nav[0]->tekst(),"System"));CHECK(!strcmp(body.nav[1]->tekst(),"Wygląd"));CHECK(!strcmp(body.nav[2]->tekst(),"Motywy"));CHECK(!strcmp(body.nav[3]->tekst(),"Czcionki"));CHECK(!strcmp(body.nav[4]->tekst(),"Wsparcie"));
+  CHECK(!strcmp(body.nav[0]->tekst(),"System"));CHECK(!strcmp(body.nav[1]->tekst(),"Energia"));CHECK(!strcmp(body.nav[2]->tekst(),"Wygląd"));CHECK(!strcmp(body.nav[3]->tekst(),"Motywy"));CHECK(!strcmp(body.nav[4]->tekst(),"Czcionki"));CHECK(!strcmp(body.nav[5]->tekst(),"Wsparcie"));CHECK(!body.power->czy_widoczna());
   CHECK(body.system->czy_widoczna());CHECK(!body.fonts->czy_widoczna());CHECK(!body.support->czy_widoczna());
   for(int width:{800,950,1100}){
    body.rozmiesc({0,0,ui_skaluj(width,dpi),ui_skaluj(512,dpi)});auto* page=body.system;

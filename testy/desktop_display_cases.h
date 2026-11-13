@@ -42,7 +42,12 @@ static void desktop_display_cases() {
  ui_skala_procent=100;screen_w=1920;screen_h=1080;desktop_layout={};desktop_layout.set_count(14);metryki_ekranu();
  for(int i=0;i<14;++i){strcpy(wpisy_pulpitu[i].nazwa,names[i]);wpisy_pulpitu[i].launcher=i<10?i:-1;}
  rozmiesc_ikony_ekranu();
- desktop_layout.anchor_position(13,desktop_layout.x0+2*desktop_layout.cw+7,desktop_layout.y0+2*desktop_layout.ch+5);
+ // File icons auto-place after the whole launcher catalog (DesktopEntries::Count),
+ // so pick an empty column. The intentional sub-cell offset must be a valid,
+ // non-overlapping position, otherwise reflow rightly relocates it.
+ desktop_layout.anchor_position(13,desktop_layout.x0+5*desktop_layout.cw+7,desktop_layout.y0+2*desktop_layout.ch+5);
+ CHECK(desktop_layout.visible(13));
+ for(int j=0;j<13;++j)CHECK(!Desktop::intersects(desktop_layout.placement_bounds(j),desktop_layout.placement_bounds(13)));
  auto original=desktop_layout;
  auto state=std::make_unique<DesktopSettings::State>();desktop_settings=state.get();state->applied=true;state->dirty=false;
  auto keys=[&](int i){return DesktopSettings::Key{i<10?'L':'F',names[i]};};

@@ -525,6 +525,9 @@ bool bws_siec_dns(const char* domena,
 
 // Binary-safe BWS29/30 mode; returns exact response bytes, zero on failure.
 uint32_t bws_siec_pobierz_bajty(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity);
+// BSF 2.2: jak wyzej, z naglowkiem "Origin" (zserializowany origin dokumentu,
+// np. dla @font-face w trybie CORS). nullptr = bez naglowka.
+uint32_t bws_siec_pobierz_bajty_origin(bool https, uint8_t* ip, const char* domain, const char* path, char* buffer, uint32_t capacity, const char* origin);
 
 bool bws_siec_pobierz_http(uint8_t* cel_ip,
                            const char* domena,

@@ -9,20 +9,22 @@ exceeding budgets or GPU timeouts.
 
 | Face | 16 px ns/glyph | 48 px ns/glyph |
 |---|---|---|
-| TrueType DejaVu Sans | 5,123 | 7,556 |
-| TrueType Noto Sans (Latin subset) | 4,981 | 7,535 |
-| CFF Noto Sans OTF | 39,600 | 71,677 |
-| CFF2 Source Serif 4 default | 46,113 | 83,024 |
-| CFF2 Source Serif 4 wght=800 | 50,137 | 87,041 |
-| TrueType Hebrew VF default / wght=700 (gvar) | 2,709 / 3,480 | 2,859 / 3,710 |
+| TrueType DejaVu Sans | 4,270 | 6,427 |
+| TrueType Noto Sans (Latin subset) | 3,918 | 6,472 |
+| CFF Noto Sans OTF | 4,746 | 8,663 |
+| CFF2 Source Serif 4 default | 8,167 | 12,340 |
+| CFF2 Source Serif 4 wght=800 | 10,943 | 15,242 |
+| TrueType Hebrew VF default / wght=700 (gvar) | 2,620 / 3,452 | 2,845 / 3,537 |
 
-CFF costs ~8–10× a TrueType miss: charstring interpretation in `double`,
-the Private DICT re-parsed per glyph (no per-FD cache) and subroutine
-calls. A miss happens once per glyph/size/style (128-slot cache); ordinary
-text with DejaVu (TrueType) takes exactly the BSF 2.1 path (bit-identical,
-no CFF/variation/colour code executed: colour lookups short-circuit on
-`color_tables == 0`, `variable()` false). gvar adds ~28 % per miss.
-Optimisation candidate: cache parsed Private DICT/subr INDEX per FD.
+Updated during BSF 2.2 stabilization (see `docs/bsf2-2-cff-performance.md`):
+CFF previously cost 8–10× a TrueType miss (39.6 / 71.7 µs). The cause was
+not the CFF parser but cubic flattening: stb calls `STBTT_sqrt` 4× per
+subdivision and BSF mapped it to a 32-iteration Newton loop. It is now SSE2
+`sqrtsd`; Private DICTs are also cached per FD at open. A miss happens once
+per glyph/size/style (128-slot cache); ordinary text with DejaVu (TrueType)
+takes exactly the BSF 2.1 path (no CFF/variation/colour code executed:
+colour lookups short-circuit on `color_tables == 0`, `variable()` false).
+gvar adds ~30 % per miss.
 
 ## Face open (validation)
 

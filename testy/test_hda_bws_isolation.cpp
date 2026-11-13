@@ -85,7 +85,8 @@ static void test_brak_surowych_verbow() {
     CHECK(BWS_HTTPS64 == 95);
     CHECK(BWS_PROCESY_LISTA == 96);
     CHECK(BWS_PROCES_ZABIJ == 97);
-    CHECK(BWS_PIERWSZY_WOLNY == 98);
+    CHECK(BWS_ZAPISZ_FRAGMENT_PLIKU == 98);
+    CHECK(BWS_PIERWSZY_WOLNY == 99);
 
     /* Istniejace numery nie ulegly zmianie. */
     CHECK(BWS_DZWIEK_TON == 27);

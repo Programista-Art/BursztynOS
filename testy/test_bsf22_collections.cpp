@@ -21,8 +21,21 @@ static std::map<std::string, std::string> files;
 static std::map<std::string, std::string> listings; // directory -> listing
 static BSF::Config config;
 static uint64_t ranged_reads, whole_reads;
+static std::map<std::string, unsigned> whole_read_paths;
+// Section E (large install): Settings holds the file-read right, so ranged
+// reads of a user path are allowed; BWS 98 writes and BWS 7 deletes.
+static bool user_reads, fail_fragment;
+static unsigned fragment_writes, fragment_fail_at;
+static uint64_t largest_fragment;
 void wypisz(const char *) {}
-bool utworz(const char *) { return false; }                       // install_font
+bool utworz(const char *path) {                                     // install_font
+  if (files.count(path))
+    return false;
+  files[path].clear();
+  std::string p = path;
+  listings[p.substr(0, 13)] += "[PLIK] " + p.substr(14) + "\n";
+  return true;
+}
 bool zapisz_plik(const char *, const char *, uint32_t) { return false; }
 bool wylistuj_katalog_uzytkownika(const char *path, char *out, uint32_t n) {
   auto it = listings.find(path);
@@ -44,6 +57,7 @@ bool czytaj_plik(const char *path, char *out, uint32_t n) {
   if (it == files.end() || n != it->second.size())
     return false;
   ++whole_reads;
+  ++whole_read_paths[path];
   memcpy(out, it->second.data(), n);
   return true;
 }
@@ -60,7 +74,7 @@ extern "C" uint64_t bws_wywolaj(uint64_t fn, uint64_t a, uint64_t b, uint64_t c,
   if (fn == 59) {
     // Same policy as the kernel handler: trusted path, 64 KiB per call,
     // end <= MaxFontFile.
-    CHECK(BSF::trusted_asset((const char *)a));
+    CHECK(user_reads || BSF::trusted_asset((const char *)a));
     CHECK(d <= 65536);
     CHECK(b + d <= BSF::MaxFontFile);
     auto it = files.find((const char *)a);
@@ -69,6 +83,33 @@ extern "C" uint64_t bws_wywolaj(uint64_t fn, uint64_t a, uint64_t b, uint64_t c,
     ++ranged_reads;
     memcpy((void *)c, it->second.data() + b, d);
     return d + 1;
+  }
+  if (fn == 98) {
+    // Kernel policy (jadro/bws/syscalls.cpp bws_zapisz_fragment_pliku):
+    // existing file, 1..1 MiB per call, offset <= current size (no holes).
+    CHECK(d >= 1 && d <= 1024 * 1024);
+    auto it = files.find((const char *)a);
+    if (it == files.end() || b > it->second.size())
+      return 0;
+    if (fail_fragment && ++fragment_writes == fragment_fail_at)
+      return 0;
+    if (!fail_fragment)
+      ++fragment_writes;
+    if (d > largest_fragment)
+      largest_fragment = d;
+    if (it->second.size() < b + d)
+      it->second.resize(b + d);
+    memcpy(&it->second[b], (const void *)c, d);
+    return 1;
+  }
+  if (fn == 7) {
+    std::string p = (const char *)a;
+    files.erase(p);
+    auto &l = listings[p.substr(0, 13)];
+    auto at = l.find("[PLIK] " + p.substr(14) + "\n");
+    if (at != std::string::npos)
+      l.erase(at, p.size() - 14 + 8);
+    return 1;
   }
   return 0;
 }
@@ -427,6 +468,68 @@ static void large_cjk(FT_Library lib) {
   std::printf("  large CJK collection: loaded lazily, CFF shared across faces\n");
   (void)lib;
 }
+// E. Installing a collection larger than MaxFile (16 MiB): validated per face
+// from metadata tables by range, copied in 1 MiB pieces (BWS 98) without a
+// whole-file buffer; corrupt files and write failures leave no target.
+static void large_install() {
+  files.clear();
+  listings.clear();
+  config = BSF::Config{};
+  config.checksum = BSF::checksum(config);
+  add_file("/czcionki/ttf/DejaVuSans.ttf", slurp("czcionki/ttf/DejaVuSans.ttf"));
+  std::string big = slurp(dir + "NotoSans-subset.ttc");
+  CHECK(!big.empty());
+  const size_t base = big.size();
+  big.resize(BSF::MaxFile + 3 * 1024 * 1024 + 12345, '\0'); // > 16 MiB, ragged tail
+  for (size_t i = base; i < big.size(); i += 4093)
+    big[i] = char(i * 131); // non-zero tail: the copy must be exact
+  const char *src = "/uzytkownicy/Pobrane/NotoSans-Big.ttc";
+  files[src] = big;
+  user_reads = true;
+  BSF::shutdown();
+  unsigned before = BSF::enumerate();
+  ranged_reads = whole_reads = 0;
+  whole_read_paths.clear();
+  fragment_writes = 0;
+  largest_fragment = 0;
+  CHECK(BSF::install_font(src) == BSF::InstallResult::Ok);
+  auto it = files.find("/czcionki/ttc/NotoSans-Big.ttc");
+  CHECK(it != files.end() && it->second == big);
+  CHECK(fragment_writes == (big.size() + 1024 * 1024 - 1) / (1024 * 1024));
+  CHECK(largest_fragment == 1024 * 1024);
+  // Never a whole-file read of the 19 MiB source or the installed copy.
+  CHECK(!whole_read_paths.count(src) && !whole_read_paths.count("/czcionki/ttc/NotoSans-Big.ttc"));
+  unsigned after = BSF::enumerate(), found = 0;
+  for (unsigned i = 0; i < after; ++i)
+    if (strstr(BSF::info(i)->path, "NotoSans-Big.ttc"))
+      ++found;
+  CHECK(found == 3 && after == before + 3); // every face catalogued
+  CHECK(BSF::install_font(src) == BSF::InstallResult::Exists);
+  // Corrupt collection header: rejected before any write.
+  std::string bad = big;
+  bad[12] = bad[13] = bad[14] = bad[15] = '\xff'; // face 0 offset past EOF
+  files["/uzytkownicy/Pobrane/Bad-Big.ttc"] = bad;
+  fragment_writes = 0;
+  CHECK(BSF::install_font("/uzytkownicy/Pobrane/Bad-Big.ttc") == BSF::InstallResult::InvalidFont);
+  CHECK(!files.count("/czcionki/ttc/Bad-Big.ttc") && fragment_writes == 0);
+  // Write failure in the middle of the copy: partial target removed.
+  files["/uzytkownicy/Pobrane/Fail-Big.ttc"] = big;
+  fail_fragment = true;
+  fragment_writes = 0;
+  fragment_fail_at = 7;
+  CHECK(BSF::install_font("/uzytkownicy/Pobrane/Fail-Big.ttc") == BSF::InstallResult::IO);
+  CHECK(!files.count("/czcionki/ttc/Fail-Big.ttc"));
+  fail_fragment = false;
+  // Above MaxFontFile (64 MiB): rejected without reading.
+  files["/uzytkownicy/Pobrane/Huge.ttc"] = std::string(BSF::MaxFontFile + 1, '\0');
+  CHECK(BSF::install_font("/uzytkownicy/Pobrane/Huge.ttc") == BSF::InstallResult::InvalidFont);
+  files.erase("/uzytkownicy/Pobrane/Huge.ttc");
+  user_reads = false;
+  BSF::shutdown();
+  std::printf("  large install: %zu B collection (> MaxFile) copied in %u x <=1 MiB BWS 98 writes, "
+              "3 faces catalogued; corrupt / failed-write / >64 MiB leave no target\n",
+              big.size(), unsigned((big.size() + 1024 * 1024 - 1) / (1024 * 1024)));
+}
 int main() {
   FT_Library lib;
   CHECK(!FT_Init_FreeType(&lib));
@@ -434,6 +537,7 @@ int main() {
   malformed();
   runtime_catalog(lib);
   large_cjk(lib);
+  large_install();
   FT_Done_FreeType(lib);
   std::printf("BSF 2.2 collections: %lu checks PASS\n", checks);
 }

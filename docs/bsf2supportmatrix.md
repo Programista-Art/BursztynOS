@@ -15,7 +15,7 @@ tested on platform**. Earlier BSF 2.1/2.0 sections follow unchanged; where a
 | TrueType `glyf`/`loca` | **Verified** (unchanged) | bit-identical output to BSF 2.1 |
 | OpenType CFF 1.0 (`OTTO`, Type 2) | **Verified** (host: all outlines = FreeType; native: Husarz/Settings) | name-keyed and CID-keyed (FDArray/FDSelect), subrs, flex, seac, arithmetic ops; no hinting; FD FontMatrix not composed |
 | CFF2 | **Verified** (host) | default and variation instances (blend/vsindex), outlines = FreeType at 39 instances; no native page uses CFF2 |
-| TTC/OTC collections | **Verified** (host, native with a 246 KB subset collection) | every face separately selectable, shared tables shared in memory, lazy per-table loading for > 4 MiB; **files > 16 MiB cannot be installed natively** (no chunked write; boot import cap) |
+| TTC/OTC collections | **Verified** (host, native with a 246 KB subset collection) | every face separately selectable, shared tables shared in memory, lazy per-table loading for > 4 MiB; install of files > 16 MiB (≤ 64 MiB) via per-face range validation + chunked BWS 98 copy **verified on host only** (native GUI install of such a file not exercised); GRUB boot-module import still capped at 16 MiB |
 | WOFF 1.0 | **Verified** (host; native in Husarz) | zlib tables, bounds, ratio limits; WOFF collections not supported |
 | WOFF2 | **Verified** (host; native in Husarz) | Brotli, glyf/loca transform (incl. overlap bitmap), hmtx transform, null transforms; WOFF2 collections not supported |
 | Variable fonts — axis model (fvar/avar 1.0, named instances) | **Verified** (host) | generic axes ≤ 16; avar 2.0 not supported; STAT not interpreted |
@@ -48,7 +48,7 @@ tested on platform**. Earlier BSF 2.1/2.0 sections follow unchanged; where a
 | Refresh (new/removed/modified, disappearing selection) | **Verified** (host) | native refresh not automated in QEMU |
 | Separate system and Terminal fonts (Config v2, v1 migration) | **Verified** (host) | native persistence across reboot not automated |
 | Unified fallback (TrueType, CFF, collections, colour, web fonts) | **Verified** (host) | one resolver; variable faces at default instance |
-| Husarz `@font-face` | **Verified** (host), see native report | src order, formats, local(), weights, unicode-range, swap/optional, CORS (response side), isolation, release |
+| Husarz `@font-face` | **Verified** (host), see native report | src order, formats, local(), weights, unicode-range, swap/optional, CORS (response side + request `Origin` header since stabilization, BWS_HTTP64_ORIGIN), isolation, release; input ≤ 240 KiB |
 | Indic / SE-Asian shaping | **Not supported** (unchanged) | glyph coverage ≠ shaping |
 
 ## [2.2] Platforms

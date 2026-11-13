@@ -30,6 +30,7 @@
 #include "bursztyn_gui.h"
 #include "bursztyn_ui/bursztyn_ui.h"
 #include "../http_kody.h"
+#include "../../jadro/siec/http_origin.h"
 #include "../husarz/pipeline.h"
 #include "../husarz/work_clock.h"
 #include "../husarz/resource.h"
@@ -3367,7 +3368,9 @@ bool resource_mime_is(const char *value,const char *expected) {
     return Husarz::mime_is(value,expected);
 }
 // HTTP responses must use the binary-safe count, never strlen on image data.
-Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceType type) {
+Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceType type,const char *origin=nullptr) {
+    // BSF 2.2: only a valid serialized origin is ever sent (kernel re-checks).
+    if(origin&&!http_origin_poprawny(origin))origin=nullptr;
     struct Address { char normalized[URL_POJEMNOSC]{},original[URL_POJEMNOSC]{},location[URL_POJEMNOSC]{},visited[MAX_PRZEKIEROWAN+1][URL_POJEMNOSC]{}; };
     struct AddressOwner { Address *value{new Address}; ~AddressOwner(){delete value;} } address;
     if (!address.value || !Husarz::normalize_resource_url(url,address.value->normalized,sizeof(address.value->normalized))) return nullptr;
@@ -3385,7 +3388,7 @@ Husarz::ResourceEntry *fetch_browser_resource(const char *url,Husarz::ResourceTy
         if(!parsuj_url(url,parsed)){delete parsed;resource_field("error","URL_PARSE");return nullptr;}
         uint8_t ip[4]{};
         if(!adres_ipv4_literal(parsed->domena,ip)&&!bws_siec_dns(parsed->domena,ip)){delete parsed;resource_field("error","DNS_FAILED");return nullptr;}
-        uint32_t count=bws_siec_pobierz_bajty(parsed->https,ip,parsed->domena,parsed->sciezka,siec_bufor,sizeof(siec_bufor));
+        uint32_t count=bws_siec_pobierz_bajty_origin(parsed->https,ip,parsed->domena,parsed->sciezka,siec_bufor,sizeof(siec_bufor),origin);
         resource_number("response-bytes",count);
         if(!count||!parsuj_odpowiedz_http(siec_bufor,count,&response)){delete parsed;resource_field("error",count?"HTTP_PARSE":"REQUEST_FAILED");return nullptr;}
         resource_number("HTTP",response.kod);resource_number("body-bytes",response.body_len);header_size=size_t(response.body-siec_bufor);

@@ -94,6 +94,12 @@ bool bws_siec_pobierz_https(uint8_t *ip, const char *domain, const char *path, c
 uint32_t bws_siec_pobierz_bajty(bool, uint8_t* ip,const char* domain,const char* path,char* data,uint32_t cap) {
     return bws_siec_pobierz_http(ip,domain,path,data,cap) ? last_response_bytes : 0;
 }
+static std::vector<std::string> resource_origins; // "Origin" sent per request ("" = none)
+uint32_t bws_siec_pobierz_bajty_origin(bool https, uint8_t* ip,const char* domain,const char* path,char* data,uint32_t cap,const char* origin) {
+    CHECK(!origin || http_origin_poprawny(origin)); // the kernel would reject anything else
+    resource_origins.push_back(origin?origin:"");
+    return bws_siec_pobierz_bajty(https,ip,domain,path,data,cap);
+}
 bool bws_tls_certyfikat_zaufany() { return true; }
 static void wheel(int delta) {
     ZdarzenieRolki e;
@@ -141,6 +147,29 @@ static void resource_compatibility_tests(){
     resource_responses["/assets/css/main.css?ver=7&theme=dark"]=answer("200 OK","Content-Type: TeXt/CsS; charset=utf-8\r\n","body{color:white;background:#111 url('../img/bg.png') center/cover no-repeat}");
     auto *entry=fetch_browser_resource("https://example.test:443/assets/start.css?ver=7&theme=dark",Husarz::ResourceType::Css);CHECK(entry);CHECK(entry->status==200);CHECK(resource_targets.size()==2);CHECK(resource_targets[1]=="/assets/css/main.css?ver=7&theme=dark");
     CHECK(Husarz::equal(entry->source_url,"https://example.test/assets/css/main.css?ver=7&theme=dark"));
+    // Non-font resources never carry an Origin header.
+    for (auto &o : resource_origins) CHECK(o.empty());
+    // BSF 2.2: font requests carry the document origin on every redirect hop.
+    resource_origins.clear();
+    resource_responses["/fonts/a.woff2"]=answer("302 Found","Location: /fonts/b.woff2\r\n","");
+    resource_responses["/fonts/b.woff2"]=answer("200 OK","Content-Type: font/woff2\r\nAccess-Control-Allow-Origin: https://page.test\r\n","wOF2xxxxxxxx");
+    CHECK(fetch_browser_resource("https://example.test/fonts/a.woff2",Husarz::ResourceType::Font,"https://page.test"));
+    CHECK(resource_origins.size()==2 && resource_origins[0]=="https://page.test" && resource_origins[1]=="https://page.test");
+    // An invalid origin is dropped in Ring 3 (and would be rejected by the kernel).
+    resource_origins.clear();
+    resource_responses["/fonts/c.woff2"]=answer("200 OK","Content-Type: font/woff2\r\n","wOF2xxxxxxxx");
+    CHECK(fetch_browser_resource("https://example.test/fonts/c.woff2",Husarz::ResourceType::Font,"https://page.test\r\nX: y"));
+    CHECK(resource_origins.size()==1 && resource_origins[0].empty());
+    {
+        char o[128];
+        CHECK(Husarz::Origin::parse("https://Page.Test:443/a/b?c").serialize(o,sizeof o) && Husarz::equal(o,"https://page.test"));
+        CHECK(Husarz::Origin::parse("http://page.test:8080/").serialize(o,sizeof o) && Husarz::equal(o,"http://page.test:8080"));
+        CHECK(!Husarz::Origin::parse("about:blank").serialize(o,sizeof o) && !o[0]);
+        CHECK(!Husarz::Origin::parse("https://page.test/").serialize(o,8));
+        for (const char *ok : {"null","https://a.b","http://x-1.example:65535","https://127.0.0.1:8443"}) CHECK(http_origin_poprawny(ok));
+        for (const char *bad : {"","https://","https://a b","https://a.b/","https://a.b:0","https://a.b:65536","https://a.b:080",
+                                "ftp://a.b","https://A.b","https://a.b\r\nX: 1","https://.a","https://a.","https://a.b:"}) CHECK(!http_origin_poprawny(bad));
+    }
     auto doc=std::make_unique<Husarz::Document>();const char *html="<html><body id=page>Theme</body></html>";renderuj_html(*doc,html,true);
     Husarz::parse_css(*doc,reinterpret_cast<const char*>(entry->raw),entry->size,10000,doc->store(entry->source_url,std::strlen(entry->source_url)));Husarz::reflow(*doc,800,{});
     auto body=Husarz::ScriptDom(*doc).query_selector("#page").id;CHECK(body);CHECK(Husarz::equal(doc->str(doc->styles[body].background_image),"url('../img/bg.png')"));

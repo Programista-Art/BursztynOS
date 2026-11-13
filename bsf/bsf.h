@@ -56,6 +56,13 @@ struct CffFace {
   uint8_t version{}; // 0 = none, 1 = CFF, 2 = CFF2
   uint8_t charset_predefined{0xff};
   bool cid{}, custom_matrix{};
+  // Private DICTs parsed and validated once at open() (FD order; one entry
+  // for a non-CID CFF). The extracted fields (Subrs INDEX, widths, vsindex)
+  // do not depend on the variation instance. FDs beyond the cache are parsed
+  // on demand exactly as before.
+  static constexpr unsigned CachedPrivates = 8;
+  CffPrivate privates[CachedPrivates]{};
+  uint8_t cached_privates{};
   bool open(Bytes table, unsigned glyphs, bool cff2);
   unsigned fd_for(unsigned glyph) const;
   bool private_for(unsigned fd, CffPrivate &, const int16_t *coords,

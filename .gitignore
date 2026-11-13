@@ -7,6 +7,7 @@
 *.bak
 /*.elf
 /*.bin
+/*.bin.bz
 /*.pak
 
 # --- ISO i staging GRUB ---

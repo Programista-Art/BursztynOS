@@ -338,6 +338,7 @@ void async_receive() {
         if (!state.payload) { async_release_shared(); return; }
         state.payload->magic=Husarz::AsyncMagic; state.payload->request=state.active.request; state.payload->kind=uint32_t(state.active.kind);
         kopiuj_limit(state.payload->url,sizeof(state.payload->url),state.active.url);
+        kopiuj_limit(state.payload->request_origin,sizeof(state.payload->request_origin),state.active.origin);
         if(state.active.kind==Husarz::RequestKind::StorageWrite){auto *s=state.active.script<Husarz::StorageOrigins?Husarz::browser_storage.local[state.active.script]:nullptr;state.payload->size=s?Husarz::storage_encode(*s,state.payload->raw,sizeof(state.payload->raw)):0;state.active.storage_revision=s?s->revision:0;}
         Husarz::WorkerMessage request{}; request.type=2; request.request=state.active.request; request.nonce=state.nonce;
         if (!worker_send(state.worker,request,state.shared)) { async_release_shared(); state.worker=0; state.queue.push(state.active); return; }

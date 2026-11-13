@@ -67,6 +67,7 @@
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
 #include "bws_api.h"
+#include "../siec/http_origin.h"
 #include "bws_gui_batch.h"
 #include "bws_czcionka.h"
 #include "bws_nowoczesne.h"
@@ -2126,15 +2127,32 @@ __attribute__((noinline)) uint64_t bws_http_common(
     uint32_t max_dlugosc = 0;
 
     bool counted = (arg4 & 0x80000000ULL) != 0;
+    char origin[HTTP_ORIGIN_MAX + 1] = {};
+    bool has_origin = false;
     if (wide) {
         BwsBuforSieci64 request{};
         if (!skopiuj_z_przestrzeni_uzytkownika(&request,
             reinterpret_cast<const void*>(arg4), sizeof(request)) ||
             !request.adres || request.pojemnosc < 2 || request.pojemnosc > MAX_HTTP_BWS ||
-            (request.flagi & ~1U)) return 0;
+            (request.flagi & ~(BWS_HTTP64_COUNTED | BWS_HTTP64_ORIGIN))) return 0;
         adres_user = request.adres;
         max_dlugosc = request.pojemnosc;
-        counted = request.flagi & 1U;
+        counted = request.flagi & BWS_HTTP64_COUNTED;
+        if (request.flagi & BWS_HTTP64_ORIGIN) {
+            // Rozszerzona struktura czytana dopiero, gdy flaga to deklaruje.
+            BwsBuforSieci64Origin ext{};
+            if (!skopiuj_z_przestrzeni_uzytkownika(&ext,
+                reinterpret_cast<const void*>(arg4), sizeof(ext)) || !ext.origin) return 0;
+            size_t n = 0;
+            for (; n <= HTTP_ORIGIN_MAX; ++n) {
+                char c = 0;
+                if (!skopiuj_z_przestrzeni_uzytkownika(&c, reinterpret_cast<const void*>(ext.origin + n), 1)) return 0;
+                origin[n < HTTP_ORIGIN_MAX ? n : HTTP_ORIGIN_MAX] = c;
+                if (!c) break;
+            }
+            if (n > HTTP_ORIGIN_MAX || !http_origin_poprawny(origin)) return 0;
+            has_origin = true;
+        }
     } else if (!dekoduj_bufor_sieci(arg4, &adres_user, &max_dlugosc)) return 0;
 
     if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
@@ -2173,7 +2191,8 @@ __attribute__((noinline)) uint64_t bws_http_common(
                 domena,
                 sciezka,
                 bufor.jako_char(),
-                limit_sieci
+                limit_sieci,
+                has_origin ? origin : nullptr
             );
     } else {
         sukces =
@@ -2182,7 +2201,8 @@ __attribute__((noinline)) uint64_t bws_http_common(
                 domena,
                 sciezka,
                 bufor.jako_char(),
-                limit_sieci
+                limit_sieci,
+                has_origin ? origin : nullptr
             );
     }
 
@@ -3026,6 +3046,38 @@ __attribute__((noinline)) uint64_t bws_utworz_katalog(
     return wynik ? 1ULL : 0ULL;
 }
 
+// BWS 98: zapis fragmentu pliku (BSF 2.2, duze fonty/kolekcje). Plik musi
+// istniec; offset nie moze przekraczac biezacego rozmiaru (bez dziur z
+// niezainicjowanymi blokami). Kopia przez bufor jadra (SMAP), PZB jak BWS 3.
+__attribute__((noinline)) uint64_t bws_zapisz_fragment_pliku(
+    proces_t& proces,
+    uint64_t arg1,
+    uint64_t arg2,
+    uint64_t arg3,
+    uint64_t arg4
+) {
+    char sciezka[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if (!pobierz_sciezke_pliku(arg1, sciezka)) return 0;
+    const uint64_t offset = arg2, buf_u = arg3, len64 = arg4;
+    if (buf_u == 0 || len64 == 0 || len64 > (1ULL * 1024ULL * 1024ULL)) return 0;
+    const uint32_t len = static_cast<uint32_t>(len64);
+    uint64_t end = 0;
+    if (__builtin_add_overflow(offset, len64, &end) || end > PSF_MAKS_ROZMIAR_PLIKU) return 0;
+    if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(buf_u), len)) return 0;
+    if (!bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(buf_u), len, false)) return 0;
+    if (!proces_moze_modyfikowac_obiekt(proces, sciezka)) {
+        wypisz_log("[PZB] file_write=DENY");
+        return 0;
+    }
+    if (offset > static_cast<uint64_t>(rozmiar_pliku(sciezka))) return 0;
+    BuforKernelowy bufor(len, false);
+    if (!bufor) return 0;
+    if (!skopiuj_z_przestrzeni_uzytkownika(bufor.get(), reinterpret_cast<const void*>(buf_u), len)) return 0;
+    if (!zapisz_fragment_pliku(sciezka, offset, bufor.jako_char(), len)) return 0;
+    powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
+    return 1ULL;
+}
+
 __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
     proces_t& proces,
     uint64_t arg1,
@@ -3199,6 +3251,8 @@ static uint64_t obsluga_wywolan_systemowych_impl(
     if (nr_funkcji == BWS_HTTP64 || nr_funkcji == BWS_HTTPS64)
         return bws_http_common(proces, nr_funkcji == BWS_HTTPS64,
             arg1, arg2, arg3, arg4, true);
+    if (nr_funkcji == BWS_ZAPISZ_FRAGMENT_PLIKU)
+        return bws_zapisz_fragment_pliku(proces, arg1, arg2, arg3, arg4);
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
         nr_funkcji < BWS_PIERWSZY_WOLNY) {
         return bws_nowoczesne_obsluz(

@@ -218,6 +218,12 @@ def install(g,target,sentinel,before_target,before_sentinel):
         if not data[8] and struct.unpack_from('<Q',data,32)[0]==table:wizard=block+32;break
         block=struct.unpack_from('<Q',data,16)[0]
     if wizard is None:raise RuntimeError('Native installer Wizard not found')
+    # The wizard window is centred; coordinates below are for 1280x720. OVMF
+    # may hand GRUB a different GOP mode (e.g. 1920x1080 despite gfxmode), so
+    # shift every click by the centring offset of the actual boot mode.
+    mode=re.search(r'\[EKRAN INIT\] boot=(\d+)x(\d+)',(g.dir/'serial.log').read_text(errors='replace'))
+    ox,oy=((int(mode.group(1))-1280)//2,(int(mode.group(2))-720)//2) if mode else (0,0)
+    def click(x,y,settle=True):g.q.click(x+ox,y+oy,settle=settle)
     def value(name,fmt='<I'):return struct.unpack(fmt,observer.user(wizard+layout[name],struct.calcsize(fmt)))[0]
     def until(predicate,label,seconds=20):
         deadline=time.monotonic()+seconds
@@ -230,14 +236,14 @@ def install(g,target,sentinel,before_target,before_sentinel):
             current=value('page')
             if current==page:return
             if current!=page-1:raise AssertionError(('unexpected installer page',current,page))
-            g.q.click(860,590)
+            click(860,590)
             if until(lambda:value('page')==page,'installer page '+str(page)):return
             g.q.screenshot(g.dir/f'page-{page}-retry-{attempt}.png')
         raise AssertionError(('installer page did not advance',value('page'),page))
-    g.q.screenshot(g.dir/'welcome.png');g.q.click(800,68)
+    g.q.screenshot(g.dir/'welcome.png');click(800,68)
     next_page(1);g.q.screenshot(g.dir/'disks.png')
     for attempt in range(3):
-        g.q.click(550,230)
+        click(550,230)
         if until(lambda:value('selected')==1,'target disk selected'):break
     assert value('selected')==1,'Disposable target was not selected'
     next_page(2);next_page(3);g.q.screenshot(g.dir/'summary.png')
@@ -245,13 +251,13 @@ def install(g,target,sentinel,before_target,before_sentinel):
     assert target_fingerprint(target)==before_target,'Target changed before confirmation'
     assert sha(sentinel)==before_sentinel,'Sentinel changed during discovery'
     next_page(4);g.q.screenshot(g.dir/'confirmation.png')
-    g.q.click(255,430);g.q.click(380,480);g.q.key('ctrl-a')
+    click(255,430);click(380,480);g.q.key('ctrl-a')
     for c in 'bursztyn':g.q.key('shift-'+c)
     g.q.screenshot(g.dir/'typed.png')
     assert until(lambda:value('enabled','<?'),'final confirmation enabled'),'Final native confirmation remains disabled'
     no_writes(g)
     assert target_fingerprint(target)==before_target,'Typing confirmation changed target'
-    g.q.click(860,590,settle=False)
+    click(860,590,settle=False)
     text=g.wait('[INSTALL] COMPLETE verified',timeout=3600)
     time.sleep(1);g.q.screenshot(g.dir/'complete.png')
     assert '[PF]' not in text and '[KERNEL-PANIC]' not in text

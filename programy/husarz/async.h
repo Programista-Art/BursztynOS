@@ -9,6 +9,7 @@ struct ResourceTask {
     uint16_t node{},node_identity{},script{}; RequestKind kind{};
     bool background{}, history{}; uint32_t storage_revision{}; uint8_t redirects{};
     char url[2048]{};
+    char origin[128]{}; // BSF 2.2: document origin sent as "Origin" (font CORS)
 };
 struct WorkerMessage { uint32_t magic{AsyncMagic}, type{}, request{}, reserved{}; uint64_t endpoint{}, nonce{}; };
 // Less than BWS's 2 MiB per-object SHM limit. Raw bytes and pixel bytes are
@@ -21,6 +22,7 @@ struct WorkerPayload {
     char url[2048]{};
     char content_type[96]{}, etag[128]{}, modified[128]{};
     char allow_origin[128]{};
+    char request_origin[128]{}; // BSF 2.2: request "Origin" header ("" = none)
     uint8_t raw[AsyncRawCapacity]{};
     uint32_t pixels[AsyncImagePixels]{};
 };

@@ -129,7 +129,13 @@ enum BwsNumer : uint64_t {
     BWS_PROCESY_LISTA = 96,
     BWS_PROCES_ZABIJ = 97,
 
-    BWS_PIERWSZY_WOLNY = 98
+    /*
+     * BSF 2.2: zapis fragmentu istniejacego pliku od offsetu (<= 1 MiB na
+     * wywolanie, offset <= biezacy rozmiar - bez dziur). Te same kontrole
+     * PZB co BWS 3; pozwala kopiowac pliki > 16 MiB bez bufora calego pliku.
+     */
+    BWS_ZAPISZ_FRAGMENT_PLIKU = 98,
+    BWS_PIERWSZY_WOLNY = 99
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30
@@ -140,4 +146,16 @@ struct BwsBuforSieci64 {
     uint32_t flagi;
 };
 static_assert(sizeof(BwsBuforSieci64) == 16, "BWS HTTP64 ABI");
+/*
+ * BSF 2.2: flaga BWS_HTTP64_ORIGIN (bit 1) oznacza, ze arg4 wskazuje
+ * BwsBuforSieci64Origin; jadro dodaje naglowek "Origin: <origin>"
+ * (zserializowany origin, walidowany: jadro/siec/http_origin.h).
+ * Bez flagi ABI jest dokladnie jak dotad (16 bajtow).
+ */
+constexpr uint32_t BWS_HTTP64_COUNTED = 1u, BWS_HTTP64_ORIGIN = 2u;
+struct BwsBuforSieci64Origin {
+    BwsBuforSieci64 bufor;
+    uint64_t origin; /* const char*, NUL, <= 255 znakow */
+};
+static_assert(sizeof(BwsBuforSieci64Origin) == 24, "BWS HTTP64 origin ABI");
 

@@ -7,8 +7,8 @@
 #include "opcje_startowe.h"
 #include "tapety.h"
 #include "ekran.h"
-extern "C" uint8_t _binary_ekran_bin_start[], _binary_ekran_bin_end[];
-extern "C" uint8_t _binary_tapety_bin_start[], _binary_tapety_bin_end[];
+extern "C" uint8_t _binary_ekran_bin_bz_start[], _binary_ekran_bin_bz_end[];
+extern "C" uint8_t _binary_tapety_bin_bz_start[], _binary_tapety_bin_bz_end[];
 extern "C" void zablokuj_ekran();
 extern "C" void odblokuj_ekran();
 /*
@@ -44,6 +44,7 @@ extern "C" void odblokuj_ekran();
 #include "network_device.h"
 #include "siec.h"
 #include "heap.h"
+#include "blob_skompresowany.h"
 #include "scheduler.h"
 #include "skladacz_obrazu.h"
 #include "gui_runtime_diag.h"
@@ -150,8 +151,8 @@ extern "C" void uruchom_klienta_dhcp();
  * WBUDOWANE PLIKI .BUR
  * ========================================================================= */
 
-extern "C" uint8_t _binary_shell_bin_start[];
-extern "C" uint8_t _binary_shell_bin_end[];
+extern "C" uint8_t _binary_shell_bin_bz_start[];
+extern "C" uint8_t _binary_shell_bin_bz_end[];
 extern "C" uint8_t _binary_cytaty_txt_start[];
 extern "C" uint8_t _binary_cytaty_txt_end[];
 extern "C" uint8_t _binary_ikonki_przyciskzasilania_png_start[], _binary_ikonki_przyciskzasilania_png_end[];
@@ -188,55 +189,55 @@ extern "C" uint8_t _binary_dane_sponsorze_wkladtworczy_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_start[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_end[];
 
-extern "C" uint8_t _binary_notatnik_bin_start[];
-extern "C" uint8_t _binary_notatnik_bin_end[];
+extern "C" uint8_t _binary_notatnik_bin_bz_start[];
+extern "C" uint8_t _binary_notatnik_bin_bz_end[];
 
-extern "C" uint8_t _binary_eksplorator_bin_start[];
-extern "C" uint8_t _binary_eksplorator_bin_end[];
+extern "C" uint8_t _binary_eksplorator_bin_bz_start[];
+extern "C" uint8_t _binary_eksplorator_bin_bz_end[];
 
-extern "C" uint8_t _binary_kalkulator_bin_start[];
-extern "C" uint8_t _binary_kalkulator_bin_end[];
+extern "C" uint8_t _binary_kalkulator_bin_bz_start[];
+extern "C" uint8_t _binary_kalkulator_bin_bz_end[];
 
-extern "C" uint8_t _binary_menedzer_okien_bin_start[];
-extern "C" uint8_t _binary_menedzer_okien_bin_end[];
+extern "C" uint8_t _binary_menedzer_okien_bin_bz_start[];
+extern "C" uint8_t _binary_menedzer_okien_bin_bz_end[];
 
-extern "C" uint8_t _binary_przegladarka_bin_start[];
-extern "C" uint8_t _binary_przegladarka_bin_end[];
-extern "C" uint8_t _binary_husarz_worker_bin_start[];
-extern "C" uint8_t _binary_husarz_worker_bin_end[];
-extern "C" uint8_t _binary_fpu_probe_bin_start[],_binary_fpu_probe_bin_end[];
+extern "C" uint8_t _binary_przegladarka_bin_bz_start[];
+extern "C" uint8_t _binary_przegladarka_bin_bz_end[];
+extern "C" uint8_t _binary_husarz_worker_bin_bz_start[];
+extern "C" uint8_t _binary_husarz_worker_bin_bz_end[];
+extern "C" uint8_t _binary_fpu_probe_bin_bz_start[],_binary_fpu_probe_bin_bz_end[];
 
-extern "C" uint8_t _binary_test_bin_start[];
-extern "C" uint8_t _binary_test_bin_end[];
+extern "C" uint8_t _binary_test_bin_bz_start[];
+extern "C" uint8_t _binary_test_bin_bz_end[];
 
-extern "C" uint8_t _binary_snake_bin_start[];
-extern "C" uint8_t _binary_snake_bin_end[];
+extern "C" uint8_t _binary_snake_bin_bz_start[];
+extern "C" uint8_t _binary_snake_bin_bz_end[];
 
-extern "C" uint8_t _binary_demo_ui_bin_start[];
-extern "C" uint8_t _binary_demo_ui_bin_end[];
+extern "C" uint8_t _binary_demo_ui_bin_bz_start[];
+extern "C" uint8_t _binary_demo_ui_bin_bz_end[];
 
-extern "C" uint8_t _binary_kontrolki2_bin_start[];
-extern "C" uint8_t _binary_kontrolki2_bin_end[];
+extern "C" uint8_t _binary_kontrolki2_bin_bz_start[];
+extern "C" uint8_t _binary_kontrolki2_bin_bz_end[];
 
-extern "C" uint8_t _binary_kontrolki3_bin_start[];
-extern "C" uint8_t _binary_kontrolki3_bin_end[];
+extern "C" uint8_t _binary_kontrolki3_bin_bz_start[];
+extern "C" uint8_t _binary_kontrolki3_bin_bz_end[];
 
-extern "C" uint8_t _binary_kontrolki4_bin_start[];
-extern "C" uint8_t _binary_kontrolki4_bin_end[];
+extern "C" uint8_t _binary_kontrolki4_bin_bz_start[];
+extern "C" uint8_t _binary_kontrolki4_bin_bz_end[];
 
-extern "C" uint8_t _binary_aktualizacje_bin_start[];
-extern "C" uint8_t _binary_aktualizacje_bin_end[];
+extern "C" uint8_t _binary_aktualizacje_bin_bz_start[];
+extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 
-extern "C" uint8_t _binary_diagnostyka_bin_start[],_binary_diagnostyka_bin_end[];
-extern "C" uint8_t _binary_test_dzwieku_bin_start[];
-extern "C" uint8_t _binary_test_dzwieku_bin_end[];
+extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
+extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
+extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
-extern "C" uint8_t _binary_przegladarka_obrazow_bin_start[];
-extern "C" uint8_t _binary_przegladarka_obrazow_bin_end[];
+extern "C" uint8_t _binary_przegladarka_obrazow_bin_bz_start[];
+extern "C" uint8_t _binary_przegladarka_obrazow_bin_bz_end[];
 
 /* TEMP-REPRO: usunac po diagnozie BWS2/BWS46. */
-extern "C" uint8_t _binary_repro_bin_start[];
-extern "C" uint8_t _binary_repro_bin_end[];
+extern "C" uint8_t _binary_repro_bin_bz_start[];
+extern "C" uint8_t _binary_repro_bin_bz_end[];
 
 // Obrazy testowe pulpitu (test.bmp, test1.bmp) nie sa juz osadzane w jadrze:
 // przychodza jako moduly Multiboot2 (patrz jadro/rdzen/obrazy_startowe.h).
@@ -594,7 +595,9 @@ bool tapety_aplikacja_instalacja_ok=false;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
 PlikKontrolny pliki_kontrolne[96]{};
 unsigned liczba_plikow_kontrolnych=0;
-struct PlanowanyPlik{char path[128];const char*data;uint32_t size;};
+// Kompresja blobow (2.2): data/koniec wskazuja skompresowany blob, a size
+// to rozmiar surowy; dane sa rozpakowywane dopiero przy zapisie pliku.
+struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;};
 PlanowanyPlik planowane_pliki[96]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
 size_t planowane_katalog_indeks=0;
@@ -678,7 +681,7 @@ bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
         for(;i+1<sizeof(e.path)&&path[i];++i){e.path[i]=path[i];}
         e.path[i]=0;
         if(path[i]){pliki_instalacja_ok=false;return false;}
-        e.data=data;e.size=size;planowane_bajty_razem+=size;
+        e.data=data;e.size=size;e.koniec=nullptr;e.skompresowany=false;planowane_bajty_razem+=size;
         return true;
     }
     if(scisla_instalacja&&!pliki_instalacja_ok)return false;
@@ -696,10 +699,46 @@ bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     return ok;
 }
 
+// Stan dekodera blobow (tablice Huffmana ~3,4 KiB, poza stosem jadra).
+// Instalacja aplikacji wbudowanych i krok SYSTEMFILES sa jednowatkowe i nie
+// przeplataja sie: plan instalatora korzysta z wlasnego strumienia ponizej.
+static BlobZ::Strumien blob_strumien;
+// Rozpakowuje skompresowany blob aplikacji do nowego bufora sterty jadra.
+uint8_t* rozpakuj_blob(const uint8_t* poczatek,const uint8_t* koniec,uint32_t* rozmiar){
+    uint32_t n=0;
+    if(!BlobZ::rozmiar_surowy(poczatek,koniec,&n)||n<sizeof(NaglowekBur))return nullptr;
+    auto* bufor=static_cast<uint8_t*>(kmalloc(n));
+    if(!bufor)return nullptr;
+    if(!BlobZ::rozpakuj(blob_strumien,poczatek,koniec,bufor,n)){
+        kfree(bufor);
+        wypisz_log("[BSP-BLAD] Uszkodzony skompresowany blob aplikacji (CRC/Adler/rozmiar).");
+        return nullptr;
+    }
+    *rozmiar=n;
+    return bufor;
+}
 bool zapisz_blob_bur(
     const char* sciezka,
     const uint8_t* poczatek,
     const uint8_t* koniec) {
+
+    // Aplikacje wbudowane sa przechowywane w obrazie jadra skompresowane.
+    if(BlobZ::czy_skompresowany(poczatek,koniec)){
+        uint32_t n=0;
+        if(!BlobZ::rozmiar_surowy(poczatek,koniec,&n)||n<sizeof(NaglowekBur))return false;
+        if(planowanie_instalacji){
+            // Plan zapamietuje tylko zrodlo; rozpakowanie nastapi przy zapisie.
+            if(!zapisz_plik_od_nowa(sciezka,reinterpret_cast<const char*>(poczatek),n))return false;
+            auto&e=planowane_pliki[planowane_liczba-1];
+            e.koniec=koniec;e.skompresowany=true;
+            return true;
+        }
+        uint8_t* surowe=rozpakuj_blob(poczatek,koniec,&n);
+        if(!surowe)return false;
+        bool ok=zapisz_plik_od_nowa(sciezka,reinterpret_cast<const char*>(surowe),n);
+        kfree(surowe);
+        return ok;
+    }
 
     uint32_t rozmiar = 0;
 
@@ -1276,8 +1315,8 @@ void instaluj_wbudowane_programy() {
      */
     if (!zapisz_blob_bur(
             "/shell.bur",
-            _binary_shell_bin_start,
-            _binary_shell_bin_end)) {
+            _binary_shell_bin_bz_start,
+            _binary_shell_bin_bz_end)) {
         if(scisla_instalacja){pliki_instalacja_ok=false;return;}
         zatrzymaj_start(
             "Nie mozna zainstalowac /shell.bur.");
@@ -1644,8 +1683,8 @@ void instaluj_wbudowane_programy() {
 
     static const char FPU_A_MANIFEST[]="nazwa = \"FPU isolation probe\"\npoziom_zaufania = 4\nplik_startowy = \"fpu-a.bur\"\nuprawnienia = [\"okna\",\"uruchom_program\"]\n";
     static const char FPU_B_MANIFEST[]="nazwa = \"FPU probe partner\"\npoziom_zaufania = 4\nplik_startowy = \"fpu-b.bur\"\nuprawnienia = [\"okna\"]\n";
-    instaluj_paczke("/programy/fpu-a.cebula/opis.aplikacji",FPU_A_MANIFEST,"/programy/fpu-a.cebula/fpu-a.bur",_binary_fpu_probe_bin_start,_binary_fpu_probe_bin_end);
-    instaluj_paczke("/programy/fpu-b.cebula/opis.aplikacji",FPU_B_MANIFEST,"/programy/fpu-b.cebula/fpu-b.bur",_binary_fpu_probe_bin_start,_binary_fpu_probe_bin_end);
+    instaluj_paczke("/programy/fpu-a.cebula/opis.aplikacji",FPU_A_MANIFEST,"/programy/fpu-a.cebula/fpu-a.bur",_binary_fpu_probe_bin_bz_start,_binary_fpu_probe_bin_bz_end);
+    instaluj_paczke("/programy/fpu-b.cebula/opis.aplikacji",FPU_B_MANIFEST,"/programy/fpu-b.cebula/fpu-b.bur",_binary_fpu_probe_bin_bz_start,_binary_fpu_probe_bin_bz_end);
 
     static const char MANIFEST_HUSARZ_WORKER[] =
         "nazwa = \"Husarz resources\"\n"
@@ -1655,15 +1694,15 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"husarz-worker.bur\"\n"
         "uprawnienia = [\"okna\", \"siec\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
     if (!instaluj_paczke("/programy/husarz-worker.cebula/opis.aplikacji",MANIFEST_HUSARZ_WORKER,
-            "/programy/husarz-worker.cebula/husarz-worker.bur",_binary_husarz_worker_bin_start,_binary_husarz_worker_bin_end))
+            "/programy/husarz-worker.cebula/husarz-worker.bur",_binary_husarz_worker_bin_bz_start,_binary_husarz_worker_bin_bz_end))
         wypisz_log("[BSP-BLAD] Husarz resource worker install failed.");
 
     if (!instaluj_paczke(
             "/programy/przegladarka.cebula/opis.aplikacji",
             MANIFEST_PRZEGLADARKI,
             "/programy/przegladarka.cebula/przegladarka.bur",
-            _binary_przegladarka_bin_start,
-            _binary_przegladarka_bin_end)) {
+            _binary_przegladarka_bin_bz_start,
+            _binary_przegladarka_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac przegladarki Husarz.");
@@ -1676,8 +1715,8 @@ void instaluj_wbudowane_programy() {
             "/programy/notatnik.cebula/opis.aplikacji",
             MANIFEST_NOTATNIKA,
             "/programy/notatnik.cebula/notatnik.bur",
-            _binary_notatnik_bin_start,
-            _binary_notatnik_bin_end)) {
+            _binary_notatnik_bin_bz_start,
+            _binary_notatnik_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Notatnika.");
@@ -1690,8 +1729,8 @@ void instaluj_wbudowane_programy() {
             "/programy/eksplorator.cebula/opis.aplikacji",
             MANIFEST_EKSPLORATORA,
             "/programy/eksplorator.cebula/eksplorator-plikow.bur",
-            _binary_eksplorator_bin_start,
-            _binary_eksplorator_bin_end)) {
+            _binary_eksplorator_bin_bz_start,
+            _binary_eksplorator_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Eksploratora Plikow.");
@@ -1705,8 +1744,8 @@ void instaluj_wbudowane_programy() {
             "/programy/test.cebula/opis.aplikacji",
              MANIFEST_TEST,
             "/programy/test.cebula/test.bur",
-            _binary_test_bin_start,
-            _binary_test_bin_end)) {
+            _binary_test_bin_bz_start,
+            _binary_test_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Aplikacji Testowej.");
@@ -1719,8 +1758,8 @@ void instaluj_wbudowane_programy() {
             "/gry/snake.cebula/opis.aplikacji",
              MANIFEST_SNAKE,
             "/gry/snake.cebula/snake.bur",
-            _binary_snake_bin_start,
-            _binary_snake_bin_end)) {
+            _binary_snake_bin_bz_start,
+            _binary_snake_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac gry Snake.");
@@ -1733,8 +1772,8 @@ void instaluj_wbudowane_programy() {
             "/programy/przegladarka-obrazow.cebula/opis.aplikacji",
             MANIFEST_PRZEGLADARKA_OBRAZOW,
             "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur",
-            _binary_przegladarka_obrazow_bin_start,
-            _binary_przegladarka_obrazow_bin_end)) {
+            _binary_przegladarka_obrazow_bin_bz_start,
+            _binary_przegladarka_obrazow_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Przegladarki Obrazow.");
     } else {
@@ -1746,8 +1785,8 @@ void instaluj_wbudowane_programy() {
             "/programy/demo_ui.cebula/opis.aplikacji",
             MANIFEST_DEMO_UI,
             "/programy/demo_ui.cebula/demo_ui.bur",
-            _binary_demo_ui_bin_start,
-            _binary_demo_ui_bin_end)) {
+            _binary_demo_ui_bin_bz_start,
+            _binary_demo_ui_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac BursztynUI Demo.");
     } else {
@@ -1759,8 +1798,8 @@ void instaluj_wbudowane_programy() {
             "/programy/kontrolki2.cebula/opis.aplikacji",
             MANIFEST_KONTROLKI2,
             "/programy/kontrolki2.cebula/kontrolki2.bur",
-            _binary_kontrolki2_bin_start,
-            _binary_kontrolki2_bin_end)) {
+            _binary_kontrolki2_bin_bz_start,
+            _binary_kontrolki2_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 2.");
     } else {
@@ -1770,7 +1809,7 @@ void instaluj_wbudowane_programy() {
 
     ekran_aplikacja_instalacja_ok=instaluj_paczke(
         "/programy/ekran.cebula/opis.aplikacji",MANIFEST_EKRAN,
-        EKRAN_PROGRAM,_binary_ekran_bin_start,_binary_ekran_bin_end);
+        EKRAN_PROGRAM,_binary_ekran_bin_bz_start,_binary_ekran_bin_bz_end);
     if(!ekran_aplikacja_instalacja_ok){
         log_blad_pliku_instalacji(EKRAN_PROGRAM,"plan/package");
         if(scisla_instalacja)pliki_instalacja_ok=false;
@@ -1782,7 +1821,7 @@ void instaluj_wbudowane_programy() {
 
     tapety_aplikacja_instalacja_ok=instaluj_paczke(
         "/programy/tapety.cebula/opis.aplikacji",MANIFEST_TAPETY,
-        TAPETY_PROGRAM,_binary_tapety_bin_start,_binary_tapety_bin_end);
+        TAPETY_PROGRAM,_binary_tapety_bin_bz_start,_binary_tapety_bin_bz_end);
     if(!tapety_aplikacja_instalacja_ok){
         log_blad_pliku_instalacji(TAPETY_PROGRAM,"plan/package");
         if(scisla_instalacja)pliki_instalacja_ok=false;
@@ -1796,8 +1835,8 @@ void instaluj_wbudowane_programy() {
             "/programy/kontrolki3.cebula/opis.aplikacji",
             MANIFEST_KONTROLKI3,
             "/programy/kontrolki3.cebula/kontrolki3.bur",
-            _binary_kontrolki3_bin_start,
-            _binary_kontrolki3_bin_end)) {
+            _binary_kontrolki3_bin_bz_start,
+            _binary_kontrolki3_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 3.");
     } else {
@@ -1809,8 +1848,8 @@ void instaluj_wbudowane_programy() {
             "/programy/kontrolki4.cebula/opis.aplikacji",
             MANIFEST_KONTROLKI4,
             "/programy/kontrolki4.cebula/kontrolki4.bur",
-            _binary_kontrolki4_bin_start,
-            _binary_kontrolki4_bin_end)) {
+            _binary_kontrolki4_bin_bz_start,
+            _binary_kontrolki4_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Kontrolek 4.");
     } else {
@@ -1822,8 +1861,8 @@ void instaluj_wbudowane_programy() {
             "/programy/aktualizacje.cebula/opis.aplikacji",
             MANIFEST_AKTUALIZACJE,
             "/programy/aktualizacje.cebula/aktualizacje.bur",
-            _binary_aktualizacje_bin_start,
-            _binary_aktualizacje_bin_end)) {
+            _binary_aktualizacje_bin_bz_start,
+            _binary_aktualizacje_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Aktualizacji Systemu.");
     } else {
@@ -1838,15 +1877,15 @@ void instaluj_wbudowane_programy() {
     (void)usun_twor("/programy/motywy.cebula");
 
     if (!instaluj_paczke("/programy/diagnostyka.cebula/opis.aplikacji",MANIFEST_DIAGNOSTYKA,
-            DIAG_APP_PATH,_binary_diagnostyka_bin_start,_binary_diagnostyka_bin_end))
+            DIAG_APP_PATH,_binary_diagnostyka_bin_bz_start,_binary_diagnostyka_bin_bz_end))
         wypisz_log("[DIAG] Nie udało się zainstalować Diagnostyki systemu");
 
     if (!instaluj_paczke(
             "/programy/test_dzwieku.cebula/opis.aplikacji",
             MANIFEST_TEST_DZWIEKU,
             "/programy/test_dzwieku.cebula/test_dzwieku.bur",
-            _binary_test_dzwieku_bin_start,
-            _binary_test_dzwieku_bin_end)) {
+            _binary_test_dzwieku_bin_bz_start,
+            _binary_test_dzwieku_bin_bz_end)) {
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Testu dzwieku.");
     } else {
@@ -1861,8 +1900,8 @@ void instaluj_wbudowane_programy() {
             "/programy/kalkulator.cebula/opis.aplikacji",
             MANIFEST_KALKULATORA,
             "/programy/kalkulator.cebula/kalkulator.bur",
-            _binary_kalkulator_bin_start,
-            _binary_kalkulator_bin_end)) {
+            _binary_kalkulator_bin_bz_start,
+            _binary_kalkulator_bin_bz_end)) {
 
         wypisz_log(
             "[BSP-BLAD] Nie mozna zainstalowac Kalkulatora.");
@@ -1873,8 +1912,8 @@ void instaluj_wbudowane_programy() {
 
     if (!zapisz_blob_bur(
             "/menedzer_okien.bur",
-            _binary_menedzer_okien_bin_start,
-            _binary_menedzer_okien_bin_end)) {
+            _binary_menedzer_okien_bin_bz_start,
+            _binary_menedzer_okien_bin_bz_end)) {
         if(scisla_instalacja){pliki_instalacja_ok=false;return;}
         zatrzymaj_start(
             "Nie mozna zainstalowac Menedzera Okien.");
@@ -2112,26 +2151,58 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         return ok;
     }
     auto&e=planowane_pliki[planowane_indeks];
+    // Skompresowany blob: bufor na caly plik (wymagany przez odwolania wstecz
+    // DEFLATE), ale kazdy krok rozpakowuje tylko porcje, ktora zaraz zapisze,
+    // wiec krok nie blokuje CPU na czas dekompresji calego pliku.
+    static uint8_t* planowane_surowe=nullptr;
+    static BlobZ::Strumien planowany_strumien;
+    static unsigned planowane_surowe_indeks=0;
+    auto zwolnij_surowe=[](){if(planowane_surowe){kfree(planowane_surowe);planowane_surowe=nullptr;}};
+    // Bufor nalezy do jednego pliku; nowy plik (albo ponowiony plan) zawsze
+    // otwiera strumien od poczatku.
+    if(planowane_surowe&&(planowane_offset==0||planowane_surowe_indeks!=planowane_indeks))zwolnij_surowe();
+    if(e.skompresowany&&!planowane_surowe){
+        uint32_t n=0;
+        const auto* zrodlo=reinterpret_cast<const uint8_t*>(e.data);
+        if(!BlobZ::rozmiar_surowy(zrodlo,e.koniec,&n)||n!=e.size||planowane_offset!=0){log_blad_pliku_instalacji(e.path,"unpack");pliki_instalacja_ok=false;return false;}
+        planowane_surowe=static_cast<uint8_t*>(kmalloc(n));
+        if(!planowane_surowe||!BlobZ::otworz(planowany_strumien,zrodlo,e.koniec,planowane_surowe,n)){
+            zwolnij_surowe();log_blad_pliku_instalacji(e.path,"unpack");pliki_instalacja_ok=false;return false;
+        }
+        planowane_surowe_indeks=planowane_indeks;
+    }
+    const char* dane=e.skompresowany?reinterpret_cast<const char*>(planowane_surowe):e.data;
     if(planowane_offset==0){
         (void)usun_twor(e.path);
         if(!utworz_plik(e.path)){
             log_blad_pliku_instalacji(e.path,"create");
-            pliki_instalacja_ok=false;return false;
+            zwolnij_surowe();pliki_instalacja_ok=false;return false;
         }
     }
     constexpr uint32_t PORCJA=4*1024;
     static_assert(PORCJA<=4096,"SYSTEMFILES STEP nie moze przekroczyc jednego bloku BSP2");
     uint32_t n=e.size-planowane_offset;if(n>PORCJA)n=PORCJA;
-    if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,e.data+planowane_offset,n)){
+    if(e.skompresowany){
+        // Ostatnia porcja konczy strumien: Adler-32 + CRC-32 calego pliku
+        // musza sie zgadzac, zanim plik zostanie uznany za zapisany.
+        bool ostatnia=planowane_offset+n==e.size;
+        bool ok=ostatnia?BlobZ::zakoncz(planowany_strumien):BlobZ::dalej(planowany_strumien,planowane_offset+n);
+        if(!ok||planowany_strumien.s.dl<planowane_offset+n){
+            wypisz_log("[BSP-BLAD] Uszkodzony skompresowany blob aplikacji (CRC/Adler/rozmiar).");
+            log_blad_pliku_instalacji(e.path,"unpack",planowane_offset,n);
+            zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+        }
+    }
+    if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,dane+planowane_offset,n)){
         log_blad_pliku_instalacji(e.path,"write",planowane_offset,n);
-        (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+        zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     if(!psf_flush_cache()){
         log_blad_pliku_instalacji(e.path,"flush",planowane_offset,n);
-        (void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+        zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     for(uint32_t i=0;i<n;++i){
-        planowane_crc^=uint8_t(e.data[planowane_offset+i]);
+        planowane_crc^=uint8_t(dane[planowane_offset+i]);
         for(unsigned bit=0;bit<8;++bit)planowane_crc=(planowane_crc>>1)^(0xEDB88320U&(0U-(planowane_crc&1)));
     }
     planowane_offset+=n;planowane_bajty+=n;
@@ -2140,6 +2211,7 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         auto&k=pliki_kontrolne[liczba_plikow_kontrolnych++];
         unsigned i=0;for(;i+1<sizeof(k.path)&&e.path[i];++i){k.path[i]=e.path[i];}k.path[i]=0;
         k.size=e.size;k.crc=~planowane_crc;
+        zwolnij_surowe();
         ++planowane_indeks;planowane_offset=0;planowane_crc=~0U;
     }
     if(wykonane)*wykonane=planowane_bajty;
@@ -2767,9 +2839,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     instaluj_wbudowane_programy();
     if(instalator_tryb()){
-        extern uint8_t _binary_instalator_bin_start[],_binary_instalator_bin_end[];
+        extern uint8_t _binary_instalator_bin_bz_start[],_binary_instalator_bin_bz_end[];
         if(!::zapewnij_katalog("/programy/instalator.cebula")||
-           !zapisz_blob_bur(INSTALATOR_PROGRAM,_binary_instalator_bin_start,_binary_instalator_bin_end))
+           !zapisz_blob_bur(INSTALATOR_PROGRAM,_binary_instalator_bin_bz_start,_binary_instalator_bin_bz_end))
             zatrzymaj_start("Nie mozna przygotowac aplikacji instalatora w RAM.");
     }
     // Restoring the display mode can compose immediately, before WM exists.
