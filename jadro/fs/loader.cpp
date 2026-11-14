@@ -1090,6 +1090,7 @@ static bool mapuj_segment_v2(void* pml4, uint64_t va, uint64_t mem, const uint8_
     return true;
 }
 
+
 static bool uruchom_program_z_pliku_impl(
     const char* sciezka_pliku,
     uint8_t bzl_poziom,
@@ -1207,14 +1208,15 @@ static bool uruchom_program_z_pliku_impl(
 
 #ifndef BURSZTYN_LOADER_HOST_TEST
     /*
-     * Delegowany start aplikacji systemowej o podwyzszonym zaufaniu (BWS 10 od
-     * rodzica bez pelnego zaufania): plik musi byc bajt w bajt aplikacja
-     * wbudowana w obraz jadra, bo etykieta PZB pliku w /programy jest
-     * zapisywalna przez zwykly proces.
+     * Start aplikacji systemowej o podwyzszonym zaufaniu (BWS 10, dowolny rodzic):
+     * bajty pliku, ktore ZA CHWILE zostana zmapowane (ten sam bufor `bufor_pliku`,
+     * brak ponownego odczytu), musza miec SHA-256 z tablicy wbudowanej w jadro
+     * albo poprawny podpis release. Etykieta PZB pliku i manifest na dysku nie
+     * sa zrodlem zaufania.
      */
     if (wymagaj_wbudowanego &&
-        !kernel_wbudowany_zgodny(bezpieczna_sciezka, bufor_pliku, rozmiar_pliku)) {
-        proba.obraz.blad = "signature-builtin-mismatch";
+        !tozsamosc_systemowa_zweryfikuj(bezpieczna_sciezka, bufor_pliku, rozmiar_pliku)) {
+        proba.obraz.blad = "signature-system-identity-mismatch";
         zwolnij_rezerwacje_procesu(pid);
         return false;
     }

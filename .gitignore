@@ -103,3 +103,6 @@ boot*.log
 # Local integration verification outputs
 /.signature-test/
 /BursztynOS.iso
+jadro/fs/skroty_systemowe.generated.h
+.tls-fixture/
+jadro/siec/tls_test_ca.generated.h

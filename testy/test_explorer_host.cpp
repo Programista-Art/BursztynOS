@@ -56,7 +56,12 @@ static void remaining_regressions() {
         CHECK(test_pixels.at({w.x,w.y+TITLE_H})==(theme.oknotlo|0xff000000U));
         CHECK(test_pixels.at({w.x+w.w-1,w.y+w.h-1})==(theme.oknotlo|0xff000000U));
         bool panel=false,field=false,opaque=true;
-        for(auto& pixel:test_pixels) {opaque &= (pixel.second>>24)==255;panel|=pixel.second==(theme.panel|0xff000000U);field|=pixel.second==(theme.poletekstowe|0xff000000U);}
+        // Production layer-pixel contract (compositor + icon path): 0x00000000 is the ONLY
+        // transparent value; opaque pixels are 0xFF.. (theme fills), 0x00RRGGBB with nonzero RGB
+        // (legacy/icon colours) or 0x01000000 (icon black). Anything else - above all a zero
+        // pixel - would punch a hole in the window.
+        for(auto& pixel:test_pixels) {const uint32_t a=pixel.second>>24;
+            opaque &= pixel.second!=0 && (a==255 || a<=1) && !(a==0 && (pixel.second&0x00ffffffU)==0);panel|=pixel.second==(theme.panel|0xff000000U);field|=pixel.second==(theme.poletekstowe|0xff000000U);}
         CHECK(opaque);CHECK(panel);CHECK(field);test_capture_pixels=false;
     }
     test_pixels.clear();test_ustaw_aktywny_motyw(nullptr);delete v;delete m;

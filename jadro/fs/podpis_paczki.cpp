@@ -27,6 +27,7 @@
 
 #include "psf.h"
 #include "aktualizacja_klucz.h"
+#include "tozsamosc_systemowa.h"
 
 namespace {
 
@@ -90,6 +91,11 @@ extern "C" const char* podpis_paczki_blad(
         case PodpisPaczkiWynik::BrakSrodowiska: return "crypto-not-ready";
         default: return "signature-unknown";
     }
+}
+
+extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]) {
+    if (!dane || !wynik || rozmiar == 0 || rozmiar > MAKS_ROZMIAR_MB) return false;
+    return mbedtls_sha256_ret(dane, static_cast<size_t>(rozmiar), wynik, 0) == 0;
 }
 
 extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(
@@ -185,4 +191,28 @@ extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(
     }
 
     return PodpisPaczkiWynik::Ok;
+}
+
+extern "C" bool tozsamosc_systemowa_zweryfikuj_tablica(
+    const TozsamoscSystemowa::Wpis* tablica, size_t liczba,
+    const char* sciezka, const uint8_t* dane, uint64_t rozmiar) {
+    if (!sciezka || !dane || rozmiar == 0) return false;
+    uint8_t skrot[32]{};
+    if (tablica && podpis_sha256(dane, rozmiar, skrot)) {
+        for (size_t i = 0; i < liczba; ++i) {
+            const auto& w = tablica[i];
+            if (w.sciezka && TozsamoscSystemowa::sciezki_rowne(w.sciezka, sciezka) &&
+                w.rozmiar == rozmiar && TozsamoscSystemowa::skroty_rowne(w.skrot, skrot))
+                return true;
+        }
+    }
+    // Niezalezna aktualizacja aplikacji: podpis release dla dokladnie tych bajtow.
+    return podpis_paczki_weryfikuj(sciezka, dane, rozmiar) == PodpisPaczkiWynik::Ok;
+}
+
+extern "C" bool tozsamosc_systemowa_zweryfikuj(const char* sciezka, const uint8_t* dane, uint64_t rozmiar) {
+    return tozsamosc_systemowa_zweryfikuj_tablica(
+        TozsamoscSystemowa::kWbudowaneSkroty,
+        sizeof(TozsamoscSystemowa::kWbudowaneSkroty) / sizeof(TozsamoscSystemowa::kWbudowaneSkroty[0]),
+        sciezka, dane, rozmiar);
 }

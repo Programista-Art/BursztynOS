@@ -50,6 +50,14 @@ public:
     // Input still wakes the wait immediately; other applications retain 8 ticks.
     void ustaw_odstep_animacji(uint32_t ticks) { odstep_animacji_=ticks<1?1:ticks>8?8:ticks; }
 
+    // Zadanie okresowe zamiast "animacji": aplikacja, ktora tylko probkuje stan
+    // (np. Diagnostyka raz na sekunde), spi do terminu lub zdarzenia zamiast budzic
+    // sie co ~32 ms. Wolane w watku petli, gdy minal `ticks` bez zdarzenia i okno
+    // nie wymaga animacji (animacje kontrolek nadal maja pierwszenstwo i interwal 8 tikow).
+    void ustaw_zadanie_okresowe(uint32_t ticks, void (*zadanie)(void*), void* kontekst) {
+        okresowe_ticks_ = ticks; okresowe_ = zadanie; okresowe_kontekst_ = kontekst;
+    }
+
     int uruchom(Okno& okno) {
         ustaw_glowne_okno(&okno);
         return uruchom();
@@ -96,8 +104,24 @@ public:
                 }
                 // Usypiamy proces w schedulerze na czas do klatki (8 tickow = ~32 ms przy 250 Hz)
                 odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, odstep_animacji_);
+            } else if (okresowe_ && okresowe_ticks_) {
+                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, okresowe_ticks_);
             } else {
                 odebrano = gui_czekaj_na_zdarzenie(&ev);
+            }
+
+            if (okresowe_ && okresowe_ticks_) {
+                // Termin liczony zegarem, niezaleznie od galezi petli (animacje, zdarzenia).
+                const uint64_t teraz = gui_czas_monotoniczny_ns();
+                if (teraz - okresowe_ostatnio_ns_ >= uint64_t(okresowe_ticks_) * 4000000ULL) {
+                    okresowe_ostatnio_ns_ = teraz;
+                    okresowe_(okresowe_kontekst_);
+                    if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
+                        glowne_okno_->rysuj(ctx);
+                        gui_odswiez();
+                        ++statystyki_.odrysowania;
+                    }
+                }
             }
 
             if (odebrano) {
@@ -124,6 +148,10 @@ public:
 
 private:
     uint32_t odstep_animacji_{8};
+    uint32_t okresowe_ticks_{0};
+    uint64_t okresowe_ostatnio_ns_{0};
+    void (*okresowe_)(void*){nullptr};
+    void* okresowe_kontekst_{nullptr};
     Okno* glowne_okno_{nullptr};
     bool czy_dziala_{false};
     SkalaUI skala_dpi_{1};

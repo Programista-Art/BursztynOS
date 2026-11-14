@@ -477,6 +477,8 @@ void powiadom_zmiane_systemu_plikow(
  * LOCK EKRANU
  * ========================================================================= */
 
+constexpr uint64_t PASMO_BLITU_PIKSELI = 64ULL * 1024ULL;
+
 class BlokadaEkranu {
 public:
     BlokadaEkranu() {
@@ -778,18 +780,54 @@ bool segment_prefiksu(
         sciezka[i] == '/';
 }
 
+/* Pojedynczy plik .bur tuz pod "/" (np. /menedzer_okien.bur, /shell.bur). */
+bool plik_bur_w_korzeniu(const char* sciezka) {
+    if (!sciezka || sciezka[0] != '/') return false;
+    size_t n = 1;
+    while (sciezka[n] != '\0') {
+        if (sciezka[n] == '/') return false;
+        ++n;
+    }
+    return n > 5 && sciezka[n - 4] == '.' && sciezka[n - 3] == 'b' &&
+           sciezka[n - 2] == 'u' && sciezka[n - 1] == 'r';
+}
+
+/*
+ * Kanoniczna sciezka bezwzgledna: bez pustych segmentow ("//"), "." i "..",
+ * bez konczacego "/". Zwykly proces nie moze obejsc ochrony drzew systemowych
+ * przez alias sciezki, nawet gdyby PSF kiedys je normalizowal.
+ */
+bool sciezka_kanoniczna(const char* sciezka) {
+    if (!sciezka || sciezka[0] != '/') return false;
+    if (sciezka[1] == '\0') return true;
+    size_t i = 1;
+    while (sciezka[i] != '\0') {
+        size_t start = i;
+        while (sciezka[i] != '\0' && sciezka[i] != '/') ++i;
+        const size_t len = i - start;
+        if (len == 0) return false;                                    // "//" albo konczacy "/"
+        if (len == 1 && sciezka[start] == '.') return false;           // "."
+        if (len == 2 && sciezka[start] == '.' && sciezka[start + 1] == '.') return false;  // ".."
+        if (sciezka[i] == '/') ++i;
+    }
+    return true;
+}
+
+/*
+ * Drzewa zaufanych plikow wykonywalnych i konfiguracji systemu. Zapis tu wymaga
+ * poziomu < PZB_UZYTKOWNIK (jadro przy starcie, usluga aktualizacji, zaufane
+ * aplikacje); zwykly proces nie moze utworzyc, zmienic, skrocic, usunac,
+ * przemianowac ani podmienic zadnego z tych plikow.
+ */
 bool sciezka_chroniona(
     const char* sciezka
 ) {
     return
-        segment_prefiksu(
-            sciezka,
-            "/system"
-        ) ||
-        segment_prefiksu(
-            sciezka,
-            "/jadro"
-        );
+        segment_prefiksu(sciezka, "/system") ||
+        segment_prefiksu(sciezka, "/jadro") ||
+        segment_prefiksu(sciezka, "/programy") ||
+        segment_prefiksu(sciezka, "/gry") ||
+        plik_bur_w_korzeniu(sciezka);
 }
 
 bool proces_moze_modyfikowac_sciezke(
@@ -806,10 +844,8 @@ bool proces_moze_modyfikowac_sciezke(
     /*
      * Zwykle aplikacje i sandbox nie moga modyfikowac krytycznych drzew.
      */
-    if (proces.poziom_zaufania >=
-            PZB_UZYTKOWNIK &&
-        sciezka_chroniona(
-            sciezka)) {
+    if (proces.poziom_zaufania >= PZB_UZYTKOWNIK &&
+        (!sciezka_kanoniczna(sciezka) || sciezka_chroniona(sciezka))) {
 
         return false;
     }
@@ -1892,10 +1928,10 @@ __attribute__((noinline)) uint64_t bws_uruchom_impl(
     const bool delegowane = aplikacja_systemowa &&
         uruchamianie::rodzic_moze_delegowac(
             rodzic.poziom_zaufania, znane_prawa(rodzic));
-    // Rodzic bez pelnego zaufania: plik musi byc identyczny z wbudowanym wzorcem.
-    const bool wymagaj_wbudowanego = delegowane &&
-        !(pzb_ma_co_najmniej_poziom(&rodzic, PZB_ZAUFANE) &&
-          pzb_ma_prawa(&rodzic, PRAWO_SYSTEM_CONFIG));
+    // Tozsamosc systemowa (SHA-256 w jadrze / podpis release) wymagana ZAWSZE, takze
+    // od zaufanego rodzica (Menedzer Okien) - podmieniony plik nie dostaje praw aplikacji.
+    const bool wymagaj_wbudowanego = delegowane ||
+        rowna_sciezka(sciezka, "/programy/ekran.cebula/ekran.bur");
     if (delegowane) {
         poziom_dziecka = aplikacja_systemowa->poziom;
         wymagane = aplikacja_systemowa->prawa;
@@ -4131,6 +4167,37 @@ static uint64_t obsluga_wywolan_systemowych_impl(
              * bez posredniego kmalloc/kfree przy kazdej klatce. ABI BWS57 i
              * wszystkie limity rozmiaru pozostaja bez zmian.
              */
+            if (arg4 != 1) {
+                /*
+                 * Duzy blit okna aplikacji (Husarz: do 16 MiB) to dziesiatki ms w
+                 * jednym, niepreemptowalnym syscallu (pomiar: BWS57 = 25% tikow
+                 * "odroczonych" podczas ladowania strony). Dzielimy go na pasy
+                 * ~64K pikseli; MIEDZY pasami zamek ekranu jest zwolniony i oddajemy
+                 * CPU. Spojnosc wzrokowa zapewnia cien warstwy (kompozytor czyta
+                 * ostatnia ukonczona klatke do gui_odswiez), wiec nie jest to
+                 * widoczne. Warstwa pulpitu (z_order 0) nie ma cienia - tam blit
+                 * pozostaje atomowy.
+                 */
+                const auto blit=arg4==3?bws_gui_alpha_blit:arg4==2?bws_gui_zastap_region:bws_gui_blit;
+                const warstwa_obrazu* warstwa = pobierz_warstwe(aktualny_pid);
+                const bool pasy = warstwa && warstwa->z_order != 0 &&
+                                  static_cast<uint64_t>(szer) * static_cast<uint64_t>(wys) > 2ULL * PASMO_BLITU_PIKSELI;
+                if (pasy) {
+                    int wiersze = static_cast<int>(PASMO_BLITU_PIKSELI / static_cast<uint64_t>(szer));
+                    if (wiersze < 1) wiersze = 1;
+                    bool jakikolwiek = false;
+                    for (int wiersz = 0; wiersz < wys; wiersz += wiersze) {
+                        const int ile = wys - wiersz < wiersze ? wys - wiersz : wiersze;
+                        {
+                            BlokadaEkranu pasmo;
+                            jakikolwiek |= blit(x, y + wiersz, szer, ile,
+                                reinterpret_cast<const uint32_t*>(arg3) + static_cast<size_t>(wiersz) * static_cast<size_t>(szer));
+                        }
+                        if (wiersz + ile < wys) scheduler_oddaj_cpu_w_syscallu();
+                    }
+                    return jakikolwiek ? 1ULL : 0ULL;
+                }
+            }
             BlokadaEkranu blokada;
             if (arg4 == 1) {
                 return skladacz_obrazu_blit_popup(

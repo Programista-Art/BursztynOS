@@ -43,3 +43,22 @@ extern "C" PodpisPaczkiWynik podpis_paczki_weryfikuj(
     const uint8_t* dane,
     uint64_t rozmiar
 );
+
+/*
+ * SHA-256 (mbedTLS) calosci bufora; ten sam prymityw, ktorego uzywa weryfikacja
+ * podpisu. Sluzy do porownania z wbudowanymi skrotami aplikacji systemowych
+ * (tozsamosc_systemowa.h). Zwraca false przy bledzie crypto.
+ */
+extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
+
+#include "tozsamosc_typy.h"
+/*
+ * Tozsamosc aplikacji systemowej (tozsamosc_systemowa.h): true, gdy SHA-256 `dane`
+ * zgadza sie z wpisem tablicy dla DOKLADNIE tej sciezki i rozmiaru, albo gdy
+ * `<sciezka>.podpis` jest poprawnym podpisem release tych bajtow.
+ */
+extern "C" bool tozsamosc_systemowa_zweryfikuj_tablica(
+    const TozsamoscSystemowa::Wpis* tablica, size_t liczba,
+    const char* sciezka, const uint8_t* dane, uint64_t rozmiar);
+// Wersja z tablica wbudowana w jadro (skroty_systemowe.generated.h).
+extern "C" bool tozsamosc_systemowa_zweryfikuj(const char* sciezka, const uint8_t* dane, uint64_t rozmiar);

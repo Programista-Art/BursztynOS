@@ -106,13 +106,17 @@ void gui_rysuj_prostokat(int x,int y,int w,int h,uint32_t color) {
 }
 bool gui_blit(int x,int y,int w,int h,const uint32_t* data) {
     if(test_capture_paints)test_paint_rects.push_back({x,y,w,h});
-    if(test_capture_pixels || test_surface_width)for(int j=0;j<h;++j)for(int i=0;i<w;++i)test_set_pixel(x+i,y+j,data[j*w+i]);
+    // Mirrors BWS57 mode 0 (gui_blit_region, zastap_przezroczyste=false): source pixels equal to
+    // SKLADACZ_PIKSEL_PRZEZROCZYSTY leave the layer unchanged, so transparent icon background is
+    // never a write into the surface (the kernel skips it; recording it was a fixture error).
+    if(test_capture_pixels || test_surface_width)for(int j=0;j<h;++j)for(int i=0;i<w;++i)if(data[j*w+i]!=0)test_set_pixel(x+i,y+j,data[j*w+i]);
     return true;
 }
 #ifndef BURSZTYN_HOST_CUSTOM_ALPHA
 bool gui_blit_alpha(int x,int y,int w,int h,const uint32_t* pixels) {
  if(!test_capture_pixels&&!test_surface_width)return true;
  for(int j=0;j<h;++j)for(int i=0;i<w;++i){
+  if(!(pixels[j*w+i]>>24))continue;   // kernel (window layer, alpha path): alpha 0 = pixel skipped
   uint32_t old=0;
   if(test_capture_pixels)old=test_pixels[{x+i,y+j}];
   if(x+i>=0&&y+j>=0&&x+i<test_surface_width&&y+j<test_surface_height)

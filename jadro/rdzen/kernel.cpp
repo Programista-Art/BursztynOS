@@ -720,41 +720,6 @@ uint8_t* rozpakuj_blob(const uint8_t* poczatek,const uint8_t* koniec,uint32_t* r
     *rozmiar=n;
     return bufor;
 }
-// Kopia referencyjna Ustawien (dostarczanych jako modul Multiboot2, nie jako
-// blob w obrazie) zdjeta przy instalacji; sluzy wylacznie do kontroli zgodnosci
-// pliku przy delegowanym starcie aplikacji systemowej (kernel_wbudowany_zgodny).
-static uint8_t* g_ustawienia_wzorzec=nullptr;
-static uint32_t g_ustawienia_wzorzec_n=0;
-static bool sciezki_rowne(const char* a,const char* b){
-    if(!a||!b)return false;
-    size_t i=0;while(a[i]&&b[i]&&a[i]==b[i])++i;return !a[i]&&!b[i];
-}
-// Czy bajty pliku `dane` sa identyczne z aplikacja wbudowana pod `sciezka`.
-// Wolane tylko, gdy rodzic bez pelnego zaufania uruchamia aplikacje o
-// podwyzszonym poziomie (BWS 10): podmieniony plik w /programy (etykieta PZB 4,
-// zapisywalna przez zwykly proces) nie moze dostac praw aplikacji systemowej.
-extern "C" bool kernel_wbudowany_zgodny(const char* sciezka,const uint8_t* dane,uint64_t rozmiar){
-    struct Wpis{const char* sciezka;const uint8_t* poczatek;const uint8_t* koniec;};
-    const Wpis wpisy[]={
-        {"/programy/aktualizacje.cebula/aktualizacje.bur",_binary_aktualizacje_bin_bz_start,_binary_aktualizacje_bin_bz_end},
-        {"/programy/diagnostyka.cebula/diagnostyka.bur",_binary_diagnostyka_bin_bz_start,_binary_diagnostyka_bin_bz_end},
-        {"/programy/test_dzwieku.cebula/test_dzwieku.bur",_binary_test_dzwieku_bin_bz_start,_binary_test_dzwieku_bin_bz_end},
-    };
-    if(!sciezka||!dane)return false;
-    const uint8_t* wzorzec=nullptr;uint32_t n=0;uint8_t* zwolnij=nullptr;
-    for(const auto& w:wpisy){
-        if(!sciezki_rowne(sciezka,w.sciezka))continue;
-        zwolnij=rozpakuj_blob(w.poczatek,w.koniec,&n);
-        wzorzec=zwolnij;
-        break;
-    }
-    if(!wzorzec&&sciezki_rowne(sciezka,"/programy/ustawienia.cebula/ustawienia.bur")){wzorzec=g_ustawienia_wzorzec;n=g_ustawienia_wzorzec_n;}
-    bool zgodny=wzorzec&&n==rozmiar;
-    for(uint32_t i=0;zgodny&&i<n;++i)zgodny=wzorzec[i]==dane[i];
-    if(zwolnij)kfree(zwolnij);
-    return zgodny;
-}
-
 bool zapisz_blob_bur(
     const char* sciezka,
     const uint8_t* poczatek,
@@ -1168,14 +1133,7 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\", \"system_config\"]\n";
     ModulMB2 settings_payload{};
     if(znajdz_modul_mb2(g_multiboot_info_ptr,"bsf-settings",&settings_payload)&&tekst_rowny(settings_payload.cmdline,"bsf-settings")&&settings_payload.rozmiar<=512*1024){
-        if(!g_ustawienia_wzorzec&&settings_payload.rozmiar>0){
-            auto* kopia=static_cast<uint8_t*>(kmalloc(settings_payload.rozmiar));
-            if(kopia){
-                const uint8_t* zrodlo=reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.start));
-                for(uint32_t i=0;i<settings_payload.rozmiar;++i)kopia[i]=zrodlo[i];
-                g_ustawienia_wzorzec=kopia;g_ustawienia_wzorzec_n=static_cast<uint32_t>(settings_payload.rozmiar);
-            }
-        }
+
         (void)instaluj_paczke("/programy/ustawienia.cebula/opis.aplikacji",SETTINGS_MANIFEST,"/programy/ustawienia.cebula/ustawienia.bur",reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.start)),reinterpret_cast<const uint8_t*>(uintptr_t(settings_payload.koniec)));
     }else{wypisz_log("[BSF] Settings payload unavailable; desktop bitmap fallback remains available.");if(scisla_instalacja||planowanie_instalacji)pliki_instalacja_ok=false;}
     static const char MANIFEST_PRZEGLADARKI[] =
@@ -2924,6 +2882,20 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     diag_boot_services_ready();
 #if defined(BURSZTYN_DIAG_TLS_COST) && BURSZTYN_DIAG_TLS_COST
     tls_diag_koszt_krypto();
+#endif
+#if defined(BURSZTYN_DIAG_FIXTURE_FILES) && BURSZTYN_DIAG_FIXTURE_FILES > 0
+    // DIAG ONLY: duzy katalog dla testow przewijania/wyszukiwania Eksploratora
+    // (/uzytkownicy/Pulpit/duzy z N plikami plik0000.txt ...). Nie istnieje w produkcji.
+    if (::zapewnij_katalog("/uzytkownicy/Pulpit/duzy")) {
+        unsigned utworzone = 0;
+        for (unsigned i = 0; i < BURSZTYN_DIAG_FIXTURE_FILES; ++i) {
+            char nazwa[64] = "/uzytkownicy/Pulpit/duzy/plik0000.txt";
+            nazwa[29] = char('0' + (i / 1000) % 10); nazwa[30] = char('0' + (i / 100) % 10);
+            nazwa[31] = char('0' + (i / 10) % 10);   nazwa[32] = char('0' + i % 10);
+            if (utworz_plik(nazwa)) ++utworzone;
+        }
+        wypisz_log(utworzone == BURSZTYN_DIAG_FIXTURE_FILES ? "[DIAG FIXTURE] pliki utworzone" : "[DIAG FIXTURE] BLAD tworzenia plikow");
+    }
 #endif
 
     /* ---------------------------------------------------------------------

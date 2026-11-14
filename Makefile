@@ -274,6 +274,30 @@ ifneq ($(filter 1 yes true,$(BURSZTYN_DEBUG_LOADER_PERF)),)
 	KERNEL_CXXFLAGS += -DBURSZTYN_DEBUG_LOADER_PERF=1
 endif
 
+# DIAG: N pustych plikow w /uzytkownicy/Pulpit/duzy (test duzych katalogow Eksploratora).
+BURSZTYN_DIAG_FIXTURE_FILES ?= 0
+ifneq ($(BURSZTYN_DIAG_FIXTURE_FILES),0)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_FIXTURE_FILES=$(BURSZTYN_DIAG_FIXTURE_FILES)
+endif
+
+# A/B: stare aktywne oczekiwanie (pause) na zakonczenie komendy VirtIO-GPU.
+BURSZTYN_GPU_POLL_WAIT ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_GPU_POLL_WAIT)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_GPU_POLL_WAIT=1
+endif
+virtio_gpu.o kernel.o: .build-config/gui-perf
+
+# Lokalny serwer HTTPS z testowym root CA (tylko diagnostyka; patrz tls.cpp):
+#   make iso BURSZTYN_DIAG_TEST_CA=1  (generuje jadro/siec/tls_test_ca.generated.h z .tls-fixture/ca.pem)
+BURSZTYN_DIAG_TEST_CA ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_TEST_CA)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_TEST_CA=1
+tls.o: jadro/siec/tls_test_ca.generated.h
+jadro/siec/tls_test_ca.generated.h:
+	testy/husarz_load/make_tls_fixture.sh
+	$(PYTHON) narzedzia/generuj_test_ca.py .tls-fixture/ca.pem $@
+endif
+
 # Pomiar kosztu kryptografii handshake'u w gosciu ([TLS COST] w logu szeregowym).
 BURSZTYN_DIAG_TLS_COST ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_TLS_COST)),)
@@ -2005,7 +2029,7 @@ GUI_PERF_BUILD_CONFIG := .build-config/gui-perf
 gui-perf-build-config-force:
 $(GUI_PERF_BUILD_CONFIG): gui-perf-build-config-force
 	@mkdir -p .build-config
-	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF) tlscost=$(BURSZTYN_DIAG_TLS_COST) noyield=$(BURSZTYN_DIAG_NO_YIELD) noshadow=$(BURSZTYN_DIAG_NO_SHADOW)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
+	@$(PYTHON) -c "from pathlib import Path; p=Path('$@'); v='runtime=$(BURSZTYNDIAGGUIRUNTIME) perf=$(BURSZTYN_DEBUG_PERF) gui_perf=$(BURSZTYN_DEBUG_GUI_PERF) loader=$(BURSZTYN_DEBUG_LOADER_PERF) tlscost=$(BURSZTYN_DIAG_TLS_COST) noyield=$(BURSZTYN_DIAG_NO_YIELD) noshadow=$(BURSZTYN_DIAG_NO_SHADOW) testca=$(BURSZTYN_DIAG_TEST_CA) gpupoll=$(BURSZTYN_GPU_POLL_WAIT) fixture=$(BURSZTYN_DIAG_FIXTURE_FILES)'; p.write_text(v) if not p.exists() or p.read_text()!=v else None"
 
 scheduler.o syscalls.o grafika.o skladacz_obrazu.o loader.o kernel.o virtio_input.o idt.o tls.o siec.o: jadro/gui/gui_runtime_diag.h $(GUI_PERF_BUILD_CONFIG)
 shell_tmp.o: programy/shell/shell_runtime_diag.h
@@ -3024,6 +3048,24 @@ test-window-geometry-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_okno_geometria.cpp -o .bsf-test/oknogeo
 	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/oknogeo
+
+# Tozsamosc aplikacji systemowych: SHA-256 plikow .bur zbudowanych razem z jadrem.
+SKROTY_SYSTEMOWE_H := jadro/fs/skroty_systemowe.generated.h
+SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o
+$(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemowe.py
+	$(PYTHON) narzedzia/generuj_skroty_systemowe.py $@ \
+		/programy/ustawienia.cebula/ustawienia.bur=ustawienia.bin \
+		/programy/diagnostyka.cebula/diagnostyka.bur=diagnostyka.bin \
+		/programy/test_dzwieku.cebula/test_dzwieku.bur=test_dzwieku.bin \
+		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
+		/programy/ekran.cebula/ekran.bur=ekran.bin
+loader.o: $(SKROTY_SYSTEMOWE_H) jadro/fs/tozsamosc_systemowa.h jadro/fs/tozsamosc_typy.h
+
+.PHONY: test-system-binary-protection-host
+test-system-binary-protection-host:
+	@mkdir -p .installertest
+	g++ $(HOST_INCLUDES) -std=c++17 -O0 -g -ffunction-sections -fdata-sections -Wl,--gc-sections -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined testy/test_system_binary_protection.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .installertest/test-system-binary-protection
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .installertest/test-system-binary-protection
 
 .PHONY: test-launch-policy-host
 test-launch-policy-host:

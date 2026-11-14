@@ -114,8 +114,10 @@ extern "C" void bursztyn_crypto_yield_point(void) {
     static uint64_t ostatni_tik = 0;
     const uint64_t tik = scheduler_pobierz_tick();
     if (tik == ostatni_tik) return;
-    ostatni_tik = tik;
-    if (!operacja_sieci.owned_by(aktualny_pid) || !scheduler_czy_inny_gotowy()) return;
+    if (!operacja_sieci.owned_by(aktualny_pid) || !scheduler_czy_inny_gotowy()) {
+        ostatni_tik = tik;   // nikt nie czeka: nie sprawdzaj ponownie w tym tiku
+        return;
+    }
 #if BURSZTYNDIAGGUIRUNTIME
     {
         uint64_t rflags = 0;
@@ -124,6 +126,9 @@ extern "C" void bursztyn_crypto_yield_point(void) {
     }
 #endif
     scheduler_odstap_w_czekaniu_sieci();
+    // WAZNE: tik zapisujemy PO wznowieniu. Zapis przed uspieniem powodowal, ze kazde
+    // wznowienie od razu oddawalo CPU ponownie (jedno mnozenie na tik zegara).
+    ostatni_tik = scheduler_pobierz_tick();
 }
 
 namespace {

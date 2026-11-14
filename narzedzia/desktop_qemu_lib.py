@@ -23,12 +23,15 @@ FAULTS = ('[PF]', '[KERNEL-PANIC]', '[GP]', 'KRYTYCZNY BLAD SYSTEMU',
 
 class Guest:
     def __init__(self, iso, out, build=ROOT, bios=False, resolution='1280x720', pages=None,
-                 timeout=1500, accel='tcg', extra_args=()):
+                 timeout=1500, accel='tcg', extra_args=(), https=False, tablet=False):
         self.iso, self.out, self.build = Path(iso).resolve(), Path(out), Path(build).resolve()
         self.out.mkdir(parents=True, exist_ok=True)
         self.bios, self.timeout = bios, timeout
         self.w, self.h = (int(v) for v in resolution.split('x'))
+        self.tablet = tablet
         self.requests = []
+        self.https_requests = []
+        self.https_server = None
         self.tmp = Path(tempfile.mkdtemp(prefix='desktop-qemu-'))
         self.serial_path = self.out / 'serial.log'
         self.serial_path.write_text('')
@@ -38,7 +41,7 @@ class Guest:
         cmd = ['qemu-system-x86_64', '-machine', 'pc,hpet=on,i8042=off', '-accel', accel, '-cpu', 'max',
                '-smp', '1', '-m', '2048', '-display', 'none', '-serial', 'file:' + str(self.serial_path),
                '-no-reboot', '-qmp', f'unix:{sock},server=on,wait=off',
-               '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0', '-device', 'usb-mouse,bus=usb.0',
+               '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0'] + (['-device', 'virtio-tablet-pci,disable-legacy=on'] if tablet else ['-device', 'usb-mouse,bus=usb.0']) + [
                '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd']
         if bios:
             cmd += ['-vga', 'std', '-global', 'VGA.vgamem_mb=64', '-cdrom', str(self.iso), '-boot', 'd']
@@ -66,7 +69,18 @@ class Guest:
             threading.Thread(target=self.server.serve_forever, daemon=True).start()
             bridge = shlex.join([sys.executable, str(ROOT / 'testy' / 'test_husarz_qemu.py'), '--bridge',
                                  str(self.server.server_port)])
-            cmd += ['-netdev', 'user,id=n1,guestfwd=tcp:10.0.2.100:80-cmd:' + bridge,
+            fwd = 'guestfwd=tcp:10.0.2.100:80-cmd:' + bridge
+            if https:
+                # Local TLS fixture (testy/husarz_load): same guest address, port 443, raw TCP bridge.
+                import subprocess as _sp
+                _sp.run([str(ROOT / 'testy/husarz_load/make_tls_fixture.sh')], check=True)
+                sys.path.insert(0, str(ROOT / 'testy/husarz_load'))
+                import https_server
+                self.https_server = https_server.serve(pages, self.https_requests)
+                hb = shlex.join([sys.executable, str(ROOT / 'testy' / 'test_husarz_qemu.py'), '--bridge',
+                                 str(self.https_server.server_port)])
+                fwd += ',guestfwd=tcp:10.0.2.100:443-cmd:' + hb
+            cmd += ['-netdev', 'user,id=n1,' + fwd,
                     '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on']
         cmd += list(extra_args)
         self.deadline = time.monotonic() + timeout
@@ -119,11 +133,12 @@ class Guest:
         self.wait(lambda: '[DIAG APP] First frame submitted' in self.log(), 'native desktop ready', 900)
         self.desktop_seconds = round(time.monotonic() - self.boot_started, 1)
         self.wait(lambda: all(f'role={r} result=interrupt IN armed' in self.log()
-                              for r in ('boot-keyboard', 'boot-mouse')), 'USB HID ready', 300)
+                              for r in (('boot-keyboard',) if self.tablet else ('boot-keyboard', 'boot-mouse'))), 'USB HID ready', 300)
         self.q = Qmp(self.sock)
         self.q.socket.settimeout(15)
-        mouse = next(m for m in self.q.call('query-mice')['return'] if 'USB' in m['name'] or 'HID' in m['name'])
-        self.hmp(f'mouse_set {mouse["index"]}')
+        if not self.tablet:
+            mouse = next(m for m in self.q.call('query-mice')['return'] if 'USB' in m['name'] or 'HID' in m['name'])
+            self.hmp(f'mouse_set {mouse["index"]}')
         self._cursor = [self.symbol('mysz_x'), self.symbol('mysz_y')]
         self._ticks = self.symbol('licznik_tykniec_zegara')
         self._buttons = self.symbol(
@@ -137,6 +152,12 @@ class Guest:
 
     # ---- input ---------------------------------------------------------
     def move(self, x, y):
+        if self.tablet:
+            ax, ay = int(x * 32767 / max(1, self.w - 1)), int(y * 32767 / max(1, self.h - 1))
+            self.q.call('input-send-event', {'events': [{'type': 'abs', 'data': {'axis': 'x', 'value': ax}},
+                                                         {'type': 'abs', 'data': {'axis': 'y', 'value': ay}}]})
+            self.wait(lambda: max(abs(c - t) for c, t in zip(self.cursor(), (x, y))) <= 2, 'tablet moved', 15, .1)
+            return
         for _ in range(80):
             self.log()
             old = self.cursor()
@@ -148,7 +169,10 @@ class Guest:
         raise RuntimeError('cursor did not reach target')
 
     def button(self, down):
-        self.hmp('mouse_button 1' if down else 'mouse_button 0')
+        if self.tablet:
+            self.q.call('input-send-event', {'events': [{'type': 'btn', 'data': {'button': 'left', 'down': bool(down)}}]})
+        else:
+            self.hmp('mouse_button 1' if down else 'mouse_button 0')
         self.wait(lambda: bool(self.word(self._buttons, 'b') & 1) == bool(down),
                   'button acknowledged', 30, .1)
 
@@ -221,3 +245,5 @@ class Guest:
             self.vm.kill()
         if self.server:
             self.server.shutdown()
+        if self.https_server:
+            self.https_server.shutdown()

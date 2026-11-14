@@ -662,6 +662,28 @@ void scheduler_zarejestruj_odroczony_tick() {
     gui_perf_deferred_tick(scheduler_czy_inny_gotowy(), g_ostatni_bws);
 }
 
+/*
+ * Kooperacyjny punkt oddania CPU w dlugim syscallu. WYMAGANIA WOLAJACEGO: nie
+ * trzyma zadnego zamka jadra (ekran, PSF, sterownik GPU...), ma wlaczone
+ * przerwania i znajduje sie poza oknem dostepu do pamieci uzytkownika. Zamki
+ * w jadrze sa spinlockami bez wywlaszczenia: oddanie CPU z trzymanym zamkiem
+ * zakleszczyloby kazdego, kto czeka na ten zamek w syscallu. Oddaje najwyzej raz
+ * na tik zegara i tylko, gdy jakis inny proces jest gotowy.
+ */
+void scheduler_oddaj_cpu_w_syscallu() {
+#if defined(BURSZTYN_DIAG_NO_YIELD) && BURSZTYN_DIAG_NO_YIELD
+    return;   // tylko A/B w pomiarach
+#endif
+    static uint64_t ostatni_tik = 0;
+    const uint64_t tik = scheduler_pobierz_tick();
+    if (tik == ostatni_tik) return;
+    ostatni_tik = tik;
+    if (!scheduler_czy_inny_gotowy()) return;
+    gui_perf_add(0, GP_SYSCALL_YIELD);
+    scheduler_odstap_w_czekaniu_sieci();
+    ostatni_tik = scheduler_pobierz_tick();   // po wznowieniu (patrz bursztyn_crypto_yield_point)
+}
+
 bool scheduler_czeka_w_sieci(int pid) {
     return pid>0 && pid<MAKS_PROCESOW && __atomic_load_n(&jawne_czekanie_sieci[pid],__ATOMIC_ACQUIRE);
 }

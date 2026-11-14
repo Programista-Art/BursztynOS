@@ -82,11 +82,6 @@ public:
  }
 };
 class Window;
-class Tick : public Kontrolka {
-public:Window* window{};uint64_t last{};
- bool czy_wymaga_animacji()const override{return true;}
- void krok_animacji(uint64_t ns)override;
-};
 class Window : public Okno {
 public:
  Window():Okno("Diagnostyka systemu",1040,650),status_data(0),devices_data(1),drivers_data(2),logs_data(3){}
@@ -137,7 +132,6 @@ public:
   details=&root.dodaj<PoleWielowierszowe>(Dokowanie::Dol,"",2048);
   details->ustaw_tekst("Wybierz urządzenie, sterownik lub log. Zaznacz tekst i użyj Ctrl+C. Log rozruchu: /logi/BOOTLOG.TXT");
   details->ustaw_tylko_do_odczytu(true);details->ustaw_zawijanie_wierszy(true);details->ustaw_preferowany_rozmiar(Rozmiar(-1,80));
-  auto& ticker=root.dodaj<Tick>(Dokowanie::Gora);ticker.window=this;ticker.ustaw_preferowany_rozmiar(Rozmiar(0,0));
   auto& tabs=root.dodaj<Karty>(Dokowanie::Wypelnij);
   const char* titles[]={"Stan systemu","Urządzenia","Sterowniki","Log uruchamiania"};Data* providers[]={&status_data,&devices_data,&drivers_data,&logs_data};
   for(int i=0;i<4;++i){auto* page=new PanelDokowany();page->ustaw_wypelnienie(Marginesy(0));
@@ -157,7 +151,16 @@ public:
   update();wypisz("[DIAG APP] Ring 3 diagnostic window initialized\n");
  }
 };
-void Tick::krok_animacji(uint64_t ns){if(!last)wypisz("[DIAG APP] First frame submitted\n");if(window&&ns-last>=1000000000ULL){last=ns;DiagSummary s{};
- if(read(DIAG_GET_SUMMARY,&s)&&(!model.valid||s.generation!=model.summary.generation||s.logs!=model.summary.logs||s.errors!=model.summary.errors||s.warnings!=model.summary.warnings||s.dropped_devices!=model.summary.dropped_devices||s.dropped_logs!=model.summary.dropped_logs))window->update();}Kontrolka::krok_animacji(ns);}
+// Raz na sekunde (zadanie okresowe petli, bez budzenia co ~32 ms): probkowanie podsumowania.
+static bool pierwsza_klatka_zalogowana=false;
+static void probkuj_podsumowanie(void* ctx){
+ if(!pierwsza_klatka_zalogowana){pierwsza_klatka_zalogowana=true;wypisz("[DIAG APP] First frame submitted\n");}
+ auto* window=static_cast<Window*>(ctx);DiagSummary s{};
+ if(read(DIAG_GET_SUMMARY,&s)&&(!model.valid||s.generation!=model.summary.generation||s.logs!=model.summary.logs||s.errors!=model.summary.errors||s.warnings!=model.summary.warnings||s.dropped_devices!=model.summary.dropped_devices||s.dropped_logs!=model.summary.dropped_logs)){
+#if BURSZTYNDIAGGUIRUNTIME
+  wypisz("[DIAG APP] summary changed -> update()\n");
+#endif
+  window->update();}
 }
-extern "C" __attribute__((noreturn)) void _start(){AplikacjaGUI app;auto* w=new Window;w->init();(void)app.uruchom(*w);delete w;bws_zakoncz_proces();}
+}
+extern "C" __attribute__((noreturn)) void _start(){AplikacjaGUI app;auto* w=new Window;w->init();app.ustaw_zadanie_okresowe(250,probkuj_podsumowanie,w);(void)app.uruchom(*w);delete w;bws_zakoncz_proces();}

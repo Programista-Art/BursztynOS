@@ -113,6 +113,26 @@ static const unsigned char ISRG_ROOT_X1[] =
 "emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=\n"
 "-----END CERTIFICATE-----\n";
 
+#if defined(BURSZTYN_DIAG_TEST_CA) && BURSZTYN_DIAG_TEST_CA
+/* DIAG ONLY (nie istnieje w buildzie produkcyjnym): dodatkowy, jawnie testowy root CA
+ * dla lokalnego serwera HTTPS (testy/husarz_load). Weryfikacja VERIFY_REQUIRED
+ * pozostaje - zmienia sie wylacznie zbior zaufanych korzeni. */
+#include "tls_test_ca.generated.h"
+extern "C" bool bursztyn_tls_pobierz_magazyn_ca(
+    const unsigned char** dane,size_t* dlugosc) {
+    static unsigned char polaczony[sizeof(ISRG_ROOT_X1) + sizeof(TEST_CA_PEM)];
+    static size_t n = 0;
+    if(!dane||!dlugosc)return false;
+    if(!n){
+        size_t a = sizeof(ISRG_ROOT_X1) - 1, b = sizeof(TEST_CA_PEM);   // ISRG bez NUL + test z NUL
+        for(size_t i=0;i<a;++i)polaczony[i]=ISRG_ROOT_X1[i];
+        for(size_t i=0;i<b;++i)polaczony[a+i]=TEST_CA_PEM[i];
+        n = a + b;
+    }
+    *dane=polaczony;*dlugosc=n;
+    return true;
+}
+#else
 extern "C" bool bursztyn_tls_pobierz_magazyn_ca(
     const unsigned char** dane,size_t* dlugosc) {
     if(!dane||!dlugosc)return false;
@@ -120,6 +140,7 @@ extern "C" bool bursztyn_tls_pobierz_magazyn_ca(
     *dlugosc=sizeof(ISRG_ROOT_X1);
     return true;
 }
+#endif
 
 /* =========================================================================
  * 2. STAN PUBLICZNY

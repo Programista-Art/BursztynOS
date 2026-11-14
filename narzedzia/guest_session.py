@@ -125,6 +125,34 @@ def handle(cmd):
         lines = G.serial_path.read_text(errors='replace').splitlines()[before:]
         return {'ok': True, 'enter_to_first_frame_s': round(t1 - t_enter, 2),
                 'guest': [l for l in lines if any(k in l for k in ('LOADER PERF', 'APP START', 'APP LAUNCH'))]}
+    elif op == 'winrect':
+        elf, title = a[0], arg.split(' ', 1)[1]
+        return {'ok': True, 'rect': list(G.observer(elf, title).window())}
+    elif op == 'resizetest':
+        # Real mouse edge/corner drags on a launched app: grow (corner), grow (left edge),
+        # shrink below the minimum (clamped), move partly off-screen; reports rectangles.
+        elf, title = a[0], arg.split(' ', 1)[1]
+        obs = G.observer(elf, title)
+        out = {'start': list(obs.window())}
+        x, y, w, h = out['start']
+        G.drag(x + w - 5, y + h - 5, x + w + 115, y + h + 35, 6)
+        time.sleep(1.5)
+        out['grow_corner'] = list(obs.window())
+        x, y, w, h = out['grow_corner']
+        G.drag(x + 2, y + h // 2, x - 58, y + h // 2, 6)
+        time.sleep(1.5)
+        out['grow_left'] = list(obs.window())
+        x, y, w, h = out['grow_left']
+        G.drag(x + w - 5, y + h - 5, x + 20, y + 20, 8)
+        time.sleep(1.5)
+        out['shrink_min'] = list(obs.window())
+        x, y, w, h = out['shrink_min']
+        G.drag(x + w // 2, y + 12, min(G.w - 2, x + w // 2 + 900), y + 12, 8)
+        time.sleep(1.5)
+        out['moved_right'] = list(obs.window())
+        G.screenshot('resize-' + elf.split('.')[0])
+        out['ok'] = True
+        return out
     elif op == 'key':
         G.key(*a)
     elif op == 'type':
@@ -173,10 +201,12 @@ def main():
     ap.add_argument('--port', type=int, default=5555)
     ap.add_argument('--resolution', default='1280x720')
     ap.add_argument('--bios', action='store_true')
+    ap.add_argument('--tablet', action='store_true', help='VirtIO tablet (absolute pointer) instead of usb-mouse')
+    ap.add_argument('--https', action='store_true', help='also serve the pages over local TLS (10.0.2.100:443)')
     ap.add_argument('--build', type=Path, default=ROOT)
     ap.add_argument('--timeout', type=int, default=7200)
     a = ap.parse_args()
-    G = Guest(a.iso, a.out, a.build, a.bios, a.resolution, a.pages, a.timeout)
+    G = Guest(a.iso, a.out, a.build, a.bios, a.resolution, a.pages, a.timeout, https=a.https, tablet=a.tablet)
     try:
         G.boot_to_desktop()
         print('READY', G.w, G.h, G.desktop_seconds, flush=True)

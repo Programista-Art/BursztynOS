@@ -503,6 +503,38 @@ static bool virtio_gpu_controlq_ready_locked(VirtioGpuDriver* drv) {
 }
 
 /*
+ * Wait step of the control-queue completion loop. The device completion raises
+ * MSI-X (virtio_gpu_isr sets command_done), so while the used ring is empty the
+ * CPU halts until the next interrupt instead of spinning on `pause`: the vCPU is
+ * idle (no host/vCPU burn, other interrupts - timer, input - are serviced at once)
+ * and the loop still re-checks the ring after every wakeup. The timer tick bounds
+ * the sleep (<= 4 ms) even if an MSI-X were lost, and the soft/hard deadlines keep
+ * their meaning. `cli; check; sti; hlt` closes the lost-wakeup window (STI delays
+ * interrupts until after the next instruction). With interrupts masked by the
+ * caller we fall back to `pause`. NO scheduling happens here: locks held by the
+ * caller (driver, screen) stay held, exactly as before - this is not a yield.
+ */
+static inline void gpu_wait_for_irq(VirtioGpuDriver* drv) {
+#if defined(BURSZTYN_GPU_POLL_WAIT) && BURSZTYN_GPU_POLL_WAIT
+    (void)drv;
+    asm volatile("pause" ::: "memory");   // A/B: zachowanie sprzed zmiany
+#else
+    uint64_t rflags = 0;
+    asm volatile("pushfq; popq %0" : "=r"(rflags));
+    if (!(rflags & (1ULL << 9))) {
+        asm volatile("pause" ::: "memory");
+        return;
+    }
+    asm volatile("cli" ::: "memory");
+    if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
+        asm volatile("sti" ::: "memory");
+        return;
+    }
+    asm volatile("sti; hlt" ::: "memory", "cc");
+#endif
+}
+
+/*
  * Submits the request already placed at cmd_vaddr (offset 0) and waits for
  * it: soft deadline VIRTIO_GPU_DEFAULT_TIMEOUT_MS, then the recovery policy.
  */
@@ -559,7 +591,7 @@ static bool virtio_gpu_execute_locked(VirtioGpuDriver* drv, size_t req_len, size
             --spin_guard;
             const uint64_t now = gpu_monotonic_ns();
             expired = now != 0 && now >= limit_ns;
-            asm volatile("pause" ::: "memory");
+            gpu_wait_for_irq(drv);
         }
     };
 

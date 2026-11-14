@@ -96,6 +96,9 @@ def guest_window(text_slice):
             'input_present_max_ms': {'p50': round(pct(ip, .5) / 1e6, 1), 'p90': round(pct(ip, .9) / 1e6, 1), 'max': round((ip[-1] if ip else 0) / 1e6, 1)},
             'deferred_ticks_total': sum(di),
             'deferred_run_max_ms': {'p50': round(pct(dr, .5) / 1e6, 1), 'p90': round(pct(dr, .9) / 1e6, 1), 'max': round((dr[-1] if dr else 0) / 1e6, 1)},
+            'gpu_wait_s': round(sum(r.get('gpu_ns', 0) for r in rows) / 1e9, 3),
+            'gpu_max_ms': round(max([r.get('gpu_max_ns', 0) for r in rows] or [0]) / 1e6, 1),
+            'frames': sum(r.get('frame_present', 0) for r in rows),
             'torn_compose': sum(r.get('torn_compose', 0) for r in rows),
             'shadow_compose': sum(r.get('shadow_compose', 0) for r in rows)}
 
@@ -130,8 +133,9 @@ def main():
     ap.add_argument('--bios', action='store_true')
     ap.add_argument('--build', type=Path, default=ROOT, help='dir with the matching system_operacyjny.bin and *.elf')
     ap.add_argument('--load-seconds', type=int, default=60)
+    ap.add_argument('--https', action='store_true', help='load the page over the local TLS fixture (10.0.2.100:443)')
     a = ap.parse_args()
-    g = Guest(a.iso, a.out, a.build, a.bios, a.resolution, a.pages, a.timeout)
+    g = Guest(a.iso, a.out, a.build, a.bios, a.resolution, a.pages, a.timeout, https=a.https)
     result = {'iso': str(a.iso), 'page': a.page, 'resolution': a.resolution, 'accel': 'tcg'}
     clock = SerialClock(g.serial_path)
     try:
@@ -153,7 +157,7 @@ def main():
         # navigate (ctrl+L, URL, Enter); pointer keeps moving while the page loads
         g.key('ctrl', 'l')
         time.sleep(.3)
-        g.type_text('http://10.0.2.100/' + a.page)
+        g.type_text(('https://' if a.https else 'http://') + '10.0.2.100/' + a.page)
         t_enter = time.monotonic()
         off = mark()
         g.key('ret')
