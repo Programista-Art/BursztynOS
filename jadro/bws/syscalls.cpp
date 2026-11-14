@@ -61,6 +61,8 @@
 #include "uruchamianie_polityka.h"
 #include "tapety_format.h"
 #include "ustawienia_aplikacji.h"
+#include "polityka_alokacji.h"
+#include "ochrona_sciezek.h"
 #include "zegar-rtc.h"
 #include "grafika.h"
 #include "siec.h"
@@ -760,85 +762,16 @@ bool pobierz_nazwe(
  * OCHRONA SCIEZEK SYSTEMOWYCH
  * ========================================================================= */
 
-bool segment_prefiksu(
-    const char* sciezka,
-    const char* prefiks
-) {
-    if (!sciezka ||
-        !prefiks) {
-
-        return false;
-    }
-
-    size_t i = 0;
-
-    while (prefiks[i] != '\0') {
-        if (sciezka[i] !=
-            prefiks[i]) {
-
-            return false;
-        }
-
-        ++i;
-    }
-
-    /*
-     * "/system2" nie jest dzieckiem "/system".
-     */
-    return
-        sciezka[i] == '\0' ||
-        sciezka[i] == '/';
-}
-
-/* Pojedynczy plik .bur tuz pod "/" (np. /menedzer_okien.bur, /shell.bur). */
-bool plik_bur_w_korzeniu(const char* sciezka) {
-    if (!sciezka || sciezka[0] != '/') return false;
-    size_t n = 1;
-    while (sciezka[n] != '\0') {
-        if (sciezka[n] == '/') return false;
-        ++n;
-    }
-    return n > 5 && sciezka[n - 4] == '.' && sciezka[n - 3] == 'b' &&
-           sciezka[n - 2] == 'u' && sciezka[n - 1] == 'r';
-}
+bool segment_prefiksu(const char* sciezka, const char* prefiks) { return OchronaSciezek::segment_prefiksu(sciezka, prefiks); }
+bool plik_bur_w_korzeniu(const char* sciezka) { return OchronaSciezek::plik_bur_w_korzeniu(sciezka); }
+bool sciezka_kanoniczna(const char* sciezka) { return OchronaSciezek::sciezka_kanoniczna(sciezka); }
 
 /*
- * Kanoniczna sciezka bezwzgledna: bez pustych segmentow ("//"), "." i "..",
- * bez konczacego "/". Zwykly proces nie moze obejsc ochrony drzew systemowych
- * przez alias sciezki, nawet gdyby PSF kiedys je normalizowal.
+ * Drzewa zaufanych plikow wykonywalnych i konfiguracji systemu (lista i opis: ochrona_sciezek.h). Zapis tu wymaga
+ * poziomu < PZB_UZYTKOWNIK (jadro przy starcie, usluga aktualizacji, zaufane aplikacje); zwykly proces nie moze
+ * utworzyc, zmienic, skrocic, usunac, przemianowac ani podmienic zadnego z tych plikow.
  */
-bool sciezka_kanoniczna(const char* sciezka) {
-    if (!sciezka || sciezka[0] != '/') return false;
-    if (sciezka[1] == '\0') return true;
-    size_t i = 1;
-    while (sciezka[i] != '\0') {
-        size_t start = i;
-        while (sciezka[i] != '\0' && sciezka[i] != '/') ++i;
-        const size_t len = i - start;
-        if (len == 0) return false;                                    // "//" albo konczacy "/"
-        if (len == 1 && sciezka[start] == '.') return false;           // "."
-        if (len == 2 && sciezka[start] == '.' && sciezka[start + 1] == '.') return false;  // ".."
-        if (sciezka[i] == '/') ++i;
-    }
-    return true;
-}
-
-/*
- * Drzewa zaufanych plikow wykonywalnych i konfiguracji systemu. Zapis tu wymaga
- * poziomu < PZB_UZYTKOWNIK (jadro przy starcie, usluga aktualizacji, zaufane
- * aplikacje); zwykly proces nie moze utworzyc, zmienic, skrocic, usunac,
- * przemianowac ani podmienic zadnego z tych plikow.
- */
-bool sciezka_chroniona(
-    const char* sciezka
-) {
-    return
-        segment_prefiksu(sciezka, "/system") ||
-        segment_prefiksu(sciezka, "/jadro") ||
-        segment_prefiksu(sciezka, "/programy") ||
-        segment_prefiksu(sciezka, "/gry") ||
-        plik_bur_w_korzeniu(sciezka);
-}
+bool sciezka_chroniona(const char* sciezka) { return OchronaSciezek::sciezka_chroniona(sciezka); }
 
 bool proces_moze_modyfikowac_sciezke(
     const proces_t& proces,
@@ -2801,16 +2734,10 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
                      sizeof(proces.sciezka_pliku)) &&
         pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ);
 
-    if (rozmiar == 0 ||
-        rozmiar >
-            (przegladarka_zaufana ? MAX_ALOKACJA_STERTY_PRZEGLADARKA_OBRAZOW
-                                  : MAX_ALOKACJA_STERTY_NA_BWS)) {
-
-        return 0;
-    }
-    if (rozmiar > 16ULL * 1024ULL * 1024ULL && !przegladarka_zaufana &&
-        (!tapety_rowne(proces.sciezka_pliku, TAPETY_PROGRAM, sizeof(proces.sciezka_pliku)) ||
-         !pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ))) return 0;
+    const bool tapety_ok =
+        tapety_rowne(proces.sciezka_pliku, TAPETY_PROGRAM, sizeof(proces.sciezka_pliku)) &&
+        pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ);
+    if (!PolitykaAlokacji::dozwolona(rozmiar, tapety_ok, przegladarka_zaufana)) return 0;
 
     if (rozmiar >
         UINT64_MAX -

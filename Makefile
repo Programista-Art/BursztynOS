@@ -354,6 +354,11 @@ ifneq ($(filter 1 yes true,$(BURSZTYNDIAGTAPETY) $(BURSZTYN_DIAG_TAPETY)),)
 RING3_FLAGS += -DBURSZTYNDIAGTAPETY=1 -DBURSZTYN_DIAG_TAPETY=1
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGTAPETY=1 -DBURSZTYN_DIAG_TAPETY=1
 endif
+BURSZTYN_DIAG_RESIZE_ROUTING ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_RESIZE_ROUTING)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_RESIZE_ROUTING=1
+endif
+
 BURSZTYNDIAGTAPETYPERF ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYNDIAGTAPETYPERF)),)
 RING3_FLAGS += -DBURSZTYNDIAGTAPETYPERF=1
@@ -1082,7 +1087,7 @@ snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(SNAKE_LINKER)
 # Przegladarka Obrazow (BursztynUI + silnik BMP w silnik_obrazu.h)
 PRZEGLADARKA_OBRAZOW_LINKER := programy/przegladarka-obrazow/przegladarka_obrazow_linker.ld
 podglad_jpeg_ring3.o: obrazy/podglad_jpeg.cpp obrazy/podglad_jpeg.h obrazy/dekoder_obrazu.h
-	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
+	$(CXX) $(RING3_FLAGS) -O2 -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
 
 przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp programy/przegladarka-obrazow/silnik_obrazu.h programy/przegladarka-obrazow/galeria.h programy/przegladarka-obrazow/powiekszenie.h obrazy/dekoder_obrazu.h obrazy/podglad_jpeg.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Iprogramy/przegladarka-obrazow -Os -ffunction-sections -fdata-sections -c $< -o $@
@@ -3141,3 +3146,21 @@ test-galeria-pak-host:
 	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_galeria_pak_host.cpp -o .bsf-test/galeria-pak
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/galeria-pak .bsf-test/zdjecia-test.pak
 	$(PYTHON) narzedzia/test_release_metadata.py
+
+.PHONY: test-galeria-kopiowanie-host
+test-galeria-kopiowanie-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_galeria_kopiowanie_host.cpp -o .bsf-test/galeria-kopiowanie
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/galeria-kopiowanie
+
+.PHONY: test-polityka-alokacji-host
+test-polityka-alokacji-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_polityka_alokacji_host.cpp -o .bsf-test/polityka-alokacji
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/polityka-alokacji
+
+.PHONY: test-ochrona-sciezek-host
+test-ochrona-sciezek-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ochrona_sciezek_host.cpp -o .bsf-test/ochrona-sciezek
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ochrona-sciezek

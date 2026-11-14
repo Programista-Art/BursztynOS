@@ -2766,6 +2766,32 @@ static int znajdz_warstwe_pod_punktem(int x, int y) {
         [](int pid) { return skladacz_obrazu_nad_paskiem(pid); });
 }
 
+#if BURSZTYN_DIAG_RESIZE_ROUTING
+// Diagnostyka: kto dostaje mouse-down i dlaczego (stos warstw w punkcie, ksztalt, dekoracja, pasek).
+static void diag_routing_klik(int x,int y,int trafiony) {
+    char b[200]{};char* p=b;char* e=b+sizeof(b)-1;
+    auto S=[&](const char* t){while(*t&&p<e)*p++=*t++;};
+    auto N=[&](int64_t v){if(v<0){if(p<e)*p++='-';v=-v;}char t[24];int n=0;do{t[n++]=char('0'+v%10);v/=10;}while(v);while(n&&p<e)*p++=t[--n];};
+    WmPasek pas;bool jest=skladacz_obrazu_pasek_info(&pas.pid,&pas.x,&pas.y,&pas.w,&pas.h);
+    S("[ROUTE] click ");N(x);S(",");N(y);S(" hit=");N(trafiony);S(" focus_before=");N(aktywny_pid_gui);
+    S(" taskbar=");N(jest&&(x>=pas.x&&y>=pas.y&&x<pas.x+pas.w&&y<pas.y+pas.h));
+    *p=0;klog_serial(b);
+    for(int pid=1;pid<SKLADACZ_MAKS_WARSTW;++pid){
+        if(!skladacz_obrazu_czy_widoczna(pid))continue;const warstwa_obrazu* w=pobierz_warstwe(pid);if(!w)continue;
+        const bool in=x>=w->x&&y>=w->y&&x<w->x+w->szerokosc&&y<w->y+w->wysokosc;
+        if(!in)continue;
+        p=b;*p=0;
+        S("[ROUTE]  pid=");N(pid);S(" z=");N(w->z_order);S(" rect=");N(w->x);S(",");N(w->y);S(" ");N(w->szerokosc);S("x");N(w->wysokosc);
+        S(" local=");N(x-w->x);S(",");N(y-w->y);
+        S(" shape=");N(skladacz_obrazu_ksztalt_w_punkcie(pid,x-w->x,y-w->y));
+        S(" frame=");N(skladacz_obrazu_dekoracja_w_punkcie(pid,x-w->x,y-w->y));
+        S(" alpha0=");N(w->bufor_pikseli&&w->bufor_pikseli[uint64_t(y-w->y)*w->szerokosc+(x-w->x)]==0);
+        S(" above=");N(skladacz_obrazu_nad_paskiem(pid));
+        *p=0;klog_serial(b);
+    }
+}
+#endif
+
 static void ustaw_focus_gui(int pid) {
     if (pid == aktywny_pid_gui) return;
     const int stary = aktywny_pid_gui;
@@ -2967,6 +2993,9 @@ static void zaktualizuj_mysze_wspolne(int64_t dx,
                wskazywac ten sam hit-testowany proces. */
             capture_pid_gui = -1;
             const int trafiony = znajdz_warstwe_pod_punktem(mysz_x, mysz_y);
+#if BURSZTYN_DIAG_RESIZE_ROUTING
+            diag_routing_klik(mysz_x, mysz_y, trafiony);
+#endif
             skladacz_obrazu_podnies_warstwe(trafiony);
             ustaw_focus_gui(trafiony);
         }

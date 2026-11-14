@@ -91,3 +91,96 @@ nie powtarzano ośmiu stref. Nieweryfikowane natywnie: przywrócenie po zamknię
 
 BIOS 1920×1080 (mysz USB): Przeglądarka, ISO startuje, pulpit i okna poprawne; galeria: 5/6 przed zmianą kolejności
 importu (RAM-dysk), patrz `gallery-packaging-security.md`.
+
+---
+
+# Etap końcowy przed commitem (po 6f98e52)
+
+## G. Zmiana rozmiaru za prawy dolny róg — przyczyna: brak błędu routingu
+
+Zinstrumentowano ścieżkę mouse-down (`BURSZTYN_DIAG_RESIZE_ROUTING=1`, log `[ROUTE]`: punkt, trafione okno,
+fokus, stos warstw w punkcie z geometrią, `shape`/`frame`/`alpha0`/`above`, pasek). Dla punktu (957,679):
+
+* Przeglądarka (pid 2, rect 100,100 860×580, z=12) ma w tym punkcie współrzędne lokalne (857,579) i **`shape=0`**:
+  piksel leży poza zaokrąglonym narożnikiem okna (promień ok. 8 px). Kompozytor rysuje tam okno spod spodu, więc
+  mysz słusznie trafia w nie (`wm_warstwa_pod_punktem`: piksel poza kształtem nie należy do okna).
+* Pod spodem jest Diagnostyka (pid 3, rect 100,30 1040×650): jej dolna krawędź kończy się w tym samym wierszu
+  (lokalnie 857,649, `frame=1`), czyli w jej strefie zmiany rozmiaru — stąd zmieniła się Diagnostyka.
+* Po pierwszym takim kliknięciu Diagnostyka jest podnoszona (z rośnie), więc kolejne kliknięcia w obszarze
+  wspólnym trafiają w nią zgodnie z widocznym stosem (zweryfikowane w logu: z=11→12…21).
+* Pasek zadań nie brał udziału (`taskbar=0`); fokus przed kliknięciem zgodny z oknem wierzchnim.
+
+Wniosek: legalnie przykryty/wycięty piksel narożnika, nie błąd. Po wskazaniu piksela **wewnątrz** kształtu (955,676)
+przy oknie Przeglądarki na wierzchu zmiana rozmiaru działa (kursor ⤡, okno 860→~1000 px). Nie dodano obejścia
+„przepuszczania kliknięć przez widoczne okno”. Test regresji: `test-taskbar-stacking-host` (34 sprawdzenia, w tym
+narożnik poza kształtem → okno pod spodem, piksel w kształcie → okno wierzchnie).
+Macierz natywna (tablet VirtIO, UEFI 1280×720; Snake, Przeglądarka, Diagnostyka, Notatnik nakładające się):
+osiem stref (W/E/N/S/NW/NE/SW/SE) każdego okna zmienia geometrię zgodnie z oczekiwaniem; strefy dolne okien, których
+dolna krawędź leży pod paskiem (y ≥ 680), są niedostępne, dopóki okno nie zostanie przesunięte w górę (pasek jest
+ponad zwykłymi oknami). Strefa chwytu ma 5 px (lx < 5), więc punkt o 5 px od krawędzi to już pasek tytułu.
+Minimalny rozmiar: Przeglądarka zatrzymuje się na 520×320 (MIN_SZER/MIN_WYS). Mysz USB: przypadek z BIOS 1080p miał identyczną
+geometrię okien (wniosek z geometrii; logu `[ROUTE]` dla myszy USB nie zbierano, macierz zmiany rozmiaru wykonano tylko na tablecie).
+
+## H. Przywracanie kursora (natywnie, tablet VirtIO)
+
+Zweryfikowane: po puszczeniu przycisku po zmianie rozmiaru i po odsunięciu wskaźnika wraca strzałka; po Alt+Tab
+(okno Diagnostyki nakryło punkt) strzałka; krawędź z kursorem ↔ po ponownym najechaniu. Niezweryfikowane
+natywnie: zamknięcie okna klawiaturą, gdy wskaźnik stoi na krawędzi (brak sposobu zamknięcia bez ruchu myszy
+w tym harnessie) i minimalizacja z krawędzi; mechanizm czyszczenia stanu per proces bez zmian. PNG właściciela
+(`ikonki/kursor.png`, `ikonki/kursor_rozciagania.png`) niezmienione.
+
+## I. Audyt bezpieczeństwa
+
+* **Wyjątek 72 MiB:** czysta polityka `polityka_alokacji.h` (test 11 sprawdzeń: granice 16/40/72 MiB, bez wyjątku bez
+  weryfikacji). Flaga tożsamości ustawiana wyłącznie w loaderze po SHA-256 *dokładnie tych bajtów, które za chwilę
+  są mapowane* (ten sam bufor, brak ponownego odczytu), czyszczona przy rezerwacji slotu (PID reuse), plus ścieżka
+  i `PRAWO_GUI|PRAWO_PLIKI_CZYTAJ`; łączny limit sterty 256 MiB bez zmian. **SHA-256 z tablicy w jądrze to lista
+  dopuszczonych binarek (tożsamość zakotwiczona w obrazie jądra), nie podpis cyfrowy**; faktyczny podpis to tylko
+  ścieżka `podpis_paczki_weryfikuj` (klucz release). Binarka o tej samej nazwie, ale innych bajtach nie dostaje wyjątku.
+* **Kontener galerii:** CRC-32 i SHA-256 tabeli to kontrola integralności (uszkodzenia, błędy), nie uwierzytelnienie —
+  kto może podmienić ISO, podmieni też sumy. Moduł pochodzi z medium rozruchowego; zdjęcia nie są wykonywalne.
+* **Ochrona ścieżek:** wydzielono `ochrona_sciezek.h` i dodano `/aktualizacje` do drzew chronionych dla procesów
+  PZB ≥ 4 (wcześniej etykieta katalogu to PZB 4, więc zwykła aplikacja z `pliki_zapisz` mogła zmienić
+  `stan_rozruchu.k0/k1` i pliki aktualizacji). Test hosta `test-ochrona-sciezek-host` (35): /system, /jadro, /programy,
+  /gry, *.bur w korzeniu, /aktualizacje, aliasy (`..`, `//`, `.`), `/system2` nie jest chroniony, cudze ustawienia,
+  prawo ustawień nie daje zapisu poza własnym katalogiem. Natywna próba z Notatnika (pole „Zapisz jako”) nie dała
+  jednoznacznych wyników (edycja pola w harnessie dopisywała do starej treści), więc dowodem są testy decyzji.
+* Poprawka UB loadera BUR v2 zachowana (`reloc_liczba == 0`), PZB bez zmian.
+
+## J. Wydajność podglądu 8000×8000
+
+Host `-O2` (30,9 MB JPEG): skala 1/4 = 1,17 s, skala 1/8 (tylko DC, bez IDCT) = 0,83 s, odczyt pliku 0,016 s ⇒
+**dominuje dekodowanie Huffmana (~70%)**, IDCT 4×4 ≈ 30%, I/O pomijalne. Zmiana: obiekt dekodera budowany z `-O2`
+zamiast `-Os` (RING3 domyślnie `-Os` dla tego pliku): natywnie 90 s → **80,8 s** (QEMU/TCG bez KVM, ~70× wolniej
+niż host). Podział pracy (12 ms z 16 ms), anulowanie przy nawigacji i limity pamięci bez zmian; podczas dekodowania
+okno Przeglądarki dało się przeciągać (zrzut „Wczytywanie podglądu… 12%” po przesunięciu o 60,100 px).
+Nie wprowadzono ryzykownych optymalizacji (np. tablic wielobitowych, pomijania współczynników).
+
+## K. Instalacja zdjęć na dysk
+
+* Test E2E instalatora (`narzedzia/instalator/qemu_install.py test`) uruchomiony: GUI instalatora, potwierdzenie,
+  start zapisu — i **awaria środowiska jak na czystym HEAD**: `[VIRTIO-BLK] ERROR: request timed out` na etapie ESP
+  (progress 20%), przed etapem plików i galerii. Ścieżka zainstalowanego systemu **nie jest zweryfikowana natywnie**.
+* Zamiast tego wydzielono i przetestowano mechanizm kopiowania (`galeria_kopiowanie.h`, `test-galeria-kopiowanie-host`,
+  25 sprawdzeń): istniejące pliki nietknięte, brak miejsca, przerwanie w środku (nigdy niepełne zdjęcie pod finalną
+  nazwą), błąd zmiany nazwy, zły CRC, wyścig z plikiem użytkownika, sprzątanie pliku tymczasowego.
+  Kopiowanie idzie przez plik `zdjecie.bzp3tmp` i zmianę nazwy bez nadpisywania; ten sam kod obsługuje import żywego
+  systemu (natywnie 6/6) i etap instalatora.
+* Wymaga ręcznego testu: instalacja → pierwszy start → `/dane/zdjecia` ma 6 plików; mały dysk → instalacja kończy się
+  sukcesem (log `[INSTALL] galeria: blad zapisu`), brak pozostawionych plików `.bzp3tmp` (stary plik tymczasowy jest
+  usuwany przy każdym starcie kopiarki).
+
+## L. Drzewo robocze i dysk (po commicie właściciela 6f98e52)
+
+Poprzednia praca jest już zacommitowana (80 plików). W commicie znalazły się też **śledzone artefakty testów**:
+`.fuzz-build/*_metrics.json` (8, plik ignorowany przez `.gitignore`, ale śledzony), `.fuzz-corpus/fuzz_bws/seed_0{2,4}.bin`,
+`docs/security-hardening-2026-11-04/fuzzing-metrics.json` oraz 8 plików `__pycache__/*.pyc`. Rekomendacja: osobny commit
+`git rm --cached` dla `.fuzz-build/*`, `*.pyc` (i opcjonalnie metryk fuzz), bo są generowane i zmieniają się przy każdym
+teście; `docs/.../fuzzing-metrics.json` zostawić tylko jeśli traktowany jako raport referencyjny. Nic nie usunięto.
+Bieżące zmiany (5 zmodyfikowanych + 8 nowych): patrz raport końcowy (plan staging).
+Dysk: wolne ok. 1,1 GB z 49 GB. Kandydaci do czyszczenia (bez automatycznego usuwania): `.bsf-test/` 8,1 GB (ignorowany
+przez Git; największe: `bsf2-native` 485 MB, `native-profile-build` 456 MB, `stab` 334 MB, `gpu-recovery` 140 MB,
+kilka `installed-*` ok. 120 MB), `.release-private/` 760 MB (w tym `apps` 89 MB; potrzebny kernel.elf bieżącego wydania),
+`~/.cache` 752 MB, `.installertest/` (guest-* 244 MB z dzisiejszego uruchomienia), `.wm-test` 143 MB,
+`.bursztyn-ui-test` 166 MB, `.aslr-test` 73 MB, `.fuzz-build` 79 MB, kopie ISO w katalogu sesji `/tmp/claude-1000` (ok. 120 MB).
+

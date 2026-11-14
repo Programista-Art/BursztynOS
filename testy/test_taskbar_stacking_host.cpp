@@ -86,6 +86,23 @@ int main() {
     for (int x : {0, 100, 640, 1279}) CHECK(hit(x, 700, pasek) == 1);      // pasek znowu klikalny w calej szerokosci
     CHECK(hit(300, 300, pasek) == 11 || hit(300, 300, pasek) == 10);       // zwykle okna nadal obsluguja obszar roboczy
     CHECK(cofnij_wszystkie() == 0);                                         // idempotentne
+    // Naroznik poza zaokraglonym ksztaltem okna jest legalnie "przezroczysty" dla myszy: trafia w okno pod spodem
+    // (nie ma przepuszczania kliknieć przez WIDOCZNE okno: piksel naroznika jest tam, gdzie widac okno spod spodu).
+    for (int i = 1; i <= 11; ++i) { warstwy[i].aktywna = false; flaga[i] = false; }
+    dodaj(12, 11, 100, 30, 1040, 650);       // dolne okno (Diagnostyka)
+    dodaj(13, 12, 100, 100, 860, 580);       // gorne okno (Przegladarka); prawy dolny naroznik zaokraglony
+    auto zaokraglone = [](int pid, int lx, int ly) {
+        if (pid != 13) return true;
+        const int r = 8, w = 860, h = 580;
+        const int dx = lx - (w - r), dy = ly - (h - r);
+        return !(dx >= 0 && dy >= 0 && dx * dx + dy * dy > r * r);
+    };
+    auto hit2 = [&](int x, int y) { return wm_warstwa_pod_punktem(x, y, -1,
+        [](int pid) -> const warstwa_obrazu* { return warstwy[pid].aktywna ? &warstwy[pid] : nullptr; },
+        [](int, int, int) { return false; }, zaokraglone, WmPasek{}, [](int) { return false; }); };
+    CHECK(hit2(100 + 859, 100 + 579) == 12);                 // ostatni piksel naroznika: poza ksztaltem -> okno pod spodem
+    CHECK(hit2(100 + 852, 100 + 572) == 13);                 // wewnatrz ksztaltu (chwytak zmiany rozmiaru) -> gorne okno
+    CHECK(hit2(100 + 859, 100 + 500) == 13 && hit2(100 + 700, 100 + 579) == 13);   // prosta krawedz nie jest zaokraglona
     printf("PASS test_taskbar_stacking_host: %d checks\n", checks);
     return 0;
 }

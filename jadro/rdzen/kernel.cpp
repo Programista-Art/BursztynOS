@@ -1,4 +1,5 @@
 #include "galeria_pak.h"
+#include "galeria_kopiowanie.h"
 extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
 #include "jadro/gui/display_mode_policy.h"
 #include "system_identity.h"
@@ -1192,6 +1193,18 @@ bool galeria_sciezka(const GaleriaPak::Wpis& w, char* sciezka, size_t cap) {
     return true;
 }
 
+GaleriaPak::Io galeria_io() {
+    GaleriaPak::Io io;
+    io.rozmiar = [](const char* p) -> uint32_t { return rozmiar_pliku(p); };
+    io.utworz = [](const char* p) { return utworz_plik(p); };
+    io.usun = [](const char* p) { return usun_twor(p); };
+    io.zapisz = [](const char* p, uint32_t off, const uint8_t* d, uint32_t n) {
+        return zapisz_fragment_pliku(p, off, reinterpret_cast<const char*>(d), n); };
+    io.zmien_nazwe = [](const char* p, const char* nowa) { return zmien_nazwe_tworu(p, nowa); };
+    io.flush = []() { return psf_flush_cache(); };
+    return io;
+}
+
 void importuj_galerie_z_modulu(uint64_t mbi) {
     if (mbi == 0 || instalator_tryb()) return;
     GaleriaModul* g = &g_galeria_modul;
@@ -1218,27 +1231,11 @@ void importuj_galerie_z_modulu(uint64_t mbi) {
         while (j > 0 && g->wpisy[kolejnosc[j - 1]].rozmiar > g->wpisy[v].rozmiar) { kolejnosc[j] = kolejnosc[j - 1]; --j; }
         kolejnosc[j] = v;
     }
-    for (uint32_t oi = 0; oi < g->liczba; ++oi) {
-        const GaleriaPak::Wpis& w = g->wpisy[kolejnosc[oi]];
-        char sciezka[96];
-        if (!galeria_sciezka(w, sciezka, sizeof(sciezka))) { ++bledne; continue; }
-        if (rozmiar_pliku(sciezka) > 0) { ++pominiete; continue; }      // zdjecie uzytkownika: nie nadpisujemy
-        const uint8_t* dane = g->dane + w.przesuniecie;
-        if (GaleriaPak::crc32(dane, w.rozmiar) != w.crc) { ++bledne; wypisz_log("[GALERIA] wpis odrzucony (CRC):"); wypisz_log(sciezka); continue; }   // CRC przed zapisem
-        (void)usun_twor(sciezka);
-        if (!utworz_plik(sciezka)) { ++bledne; wypisz_log("[GALERIA] wpis odrzucony (utworzenie pliku):"); wypisz_log(sciezka); continue; }
-        bool ok = true;
-        for (uint32_t off = 0; off < w.rozmiar && ok; off += PORCJA) {
-            const uint32_t n = (w.rozmiar - off > PORCJA) ? PORCJA : (w.rozmiar - off);
-            ok = zapisz_fragment_pliku(sciezka, off, reinterpret_cast<const char*>(dane + off), n);
-        }
-        if (!ok || rozmiar_pliku(sciezka) != w.rozmiar) {
-            (void)usun_twor(sciezka); ++bledne;
-            wypisz_log("[GALERIA] wpis nie miesci sie w RAM-dysku (usuniety w calosci):"); wypisz_log(sciezka);
-            continue;
-        }
-        ++nowe;
-    }
+    GaleriaPak::Kopiarka kop;
+    kop.start(g->dane, g->wpisy, g->liczba, galeria_io(), kolejnosc);
+    while (kop.krok(PORCJA) == GaleriaPak::Krok::Dalej) {}
+    nowe = kop.zainstalowane; pominiete = kop.pominiete; bledne = kop.bledne;
+    if (bledne) wypisz_log("[GALERIA] czesc wpisow nie zostala zapisana (brak miejsca w RAM-dysku, CRC albo nazwa).");
     (void)psf_flush_cache();
     galeria_log_liczba("[GALERIA] zdjecia zaimportowane: ", nowe);
     galeria_log_liczba("[GALERIA] zdjecia pominiete (istnieja): ", pominiete);
@@ -1251,19 +1248,11 @@ void importuj_galerie_z_modulu(uint64_t mbi) {
  * maszyny stanow instalatora (po tapetach). Nie nadpisuje istniejacych plikow, usuwa niepelny plik przy bledzie,
  * a KAZDY blad konczy etap galerii BEZ przerywania instalacji systemu (instalacja jest wazniejsza niz zdjecia).
  */
-struct GaleriaInstalacja {
-    bool aktywna{false};
-    uint32_t indeks{0};
-    uint32_t offset{0};
-    uint32_t crc{0};
-    bool plik_otwarty{false};
-    uint32_t zainstalowane{0}, pominiete{0}, bledne{0};
-    uint64_t bajty{0};
-};
-GaleriaInstalacja g_galeria_inst;
+GaleriaPak::Kopiarka g_galeria_kop;
+bool g_galeria_kop_aktywna = false;
 
 bool galeria_inst_start(uint64_t mbi, uint64_t* razem) {
-    g_galeria_inst = GaleriaInstalacja{};
+    g_galeria_kop_aktywna = false;
     if (razem) *razem = 0;
     GaleriaModul* g = &g_galeria_modul;
     if (!galeria_otworz_modul(mbi, g)) return false;          // brak modulu = brak galerii, nie blad instalacji
@@ -1273,58 +1262,24 @@ bool galeria_inst_start(uint64_t mbi, uint64_t* razem) {
     uint64_t suma = 0;
     for (uint32_t i = 0; i < g->liczba; ++i) suma += g->wpisy[i].rozmiar;
     if (razem) *razem = suma;
-    g_galeria_inst.aktywna = true;
+    g_galeria_kop.start(g->dane, g->wpisy, g->liczba, galeria_io());
+    g_galeria_kop_aktywna = true;
     return true;
 }
 
 // Jedna porcja (<= 64 KiB). *gotowe = true po ostatnim wpisie lub po bledzie (etap konczy sie bez przerywania instalacji).
 void galeria_inst_step(uint64_t* wykonane, bool* gotowe) {
-    GaleriaInstalacja& s = g_galeria_inst;
-    GaleriaModul* g = &g_galeria_modul;
-    if (wykonane) *wykonane = s.bajty;
     if (gotowe) *gotowe = false;
-    if (!s.aktywna || s.indeks >= g->liczba) {
-        if (s.aktywna) {
-            (void)psf_flush_cache();
-            galeria_log_liczba("[INSTALL] galeria: zainstalowane=", s.zainstalowane);
-            galeria_log_liczba("[INSTALL] galeria: pominiete=", s.pominiete);
-            if (s.bledne) galeria_log_liczba("[INSTALL] galeria: bledne=", s.bledne);
-            s.aktywna = false;
-        }
-        if (gotowe) *gotowe = true;
-        return;
-    }
-    const GaleriaPak::Wpis& w = g->wpisy[s.indeks];
-    char sciezka[96];
-    const uint8_t* dane = g->dane + w.przesuniecie;
-    auto nastepny = [&]() { ++s.indeks; s.offset = 0; s.plik_otwarty = false; };
-    if (!galeria_sciezka(w, sciezka, sizeof(sciezka))) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
-    if (s.offset == 0 && !s.plik_otwarty) {
-        if (rozmiar_pliku(sciezka) > 0) { ++s.pominiete; s.bajty += w.rozmiar; nastepny(); return; }   // zdjecie uzytkownika
-        if (GaleriaPak::crc32(dane, w.rozmiar) != w.crc) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
-        (void)usun_twor(sciezka);
-        if (!utworz_plik(sciezka)) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
-        s.plik_otwarty = true;
-    }
-    constexpr uint32_t PORCJA = 64U * 1024U;
-    const uint32_t n = (w.rozmiar - s.offset > PORCJA) ? PORCJA : (w.rozmiar - s.offset);
-    if (!zapisz_fragment_pliku(sciezka, s.offset, reinterpret_cast<const char*>(dane + s.offset), n)) {
-        // Brak miejsca albo blad zapisu: usun niepelny plik i zakoncz etap galerii (pozostale zdjecia pomijamy).
-        (void)usun_twor(sciezka);
-        ++s.bledne;
-        wypisz_log("[INSTALL] galeria: blad zapisu - etap galerii przerwany, instalacja systemu trwa.");
-        s.aktywna = false;
-        (void)psf_flush_cache();
-        if (gotowe) *gotowe = true;
-        return;
-    }
-    s.offset += n; s.bajty += n;
-    if (s.offset >= w.rozmiar) {
-        if (rozmiar_pliku(sciezka) != w.rozmiar) { (void)usun_twor(sciezka); ++s.bledne; }
-        else { ++s.zainstalowane; (void)psf_flush_cache(); }
-        nastepny();
-    }
-    if (wykonane) *wykonane = s.bajty;
+    if (!g_galeria_kop_aktywna) { if (wykonane) *wykonane = g_galeria_kop.bajty; if (gotowe) *gotowe = true; return; }
+    const GaleriaPak::Krok k = g_galeria_kop.krok(64U * 1024U);
+    if (wykonane) *wykonane = g_galeria_kop.bajty;
+    if (k == GaleriaPak::Krok::Dalej) return;
+    if (k == GaleriaPak::Krok::KoniecBlad) wypisz_log("[INSTALL] galeria: blad zapisu - etap galerii przerwany, instalacja systemu trwa.");
+    galeria_log_liczba("[INSTALL] galeria: zainstalowane=", g_galeria_kop.zainstalowane);
+    galeria_log_liczba("[INSTALL] galeria: pominiete=", g_galeria_kop.pominiete);
+    if (g_galeria_kop.bledne) galeria_log_liczba("[INSTALL] galeria: bledne=", g_galeria_kop.bledne);
+    g_galeria_kop_aktywna = false;
+    if (gotowe) *gotowe = true;
 }
 
 // Zwolnienie modulu po zakonczeniu instalacji (instalator trzymal go przy zyciu).
