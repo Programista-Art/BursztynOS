@@ -136,6 +136,10 @@ bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset,
 /* BWS 60: monotoniczny czas HPET w nanosekundach (0, gdy HPET niedostepny). */
 uint64_t gui_czas_monotoniczny_ns();
 /* Popup aplikacji jest skladany nad zwyklymi oknami, ale pod menu systemu. */
+/* Tylko zaufany Menedzer Okien (jadro odrzuca innych): pasek zadan jako powierzchnia kompozytora
+ * oraz zezwolenie "Zawsze na wierzchu takze nad paskiem zadan" dla okna (window_id). */
+bool gui_ustaw_pasek_zadan(bool otwarty, int x, int y, int szer, int wys);
+bool gui_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone);
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
 

@@ -107,3 +107,5 @@ jadro/fs/skroty_systemowe.generated.h
 jadro/gui/kursor_rozciagania.generated.h
 .tls-fixture/
 jadro/siec/tls_test_ca.generated.h
+
+.galeria.stamp

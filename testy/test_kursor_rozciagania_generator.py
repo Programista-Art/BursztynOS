@@ -20,24 +20,32 @@ def png(w, h, rgba, ctype=6, filt=0):
 
 with tempfile.TemporaryDirectory() as d:
     d = Path(d)
+    for sub in ('z1', 'z2', 'ok'): (d / sub).mkdir()
     # 1. brak pliku -> naglowek 'niedostepny', build nie pada
     run(d / 'a.h', d / 'nie_ma.png')
     assert 'KURSOR_ROZCIAGANIA_DOSTEPNY 0' in (d / 'a.h').read_text()
     # 2. uszkodzony plik -> ostrzezenie + niedostepny
-    (d / 'zly.png').write_bytes(b'to nie jest png')
-    err = run(d / 'b.h', d / 'zly.png')
+    (d / 'z1' / 'kursor_rozciagania.png').write_bytes(b'to nie jest png')
+    err = run(d / 'b.h', d / 'z1' / 'kursor_rozciagania.png')
     assert 'OSTRZEZENIE' in err and 'DOSTEPNY 0' in (d / 'b.h').read_text()
     # 3. PNG z nieobslugiwanym formatem (16-bit / przeplot) odrzucony
     bad = bytearray(png(8, 4, [255, 255, 255, 255])); bad[24] = 16
     for tryb in (bad,):
-        (d / 'c.png').write_bytes(bytes(tryb))
-        run(d / 'c.h', d / 'c.png'); assert 'DOSTEPNY 0' in (d / 'c.h').read_text()
+        (d / 'z2' / 'kursor_rozciagania.png').write_bytes(bytes(tryb))
+        run(d / 'c.h', d / 'z2' / 'kursor_rozciagania.png'); assert 'DOSTEPNY 0' in (d / 'c.h').read_text()
     # 4. poprawny PNG -> dostepny, deterministyczny, w limitach
-    (d / 'ok.png').write_bytes(png(64, 32, [255, 255, 255, 255]))
-    run(d / 'e1.h', d / 'ok.png'); run(d / 'e2.h', d / 'ok.png')
+    (d / 'ok' / 'kursor_rozciagania.png').write_bytes(png(64, 32, [255, 255, 255, 255]))
+    run(d / 'e1.h', d / 'ok' / 'kursor_rozciagania.png'); run(d / 'e2.h', d / 'ok' / 'kursor_rozciagania.png')
     t = (d / 'e1.h').read_text()
     assert 'DOSTEPNY 1' in t and t == (d / 'e2.h').read_text()
     # 5. rzeczywisty plik repo (jesli jest): wszystkie warianty <= 64 i niepuste
+    realk = ROOT / 'ikonki/kursor.png'
+    if realk.is_file():
+        W, H, dane, hx, hy = g.zbuduj_strzalke(realk)
+        assert W == H == 32 and 0 <= hx < W and 0 <= hy < H and dane[hy * W + hx], 'hotspot na czubku'
+        assert all((v >> 24) in (0, 255) for v in dane)
+        assert not any(dane[y * W + x] for y in range(hy) for x in range(W)), 'brak pikseli nad czubkiem'
+        print('Strzalka repo: OK', (W, H, hx, hy))
     real = ROOT / 'ikonki/kursor_rozciagania.png'
     if real.is_file():
         w = g.zbuduj(real)[0]
@@ -47,7 +55,24 @@ with tempfile.TemporaryDirectory() as d:
         print('PNG repo: OK', [(n, W, H) for n, (W, H, _) in w])
     else:
         print('PNG repo: BRAK (pominieto)')
+    # 5b. domyslna strzalka: tylko plik o nazwie kursor.png; brak/uszkodzenie => makro 0; hotspot = czubek
+    (d / 'kursor.png').write_bytes(png(64, 64, [255, 255, 255, 255]))
+    run(d / 's1.h', d / 'kursor.png')
+    ts = (d / 's1.h').read_text()
+    assert 'KURSOR_STRZALKA_DOSTEPNY 1' in ts and 'KURSOR_ROZCIAGANIA_DOSTEPNY 0' in ts
+    run(d / 's0.h', d / 'nie_ma' / 'kursor.png')
+    assert 'KURSOR_STRZALKA_DOSTEPNY 0' in (d / 's0.h').read_text()
+    (d / 'zly').mkdir(); (d / 'zly' / 'kursor.png').write_bytes(b'xx')
+    assert 'OSTRZEZENIE' in run(d / 's2.h', d / 'zly' / 'kursor.png')
+    assert 'KURSOR_STRZALKA_DOSTEPNY 0' in (d / 's2.h').read_text()
+    # brak starych danych: zmiana PNG zmienia wynik
+    (d / 'k2').mkdir(); (d / 'k2' / 'kursor.png').write_bytes(png(64, 64, [10, 20, 30, 255]))
+    run(d / 's3.h', d / 'k2' / 'kursor.png')
+    assert (d / 's3.h').read_text() != ts
+    # obie ikony naraz niezaleznie
+    run(d / 's4.h', d / 'kursor.png', d / 'ok' / 'kursor_rozciagania.png')
+    assert 'KURSOR_STRZALKA_DOSTEPNY 1' in (d / 's4.h').read_text()
     # 6. nie zapisuje pliku, gdy tresc bez zmian (mtime stabilny => brak zbednych rebuildow)
-    m = (d / 'e1.h').stat().st_mtime_ns; run(d / 'e1.h', d / 'ok.png')
+    m = (d / 'e1.h').stat().st_mtime_ns; run(d / 'e1.h', d / 'ok' / 'kursor_rozciagania.png')
     assert (d / 'e1.h').stat().st_mtime_ns == m
 print('PASS test_kursor_rozciagania_generator')

@@ -954,7 +954,7 @@ static void parametry_kursora(const StanKursoraProcesu* s,
         return;
     }
     const uint32_t typ = s ? s->typ : GUI_CURSOR_ARROW;
-    if (const OpisKursoraRozciagania* o = kursor_rozciagania_opis(typ)) {
+    if (const OpisKursoraRozciagania* o = kursor_zasobu_opis(typ)) {
         *w = o->szer; *h = o->wys; *hx = o->hotspot_x; *hy = o->hotspot_y;
         return;
     }
@@ -976,7 +976,7 @@ static bool piksel_kursora(const StanKursoraProcesu* s, int x, int y,
         *kolor = p & 0x00FFFFFFU;
         return true;
     }
-    if (const OpisKursoraRozciagania* o = kursor_rozciagania_opis(typ))
+    if (const OpisKursoraRozciagania* o = kursor_zasobu_opis(typ))
         return kursor_rozciagania_piksel(o, x, y, kolor);
     if (x >= 16 || y >= 16) return false;
     if (typ == GUI_CURSOR_ARROW) {
@@ -2634,6 +2634,19 @@ extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
         przelacz_okno_klawiatura((modyfikatory&BWS_MOD_SHIFT)!=0);
         return true;
     }
+    // Ctrl+Alt+B: awaryjne cofniecie trybu "nad paskiem zadan" (system, przed dostarczeniem do aplikacji).
+    // Tylko zmniejsza uprawnienia okien, wiec moze byc wywolane z dowolnego miejsca; nie daje nic nikomu.
+    const bool klawisz_b=(kod&BWS_KEY_SOURCE_USB)?(kod&255U)==5U:
+        !(kod&BWS_KEY_SOURCE_E0) && (kod&127U)==0x30U;
+    static bool odzysk_b_wcisniety = false;
+    if (klawisz_b && !wcisniety && odzysk_b_wcisniety) { odzysk_b_wcisniety = false; return true; }
+    if (klawisz_b && wcisniety && (modyfikatory&BWS_MOD_CTRL) && (modyfikatory&BWS_MOD_ALT) &&
+        !(modyfikatory&BWS_MOD_SUPER) && !powitanie_aktywne()) {
+        odzysk_b_wcisniety = true;
+        const uint32_t n = skladacz_obrazu_wylacz_wszystkie_nad_paskiem();
+        LogGfxU64("[TASKBAR] Ctrl+Alt+B: cofnieto tryb nad paskiem dla okien: ", n);
+        return true;
+    }
     if (aktywny_pid_gui <= 0) return false;
     bws_zdarzenie e{};
     e.typ = BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;
@@ -2748,7 +2761,9 @@ static int znajdz_warstwe_pod_punktem(int x, int y) {
         skladacz_obrazu_overlay_pod_punktem(x,y),
         [](int pid) { return skladacz_obrazu_czy_widoczna(pid) ? pobierz_warstwe(pid) : nullptr; },
         [](int pid,int lx,int ly) { return skladacz_obrazu_dekoracja_w_punkcie(pid,lx,ly); },
-        [](int pid,int lx,int ly) { return skladacz_obrazu_ksztalt_w_punkcie(pid,lx,ly); });
+        [](int pid,int lx,int ly) { return skladacz_obrazu_ksztalt_w_punkcie(pid,lx,ly); },
+        [&]{WmPasek p;if(skladacz_obrazu_pasek_info(&p.pid,&p.x,&p.y,&p.w,&p.h))p.aktywny=true;return p;}(),
+        [](int pid) { return skladacz_obrazu_nad_paskiem(pid); });
 }
 
 static void ustaw_focus_gui(int pid) {

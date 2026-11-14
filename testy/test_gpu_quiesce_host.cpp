@@ -77,7 +77,9 @@ int main(int argc,char**){
         now=0;powitanie_inicjalizuj(true);
         auto present=[&](){powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),320,240,1280,0,0,320,240,100);powitanie_publikacja();};
         advance(100000);present();advance(3100000);present();
-        assert(powitanie_aktywne()&&live==1&&sekwencja.komunikat==1);
+        // Po 3,2 s splash jest nadal aktywny i dotarl do fazy paska postepu (dawny stan "komunikat==1"
+        // zniknal z modelu po przeprojektowaniu animacji: Sekwencja ma teraz Faza/Stan).
+        assert(powitanie_aktywne()&&live==1&&sekwencja.stan==Powitanie::Stan::Widoczny&&sekwencja.faza==Powitanie::Faza::Pasek);
         drv={};drv.initialized=true;drv.controlq=&queue;drv.lock=mode==1;
         avail.idx=mode==2;mock_clock=mode==0?7500000000ULL:0;
         wycisz_start_przed_restartem();

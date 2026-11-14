@@ -17,6 +17,7 @@
 #include "bursztyn_ui/bursztyn_ui.h"
 #include "bursztyn_gui.h"
 #include "gry/snake/snake_logika.h"
+#include "gry/snake/snake_ustawienia.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -45,6 +46,8 @@ constexpr int MIN_SZER = 440;
 constexpr int MIN_WYS = 380;
 constexpr uint32_t OKRES_TIMERA_TIKI = 8;            // ~32 ms przy 250 Hz; krok gry liczony zegarem
 constexpr int MAKS_KROKOW_NA_WYWOLANIE = 3;          // po dlugiej przerwie nie "doganiamy" gry
+constexpr const char* APP_ID_USTAWIEN = "snake";
+constexpr const char* KLUCZ_USTAWIEN = "stan";
 
 // ---- formatowanie liczb bez libc -------------------------------------------
 size_t dopisz_tekst(char* d, size_t cap, size_t poz, const char* s) {
@@ -61,9 +64,8 @@ size_t dopisz_liczbe(char* d, size_t cap, size_t poz, int v) {
     return poz;
 }
 
-// Kolor -> jasnosc (0..255), do wyboru czytelnego koloru oczu glowy weza.
-int jasnosc(uint32_t rgb) {
-    return static_cast<int>((((rgb >> 16) & 255U) * 30U + ((rgb >> 8) & 255U) * 59U + (rgb & 255U) * 11U) / 100U);
+const char* nazwa_predkosci(Predkosc p) {
+    return p == Predkosc::Wolno ? "Wolno" : (p == Predkosc::Szybko ? "Szybko" : "Normalnie");
 }
 
 struct AplikacjaSnake {
@@ -73,19 +75,61 @@ struct AplikacjaSnake {
     Przycisk* btn_pauza{nullptr};
     Przycisk* btn_nowa{nullptr};
     Etykieta* lbl_wynik{nullptr};
+    Etykieta* lbl_rekord{nullptr};
     PasekStanu* pasek{nullptr};
+    Menu* menu_ustawien{nullptr};
     Gra gra{};
+    UstawieniaSnake ust{};
     uint64_t ostatni_krok_ns{0};
     uint64_t licznik_losowania{0x9E3779B97F4A7C15ULL};
     Stan pokazany_stan{Stan::Gotowa};
     int pokazany_wynik{-1};
+    uint32_t pokazany_rekord{0xFFFFFFFFu};
     int pokazana_komorka{-1};
     bool timer_wlaczony{false};
+    bool rekord_brudny{false};        // rekord/ustawienia zmienione od ostatniego udanego zapisu
+    bool nowy_rekord{false};          // w biezacej grze pobito rekord
+    bool zapis_nieudany{false};       // ostatnia proba zapisu nie powiodla sie (system plikow odmowil)
 
     uint64_t ziarno() {
         // Ziarno tylko dla jablek; zegar monotoniczny + licznik, bez RDTSC.
         licznik_losowania = licznik_losowania * 6364136223846793005ULL + 1442695040888963407ULL;
         return licznik_losowania ^ gui_czas_monotoniczny_ns();
+    }
+
+    // ---- trwale ustawienia i rekord ----------------------------------------------
+    void wczytaj() {
+        char buf[USTAWIENIA_MAKS_BAJTOW + 8] = {};
+        UstawieniaSnake u;
+        if (ustawienia_wczytaj(APP_ID_USTAWIEN, KLUCZ_USTAWIEN, buf, sizeof(buf))) {
+            size_t n = 0;
+            while (n < sizeof(buf) && buf[n]) ++n;
+            u = wczytaj_ustawienia(buf, n);          // uszkodzone dane => wartosci domyslne
+        }
+        ust = u;
+        ust.poprawne = u.poprawne;
+        rekord_brudny = false;
+        zapis_nieudany = false;
+    }
+
+    // Zapisuje tylko, gdy cos sie zmienilo (nigdy co klatke). Weryfikuje odczytem zwrotnym.
+    bool zapisz() {
+        if (!rekord_brudny) return true;
+        char buf[USTAWIENIA_MAKS_BAJTOW + 8] = {};
+        if (zapisz_ustawienia(ust, buf, sizeof(buf)) == 0) return false;
+        bool ok = ustawienia_zapisz(APP_ID_USTAWIEN, KLUCZ_USTAWIEN, buf);
+        if (ok) {
+            char kontrola[USTAWIENIA_MAKS_BAJTOW + 8] = {};
+            ok = ustawienia_wczytaj(APP_ID_USTAWIEN, KLUCZ_USTAWIEN, kontrola, sizeof(kontrola));
+            for (size_t i = 0; ok && i < sizeof(kontrola); ++i) {
+                if (kontrola[i] != buf[i]) ok = false;
+                if (!buf[i]) break;
+            }
+        }
+        zapis_nieudany = !ok;
+        if (ok) rekord_brudny = false;
+        odswiez_interfejs(true);
+        return ok;
     }
 
     void synchronizuj_timer() {
@@ -108,27 +152,58 @@ struct AplikacjaSnake {
         }
         const uint64_t teraz = gui_czas_monotoniczny_ns();
         if (ostatni_krok_ns == 0 || teraz < ostatni_krok_ns) { ostatni_krok_ns = teraz; return; }
+        const uint64_t krok = krok_ns(ust.predkosc);
         int kroki = 0;
-        while (teraz - ostatni_krok_ns >= KROK_NS && gra.stan == Stan::Gra) {
-            ostatni_krok_ns += KROK_NS;
+        while (teraz - ostatni_krok_ns >= krok && gra.stan == Stan::Gra) {
+            ostatni_krok_ns += krok;
             gra.krok();
+            sprawdz_rekord();
             if (++kroki >= MAKS_KROKOW_NA_WYWOLANIE) { ostatni_krok_ns = teraz; break; }
         }
         if (kroki) po_zmianie_stanu();
     }
 
-    void nowa_gra() {
-        gra.nowa_gra(ziarno(), true);
+    // Rekord rosnie na biezaco; zapis dopiero na koncu gry/wyjsciu (bez zapisu co krok).
+    void sprawdz_rekord() {
+        if (gra.wynik() > 0 && static_cast<uint32_t>(gra.wynik()) > ust.rekord) {
+            ust.rekord = static_cast<uint32_t>(gra.wynik());
+            nowy_rekord = true;
+            rekord_brudny = true;
+        }
+    }
+
+    void nowa_gra(bool od_razu) {
+        zapisz();
+        nowy_rekord = false;
+        gra.nowa_gra(ziarno(), od_razu);
         po_zmianie_stanu();
     }
 
     void przelacz_pauze() {
-        if (gra.zakonczona()) { nowa_gra(); return; }
+        if (gra.zakonczona()) { nowa_gra(true); return; }
         if (gra.przelacz_pauze()) po_zmianie_stanu();
     }
 
     void kierunek(Kierunek k) {
         if (gra.ustaw_kierunek(k)) po_zmianie_stanu();
+    }
+
+    void ustaw_predkosc(Predkosc p) {
+        if (p == ust.predkosc) return;
+        ust.predkosc = p;                 // bez restartu gry: tylko nowy odstep miedzy krokami
+        ostatni_krok_ns = 0;
+        rekord_brudny = true;
+        zapisz();
+        odswiez_interfejs(true);
+        if (menu_ustawien) menu_ustawien->zaznacz_radio(1, 201U + static_cast<uint32_t>(p));
+        if (plansza) plansza->uniewaznij();
+    }
+
+    void przelacz_siatke() {
+        ust.siatka = !ust.siatka;
+        rekord_brudny = true;
+        zapisz();
+        if (plansza) plansza->uniewaznij();
     }
 
     const char* tekst_stanu() const {
@@ -143,42 +218,49 @@ struct AplikacjaSnake {
     }
 
     void po_zmianie_stanu() {
+        if (gra.zakonczona()) zapisz();               // rekord zapisujemy raz, na koncu gry
         synchronizuj_timer();
-        odswiez_interfejs();
+        odswiez_interfejs(false);
         if (plansza) plansza->uniewaznij();
     }
 
-    void odswiez_interfejs() {
+    void odswiez_interfejs(bool wymus) {
         char b[48];
-        if (lbl_wynik && pokazany_wynik != gra.wynik()) {
+        if (lbl_wynik && (wymus || pokazany_wynik != gra.wynik())) {
             size_t p = dopisz_tekst(b, sizeof(b), 0, "Wynik: ");
             dopisz_liczbe(b, sizeof(b), p, gra.wynik());
             lbl_wynik->ustaw_tekst(b);
         }
-        if (btn_pauza && pokazany_stan != gra.stan) {
+        if (lbl_rekord && (wymus || pokazany_rekord != ust.rekord)) {
+            size_t p = dopisz_tekst(b, sizeof(b), 0, "Rekord: ");
+            dopisz_liczbe(b, sizeof(b), p, static_cast<int>(ust.rekord));
+            lbl_rekord->ustaw_tekst(b);
+        }
+        if (btn_pauza && (wymus || pokazany_stan != gra.stan)) {
             btn_pauza->ustaw_tekst(gra.stan == Stan::Pauza ? "Wznów" : (gra.zakonczona() ? "Jeszcze raz" : "Pauza"));
-            btn_pauza->ustaw_wlaczona(true);
         }
         if (pasek) {
-            if (pokazany_stan != gra.stan) pasek->ustaw_tekst(0, tekst_stanu());
-            if (pokazany_wynik != gra.wynik()) {
-                size_t p = dopisz_tekst(b, sizeof(b), 0, "Dł.: ");
-                dopisz_liczbe(b, sizeof(b), p, gra.dlugosc);
+            if (wymus || pokazany_stan != gra.stan || zapis_nieudany) {
+                pasek->ustaw_tekst(0, zapis_nieudany ? "Nie zapisano rekordu" : tekst_stanu());
+            }
+            if (wymus) {
+                size_t p = dopisz_tekst(b, sizeof(b), 0, nazwa_predkosci(ust.predkosc));
+                p = dopisz_tekst(b, sizeof(b), p, " ");
+                p = dopisz_liczbe(b, sizeof(b), p, static_cast<int>(krok_ns(ust.predkosc) / 1000000ULL));
+                dopisz_tekst(b, sizeof(b), p, " ms");
                 pasek->ustaw_tekst(1, b);
             }
         }
         pokazany_stan = gra.stan;
         pokazany_wynik = gra.wynik();
+        pokazany_rekord = ust.rekord;
     }
 
-    void ustaw_rozmiar_komorki(int k) {
-        if (!pasek || k == pokazana_komorka) return;
-        pokazana_komorka = k;
-        char b[48];
-        size_t p = dopisz_tekst(b, sizeof(b), 0, "Pole: ");
-        p = dopisz_liczbe(b, sizeof(b), p, k);
-        dopisz_tekst(b, sizeof(b), p, " px");
-        pasek->ustaw_tekst(2, b);
+    void ustaw_rozmiar_komorki(int k) { pokazana_komorka = k; }
+
+    void pokaz_pomoc(const char* tytul, const char* tekst) {
+        if (!okno) return;
+        Komunikat::informacja(okno->zarzadca_popupow(), tytul, tekst, nullptr, nullptr, okno->kontrolka_glowna());
     }
 };
 
@@ -193,44 +275,53 @@ uint32_t mieszaj(uint32_t a, uint32_t b, int procent_b) {
     return wynik;
 }
 
-// Rysowanie planszy: tlo/ramka narysowane przez PowierzchniaRysunkowa z motywu; tu komorki.
+int jasnosc(uint32_t rgb) {
+    return static_cast<int>((((rgb >> 16) & 255U) * 30U + ((rgb >> 8) & 255U) * 59U + (rgb & 255U) * 11U) / 100U);
+}
+
+// Rysowanie planszy. Widoczne jest pole 18x13 (logiczna siatka 20x15 ma sciany na obwodzie,
+// bez rysowania), cienka obwodka 1 px (skalowana DPI) w kolorze ramki motywu.
 void rysuj_plansze(PowierzchniaRysunkowa* pow, KontekstRysowania& ctx, void*) {
     AplikacjaSnake& s = g_snake;
-    const UkladPlanszy u = uklad_planszy(pow->szerokosc(), pow->wysokosc(), 6);
+    const int margines = ui_skaluj(6, ui_skala_procent);
+    const UkladPlanszy u = uklad_planszy(pow->szerokosc(), pow->wysokosc(), margines);
     s.ustaw_rozmiar_komorki(u.komorka);
-    if (u.komorka <= 0) return;                         // okno za male: nic nie rysujemy
+    // Delikatne oddzielenie: tlo okna wokol, tlo pola gry wewnatrz cienkiej ramki.
+    ctx.rysuj_prostokat(Prostokat(0, 0, pow->szerokosc(), pow->wysokosc()), motyw_kolor(MOTYW_KOLOR_OKNOTLO));
+    if (u.komorka <= 0) return;                         // okno za male: nic wiecej nie rysujemy
     const uint32_t tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
     const uint32_t tekst = motyw_kolor(MOTYW_KOLOR_TEKST);
-    const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
-    const uint32_t sciana = mieszaj(tlo, akcent, 55);
     const uint32_t siatka = mieszaj(tlo, tekst, 8);
     const uint32_t cialo = motyw_kolor(MOTYW_KOLOR_SUKCES);
     const uint32_t glowa = mieszaj(cialo, jasnosc(cialo) > 128 ? 0x00000000U : 0x00FFFFFFU, 25);
     const uint32_t jablko = motyw_kolor(MOTYW_KOLOR_BLAD);
     const int k = u.komorka;
     const int ox = u.x, oy = u.y;
+    const int g = ui_skaluj(1, ui_skala_procent);       // grubosc obwodki: ~1 px fizyczny
+    ctx.rysuj_prostokat(Prostokat(ox, oy, u.szer, u.wys), tlo);
+    if (s.ust.siatka) {
+        for (int gx = 1; gx < WIDOCZNE_X; ++gx) ctx.rysuj_linie_pionowa(ox + gx * k, oy, u.wys, siatka);
+        for (int gy = 1; gy < WIDOCZNE_Y; ++gy) ctx.rysuj_linie_pozioma(ox, oy + gy * k, u.szer, siatka);
+    }
+    ctx.rysuj_ramke(Prostokat(ox - g, oy - g, u.szer + 2 * g, u.wys + 2 * g), motyw_kolor(MOTYW_KOLOR_RAMKA), g);
 
-    // Plansza: sciany (obwod), wnetrze z delikatna siatka.
-    ctx.rysuj_prostokat(Prostokat(ox, oy, u.szer, u.wys), sciana);
-    ctx.rysuj_prostokat(Prostokat(ox + k, oy + k, u.szer - 2 * k, u.wys - 2 * k), tlo);
-    for (int gx = 2; gx < PLANSZA_X - 1; ++gx) ctx.rysuj_linie_pionowa(ox + gx * k, oy + k, u.wys - 2 * k, siatka);
-    for (int gy = 2; gy < PLANSZA_Y - 1; ++gy) ctx.rysuj_linie_pozioma(ox + k, oy + gy * k, u.szer - 2 * k, siatka);
-
-    const int wc = k >= 8 ? 1 : 0;                      // odstep komorki od siatki
+    auto komorka = [&](const PunktPlanszy& p, int margines_k, uint32_t kolor, int promien) {
+        const int px = p.x - 1, py = p.y - 1;                 // pole (1,1) logiki = lewy gorny widoczny
+        if (px < 0 || py < 0 || px >= WIDOCZNE_X || py >= WIDOCZNE_Y) return;
+        ctx.rysuj_zaokraglony_prostokat(Prostokat(ox + px * k + margines_k, oy + py * k + margines_k,
+                                                  k - 2 * margines_k, k - 2 * margines_k), kolor, promien);
+    };
     if (s.gra.stan != Stan::Wygrana) {
         const int m = k >= 10 ? 3 : (k >= 6 ? 2 : 1);
-        ctx.rysuj_zaokraglony_prostokat(Prostokat(ox + s.gra.jablko.x * k + m, oy + s.gra.jablko.y * k + m,
-                                                  k - 2 * m, k - 2 * m), jablko, k >= 12 ? 3 : 1);
+        komorka(s.gra.jablko, m, jablko, k >= 12 ? 3 : 1);
     }
-    for (int i = s.gra.dlugosc - 1; i >= 0; --i) {
-        const PunktPlanszy& p = s.gra.waz[i];
-        ctx.rysuj_prostokat(Prostokat(ox + p.x * k + wc, oy + p.y * k + wc, k - 2 * wc, k - 2 * wc),
-                            i == 0 ? glowa : cialo);
-    }
+    const int wc = k >= 8 ? 1 : 0;
+    for (int i = s.gra.dlugosc - 1; i >= 0; --i)
+        komorka(s.gra.waz[i], wc, i == 0 ? glowa : cialo, k >= 14 ? 2 : 0);
     if (k >= 10) {                                      // oczy glowy w kolorze tekstu motywu
         const PunktPlanszy& h = s.gra.waz[0];
         const int e = k / 5 > 1 ? k / 5 : 2;
-        const int hx = ox + h.x * k, hy = oy + h.y * k;
+        const int hx = ox + (h.x - 1) * k, hy = oy + (h.y - 1) * k;
         const bool poziomo = s.gra.kx != 0;
         const int ax = poziomo ? (s.gra.kx > 0 ? k - k / 3 - e : k / 3) : k / 4;
         const int ay = poziomo ? k / 4 : (s.gra.ky > 0 ? k - k / 3 - e : k / 3);
@@ -240,33 +331,59 @@ void rysuj_plansze(PowierzchniaRysunkowa* pow, KontekstRysowania& ctx, void*) {
         ctx.rysuj_prostokat(Prostokat(hx + bx, hy + by, e, e), tekst);
     }
 
-    // Nakladka stanu (Gotowa / Pauza / Koniec gry / Wygrana) - kolory motywu.
+    // Kompaktowa nakladka stanu (Gotowa / Pauza / Koniec gry / Wygrana) - kolory motywu.
     const char* tytul = nullptr;
     const char* podpis = nullptr;
+    char rekord_txt[40] = {};
     switch (s.gra.stan) {
-        case Stan::Pauza: tytul = "PAUZA"; podpis = "Spacja lub 'Wznów'"; break;
-        case Stan::KoniecGry: tytul = "KONIEC GRY"; podpis = "R lub 'Nowa gra'"; break;
-        case Stan::Wygrana: tytul = "WYGRANA!"; podpis = "R lub 'Nowa gra'"; break;
-        case Stan::Gotowa: tytul = "SNAKE"; podpis = "Strzałki/WASD lub Spacja"; break;
+        case Stan::Pauza: tytul = "Pauza"; podpis = "Spacja - wznów"; break;
+        case Stan::KoniecGry: tytul = "Koniec gry"; podpis = "R - nowa gra"; break;
+        case Stan::Wygrana: tytul = "Wygrana!"; podpis = "R - nowa gra"; break;
+        case Stan::Gotowa: tytul = nullptr; podpis = "Strzałki lub WASD - start"; break;
         case Stan::Gra: break;
     }
-    if (tytul) {
-        // Rozmiar nakladki wynika z zmierzonego tekstu (czytelna takze przy malych komorkach).
-        const int tw1 = ctx.zmierz_tekst(tytul, 1).szerokosc, tw2 = ctx.zmierz_tekst(podpis, 1).szerokosc;
+    if (s.nowy_rekord && s.gra.zakonczona()) {
+        size_t p = dopisz_tekst(rekord_txt, sizeof(rekord_txt), 0, s.zapis_nieudany ? "Nowy rekord: " : "Nowy rekord: ");
+        p = dopisz_liczbe(rekord_txt, sizeof(rekord_txt), p, static_cast<int>(s.ust.rekord));
+        if (s.zapis_nieudany) dopisz_tekst(rekord_txt, sizeof(rekord_txt), p, " (nie zapisano)");
+    }
+    if (podpis) {
+        const char* wiersze[3] = {tytul, rekord_txt[0] ? rekord_txt : nullptr, podpis};
+        int tw = 0, n = 0;
+        for (const char* w : wiersze) if (w) { const int sz = ctx.zmierz_tekst(w, 1).szerokosc; if (sz > tw) tw = sz; ++n; }
         const int fh = ctx.pobierz_wysokosc_czcionki(1);
-        int nw = (tw1 > tw2 ? tw1 : tw2) + 40, nh = fh * 2 + 36;
+        int nw = tw + 28, nh = n * (fh + 4) + 14;
         if (nw > u.szer - 8) nw = u.szer - 8;
         if (nh > u.wys - 8) nh = u.wys - 8;
         const int nx = ox + (u.szer - nw) / 2, ny = oy + (u.wys - nh) / 2;
-        const uint32_t kol = s.gra.stan == Stan::KoniecGry ? jablko : (s.gra.stan == Stan::Wygrana ? cialo : akcent);
+        const uint32_t kol = s.gra.stan == Stan::KoniecGry ? jablko : (s.gra.stan == Stan::Wygrana ? cialo : motyw_kolor(MOTYW_KOLOR_AKCENT));
         ctx.rysuj_prostokat(Prostokat(nx, ny, nw, nh), motyw_kolor(MOTYW_KOLOR_PANEL));
-        ctx.rysuj_ramke(Prostokat(nx, ny, nw, nh), kol, 2);
-        const int polowa = nh / 2;
-        ctx.rysuj_tekst_wysrodkowany(Prostokat(nx, ny + 2, nw, polowa - 2), tytul, tekst, 1);
-        ctx.rysuj_tekst_wysrodkowany(Prostokat(nx, ny + polowa, nw, polowa - 2), podpis,
-                                     motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), 1);
+        ctx.rysuj_ramke(Prostokat(nx, ny, nw, nh), kol, 1);
+        int y = ny + 7;
+        for (int i = 0; i < 3; ++i) {
+            if (!wiersze[i]) continue;
+            const uint32_t kolor = i == 0 ? tekst : (i == 1 ? motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE) : motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+            ctx.rysuj_tekst_wysrodkowany(Prostokat(nx, y, nw, fh + 4), wiersze[i], kolor, 1);
+            y += fh + 4;
+        }
     }
 }
+
+const char* TEKST_STEROWANIE =
+    "Strzałki lub W, A, S, D - kierunek ruchu węża.\n"
+    "Spacja - pauza / wznowienie.\n"
+    "R - rozpocznij od nowa.\n"
+    "Esc - zamknij menu.\n"
+    "Wąż skręca najwyżej raz na krok gry.";
+const char* TEKST_ZASADY =
+    "Zjadaj jabłka, aby urosnąć i zdobyć punkty.\n"
+    "Uderzenie w ścianę lub we własne ciało kończy grę.\n"
+    "Wygrywasz, gdy wąż wypełni całą planszę.\n"
+    "Najlepszy wynik jest zapamiętywany.";
+const char* TEKST_O_GRZE =
+    "Snake dla Bursztyn OS\n"
+    "Aplikacja BursztynUI (Ring 3).\n"
+    "Plansza 20 x 15, trzy prędkości gry.";
 
 class OknoSnake : public Okno {
 public:
@@ -276,7 +393,9 @@ public:
 
     void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
         AplikacjaSnake& s = g_snake;
-        if (ev.typ == BWS_ZDARZENIE_KLAWISZ) {
+        // Menu/dialog otwarty => klawisze naleza do niego (strzalki nie moga sterowac wezem).
+        const bool modalne = zarzadca_popupow().czy_otwarty();
+        if (!modalne && ev.typ == BWS_ZDARZENIE_KLAWISZ) {
             switch (ev.kod) {
                 case 'w': case 'W': s.kierunek(Kierunek::Gora); return;
                 case 's': case 'S': s.kierunek(Kierunek::Dol); return;
@@ -284,10 +403,10 @@ public:
                 case 'd': case 'D': s.kierunek(Kierunek::Prawo); return;
                 case ' ': s.przelacz_pauze(); return;
                 case 'p': case 'P': if (!s.gra.zakonczona()) s.przelacz_pauze(); return;
-                case 'r': case 'R': s.nowa_gra(); return;
+                case 'r': case 'R': s.nowa_gra(false); return;
                 default: break;
             }
-        } else if (ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && ev.x != 0) {
+        } else if (!modalne && ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && ev.x != 0) {
             switch (klawisz_polecenia(ev)) {          // strzalki (kody 0x48/0x50/0x4b/0x4d)
                 case 0x48: s.kierunek(Kierunek::Gora); return;
                 case 0x50: s.kierunek(Kierunek::Dol); return;
@@ -314,36 +433,68 @@ static void snake_zbuduj_ui(AplikacjaGUI& app, OknoSnake& okno) {
     g_snake.app = &app;
     g_snake.okno = &okno;
     app.ustaw_glowne_okno(&okno);
+    g_snake.wczytaj();
 
     Panel* korzen = new Panel(Orientacja::Pionowa);
-    korzen->ustaw_wypelnienie(Marginesy(8, 8, 8, 0));
-    korzen->ustaw_odstep(6);
+    korzen->ustaw_wypelnienie(Marginesy(2, 2, 2, 0));
+    korzen->ustaw_odstep(4);
     okno.ustaw_kontrolke_glowna(korzen);
 
-    Panel& gora = korzen->dodaj<Panel>(Orientacja::Pozioma);
-    gora.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-    gora.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
-    gora.ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
-    gora.ustaw_odstep(8);
+    MenuGlowne& menu = korzen->dodaj<MenuGlowne>();
+    Menu& m_gra = menu.menu().dodaj_podmenu("Gra", 100);
+    m_gra.dodaj_element("Nowa gra", 101, [](ElementMenu&, void*) { g_snake.nowa_gra(true); });
+    m_gra.dodaj_element("Pauza / Wznów (Spacja)", 102, [](ElementMenu&, void*) { g_snake.przelacz_pauze(); });
+    m_gra.dodaj_element("Rozpocznij od nowa (R)", 103, [](ElementMenu&, void*) { g_snake.nowa_gra(false); });
+    m_gra.dodaj_separator();
+    m_gra.dodaj_element("Zakończ", 109, [](ElementMenu&, void*) { g_snake.zapisz(); if (g_snake.app) g_snake.app->zakoncz(); });
 
-    Etykieta& tytul = gora.dodaj<Etykieta>("Snake");
-    tytul.ustaw_preferowany_rozmiar(Rozmiar(56, 28));
-    tytul.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
+    Menu& m_ust = menu.menu().dodaj_podmenu("Ustawienia", 200);
+    Menu& m_pred = m_ust.dodaj_podmenu("Prędkość gry", 210);
+    g_snake.menu_ustawien = &m_pred;
+    static const char* const nazwy[3] = {"Wolno (300 ms)", "Normalnie (220 ms)", "Szybko (150 ms)"};
+    for (int i = 0; i < LICZBA_PREDKOSCI; ++i) {
+        ElementMenu& e = m_pred.dodaj_element(nazwy[i], 201U + static_cast<uint32_t>(i), [](ElementMenu& el, void*) {
+            g_snake.ustaw_predkosc(static_cast<Predkosc>(el.identyfikator() - 201U));
+        });
+        e.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Radio).ustaw_grupe_radialna(1);
+    }
+    m_pred.zaznacz_radio(1, 201U + static_cast<uint32_t>(g_snake.ust.predkosc));
+    ElementMenu& e_siatka = m_ust.dodaj_element("Widoczność siatki", 220, [](ElementMenu& el, void*) {
+        g_snake.przelacz_siatke();
+        el.ustaw_zaznaczony(g_snake.ust.siatka);
+    });
+    e_siatka.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole).ustaw_zaznaczony(g_snake.ust.siatka);
 
-    Etykieta& wynik = gora.dodaj<Etykieta>("Wynik: 0");
+    Menu& m_pomoc = menu.menu().dodaj_podmenu("Pomoc", 300);
+    m_pomoc.dodaj_element("Sterowanie", 301, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("Sterowanie", TEKST_STEROWANIE); });
+    m_pomoc.dodaj_element("Zasady gry", 302, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("Zasady gry", TEKST_ZASADY); });
+    m_pomoc.dodaj_element("O grze", 303, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("O grze", TEKST_O_GRZE); });
+
+    Panel& info = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    info.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    info.ustaw_preferowany_rozmiar(Rozmiar(-1, 30));
+    info.ustaw_wypelnienie(Marginesy(6, 0, 6, 0));
+    info.ustaw_odstep(8);
+
+    Etykieta& wynik = info.dodaj<Etykieta>("Wynik: 0");
     g_snake.lbl_wynik = &wynik;
-    wynik.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    wynik.ustaw_preferowany_rozmiar(Rozmiar(90, 26));
     wynik.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
 
-    Przycisk& nowa = gora.dodaj<Przycisk>("Nowa gra");
-    g_snake.btn_nowa = &nowa;
-    nowa.ustaw_preferowany_rozmiar(Rozmiar(116, 28));
-    nowa.ustaw_mozliwosc_fokusu(false);                 // klawisze gry zostaja przy oknie
-    nowa.przy_kliknieciu([](Przycisk*, void*) { g_snake.nowa_gra(); });
+    Etykieta& rekord = info.dodaj<Etykieta>("Rekord: 0");
+    g_snake.lbl_rekord = &rekord;
+    rekord.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    rekord.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
 
-    Przycisk& pauza = gora.dodaj<Przycisk>("Pauza");
+    Przycisk& nowa = info.dodaj<Przycisk>("Nowa gra");
+    g_snake.btn_nowa = &nowa;
+    nowa.ustaw_preferowany_rozmiar(Rozmiar(92, 26));
+    nowa.ustaw_mozliwosc_fokusu(false);                 // klawisze gry zostaja przy oknie
+    nowa.przy_kliknieciu([](Przycisk*, void*) { g_snake.nowa_gra(true); });
+
+    Przycisk& pauza = info.dodaj<Przycisk>("Pauza");
     g_snake.btn_pauza = &pauza;
-    pauza.ustaw_preferowany_rozmiar(Rozmiar(116, 28));
+    pauza.ustaw_preferowany_rozmiar(Rozmiar(100, 26));
     pauza.ustaw_mozliwosc_fokusu(false);
     pauza.przy_kliknieciu([](Przycisk*, void*) { g_snake.przelacz_pauze(); });
 
@@ -358,14 +509,13 @@ static void snake_zbuduj_ui(AplikacjaGUI& app, OknoSnake& okno) {
     g_snake.pasek = &sb;
     sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
     sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-    sb.dodaj_sekcje("Gotowy", 120, RozmiarSekcjiStanu::Rozciagnij);
-    sb.dodaj_sekcje("Dł.: 3", 70, RozmiarSekcjiStanu::Stala);
-    sb.dodaj_sekcje("Pole: 0 px", 100, RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("Gotowy", 150, RozmiarSekcjiStanu::Rozciagnij);
+    sb.dodaj_sekcje("Normalnie 220 ms", 150, RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("Spacja: pauza, R: nowa", 190, RozmiarSekcjiStanu::Stala);
 
     g_snake.gra.nowa_gra(g_snake.ziarno(), false);
     g_snake.pokazany_wynik = -1;
-    g_snake.pokazany_stan = Stan::Pauza;                // wymusza pierwsze odswiezenie napisow
-    g_snake.odswiez_interfejs();
+    g_snake.odswiez_interfejs(true);
 }
 
 #ifndef SNAKE_HOST_TEST
@@ -374,6 +524,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     OknoSnake okno("Snake", OKNO_SZER, OKNO_WYS);
     snake_zbuduj_ui(app, okno);
     app.uruchom(okno);
+    g_snake.zapisz();                                   // rekord/ustawienia przy zamknieciu
     bws_zakoncz_proces();
 }
 #endif

@@ -2,8 +2,14 @@
 """Generuje jadro/gui/kursor_rozciagania.generated.h z ikonki/kursor_rozciagania.png.
 
 Uzycie: generuj_kursor_rozciagania.py WYJSCIE.h [PLIK.png ...]
-Pierwszy istniejacy plik z listy jest zrodlem; gdy zadnego nie ma, powstaje
-naglowek z KURSOR_ROZCIAGANIA_DOSTEPNY=0 (jadro uzywa wtedy wbudowanych ksztaltow).
+Pliki rozpoznawane po nazwie, kazdy niezalezny i opcjonalny:
+  kursor.png                                  -> domyslna strzalka systemowa (GUI_CURSOR_ARROW)
+  kursor_rozciagania.png / kursorrozciagania.png -> kursory zmiany rozmiaru
+Brak/uszkodzenie pliku => odpowiednia makrodefinicja *_DOSTEPNY=0 i jadro uzywa
+wbudowanych ksztaltow. Wynik zalezy wylacznie od wejsc (brak starych danych).
+
+STRZALKA: rysunek 1:1 pomniejszony proporcjonalnie do DOCELOWA_STRZALKA px (bez
+obrotu); hotspot = czubek (najwyzszy kryjacy wiersz, srodek jego pikseli).
 
 Rysunek jest POZIOMA dwustronna strzalka. Wariant EW to rysunek 1:1 pomniejszony
 proporcjonalnie (usrednianie powierzchni, bez znieksztalcenia proporcji); NS to
@@ -16,6 +22,7 @@ import math, struct, sys, zlib
 from pathlib import Path
 
 DOCELOWA_SZEROKOSC = 32      # px poziomej strzalki (1x); pozostale warianty z niej wynikaja
+DOCELOWA_STRZALKA = 32       # px dluzszego boku domyslnej strzalki (128 -> 32)
 MAKS_BOK = 64                # limit plane kursora w jadrze (kursor_plane_piksele 64x64)
 PROG_ALFY = 128
 PROBKI = 4                   # PROBKI x PROBKI probek na piksel docelowy
@@ -132,6 +139,35 @@ def zbuduj(path):
             ('NESW', wariant(px, w, h, -45, skala))], (w, h)
 
 
+def zbuduj_strzalke(path):
+    w, h, px = wczytaj_png(Path(path).read_bytes())
+    skala = DOCELOWA_STRZALKA / float(max(w, h))
+    W, H, dane = wariant(px, w, h, 0, skala)
+    # hotspot: czubek strzalki
+    wiersz = next((y for y in range(H) if any(dane[y * W + x] for x in range(W))), None)
+    if wiersz is None:
+        raise ValueError('pusty kursor')
+    xs = [x for x in range(W) if dane[wiersz * W + x]]
+    hx = min(W - 1, max(0, int(round(sum(xs) / float(len(xs))))))
+    return (W, H, dane, hx, wiersz)
+
+
+def naglowek_strzalki(strz):
+    if not strz:
+        return ['#define KURSOR_STRZALKA_DOSTEPNY 0']
+    W, H, dane, hx, hy = strz
+    L = ['#define KURSOR_STRZALKA_DOSTEPNY 1',
+         'inline constexpr uint16_t kKursorStrzalkaSzer = %d;' % W,
+         'inline constexpr uint16_t kKursorStrzalkaWys = %d;' % H,
+         'inline constexpr uint16_t kKursorStrzalkaHotX = %d;' % hx,
+         'inline constexpr uint16_t kKursorStrzalkaHotY = %d;' % hy,
+         'inline constexpr uint32_t kKursorStrzalka[%d] = {' % (W * H)]
+    for i in range(0, len(dane), 8):
+        L.append('    ' + ','.join('0x%08x' % v for v in dane[i:i + 8]) + ',')
+    L.append('};')
+    return L
+
+
 def naglowek(zrodlo, warianty, wym):
     L = ['// GENEROWANY PLIK (narzedzia/generuj_kursor_rozciagania.py) - nie edytowac.',
          '#pragma once', '#include <stdint.h>',
@@ -152,16 +188,25 @@ def naglowek(zrodlo, warianty, wym):
 
 def main():
     out = Path(sys.argv[1])
-    zrodlo = next((p for p in sys.argv[2:] if Path(p).is_file()), None)
+    pliki = [p for p in sys.argv[2:] if Path(p).is_file()]
+    zrodlo = next((p for p in pliki if Path(p).name.startswith('kursor') and 'rozciag' in Path(p).name), None)
+    zrodlo_strzalki = next((p for p in pliki if Path(p).name == 'kursor.png'), None)
+    warianty, wym, strz = [], (0, 0), None
     if zrodlo:
         try:
             warianty, wym = zbuduj(zrodlo)
         except Exception as e:  # uszkodzony plik nie moze wywrocic budowania systemu
             sys.stderr.write('OSTRZEZENIE: %s: %s - uzywam ksztaltow wbudowanych\n' % (zrodlo, e))
             zrodlo, warianty, wym = None, [], (0, 0)
-    else:
-        warianty, wym = [], (0, 0)
-    text = naglowek(zrodlo or '', warianty, wym)
+    if zrodlo_strzalki:
+        try:
+            strz = zbuduj_strzalke(zrodlo_strzalki)
+        except Exception as e:
+            sys.stderr.write('OSTRZEZENIE: %s: %s - uzywam wbudowanej strzalki\n' % (zrodlo_strzalki, e))
+            strz = None
+    text = naglowek(zrodlo or '', warianty, wym).rstrip('\n').split('\n')
+    text += naglowek_strzalki(strz)
+    text = '\n'.join(text) + '\n'
     if not out.exists() or out.read_text() != text:
         out.write_text(text)
 

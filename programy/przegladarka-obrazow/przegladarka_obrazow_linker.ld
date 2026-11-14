@@ -5,7 +5,7 @@
  * zapisanym w przegladarka-obrazow.cpp:
  *
  *   nagłówek:  offset 0x0000, obszar 0x1000,   VA 0x1000000
- *   TEXT:      offset 0x1000, rozmiar 0x30000, VA 0x1001000
+ *   TEXT:      offset 0x1000, rozmiar 0x50000, VA 0x1001000
  *   DATA/BSS:  offset 0x31000, rozmiar 0x20000, VA 0x1031000
  */
 
@@ -18,12 +18,12 @@ BUR_HEADER_SIZE   = 0x1000;
 BUR_HEADER_VADDR  = 0x1000000;
 
 BUR_TEXT_OFFSET   = 0x1000;
-BUR_TEXT_SIZE     = 0x30000;
+BUR_TEXT_SIZE     = 0x50000;
 BUR_TEXT_VADDR    = 0x1001000;
 
-BUR_DATA_OFFSET   = 0x31000;
+BUR_DATA_OFFSET   = 0x51000;
 BUR_DATA_SIZE     = 0x20000;
-BUR_DATA_VADDR    = 0x1031000;
+BUR_DATA_VADDR    = 0x1051000;
 
 BUR_TEXT_END      = BUR_TEXT_VADDR + BUR_TEXT_SIZE;
 BUR_DATA_END      = BUR_DATA_VADDR + BUR_DATA_SIZE;

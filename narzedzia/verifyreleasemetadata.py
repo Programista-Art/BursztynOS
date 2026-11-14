@@ -4,7 +4,10 @@ Requires xorriso/file and mtools for ISO/EFI extraction and file typing.
 JSON is the audit baseline. EFI members use container.img!/member paths.
 Third-party GRUB relocatable modules require symbol tables: explicit path exception.
 """
-import argparse, hashlib, json, pathlib, re, struct, subprocess, tempfile
+import argparse, hashlib, json, pathlib, re, struct, subprocess, sys, tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import galeria_skaner
 
 def sha(data): return hashlib.sha256(data).hexdigest()
 def run(*args): return subprocess.check_output(args, stderr=subprocess.DEVNULL).decode('utf-8','replace')
@@ -65,11 +68,29 @@ def inspect(root, scan_efi=True):
   inventory.append(dict(path=rel,size=len(data),sha256=sha(data),type=typ,magic=data[:16].hex(),executable=bool(e or data.startswith((b'MZ',b'BUR\0',b'BUR\x02'))),compression=next((x for x in ('gzip','XZ','bzip2','compressed') if x in typ),None)))
   def issue(kind,**kw):findings.append(dict(path=rel,kind=kind,**kw))
   if (p.suffix in BAD_SUFFIX and rel not in GRUB_RUNTIME_OBJECTS) or BAD_DIR.intersection(pathlib.PurePosixPath(rel).parts):issue('development-file')
-  for category,pattern in SECRET.items():
-   for m in re.finditer(pattern,data):issue('secret-pattern',category=category,offset=m.start(),fingerprint=sha(m.group())[:16])
-  paths=[dict(offset=m.start(),value=m.group().decode('utf-8','replace')) for m in PATH.finditer(data)]
-  # No raw suspect strings in reports; paths are represented by fingerprints.
-  for m in paths:issue('source-path',offset=m['offset'],fingerprint=sha(m['value'].encode())[:16])
+  # Kontener galerii BZP3 (boot/zdjecia.pak): naglowek, tabela i nazwy oraz segmenty metadanych zdjec sa skanowane
+  # jak kazdy tekst; dane pikseli sa walidowane wg formatu zdjecia (galeria_skaner.py), nie skanowane jako tekst.
+  # Niepoprawny kontener lub wpis => finding + skan SUROWYCH bajtow (nic nie jest pomijane po cichu).
+  blobs=[(None,data)]
+  if rel=='boot/zdjecia.pak' and data[:4]==b'BZP3':
+   regions,problems,entry_count=galeria_skaner.skanuj(data)
+   if regions is None:
+    for _,why in problems:issue('gallery-container-invalid',reason=why)
+   else:
+    for entry,why in problems:issue('gallery-entry-invalid',entry=entry,reason=why)
+    blobs=regions
+    inventory[-1]['gallery']=dict(container='BZP3',scanned_regions=len(regions),scanned_bytes=sum(len(b) for _,b in regions),entries=entry_count)
+  paths=[]
+  for label,blob in blobs:
+   def at(kind,**kw):
+    if label:kw['region']=label
+    issue(kind,**kw)
+   for category,pattern in SECRET.items():
+    for m in re.finditer(pattern,blob):at('secret-pattern',category=category,offset=m.start(),fingerprint=sha(m.group())[:16])
+   for m in PATH.finditer(blob):
+    paths.append(dict(offset=m.start(),value=m.group().decode('utf-8','replace')))
+    # No raw suspect strings in reports; paths are represented by fingerprints.
+    at('source-path',offset=m.start(),fingerprint=sha(m.group())[:16])
   if e:
    if e.get('unsupported'):issue('unsupported-elf')
    else:
@@ -81,9 +102,10 @@ def inspect(root, scan_efi=True):
   if portable:
    if portable['symbols']:issue('symbol-table',section='COFF',count=portable['symbols'])
    if portable['debug_bytes']:issue('debug-section',section='PE debug directory',size=portable['debug_bytes'])
+  scan_data=b'\n'.join(blob for _,blob in blobs)
   for marker in DIAG:
-   if marker in data:issue('diagnostic-marker',marker=marker.decode())
-  ss=re.findall(rb'[\x20-\x7e]{4,}',data)
+   if marker in scan_data:issue('diagnostic-marker',marker=marker.decode())
+  ss=re.findall(rb'[\x20-\x7e]{4,}',scan_data)
   src_ext=sum(bool(any(m.group() not in PUBLIC_SOURCE_ALLOWLIST for m in SOURCE.finditer(s))) for s in ss)
   baselines.append(dict(path=rel,strings=len(ss),source_extensions=src_ext,paths=len(paths),likely_identifiers=sum(bool(re.search(rb'_Z\w+|\b\w+::\w+|\b(?:scheduler|paging|syscall|virtio|BursztynUI|Husarz|PZB|BWS)\w*',s)) for s in ss),debug_test_assert=sum(bool(re.search(rb'\b(?:DEBUG|TEST|ASSERT)\b',s)) for s in ss),private_repo=sum(b'/Burstzyn/BursztynOS' in s for s in ss),elf=e,pe=portable))
  # GRUB's EFI boot filesystem is a second shipped filesystem. Scanning only

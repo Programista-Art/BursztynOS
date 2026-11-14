@@ -15,8 +15,9 @@ static void target(const uint8_t* data,size_t size) {
     if(n.dane_rozmiar_pamieci>1024*1024)return;
     std::vector<uint8_t> writable(n.dane_rozmiar_pamieci,0);
     memcpy(writable.data(),copy.data()+n.dane_przesuniecie,n.dane_rozmiar_pliku);
+    // reloc_przesuniecie jest walidowany tylko dla reloc_liczba > 0 (jak w loaderze).
     assert(bur_v2_zastosuj_relokacje_danych(n,
-        reinterpret_cast<const BurV2Relokacja*>(copy.data()+n.reloc_przesuniecie),
+        n.reloc_liczba==0?nullptr:reinterpret_cast<const BurV2Relokacja*>(copy.data()+n.reloc_przesuniecie),
         writable.data(),ASLR_PIE_WINDOW_BASE));
 }
 

@@ -182,6 +182,9 @@ static bool test_mouse_capture=false;
 void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
 static uint32_t test_cursor_shape=0;
 bool gui_ustaw_kursor(uint32_t shape) {test_cursor_shape=shape;return true;}
+static bool test_pasek_otwarty=false;static int test_pasek_rect[4]={};static std::map<uint64_t,bool> test_nad_paskiem;
+bool gui_ustaw_pasek_zadan(bool otwarty,int x,int y,int w,int h) {test_pasek_otwarty=otwarty;test_pasek_rect[0]=x;test_pasek_rect[1]=y;test_pasek_rect[2]=w;test_pasek_rect[3]=h;return true;}
+bool gui_ustaw_nad_paskiem(uint64_t id,bool v) {test_nad_paskiem[id]=v;return true;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
 bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
 void bws_przesun_warstwe(int, int) {}

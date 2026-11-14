@@ -759,7 +759,11 @@ void input_dispatch_event(InputDevice* dev, const InputEvent* ev) {
 
         case INPUT_EV_REL: {
             const int32_t delta = input_signed_value(ev->value);
-            if (!(dev->pointer_mode & INPUT_POINTER_RELATIVE) || !input_is_pointer_device(dev)) break;
+            if (!input_is_pointer_device(dev)) break;
+            // Kolko (REL_WHEEL/REL_HWHEEL) jest niezalezne od trybu pozycjonowania: tablet absolutny (VirtIO tablet)
+            // tez je zglasza (QEMU tlumaczy przycisk kola na EV_REL), a ruch X/Y w trybie bezwzglednym nadal jest ignorowany.
+            const bool kolko = ev->code == INPUT_REL_WHEEL || ev->code == INPUT_REL_HWHEEL;
+            if (!(dev->pointer_mode & INPUT_POINTER_RELATIVE) && !kolko) break;
             const bool full_signed=dev->bus_type==INPUT_BUS_VIRTIO;
             if (ev->code == INPUT_REL_X) {
                 dev->rel_x = input_accumulate_delta(dev->rel_x, delta,full_signed);

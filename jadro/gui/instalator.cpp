@@ -4,6 +4,9 @@
 #include "grafika.h"
 #include "scheduler.h"
 #include "tapety.h"
+extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem);
+extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe);
+extern "C" void galeria_instaluj_zakoncz();
 #include "sterowniki/usb/xhci.h"
 #include "sterowniki/czas/hpet.h"
 
@@ -22,7 +25,8 @@ Storage::FatInstallState fat_state{};
 Storage::GptInstallState gpt_state{};
 bool gpt_started=false;
 bool fat_started=false;
-bool wallpapers_started=false;
+bool wallpapers_started=false,wallpapers_finished=false;
+uint32_t galeria_phase=0;uint64_t galeria_done=0,galeria_total=0;   // opcjonalna galeria: 0=nie, 1=w toku, 2=koniec
 uint64_t wallpaper_bytes_done=0,wallpaper_bytes_total=0;
 bool system_started=false;
 uint64_t system_bytes_done=0,system_bytes_total=0;
@@ -221,15 +225,26 @@ void perform(){
             klog_serial("[INSTALL] progress=75 stage=WALLPAPERS");
             wallpapers_started=tapety_instaluj_start(mbi_saved,&wallpaper_bytes_total);
         }
-        bool done=false;
+        bool done=wallpapers_finished;
         for(int b=0;b<4&&!done;++b){
             if(!wallpapers_started||wallpaper_bytes_total>UINT32_MAX||
                !tapety_instaluj_step(&wallpaper_bytes_done,&wallpapers_done,&wallpapers_total,&done)){
                 fail(INST_PLIKI,"Tapety: synchronizacja lub zapis nie powiodły się.");return;}
         }
-        set_progress(instalator_podpostep(75,92,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total)),
+        if(done)wallpapers_finished=true;
+        // Przykladowe zdjecia (zdjecia.pak): best effort, kazdy blad konczy tylko ten etap (instalacja trwa).
+        if(done&&galeria_phase==0){
+            klog_serial("[INSTALL] progress=75 stage=GALLERY");
+            galeria_phase=galeria_instaluj_start(mbi_saved,&galeria_total)?1:2;
+        }else if(done&&galeria_phase==1){
+            bool g_gotowe=false;
+            for(int b=0;b<2&&!g_gotowe;++b)galeria_instaluj_step(&galeria_done,&g_gotowe);
+            if(g_gotowe){galeria_phase=2;galeria_instaluj_zakoncz();}
+        }
+        const uint64_t post_razem=wallpaper_bytes_total+galeria_total,post_wyk=wallpaper_bytes_done+galeria_done;
+        set_progress(instalator_podpostep(75,92,uint32_t(post_wyk>UINT32_MAX?UINT32_MAX:post_wyk),uint32_t(post_razem>UINT32_MAX?UINT32_MAX:post_razem)),
                      POSTEP_TAPETY,uint32_t(wallpaper_bytes_done),uint32_t(wallpaper_bytes_total));
-        if(done){set_progress(92,POSTEP_WERYFIKACJA,wallpapers_done,wallpapers_total);stage=INST_WERYFIKACJA;}
+        if(done&&galeria_phase==2){set_progress(92,POSTEP_WERYFIKACJA,wallpapers_done,wallpapers_total);stage=INST_WERYFIKACJA;}
     }else if(stage==INST_WERYFIKACJA){
         if(verify_phase==0){
             klog_serial("[INSTALL] progress=92 stage=VERIFY");
@@ -342,7 +357,7 @@ bool instalator_obsluz(const proces_t&p,const InstalatorZadanie&r,InstalatorOdpo
         status=0;error[0]=0;selected=UINT32_MAX;nonce=0;
         progress=0;progress_stage=POSTEP_PRZYGOTOWANIE;progress_done=progress_total=0;
         gpt_state={};gpt_started=false;fat_state={};fat_started=false;
-        wallpapers_started=false;wallpaper_bytes_done=wallpaper_bytes_total=0;
+        wallpapers_started=false;wallpapers_finished=false;galeria_phase=0;galeria_done=galeria_total=0;wallpaper_bytes_done=wallpaper_bytes_total=0;
         system_started=false;system_bytes_done=system_bytes_total=0;
         verify_phase=0;verify_meta_done=verify_meta_total=0;
         verify_system_done=verify_system_total=verify_wall_done=verify_wall_total=0;

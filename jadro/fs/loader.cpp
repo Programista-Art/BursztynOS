@@ -506,6 +506,18 @@ static void wyzeruj_znane_pola_procesu(
     proces.sciezka_pliku[0] = '\0';
 }
 
+/*
+ * Tozsamosc Przegladarki Obrazow dla polityki duzych alokacji (BWS 35).
+ * Ustawiane WYLACZNIE tutaj, po zweryfikowaniu SHA-256 (tablica wbudowana w jadro albo podpis
+ * release) bajtow, ktore za chwile zostana zmapowane. Sama sciezka, manifest ani etykieta PZB
+ * nie wystarcza. Wpis jest czyszczony przy rezerwacji slotu, wiec ponowne uzycie PID go nie dziedziczy.
+ */
+static bool g_przegladarka_obrazow_zweryfikowana[MAKS_PROCESOW];
+
+extern "C" bool loader_przegladarka_obrazow_zweryfikowana(uint64_t pid) {
+    return pid > 0 && pid < MAKS_PROCESOW && g_przegladarka_obrazow_zweryfikowana[pid];
+}
+
 static bool sciezka_juz_zarezerwowana(
     const char* sciezka
 ) {
@@ -551,6 +563,7 @@ static int zarezerwuj_slot_procesu(
         proces_t& proces = tablica_procesow[pid];
 
         wyzeruj_znane_pola_procesu(proces);
+        g_przegladarka_obrazow_zweryfikowana[pid] = false;
         fpu_reset_process(pid);
         argument_startowy_procesu[pid][0] = '\0';
         proces.pid = static_cast<uint64_t>(pid);
@@ -1253,6 +1266,13 @@ static bool uruchom_program_z_pliku_impl(
         }
     }
 
+#ifndef BURSZTYN_LOADER_HOST_TEST
+    if (takie_same_sciezki(bezpieczna_sciezka, "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur")) {
+        g_przegladarka_obrazow_zweryfikowana[pid] =
+            tozsamosc_systemowa_zweryfikuj(bezpieczna_sciezka, bufor_pliku, rozmiar_pliku);
+    }
+#endif
+
     const bool v2 = bufor_pliku[3] == 2;
     NaglowekBurV2 n2{};
     PlanUkladuAslrRing3 layout{};
@@ -1283,7 +1303,9 @@ static bool uruchom_program_z_pliku_impl(
         if (!canary) { proba.obraz.blad = "bur-v2-invalid-guard";
             zwolnij_rezerwacje_procesu(pid); return false; }
         for (auto& value : random) value = 0;
-        relocs = reinterpret_cast<const BurV2Relokacja*>(bufor_pliku + n2.reloc_przesuniecie);
+        /* Offset jest walidowany tylko gdy reloc_liczba > 0; nie licz wskaznika dla pustej tablicy. */
+        relocs = n2.reloc_liczba == 0 ? nullptr
+            : reinterpret_cast<const BurV2Relokacja*>(bufor_pliku + n2.reloc_przesuniecie);
         uint64_t end = 0;
         for (uint32_t i = 0; i < n2.reloc_liczba; ++i) {
             uint64_t value = 0; size_t width = 0;
@@ -1814,6 +1836,8 @@ extern "C" bool pakiet_parsuj_manifest_tekst(
                             out_manifest->uprawnienia |= PRAWO_PLIKI_CZYTAJ;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "pliki_zapisz")) {
                             out_manifest->uprawnienia |= PRAWO_PLIKI_ZAPISZ;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "ustawienia_aplikacji")) {
+                            out_manifest->uprawnienia |= PRAWO_USTAWIENIA_APLIKACJI;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "system_config")) {
                             out_manifest->uprawnienia |= PRAWO_SYSTEM_CONFIG;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "siec")) {

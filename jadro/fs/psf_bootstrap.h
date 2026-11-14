@@ -32,6 +32,7 @@ static const char* const KATALOGI_SYSTEMOWE[] = {
         "/system",
         "/dane",
         "/dane/sponsorze",
+        "/dane/zdjecia",
         "/system/konfig",
         "/system/motywy",
         "/programy",

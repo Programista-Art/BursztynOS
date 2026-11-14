@@ -66,6 +66,38 @@ int main() {
     printf("zasob kursora: BRAK (uzywany ksztalt wbudowany)\n");
     for (uint32_t t = 3; t <= 6; ++t) CHECK(kursor_rozciagania_opis(t) == nullptr);
 #endif
+    // Domyslna strzalka systemowa (ikonki/kursor.png): rozmiar, hotspot na czubku, alfa binarna, proporcje.
+#if KURSOR_STRZALKA_DOSTEPNY
+    {
+        const auto* a = kursor_zasobu_opis(GUI_CURSOR_ARROW);
+        CHECK(a != nullptr && a == kursor_strzalki_opis());
+        CHECK(a->szer > 0 && a->wys > 0 && a->szer <= GUI_CURSOR_CUSTOM_MAX_W && a->wys <= GUI_CURSOR_CUSTOM_MAX_H);
+        CHECK(a->hotspot_x < a->szer && a->hotspot_y < a->wys);
+        int first = -1, opaque = 0, minx = 999, maxx = -1;
+        uint32_t k = 0;
+        for (int y = 0; y < a->wys; ++y)
+            for (int x = 0; x < a->szer; ++x)
+                if (kursor_rozciagania_piksel(a, x, y, &k)) {
+                    ++opaque; if (first < 0) first = y;
+                    if (x < minx) minx = x; if (x > maxx) maxx = x;
+                    CHECK((a->piksele[y * a->szer + x] >> 24) == 0xFF);
+                }
+        CHECK(opaque > 80);
+        CHECK(first == a->hotspot_y);                                   // hotspot w najwyzszym wierszu (czubek)
+        uint32_t k2 = 0;
+        CHECK(kursor_rozciagania_piksel(a, a->hotspot_x, a->hotspot_y, &k2));   // hotspot lezy na kryjacym pikselu
+        CHECK(a->hotspot_x >= minx && a->hotspot_x <= maxx);
+        // Proporcje zrodla 128x128 zachowane (kwadrat po pomniejszeniu).
+        CHECK(a->szer == a->wys);
+        // Inne typy specjalne nie sa zastepowane strzalka.
+        for (uint32_t t : {uint32_t(GUI_CURSOR_HAND), uint32_t(GUI_CURSOR_TEXT), uint32_t(GUI_CURSOR_WAIT),
+                           uint32_t(GUI_CURSOR_CROSSHAIR), uint32_t(GUI_CURSOR_CUSTOM)})
+            CHECK(kursor_zasobu_opis(t) == nullptr);
+        printf("strzalka: %dx%d hotspot (%d,%d)\n", a->szer, a->wys, a->hotspot_x, a->hotspot_y);
+    }
+#else
+    CHECK(kursor_zasobu_opis(GUI_CURSOR_ARROW) == nullptr && kursor_strzalki_opis() == nullptr);
+#endif
     // Poza obrazem i wskaznik zerowy: bezpiecznie false.
     uint32_t cc = 0;
     CHECK(!kursor_rozciagania_piksel(nullptr, 0, 0, &cc));

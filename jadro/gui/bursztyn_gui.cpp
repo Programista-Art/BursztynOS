@@ -1560,6 +1560,16 @@ bool clipboard_set(const char* mime, const void* dane, uint64_t rozmiar) {
             reinterpret_cast<uint64_t>(dane), rozmiar, 0) == 1ULL;
 }
 
+static uint64_t pakuj_i32(int a, int b) {
+    return (static_cast<uint64_t>(static_cast<uint32_t>(a)) << 32) | static_cast<uint32_t>(b);
+}
+bool gui_ustaw_pasek_zadan(bool otwarty, int x, int y, int szer, int wys) {
+    return bws_wywolaj(BWS_GUI_SYSTEM_OVERLAY, otwarty ? 3 : 2, pakuj_i32(x, y), pakuj_i32(szer, wys), 0) == 1ULL;
+}
+bool gui_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone) {
+    return bws_wywolaj(BWS_GUI_SYSTEM_OVERLAY, wlaczone ? 5 : 4, window_id, 0, 0) == 1ULL;
+}
+
 bool gui_ustaw_kursor(uint32_t typ) {
     return bws_wywolaj(BWS_GUI_CURSOR_SHAPE, typ, 0, 0, 0) == 1ULL;
 }
@@ -1655,7 +1665,15 @@ bool zapewnij_katalog_aplikacji(const char* app_id) {
 
     if (katalog[0] == '\0') return false;
 
-    /* utworz_katalog_uzytkownika zwraca false takze gdy katalog juz jest. */
+    /* Tworzymy kazdy poziom sciezki po kolei (/uzytkownicy/domyslny, .../Ustawienia, .../<app>):
+     * system tworzy tylko /uzytkownicy i /uzytkownicy/Pulpit, wiec pojedynczy mkdir nie wystarczal.
+     * utworz_katalog_uzytkownika zwraca false takze gdy katalog juz jest - to nie jest blad. */
+    for (int i = 1; katalog[i] != '\0'; ++i) {
+        if (katalog[i] != '/') continue;
+        katalog[i] = '\0';
+        (void)utworz_katalog_uzytkownika(katalog);
+        katalog[i] = '/';
+    }
     (void)utworz_katalog_uzytkownika(katalog);
     return true;
 }

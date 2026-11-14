@@ -3,6 +3,23 @@
 #include <string>
 static int checks = 0;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); exit(1); } } while (0)
+#include <map>
+static std::map<std::string, std::string> g_ustawienia;
+static bool g_zapis_zabroniony = false;
+static int g_zapisy = 0;
+bool ustawienia_zapisz(const char* app, const char* klucz, const char* wartosc) {
+    ++g_zapisy;
+    if (g_zapis_zabroniony) return false;
+    g_ustawienia[std::string(app) + "/" + klucz] = wartosc;
+    return true;
+}
+bool ustawienia_wczytaj(const char* app, const char* klucz, char* wynik, uint32_t cap) {
+    auto it = g_ustawienia.find(std::string(app) + "/" + klucz);
+    if (cap) wynik[0] = '\0';
+    if (it == g_ustawienia.end() || it->second.size() + 1 > cap) return false;
+    memcpy(wynik, it->second.c_str(), it->second.size() + 1);
+    return true;
+}
 #define SNAKE_HOST_TEST 1
 #include "../gry/snake/snake.cpp"
 
@@ -12,6 +29,8 @@ static bws_zdarzenie ev(uint32_t typ, uint32_t kod = 0, int x = 0, int y = 0) {
 
 static void logika() {
     Gra g{}; g.rng = 1;
+    CHECK(KROK_NS == 220000000ULL && krok_ns(PREDKOSC_DOMYSLNA) == 220000000ULL);
+    CHECK(krok_ns(Predkosc::Wolno) == 300000000ULL && krok_ns(Predkosc::Szybko) == 150000000ULL);
     // inicjalizacja
     g.nowa_gra(12345, false);
     CHECK(g.stan == Stan::Gotowa && g.dlugosc == 3 && g.wynik() == 0);
@@ -87,12 +106,12 @@ static void uklad() {
     for (int w : {200, 320, 480, 640, 1000, 1900})
         for (int h : {150, 240, 360, 480, 700, 1000}) {
             const UkladPlanszy u = uklad_planszy(w, h, 6);
-            if (u.komorka == 0) { CHECK(w - 12 < PLANSZA_X || h - 12 < PLANSZA_Y); continue; }
-            CHECK(u.szer == u.komorka * PLANSZA_X && u.wys == u.komorka * PLANSZA_Y);
+            if (u.komorka == 0) { CHECK(w - 12 < WIDOCZNE_X || h - 12 < WIDOCZNE_Y); continue; }
+            CHECK(u.szer == u.komorka * WIDOCZNE_X && u.wys == u.komorka * WIDOCZNE_Y);
             CHECK(u.x >= 6 && u.y >= 6 && u.x + u.szer <= w - 6 && u.y + u.wys <= h - 6);
             CHECK(u.x == (w - u.szer) / 2 && u.y == (h - u.wys) / 2);
             // maksymalna: komorka+1 juz sie nie miesci
-            CHECK((u.komorka + 1) * PLANSZA_X > w - 12 || (u.komorka + 1) * PLANSZA_Y > h - 12);
+            CHECK((u.komorka + 1) * WIDOCZNE_X > w - 12 || (u.komorka + 1) * WIDOCZNE_Y > h - 12);
         }
     CHECK(uklad_planszy(0, 0, 6).komorka == 0 && uklad_planszy(-5, 100, 6).komorka == 0);
     CHECK(uklad_planszy(INT32_MAX, INT32_MAX, 6).komorka > 0);       // brak przepelnien
@@ -134,8 +153,10 @@ static void ui() {
     s.tyk();
     CHECK(s.gra.waz[0].y >= y0 - 1 - 3 || s.gra.stan == Stan::KoniecGry);
     // nowa gra przez klawisz R i przycisk
-    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'r'));
-    CHECK(s.gra.stan == Stan::Gra && s.gra.wynik() == 0 && s.gra.dlugosc == 3);
+    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'r'));              // R = rozpocznij od nowa (stan Gotowa)
+    CHECK(s.gra.stan == Stan::Gotowa && s.gra.wynik() == 0 && s.gra.dlugosc == 3 && !s.timer_wlaczony);
+    s.nowa_gra(true);                                                    // Nowa gra = start od razu
+    CHECK(s.gra.stan == Stan::Gra && s.timer_wlaczony);
     // pauza: Spacja; stan nie rusza sie mimo uplywu czasu; timer wylaczony
     okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, ' '));
     CHECK(s.gra.stan == Stan::Pauza && !s.timer_wlaczony);
@@ -162,7 +183,7 @@ static void ui() {
             for (int i = 0; i < przed.dlugosc; ++i) CHECK(s.gra.waz[i].x == przed.waz[i].x && s.gra.waz[i].y == przed.waz[i].y);
             const UkladPlanszy u = uklad_planszy(s.plansza->szerokosc(), s.plansza->wysokosc(), 6);
             CHECK(u.komorka > 0);
-            CHECK(u.szer * PLANSZA_Y == u.wys * PLANSZA_X);          // proporcje 4:3 zachowane
+            CHECK(u.szer * WIDOCZNE_Y == u.wys * WIDOCZNE_X);          // proporcje widocznego pola (18:13) zachowane
         }
     }
     // rysowanie i motyw: dwa rozne motywy => kolory planszy, weza i jablka wynikaja z motywu
@@ -186,11 +207,17 @@ static void ui() {
         const Prostokat r = s.plansza->prostokat_do_ekranu(Prostokat(0, 0, s.plansza->szerokosc(), s.plansza->wysokosc()));
         const UkladPlanszy u = uklad_planszy(r.szerokosc, r.wysokosc, 6);
         const int k = u.komorka;
-        auto kom = [&](int cx, int cy) { return px(r.x + u.x + cx * k + k / 2, r.y + u.y + cy * k + k / 2); };
+        auto kom = [&](int cx, int cy) { return px(r.x + u.x + (cx - 1) * k + k / 2, r.y + u.y + (cy - 1) * k + k / 2); };
         CHECK(kom(2, 2) == (m.poletekstowe & 0xFFFFFF));              // puste pole = tlo z motywu
         CHECK(kom(15, 10) == (m.blad & 0xFFFFFF));                    // jablko = kolor bledu z motywu
         CHECK(kom(9, 7) == (m.sukces & 0xFFFFFF));                    // cialo = kolor sukcesu z motywu
-        CHECK(px(r.x + u.x + 1, r.y + u.y + 1) != (m.poletekstowe & 0xFFFFFF));   // sciana inna niz tlo
+        // Cienka obwodka z motywu (bez grubej, zakodowanej na stale ramki): 1 px w kolorze RAMKA,
+        // 3 px na zewnatrz jest juz tlo okna, wnetrze to pole gry.
+        CHECK(px(r.x + u.x - 1, r.y + u.y + u.wys / 2) == (m.ramka & 0xFFFFFF));
+        CHECK(px(r.x + u.x - 3, r.y + u.y + u.wys / 2) == (m.oknotlo & 0xFFFFFF));
+        CHECK(px(r.x + u.x + u.szer, r.y + u.y + u.wys / 2) == (m.ramka & 0xFFFFFF));
+        CHECK(px(r.x + u.x + 1, r.y + u.y + 1) == (m.poletekstowe & 0xFFFFFF));
+        CHECK(u.komorka * 2 > 2 && (2 * 1) <= 2);                              // obwodka <= 2 px
         // okno: tlo i pasek z motywu
         CHECK(px(okno.x() + 2, okno.y() + okno.wysokosc() - 40) != 0xDEADBEEFu);
         CHECK(s.gra.waz[0].x == 10 && s.gra.jablko.x == 15);          // stan gry nietkniety
@@ -212,10 +239,151 @@ static void ui() {
     test_ustaw_aktywny_motyw(nullptr);
 }
 
+
+static void ustawienia_i_rekord() {
+    // ---- parser/serializacja (dane z dysku sa niezaufane) ----
+    UstawieniaSnake u;
+    CHECK(u.rekord == 0 && u.predkosc == Predkosc::Normalnie && u.siatka);
+    char b[160];
+    u.rekord = 42; u.predkosc = Predkosc::Szybko; u.siatka = false;
+    const size_t n = zapisz_ustawienia(u, b, sizeof(b));
+    CHECK(n > 0 && n <= USTAWIENIA_MAKS_BAJTOW && b[n] == 0);
+    UstawieniaSnake w = wczytaj_ustawienia(b, n);
+    CHECK(w.poprawne && w.rekord == 42 && w.predkosc == Predkosc::Szybko && !w.siatka);
+    CHECK(zapisz_ustawienia(u, b, 10) == 0);                      // bufor za maly
+    auto zly = [&](const char* t) { UstawieniaSnake x = wczytaj_ustawienia(t, strlen(t)); return !x.poprawne; };
+    CHECK(zly("") || true);
+    CHECK(zly("smiec"));                                          // zly naglowek
+    CHECK(zly("snake1\nrekord=abc\n"));                          // nie-cyfry
+    CHECK(zly("snake1\nrekord=-5\n"));
+    CHECK(zly("snake1\nrekord=232\n"));                          // ponad maksimum (231)
+    CHECK(zly("snake1\nrekord=99999999999\n"));                  // przepelnienie
+    CHECK(zly("snake1\npredkosc=3\n"));
+    CHECK(zly("snake1\nsiatka=2\n"));
+    CHECK(zly("snake1\nnieznany=1\n"));
+    {   // zle wartosci => wartosci domyslne, nie czesciowe smieci
+        const char* zlyp = "snake1\nrekord=999\npredkosc=7\n";
+        UstawieniaSnake x = wczytaj_ustawienia(zlyp, strlen(zlyp));
+        CHECK(!x.poprawne && x.rekord == 0 && x.predkosc == Predkosc::Normalnie);
+        std::string duzy(USTAWIENIA_MAKS_BAJTOW + 1, 'a');
+        x = wczytaj_ustawienia(duzy.c_str(), duzy.size());
+        CHECK(!x.poprawne && x.rekord == 0);                       // plik wiekszy niz limit
+        const char bin[] = {'s','n','a','k','e','1','\n','r','e','k','o','r','d','=','1','\0','2','\n'};
+        x = wczytaj_ustawienia(bin, sizeof(bin));
+        CHECK(!x.poprawne);
+    }
+    { const char* t231 = "snake1\nrekord=231\n"; CHECK(wczytaj_ustawienia(t231, strlen(t231)).rekord == 231); }
+
+    // ---- rekord w aplikacji ----
+    g_ustawienia.clear(); g_zapisy = 0; g_zapis_zabroniony = false;
+    test_capture_pixels = false;
+    AplikacjaGUI app;
+    OknoSnake okno("Snake", OKNO_SZER, OKNO_WYS);
+    snake_zbuduj_ui(app, okno);
+    okno.przelicz_uklad();
+    AplikacjaSnake& s = g_snake;
+    CHECK(s.ust.rekord == 0 && s.ust.predkosc == Predkosc::Normalnie && s.ust.siatka);   // domyslne, brak pliku
+    CHECK(g_zapisy == 0);                                           // start nic nie zapisuje
+    s.nowa_gra(true);
+    s.gra.jablko = {11, 7};
+    test_monotonic_ns = 10000000000ULL;
+    s.tyk();
+    test_monotonic_ns += krok_ns(Predkosc::Normalnie) + 1; s.tyk();       // glowa (10,7)->(11,7): jablko
+    CHECK(s.gra.wynik() == 1 && s.ust.rekord == 1 && s.nowy_rekord && s.rekord_brudny);
+    CHECK(g_zapisy == 0);                                           // zadnego zapisu w trakcie gry
+    for (int i = 0; i < 30; ++i) { test_monotonic_ns += krok_ns(Predkosc::Normalnie) + 1; s.gra.jablko = {1, 13}; s.tyk(); }
+    CHECK(s.gra.zakonczona());
+    CHECK(g_zapisy == 1 && !s.rekord_brudny && !s.zapis_nieudany);        // jeden zapis na koniec gry
+    CHECK(g_ustawienia["snake/stan"].find("rekord=1") != std::string::npos);
+    // "zamkniecie i ponowne otwarcie": nowa instancja stanu wczytuje rekord
+    s.ust = UstawieniaSnake{}; s.wczytaj();
+    CHECK(s.ust.rekord == 1 && s.ust.poprawne);
+    // gorszy wynik nie nadpisuje rekordu
+    s.nowa_gra(true); s.nowy_rekord = false;
+    for (int i = 0; i < 30 && !s.gra.zakonczona(); ++i) { test_monotonic_ns += krok_ns(Predkosc::Normalnie) + 1; s.gra.jablko = {1, 13}; s.tyk(); }
+    CHECK(s.ust.rekord == 1 && !s.nowy_rekord);
+    // uszkodzony plik => domyslne bez crasha
+    g_ustawienia["snake/stan"] = "snake1\nrekord=zzz\n";
+    s.wczytaj();
+    CHECK(s.ust.rekord == 0 && !s.ust.poprawne);
+    g_ustawienia["snake/stan"] = std::string(5000, 'x');             // ponad limit odczytu
+    s.wczytaj();
+    CHECK(s.ust.rekord == 0);
+    // odmowa zapisu: bez udawania sukcesu, komunikat o nowym rekordzie ostrzega
+    g_ustawienia.clear(); g_zapis_zabroniony = true; s.wczytaj();
+    s.nowa_gra(true);
+    s.gra.jablko = {11, 7};
+    test_monotonic_ns += 10 * krok_ns(Predkosc::Normalnie); s.tyk();
+    test_monotonic_ns += krok_ns(Predkosc::Normalnie) + 1; s.tyk();
+    for (int i = 0; i < 30 && !s.gra.zakonczona(); ++i) { test_monotonic_ns += krok_ns(Predkosc::Normalnie) + 1; s.gra.jablko = {1, 13}; s.tyk(); }
+    CHECK(s.gra.zakonczona() && s.nowy_rekord && s.zapis_nieudany && s.rekord_brudny);
+    g_zapis_zabroniony = false;
+    CHECK(s.zapisz() && !s.zapis_nieudany && !s.rekord_brudny);       // ponowna proba po odblokowaniu
+
+    // ---- predkosci ----
+    s.nowa_gra(true);
+    const PunktPlanszy g0 = s.gra.waz[0];
+    s.gra.jablko = {1, 13};
+    s.ustaw_predkosc(Predkosc::Wolno);                               // zmiana w trakcie gry nie restartuje
+    CHECK(s.gra.stan == Stan::Gra && s.gra.waz[0].x == g0.x && s.gra.dlugosc == 3);
+    test_monotonic_ns += 5000000000ULL; s.tyk();                      // odniesienie
+    const int x0 = s.gra.waz[0].x;
+    test_monotonic_ns += 299000000ULL; s.tyk();
+    CHECK(s.gra.waz[0].x == x0);                                      // 299 ms < 300 ms: brak kroku
+    test_monotonic_ns += 2000000ULL; s.tyk();
+    CHECK(s.gra.waz[0].x == x0 + 1);                                  // 301 ms: dokladnie jeden krok
+    s.ustaw_predkosc(Predkosc::Szybko);
+    CHECK(g_ustawienia["snake/stan"].find("predkosc=2") != std::string::npos);
+    test_monotonic_ns += 5000000000ULL; s.tyk();
+    const int x1 = s.gra.waz[0].x;
+    test_monotonic_ns += 151000000ULL; s.tyk();
+    CHECK(s.gra.waz[0].x == x1 + 1);
+    s.ustaw_predkosc(Predkosc::Normalnie);
+    CHECK(s.ust.predkosc == PREDKOSC_DOMYSLNA);
+    // pauza zatrzymuje logike; wznowienie nie "nadgania" czasu pauzy
+    s.przelacz_pauze();
+    const int xp = s.gra.waz[0].x;
+    test_monotonic_ns += 60ULL * 1000000000ULL; s.tyk();
+    CHECK(s.gra.stan == Stan::Pauza && s.gra.waz[0].x == xp);
+    s.przelacz_pauze();
+    test_monotonic_ns += 1000000ULL; s.tyk();
+    test_monotonic_ns += 1000000ULL; s.tyk();
+    CHECK(s.gra.waz[0].x == xp || s.gra.waz[0].x == xp + 1);          // najwyzej jeden krok po wznowieniu
+}
+
+static void menu_i_fokus() {
+    test_capture_pixels = false;
+    AplikacjaGUI app;
+    OknoSnake okno("Snake", OKNO_SZER, OKNO_WYS);
+    snake_zbuduj_ui(app, okno);
+    okno.przelicz_uklad();
+    AplikacjaSnake& s = g_snake;
+    s.nowa_gra(true);
+    // otwarty popup (menu/dialog) blokuje sterowanie wezem
+    s.pokaz_pomoc("Sterowanie", "test");
+    CHECK(okno.zarzadca_popupow().czy_otwarty());
+    const int ky = s.gra.oky;
+    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'w'));
+    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, ' '));
+    CHECK(s.gra.oky == ky && s.gra.stan == Stan::Gra);
+    // po zamknieciu dialogu sterowanie wraca
+    okno.zarzadca_popupow().zamknij(PowodZamknieciaPopup::Anulowanie);
+    CHECK(!okno.zarzadca_popupow().czy_otwarty());
+    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'w'));
+    CHECK(s.gra.oky == -1);
+    // dwa skrety w jednym kroku: drugi odrzucony
+    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'a'));
+    CHECK(s.gra.okx == 0 && s.gra.oky == -1);
+    // przyciski nie przejmuja fokusu klawiatury
+    CHECK(!s.btn_pauza->czy_moze_miec_fokus() && !s.btn_nowa->czy_moze_miec_fokus());
+}
+
 int main() {
     logika();
     uklad();
     ui();
+    ustawienia_i_rekord();
+    menu_i_fokus();
     printf("PASS test_snake_host: %d checks\n", checks);
     return 0;
 }

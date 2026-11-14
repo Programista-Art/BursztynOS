@@ -1340,14 +1340,54 @@ uint64_t sygnatura_okien() {
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
         const GuiOknoInfo& o = okna_taskbara[i];
         h ^= o.window_id + (h << 6U) + (h >> 2U);
-        h ^= (static_cast<uint64_t>(o.stan) << 1U) | o.aktywne;
+        h ^= (static_cast<uint64_t>(o.stan) << 1U) | o.aktywne | (static_cast<uint64_t>(o.nad_paskiem) << 8U);
     }
     return h;
+}
+
+// Zezwolenie "Zawsze na wierzchu takze nad paskiem zadan": jawny opt-in uzytkownika, domyslnie
+// wylaczony. Jadro zna flage; WM trzyma lokalna liste (id okna zawiera generacje), zeby
+// pokazac znacznik na przycisku i przelaczac stan. Wpisy zamknietych okien sa czyszczone.
+constexpr int MAKS_NAD_PASKIEM = 16;
+uint64_t nad_paskiem_ids[MAKS_NAD_PASKIEM] = {};
+int nad_paskiem_liczba = 0;
+bool czy_nad_paskiem(uint64_t id) {
+    for (int i = 0; i < nad_paskiem_liczba; ++i) if (nad_paskiem_ids[i] == id) return true;
+    return false;
+}
+bool przelacz_nad_paskiem(uint64_t id) {
+    if (id == 0) return false;
+    const bool teraz = !czy_nad_paskiem(id);
+    if (teraz && nad_paskiem_liczba >= MAKS_NAD_PASKIEM) return false;
+    if (!gui_ustaw_nad_paskiem(id, teraz)) return false;            // jadro waliduje zaufanie i generacje
+    if (teraz) nad_paskiem_ids[nad_paskiem_liczba++] = id;
+    else for (int i = 0; i < nad_paskiem_liczba; ++i) if (nad_paskiem_ids[i] == id) {
+        nad_paskiem_ids[i] = nad_paskiem_ids[--nad_paskiem_liczba]; break; }
+    return true;
+}
+// Zrodlem prawdy jest jadro (flaga w snapshotcie okien): zamkniecie okna ORAZ awaryjne cofniecie
+// klawiszem systemowym Ctrl+Alt+B uaktualniaja liste WM bez dodatkowych wywolan.
+void wyczysc_nad_paskiem_zamknietych(const GuiOknoInfo* okna, uint32_t n) {
+    nad_paskiem_liczba = 0;
+    for (uint32_t k = 0; k < n && nad_paskiem_liczba < MAKS_NAD_PASKIEM; ++k)
+        if (okna[k].nad_paskiem) nad_paskiem_ids[nad_paskiem_liczba++] = okna[k].window_id;
+}
+
+// Pasek zadan jako powierzchnia kompozytora: rejestrowany tylko przy zmianie geometrii.
+int rejestr_pasek_x = -1, rejestr_pasek_y = -1, rejestr_pasek_w = -1, rejestr_pasek_h = -1;
+void zarejestruj_pasek_zadan() {
+    const int x = desktop_geometry.taskbar_x, y = desktop_geometry.taskbar_y;
+    const int w = desktop_geometry.taskbar_width, h = desktop_geometry.taskbar_height;
+    if (x == rejestr_pasek_x && y == rejestr_pasek_y && w == rejestr_pasek_w && h == rejestr_pasek_h) return;
+    if (w > 0 && h > 0 && gui_ustaw_pasek_zadan(true, x, y, w, h)) {
+        rejestr_pasek_x = x; rejestr_pasek_y = y; rejestr_pasek_w = w; rejestr_pasek_h = h;
+    }
 }
 
 void odswiez_snapshot_okien() {
     liczba_okien_taskbara = gui_pobierz_okna(
         okna_taskbara, SKLADACZ_MAKS_WARSTW);
+    wyczysc_nad_paskiem_zamknietych(okna_taskbara, liczba_okien_taskbara);
 }
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h) {
@@ -1642,8 +1682,10 @@ void RysujTaskbarZawartosc() {
             pulpit_prostokat(task_x + TASK_BUTTON_W - 1, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
         }
         char podpis[15] = {};
-        for (int c = 0; c < 14 && o.tytul[c] != '\0'; ++c)
-            podpis[c] = o.tytul[c];
+        int pc = 0;
+        if (czy_nad_paskiem(o.window_id)) { podpis[pc++] = '^'; podpis[pc++] = ' '; }   // okno nad paskiem
+        for (int c = 0; pc < 14 && o.tytul[c] != '\0'; ++c)
+            podpis[pc++] = o.tytul[c];
         pulpit_tekst(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
                                  TASK_BUTTON_W, SKROT_H, 1,
                                  kolor_tekst, podpis);
@@ -1655,6 +1697,7 @@ void RysujTaskbarZawartosc() {
 }
 
 void RysujTaskbar() {
+    zarejestruj_pasek_zadan();
     static DesktopSelectionPaint* paint=nullptr;
     static BursztynUI::KontekstRysowania* ctx=nullptr;
     if(!paint)paint=new DesktopSelectionPaint;
@@ -2459,6 +2502,22 @@ void obsluz_klikniecie(int mx, int my) {
     }
 }
 
+// Prawy przycisk na przycisku okna w pasku: przelacza "Zawsze na wierzchu takze nad paskiem zadan".
+bool obsluz_prawy_klik_paska(int mx, int my) {
+    int task_x = TASK_BUTTON_X;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        if (okna_taskbara[i].tytul[0] == '\0' ||
+            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
+        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
+                                TASK_BUTTON_W, SKROT_H)) {
+            if (przelacz_nad_paskiem(okna_taskbara[i].window_id)) { RysujTaskbar(); wm_gui_odswiez(); }
+            return true;
+        }
+        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+    }
+    return false;
+}
+
 void rozmiesc_ikony_ekranu(){
     PULPIT_GRID_Y=ui_skaluj(3,ui_skala_procent);
     aktualizuj_layout_pulpitu();
@@ -2621,6 +2680,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     while (true) {
         bws_zdarzenie zdarzenie{};
         if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
+        zarejestruj_pasek_zadan();      // pasek jako powierzchnia kompozytora (retry do skutku, potem tylko przy zmianie)
         WmRefreshBatch frame_batch;
         if(zdarzenie.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY)desktop_modifiers=zdarzenie.przyciski;
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
@@ -2737,6 +2797,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             anuluj_gest_pulpitu();
             last_desktop_click=-1;last_desktop_click_time=0;
             gui_ustaw_capture_myszy(false);
+            if (obsluz_prawy_klik_paska(zdarzenie.x, zdarzenie.y)) continue;
             (void)obsluz_prawy_klik_pulpitu(zdarzenie);
             continue;
         }

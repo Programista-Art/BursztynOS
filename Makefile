@@ -1081,12 +1081,15 @@ snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(SNAKE_LINKER)
 
 # Przegladarka Obrazow (BursztynUI + silnik BMP w silnik_obrazu.h)
 PRZEGLADARKA_OBRAZOW_LINKER := programy/przegladarka-obrazow/przegladarka_obrazow_linker.ld
-przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp programy/przegladarka-obrazow/silnik_obrazu.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+podglad_jpeg_ring3.o: obrazy/podglad_jpeg.cpp obrazy/podglad_jpeg.h obrazy/dekoder_obrazu.h
+	$(CXX) $(RING3_FLAGS) -Os -ffunction-sections -fdata-sections -Wno-unused-function -Wno-unused-parameter -c $< -o $@
+
+przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp programy/przegladarka-obrazow/silnik_obrazu.h programy/przegladarka-obrazow/galeria.h programy/przegladarka-obrazow/powiekszenie.h obrazy/dekoder_obrazu.h obrazy/podglad_jpeg.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Iprogramy/przegladarka-obrazow -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o $(BSF_APP_GUI) $(PRZEGLADARKA_OBRAZOW_LINKER)
+przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o btp_ring3.o image_ring3.o podglad_jpeg_ring3.o $(BSF_APP_GUI) $(PRZEGLADARKA_OBRAZOW_LINKER)
 	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_OBRAZOW_LINKER)) $(RING3_LDFLAGS) \
-		przegladarka_obrazow_tmp.o $(BSF_APP_GUI) -o przegladarka_obrazow.elf
+		przegladarka_obrazow_tmp.o btp_ring3.o image_ring3.o podglad_jpeg_ring3.o $(BSF_APP_GUI) -o przegladarka_obrazow.elf
 	$(BUR_CONVERT) przegladarka_obrazow.elf przegladarka_obrazow.bin
 	$(PYTHON) narzedzia/kompresuj_blob.py przegladarka_obrazow.bin przegladarka_obrazow.bin.bz
 	$(LD) -r -b binary przegladarka_obrazow.bin.bz -o przegladarka_obrazow_blob.o
@@ -1207,7 +1210,13 @@ check-kernel: $(KERNEL)
 # 1. Bursztyn OS (domyslny, czysty start bez autostartu testow)
 # 2. Bursztyn OS - testy automatyczne (multiboot2 bursztyn.test=automated)
 #
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
+# Zdjecia galerii (dane/zdjecia, nazwy moga zawierac spacje): odcisk listy plikow zamiast wildcard.
+GALERIA_STAMP := .galeria.stamp
+.PHONY: FORCE
+$(GALERIA_STAMP): FORCE narzedzia/package_galeria.py
+	@$(PYTHON) narzedzia/package_galeria.py --stamp $@
+
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py narzedzia/package_galeria.py $(GALERIA_STAMP) $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -1263,6 +1272,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 	$(PYTHON) narzedzia/package_support.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_power_icons.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_desktop_images.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_galeria.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -1936,9 +1946,9 @@ image_ring3.o: obrazy/dekoder_obrazu.cpp obrazy/dekoder_obrazu.h obrazy/vendor/s
 test-image:
 	$(PYTHON) obrazy/testy/test_jpeg.py
 	$(PYTHON) obrazy/testy/test_png.py
-	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_jpeg.cpp -o /tmp/bursztyn-test-tapety-jpeg
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -I. -Ijadro/gui obrazy/test_tapety_jpeg.cpp -o /tmp/bursztyn-test-tapety-jpeg
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-jpeg
-	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined obrazy/test_tapety_manifest.cpp -o /tmp/bursztyn-test-tapety-manifest
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -I. -Ijadro/gui obrazy/test_tapety_manifest.cpp -o /tmp/bursztyn-test-tapety-manifest
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/bursztyn-test-tapety-manifest
 tapety_tmp.o: programy/tapety/tapety.cpp programy/tapety/klient.h programy/tapety/miniatury.h jadro/gui/tapety_format.h obrazy/skalowanie.h obrazy/dekoder_obrazu.h narzedzia/tapety-btp/tapetybtp.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
@@ -3053,17 +3063,18 @@ test-window-geometry-host:
 
 # Tozsamosc aplikacji systemowych: SHA-256 plikow .bur zbudowanych razem z jadrem.
 SKROTY_SYSTEMOWE_H := jadro/fs/skroty_systemowe.generated.h
-SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o
+SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o
 $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemowe.py
 	$(PYTHON) narzedzia/generuj_skroty_systemowe.py $@ \
 		/programy/ustawienia.cebula/ustawienia.bur=ustawienia.bin \
 		/programy/diagnostyka.cebula/diagnostyka.bur=diagnostyka.bin \
 		/programy/test_dzwieku.cebula/test_dzwieku.bur=test_dzwieku.bin \
 		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
-		/programy/ekran.cebula/ekran.bur=ekran.bin
+		/programy/ekran.cebula/ekran.bur=ekran.bin \
+		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin
 # Kursor zmiany rozmiaru: opcjonalne ikonki/kursor_rozciagania.png (brak pliku nie psuje budowania).
 KURSOR_ROZCIAGANIA_H := jadro/gui/kursor_rozciagania.generated.h
-KURSOR_ROZCIAGANIA_PNG := ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
+KURSOR_ROZCIAGANIA_PNG := ikonki/kursor.png ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
 .PHONY: FORCE
 FORCE:
 $(KURSOR_ROZCIAGANIA_H): narzedzia/generuj_kursor_rozciagania.py FORCE
@@ -3107,5 +3118,26 @@ test-snake-host:
 .PHONY: test-przegladarka-obrazow-host
 test-przegladarka-obrazow-host:
 	@mkdir -p .bursztyn-ui-test
-	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -Iprogramy/przegladarka-obrazow -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_przegladarka_obrazow_host.cpp -o .bursztyn-ui-test/test-przegladarka-obrazow
-	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bursztyn-ui-test/test-przegladarka-obrazow
+	$(PYTHON) testy/generuj_obrazy_testowe.py .bsf-test/img-fixtures
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -Iprogramy/przegladarka-obrazow -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_przegladarka_obrazow_host.cpp obrazy/dekoder_obrazu.cpp obrazy/podglad_jpeg.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bursztyn-ui-test/test-przegladarka-obrazow
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bursztyn-ui-test/test-przegladarka-obrazow .bsf-test/img-fixtures
+
+.PHONY: test-taskbar-stacking-host
+test-taskbar-stacking-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_taskbar_stacking_host.cpp -o .bursztyn-ui-test/test-taskbar-stacking
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bursztyn-ui-test/test-taskbar-stacking
+
+.PHONY: test-ustawienia-aplikacji-host
+test-ustawienia-aplikacji-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ustawienia_aplikacji_host.cpp -o .bsf-test/ustawienia-aplikacji
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ustawienia-aplikacji
+
+.PHONY: test-galeria-pak-host
+test-galeria-pak-host:
+	@mkdir -p .bsf-test
+	$(PYTHON) -c "import sys; sys.path.insert(0,'narzedzia'); import package_galeria as g, pathlib; pathlib.Path('.bsf-test/zdjecia-test.pak').write_bytes(g.zbuduj(g.zbierz()))"
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_galeria_pak_host.cpp -o .bsf-test/galeria-pak
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/galeria-pak .bsf-test/zdjecia-test.pak
+	$(PYTHON) narzedzia/test_release_metadata.py

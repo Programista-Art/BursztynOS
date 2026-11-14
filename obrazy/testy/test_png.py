@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PHOTO_PNG = Path(os.environ.get('BURSZTYN_TEST_PNG', str(ROOT / 'obrazy/tapety/nowatapeta.png')))
+PHOTO_PNG = Path(os.environ.get('BURSZTYN_TEST_PNG', str(ROOT / 'obrazy/testy/dane/nowatapeta.png')))
 TAPETY_TLO = (26, 11, 0) # 0xFF1A0B00: R=26 (0x1A), G=11 (0x0B), B=0 (0x00)
 
 def test_png_cpp_decoder():

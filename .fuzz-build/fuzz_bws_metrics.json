@@ -1,10 +1,10 @@
 {
   "target": "fuzz_bws",
-  "executions": 10022,
-  "seed_corpus_count": 20,
-  "final_corpus_count": 127,
-  "unique_edges": 212,
+  "executions": 10023,
+  "seed_corpus_count": 21,
+  "final_corpus_count": 121,
+  "unique_edges": 208,
   "regressions_verified": 2,
-  "elapsed_ms": 2582,
+  "elapsed_ms": 3460,
   "crashes_found": 0
 }

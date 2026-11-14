@@ -60,6 +60,7 @@
 #include "pzb.h"
 #include "uruchamianie_polityka.h"
 #include "tapety_format.h"
+#include "ustawienia_aplikacji.h"
 #include "zegar-rtc.h"
 #include "grafika.h"
 #include "siec.h"
@@ -432,6 +433,15 @@ constexpr uint64_t KONIEC_STERTY_USER =
 // metadata and page rounding. The per-process 256 MiB ceiling still applies.
 constexpr uint64_t MAX_ALOKACJA_STERTY_NA_BWS =
     40ULL * 1024ULL * 1024ULL;
+
+/*
+ * Przegladarka Obrazow: pojedyncza alokacja do 72 MiB (powierzchnia BGRA 17 Mpx = 64,9 MiB).
+ * Dotyczy WYLACZNIE procesu, ktorego bajty zostaly zweryfikowane przez loader (SHA-256 / podpis),
+ * ktory ma PRAWO_GUI | PRAWO_PLIKI_CZYTAJ. Obowiazuje nadal limit sterty procesu (256 MiB).
+ */
+constexpr uint64_t MAX_ALOKACJA_STERTY_PRZEGLADARKA_OBRAZOW =
+    72ULL * 1024ULL * 1024ULL;
+extern "C" bool loader_przegladarka_obrazow_zweryfikowana(uint64_t pid);
 
 struct StanDropProcesu {
     BwsCelDrop cele[BWS_DROP_CELE_MAX];
@@ -834,9 +844,10 @@ bool proces_moze_modyfikowac_sciezke(
     const proces_t& proces,
     const char* sciezka
 ) {
-    if (!proces_ma_prawo(
-            proces,
-            PRAWO_PLIKI_ZAPISZ)) {
+    const bool ma_zapisz = proces_ma_prawo(proces, PRAWO_PLIKI_ZAPISZ);
+    const bool ma_ustawienia =
+        !instalator_tryb() && proces_ma_prawo(proces, PRAWO_USTAWIENIA_APLIKACJI);
+    if (!ma_zapisz && !ma_ustawienia) {
 
         return false;
     }
@@ -847,6 +858,21 @@ bool proces_moze_modyfikowac_sciezke(
     if (proces.poziom_zaufania >= PZB_UZYTKOWNIK &&
         (!sciezka_kanoniczna(sciezka) || sciezka_chroniona(sciezka))) {
 
+        return false;
+    }
+
+    /*
+     * Prywatne ustawienia aplikacji: zapis tylko we wlasnym katalogu (id z sciezki pliku procesu
+     * ustawionej przez loader), izolacja od ustawien innych aplikacji, a PRAWO_USTAWIENIA_APLIKACJI
+     * nie daje zapisu nigdzie indziej.
+     */
+    if (proces.poziom_zaufania >= PZB_UZYTKOWNIK) {
+        const UstawieniaAplikacji::Decyzja d = UstawieniaAplikacji::ocen(
+            proces.sciezka_pliku, sciezka, ma_zapisz, ma_ustawienia);
+        if (d == UstawieniaAplikacji::Decyzja::Odmow) {
+            return false;
+        }
+    } else if (!ma_zapisz) {
         return false;
     }
 
@@ -2769,13 +2795,20 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
      * ze strona naprawde zostala opublikowana jako USER|WRITE.
      */
 
+    const bool przegladarka_zaufana =
+        loader_przegladarka_obrazow_zweryfikowana(proces.pid) &&
+        tapety_rowne(proces.sciezka_pliku, "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur",
+                     sizeof(proces.sciezka_pliku)) &&
+        pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ);
+
     if (rozmiar == 0 ||
         rozmiar >
-            MAX_ALOKACJA_STERTY_NA_BWS) {
+            (przegladarka_zaufana ? MAX_ALOKACJA_STERTY_PRZEGLADARKA_OBRAZOW
+                                  : MAX_ALOKACJA_STERTY_NA_BWS)) {
 
         return 0;
     }
-    if (rozmiar > 16ULL * 1024ULL * 1024ULL &&
+    if (rozmiar > 16ULL * 1024ULL * 1024ULL && !przegladarka_zaufana &&
         (!tapety_rowne(proces.sciezka_pliku, TAPETY_PROGRAM, sizeof(proces.sciezka_pliku)) ||
          !pzb_ma_prawa(&proces, PRAWO_GUI | PRAWO_PLIKI_CZYTAJ))) return 0;
 
@@ -4062,6 +4095,35 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         case 40:
             if (!operacja_systemowa_dozwolona(proces) ||
                 !proces_ma_prawo(proces, PRAWO_GUI)) return 0;
+            if (arg1 >= 2) {
+                /* Pasek zadan i priorytet "nad paskiem": wylacznie zaufany Menedzer Okien.
+                 * Zwykla aplikacja nie moze sama przyznac sobie priorytetu kompozytora
+                 * (manifest ani PZB aplikacji nie wystarcza - liczy sie tozsamosc procesu). */
+                if (!tapety_rowne(proces.sciezka_pliku, "/menedzer_okien.bur", sizeof(proces.sciezka_pliku)) &&
+                    !tapety_rowne(proces.sciezka_pliku, "/programy/menedzer_okien.cebula/menedzer_okien.bur",
+                                  sizeof(proces.sciezka_pliku))) {
+                    wypisz_log("[GUI] Pasek zadan / nad paskiem: odmowa - proces nie jest Menedzerem Okien.");
+                    return 0;
+                }
+                switch (arg1) {
+                    case 2:   /* zamknij powierzchnie paska */
+                        skladacz_obrazu_ustaw_pasek(aktualny_pid, false, 0, 0, 0, 0);
+                        return 1;
+                    case 3: { /* zarejestruj prostokat paska (warstwa WM) */
+                        skladacz_obrazu_ustaw_pasek(aktualny_pid, true, gorne_i32(arg2), dolne_i32(arg2),
+                                                    gorne_i32(arg3), dolne_i32(arg3));
+                        int pp = -1, px = 0, py = 0, pw = 0, ph = 0;
+                        const bool ok = skladacz_obrazu_pasek_info(&pp, &px, &py, &pw, &ph) && pp == aktualny_pid;
+                        if (!ok) wypisz_log("[GUI] Pasek zadan: rejestracja odrzucona przez kompozytor (warstwa/rozmiar).");
+                        return ok ? 1ULL : 0ULL;
+                    }
+                    case 4:   /* cofnij zezwolenie "nad paskiem" okna arg2 (window_id) */
+                    case 5:   /* przyznaj zezwolenie "nad paskiem" oknu arg2 (window_id) */
+                        return skladacz_obrazu_ustaw_nad_paskiem(arg2, arg1 == 5) ? 1ULL : 0ULL;
+                    default:
+                        return 0;
+                }
+            }
             skladacz_obrazu_ustaw_overlay(
                 aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
                 gorne_i32(arg3), dolne_i32(arg3));

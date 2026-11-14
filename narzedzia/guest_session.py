@@ -7,7 +7,7 @@
 One command per connection, one reply line (JSON). Commands:
   ping | click X Y | dclick X Y | rclick X Y | move X Y | drag X0 Y0 X1 Y1 [steps]
   wheel DZ | key K1 [K2..] | type TEXT | shot NAME | launch QUERY | wait SECONDS
-  perf (aggregated [GUI PERF] since last perf call) | serial N (last N lines)
+  peek SYMBOL [OFF..] | ctrlwheel N | perf (aggregated [GUI PERF] since last perf call) | serial N (last N lines)
   grep PATTERN (count/last match in serial) | cursor | quit
 Scenarios script their own flow from outside, reading screenshots in between.
 """
@@ -66,9 +66,14 @@ def handle(cmd):
         time.sleep(.3)
     elif op == 'rclick':
         G.move(int(a[0]), int(a[1]))
-        G.hmp('mouse_button 4')
-        time.sleep(.2)
-        G.hmp('mouse_button 0')
+        if G.tablet:          # HMP mouse_button nie steruje tabletem: prawy przycisk przez QMP
+            for down in (True, False):
+                G.q.call('input-send-event', {'events': [{'type': 'btn', 'data': {'button': 'right', 'down': down}}]})
+                time.sleep(.2)
+        else:
+            G.hmp('mouse_button 4')
+            time.sleep(.2)
+            G.hmp('mouse_button 0')
         time.sleep(.5)
     elif op == 'move':
         G.move(int(a[0]), int(a[1]))
@@ -153,6 +158,19 @@ def handle(cmd):
         G.screenshot('resize-' + elf.split('.')[0])
         out['ok'] = True
         return out
+    elif op == 'peek':
+        # peek SYMBOL [OFFSET...]: odczyt 32-bitowych slow z pamieci gościa (tylko do odczytu; diagnostyka)
+        base = int(a[0], 16) if a[0].startswith('0x') else G.symbol(a[0])
+        return {'ok': True, 'addr': hex(base), 'words': [G.word(base + int(o), 'w') for o in (a[1:] or ['0'])]}
+    elif op == 'ctrlwheel':
+        # ctrlwheel N: Ctrl + kolko myszy (N>0 w dol, N<0 w gore)
+        n = int(a[0]); btn = 'wheel-down' if n > 0 else 'wheel-up'
+        ev = [{'type': 'key', 'data': {'down': True, 'key': {'type': 'qcode', 'data': 'ctrl'}}}]
+        for _ in range(abs(n)):
+            ev += [{'type': 'btn', 'data': {'button': btn, 'down': True}}, {'type': 'btn', 'data': {'button': btn, 'down': False}}]
+        ev += [{'type': 'key', 'data': {'down': False, 'key': {'type': 'qcode', 'data': 'ctrl'}}}]
+        G.q.call('input-send-event', {'events': ev})
+        time.sleep(.5)
     elif op == 'key':
         G.key(*a)
     elif op == 'type':

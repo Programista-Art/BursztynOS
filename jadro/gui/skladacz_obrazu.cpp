@@ -156,6 +156,9 @@ struct SystemOverlayState {
     GuiDirtyRect rect;
 };
 SystemOverlayState system_overlay = {false, -1, {0, 0, 0, 0}};
+// Pasek zadan: osobna powierzchnia (warstwa WM, prostokat paska) + okna "nad paskiem".
+SystemOverlayState taskbar_overlay = {false, -1, {0, 0, 0, 0}};
+bool nad_paskiem_flaga[MAKS_WARSTW] = {};
 struct ApplicationPopupState {
     bool otwarty;
     int pid;
@@ -1478,6 +1481,9 @@ void usun_warstwe(
         skladacz_obrazu_ustaw_drag_overlay(pid, false, 0, 0);
     if (system_overlay.pid == pid)
         skladacz_obrazu_ustaw_overlay(pid, false, 0, 0, 0, 0);
+    if (taskbar_overlay.otwarty && taskbar_overlay.pid == pid)
+        skladacz_obrazu_ustaw_pasek(pid, false, 0, 0, 0, 0);
+    if (pid_poprawny(pid)) nad_paskiem_flaga[pid] = false;     // zezwolenie nie przechodzi na nowe okno tego pid
     if (!pid_poprawny(
             pid)) {
 
@@ -1856,6 +1862,27 @@ void zloz_popup_aplikacji(LayerRenderInfo* layers, int count,
     zloz_snapshot_region(popup, clip);
 }
 
+// Kolejnosc: zwykle okna -> PASEK ZADAN -> okna z zezwoleniem "nad paskiem" -> popup -> overlay.
+// Pasek jest skladany tylko w czesci wspolnej z regionem; okna "nad paskiem" w tym samym klipie
+// (poza paskiem zostaly juz zlozone w normalnej kolejnosci z).
+void zloz_pasek_zadan(LayerRenderInfo* layers, int count, const GuiDirtyRect& region) {
+    if (!taskbar_overlay.otwarty) return;
+    const GuiDirtyRect& p = taskbar_overlay.rect;
+    const int x0 = p.x > region.x ? p.x : region.x;
+    const int y0 = p.y > region.y ? p.y : region.y;
+    const int x1 = p.x + p.width < region.x + region.width ? p.x + p.width : region.x + region.width;
+    const int y1 = p.y + p.height < region.y + region.height ? p.y + p.height : region.y + region.height;
+    if (x0 >= x1 || y0 >= y1) return;
+    const GuiDirtyRect clip{x0, y0, x1 - x0, y1 - y0};
+    for (int li = 0; li < count; ++li)
+        if (layers[li].pid == taskbar_overlay.pid) { zloz_snapshot_region(layers[li], clip); break; }
+    for (int li = 0; li < count; ++li) {
+        const int pid = layers[li].pid;
+        if (pid > 0 && pid < MAKS_WARSTW && pid != taskbar_overlay.pid && nad_paskiem_flaga[pid])
+            zloz_snapshot_region(layers[li], clip);
+    }
+}
+
 int snapshot_warstw(LayerRenderInfo* out) {
     uint64_t f=irq_off();++render_readers;int n=0;
     for(int i=0;i<MAKS_WARSTW;++i)if(warstwa_ma_spojny_bufor(i)){
@@ -1976,6 +2003,12 @@ void skladacz_obrazu_zloz_klatke() {
         ++zlozone_warstwy;
     }
 
+    if (taskbar_overlay.otwarty) {
+        LayerRenderInfo pelne[MAKS_WARSTW];
+        const int n = snapshot_warstw(pelne);
+        zloz_pasek_zadan(pelne, n, GuiDirtyRect{0, 0, ekran_szer, ekran_wys});
+        zakoncz_snapshot();
+    }
     const GuiDirtyRect caly_ekran{0, 0, ekran_szer, ekran_wys};
     rysuj_drag_overlay_region(caly_ekran);
     if (popup_aplikacji_spojny()) {
@@ -2236,6 +2269,7 @@ void skladacz_obrazu_obsluz_dirty() {
         pixels+=rect_area(r);
         grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);
         for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);
+        zloz_pasek_zadan(layers,layer_count,r);
         rysuj_drag_overlay_region(r);
         zloz_popup_aplikacji(layers,layer_count,r);
         if(system_overlay.otwarty){
@@ -2452,6 +2486,7 @@ uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
         o.widoczne = warstwa_ma_spojny_bufor(pid) ? 1U : 0U;
         o.aktywne = pid == aktywny_pid ? 1U : 0U;
         o.x = w.x; o.y = w.y; o.szerokosc = w.szerokosc; o.wysokosc = w.wysokosc;
+        o.nad_paskiem = nad_paskiem_flaga[pid] ? 1U : 0U;
         for (uint32_t i = 0; i < sizeof(o.tytul); ++i) o.tytul[i] = tytul_okna[pid][i];
     }
     return count;
@@ -2483,6 +2518,69 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
     if (system_overlay.otwarty) return system_overlay.pid;
     if (popup_aplikacji_spojny()) return application_popup.pid;
     return -1;
+}
+
+void skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys) {
+    const GuiDirtyRect stary = taskbar_overlay.rect;
+    const bool byl = taskbar_overlay.otwarty;
+    if (!otwarty) {
+        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid) return;       // tylko wlasciciel zamyka
+        taskbar_overlay = {false, -1, {0, 0, 0, 0}};
+    } else if (pid_poprawny(pid) && warstwa_ma_spojny_bufor(pid) && szer > 0 && wys > 0 &&
+               szer <= 16384 && wys <= 4096 && x > -16384 && y > -16384 && x < 16384 && y < 16384 &&
+               (!taskbar_overlay.otwarty || taskbar_overlay.pid == pid)) {
+        taskbar_overlay = {true, pid, {x, y, szer, wys}};
+    } else {
+        return;
+    }
+    if (byl) skladacz_obrazu_oznacz_dirty_rect(stary.x, stary.y, stary.width, stary.height);
+    if (taskbar_overlay.otwarty) skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+}
+
+bool skladacz_obrazu_pasek_info(int* pid, int* x, int* y, int* szer, int* wys) {
+    if (!taskbar_overlay.otwarty) return false;
+    if (pid) *pid = taskbar_overlay.pid;
+    if (x) *x = taskbar_overlay.rect.x;
+    if (y) *y = taskbar_overlay.rect.y;
+    if (szer) *szer = taskbar_overlay.rect.width;
+    if (wys) *wys = taskbar_overlay.rect.height;
+    return true;
+}
+
+bool skladacz_obrazu_nad_paskiem(int pid) {
+    return pid_poprawny(pid) && nad_paskiem_flaga[pid];
+}
+
+uint32_t skladacz_obrazu_wylacz_wszystkie_nad_paskiem() {
+    uint32_t cofniete = 0;
+    for (int pid = 1; pid < MAKS_WARSTW; ++pid) {
+        if (!nad_paskiem_flaga[pid]) continue;
+        nad_paskiem_flaga[pid] = false;
+        ++cofniete;
+        if (pid_poprawny(pid) && warstwa_ma_spojny_bufor(pid)) {
+            const warstwa_obrazu& w = tablica_warstw[pid];
+            skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+        }
+    }
+    if (cofniete && taskbar_overlay.otwarty)
+        skladacz_obrazu_oznacz_dirty_rect(taskbar_overlay.rect.x, taskbar_overlay.rect.y,
+                                          taskbar_overlay.rect.width, taskbar_overlay.rect.height);
+    return cofniete;
+}
+
+bool skladacz_obrazu_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone) {
+    const int pid = static_cast<int>(static_cast<uint32_t>(window_id));
+    // window_id zawiera generacje: nieaktualny identyfikator nie zmienia stanu cudzego okna.
+    if (!pid_poprawny(pid) || !warstwa_ma_spojny_bufor(pid) || skladacz_obrazu_id_okna(pid) != window_id) return false;
+    if (taskbar_overlay.otwarty && taskbar_overlay.pid == pid) return false;         // sam pasek nie jest oknem
+    if (nad_paskiem_flaga[pid] == wlaczone) return true;
+    nad_paskiem_flaga[pid] = wlaczone;
+    const warstwa_obrazu& w = tablica_warstw[pid];
+    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    if (taskbar_overlay.otwarty)
+        skladacz_obrazu_oznacz_dirty_rect(taskbar_overlay.rect.x, taskbar_overlay.rect.y,
+                                          taskbar_overlay.rect.width, taskbar_overlay.rect.height);
+    return true;
 }
 
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,

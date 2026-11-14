@@ -161,6 +161,7 @@ struct GuiOknoInfo {
     int32_t y;
     int32_t szerokosc;
     int32_t wysokosc;
+    uint32_t nad_paskiem;   /* 1 = okno ma jawne zezwolenie "nad paskiem zadan" (nadaje je tylko Menedzer Okien) */
     char tytul[48];
 };
 
@@ -410,6 +411,21 @@ uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
 void skladacz_obrazu_ustaw_overlay(int pid, bool otwarty,
                                   int x, int y, int szer, int wys);
 int skladacz_obrazu_overlay_pod_punktem(int x, int y);
+
+/* Pasek zadan jako niezalezna powierzchnia kompozytora.
+ * Warstwa Menedzera Okien (z_order 0, pulpit) pozostaje na dole; jej prostokat paska jest
+ * skladany ponownie PO zwyklych oknach aplikacji, a PRZED oknami z jawnym zezwoleniem
+ * "nad paskiem", popupami i overlayem systemowym. Rejestracja wylacznie przez zaufany
+ * Menedzer Okien (BWS 40, patrz syscalls.cpp). Hit-test (wm_input.h) uzywa tej samej kolejnosci. */
+void skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys);
+bool skladacz_obrazu_pasek_info(int* pid, int* x, int* y, int* szer, int* wys);
+/* Zezwolenie "Zawsze na wierzchu takze nad paskiem zadan" dla okna (window_id z snapshotu).
+ * Domyslnie wylaczone; ustawiane tylko przez zaufany Menedzer Okien; zerowane przy zamknieciu okna. */
+bool skladacz_obrazu_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone);
+bool skladacz_obrazu_nad_paskiem(int pid);
+/* Awaryjne cofniecie zezwolenia: wylacza tryb "nad paskiem" dla WSZYSTKICH okien (klawisz systemowy
+ * Ctrl+Alt+B, obslugiwany w jadrze przed dostarczeniem do aplikacji). Zwraca liczbe cofnietych okien. */
+uint32_t skladacz_obrazu_wylacz_wszystkie_nad_paskiem();
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
                                            int x, int y, int szer, int wys);
 bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,

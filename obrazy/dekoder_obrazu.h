@@ -18,6 +18,9 @@ constexpr uint32_t OBRAZ_BGRA8888 = 1;
 constexpr uint32_t OBRAZ_MAX_BOK = 8192;
 constexpr uint32_t OBRAZ_MAX_PIKSELE = 8U * 1024U * 1024U;
 constexpr size_t OBRAZ_MAX_PLIK = 16U * 1024U * 1024U;
+// Twarde sufity dla dekoduj_obraz_z_alfa_limity(): nigdy nie sa przekraczane, niezaleznie od wywolujacego.
+constexpr uint64_t OBRAZ_TWARDY_MAX_PIKSELE = 17ULL * 1000ULL * 1000ULL;
+constexpr size_t OBRAZ_TWARDY_MAX_PLIK = 32U * 1024U * 1024U;
 
 using Obraz = DekodowanyObraz;
 using FormatPiksela = uint32_t;
@@ -27,6 +30,9 @@ BladObrazu dekoduj_obraz(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                          AlokujObraz alokuj, ZwolnijObraz zwolnij);
 // Web/reusable image surfaces retain straight alpha; legacy wallpaper API remains opaque.
 BladObrazu dekoduj_obraz_z_alfa(const uint8_t* dane,size_t n,DekodowanyObraz* out,AlokujObraz alokuj,ZwolnijObraz zwolnij);
+BladObrazu dekoduj_obraz_z_alfa_limity(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                                       AlokujObraz alokuj, ZwolnijObraz zwolnij,
+                                       uint64_t max_pikseli, size_t max_plik);
 BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                         AlokujObraz alokuj, ZwolnijObraz zwolnij);
 BladObrazu sprawdz_jpeg(const uint8_t* dane, size_t n,

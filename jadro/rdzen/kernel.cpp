@@ -1,3 +1,5 @@
+#include "galeria_pak.h"
+extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
 #include "jadro/gui/display_mode_policy.h"
 #include "system_identity.h"
 #include "diagnostyka_systemu.h"
@@ -812,6 +814,17 @@ bool instaluj_paczke(
  * ========================================================================= */
 
 
+// Obszar na ustawienia aplikacji uzytkownika (np. rekord Snake, ustawienia_zapisz()).
+// Katalogi systemowe pod /uzytkownicy maja poziom jadra, a model PZB zabrania aplikacji na poziomie
+// PZB_UZYTKOWNIK tworzenia w nich podkatalogow. System przygotowuje wiec WLASNOSC UZYTKOWNIKA
+// (poziom PZB_UZYTKOWNIK) dla /uzytkownicy/domyslny/Ustawienia; aplikacja tworzy tylko swoj podkatalog
+// i nie dostaje zadnych podwyzszonych uprawnien. Istniejace katalogi (z dysku) nie sa zmieniane.
+void zapewnij_katalogi_ustawien_uzytkownika() {
+    static const char* const sciezki[] = {"/uzytkownicy/domyslny", "/uzytkownicy/domyslny/Ustawienia"};
+    for (const char* s : sciezki)
+        if (!katalog_istnieje(s)) (void)utworz_katalog_z_pzb(s, PZB_UZYTKOWNIK);
+}
+
 void utworz_drabine_katalogow() {
 
     for (size_t i = 0;
@@ -1120,6 +1133,206 @@ void importuj_modul_test8k(uint64_t mbi) {
     wypisz_log("[PMM] Pamiec fizyczna modulu test8k.bmp zwolniona do puli PMM.");
 }
 
+/* =========================================================================
+ * GALERIA ZDJEC (modul Multiboot2 "zdjecia.pak", kontener BZP3: jadro/fs/galeria_pak.h)
+ *
+ * ISO niesie zdjecia z dane/zdjecia/ jako jeden modul (nie sa wlinkowane do jadra, wiec nie
+ * zwiekszaja obrazu 15 MiB). Przy rozruchu zywego systemu trafiaja do /dane/zdjecia/; instalator
+ * kopiuje je opcjonalnie na dysk docelowy (galeria_instaluj_*), a zainstalowany system dostaje je z dysku.
+ * Istniejace pliki uzytkownika NIGDY nie sa nadpisywane (import pomija wpis o tej nazwie), sciezka
+ * docelowa to zawsze /dane/zdjecia/<nazwa> (nazwa bez '/', '\\' i ".."), CRC-32 kazdego wpisu jest
+ * sprawdzane PRZED utworzeniem pliku, a niepelny plik jest usuwany. Jadro nie dekoduje obrazow.
+ * ========================================================================= */
+void galeria_log_liczba(const char* prefiks, uint32_t v) {
+    char b[96] = {};
+    size_t p = 0;
+    while (prefiks[p] && p < 70) { b[p] = prefiks[p]; ++p; }
+    char t[12]; int n = 0;
+    do { t[n++] = static_cast<char>('0' + v % 10U); v /= 10U; } while (v && n < 11);
+    while (n && p < 94) b[p++] = t[--n];
+    b[p] = '\0';
+    wypisz_log(b);
+}
+
+// Wspolny odczyt modulu: waliduje kontener i zwraca wpisy. false => modul niepoprawny lub brak.
+struct GaleriaModul {
+    const uint8_t* dane{nullptr};
+    uint64_t start{0}, rozmiar{0};
+    GaleriaPak::Wpis wpisy[GaleriaPak::MAKS_WPISOW];
+    uint32_t liczba{0};
+};
+GaleriaModul g_galeria_modul;
+
+bool galeria_otworz_modul(uint64_t mbi, GaleriaModul* g) {
+    ModulMB2 mod{};
+    if (!znajdz_modul_mb2(mbi, "zdjecia.pak", &mod) || !mod.poprawny || !tekst_rowny(mod.cmdline, "zdjecia.pak")) return false;
+    g->start = mod.start; g->rozmiar = mod.rozmiar; g->dane = nullptr; g->liczba = 0;
+    if (mod.start == 0 || mod.start >= 0x100000000ULL || mod.koniec > 0x100000000ULL) {
+        wypisz_log("[GALERIA] Nieprawidlowy modul zdjecia.pak.");
+        return false;
+    }
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(mod.start));
+    const GaleriaPak::Blad b = GaleriaPak::parsuj(d, mod.rozmiar, g->wpisy, &g->liczba, &podpis_sha256);
+    if (b != GaleriaPak::Blad::OK) {
+        wypisz_log("[GALERIA] zdjecia.pak odrzucony:");
+        wypisz_log(GaleriaPak::opis(b));
+        return false;
+    }
+    g->dane = d;
+    return true;
+}
+
+bool galeria_sciezka(const GaleriaPak::Wpis& w, char* sciezka, size_t cap) {
+    static const char PREFIKS[] = "/dane/zdjecia/";
+    if (cap < sizeof(PREFIKS) + w.dl) return false;
+    size_t p = 0;
+    for (; PREFIKS[p]; ++p) sciezka[p] = PREFIKS[p];
+    for (uint32_t k = 0; k < w.dl; ++k) sciezka[p++] = w.nazwa[k];
+    sciezka[p] = '\0';
+    return true;
+}
+
+void importuj_galerie_z_modulu(uint64_t mbi) {
+    if (mbi == 0 || instalator_tryb()) return;
+    GaleriaModul* g = &g_galeria_modul;
+    if (!galeria_otworz_modul(mbi, g)) {
+        if (g->start) OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    PsfStanStartu stan{};
+    (void)zapewnij_katalog_startowy("/dane", &stan);
+    if (!zapewnij_katalog_startowy("/dane/zdjecia", &stan)) {
+        wypisz_log("[GALERIA] Brak katalogu /dane/zdjecia.");
+        OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    uint32_t nowe = 0, pominiete = 0, bledne = 0;
+    constexpr uint32_t PORCJA = 192U * 1024U;
+    // RAM-dysk zywego systemu ma 128 MiB wspoldzielone z systemem: importujemy od NAJMNIEJSZYCH, zeby jak
+    // najwiecej zdjec sie zmiescilo; wpis, ktory sie nie miesci, jest usuwany w calosci (z logiem nazwy i powodu).
+    uint32_t kolejnosc[GaleriaPak::MAKS_WPISOW];
+    for (uint32_t i = 0; i < g->liczba; ++i) kolejnosc[i] = i;
+    for (uint32_t i = 1; i < g->liczba; ++i) {
+        const uint32_t v = kolejnosc[i];
+        uint32_t j = i;
+        while (j > 0 && g->wpisy[kolejnosc[j - 1]].rozmiar > g->wpisy[v].rozmiar) { kolejnosc[j] = kolejnosc[j - 1]; --j; }
+        kolejnosc[j] = v;
+    }
+    for (uint32_t oi = 0; oi < g->liczba; ++oi) {
+        const GaleriaPak::Wpis& w = g->wpisy[kolejnosc[oi]];
+        char sciezka[96];
+        if (!galeria_sciezka(w, sciezka, sizeof(sciezka))) { ++bledne; continue; }
+        if (rozmiar_pliku(sciezka) > 0) { ++pominiete; continue; }      // zdjecie uzytkownika: nie nadpisujemy
+        const uint8_t* dane = g->dane + w.przesuniecie;
+        if (GaleriaPak::crc32(dane, w.rozmiar) != w.crc) { ++bledne; wypisz_log("[GALERIA] wpis odrzucony (CRC):"); wypisz_log(sciezka); continue; }   // CRC przed zapisem
+        (void)usun_twor(sciezka);
+        if (!utworz_plik(sciezka)) { ++bledne; wypisz_log("[GALERIA] wpis odrzucony (utworzenie pliku):"); wypisz_log(sciezka); continue; }
+        bool ok = true;
+        for (uint32_t off = 0; off < w.rozmiar && ok; off += PORCJA) {
+            const uint32_t n = (w.rozmiar - off > PORCJA) ? PORCJA : (w.rozmiar - off);
+            ok = zapisz_fragment_pliku(sciezka, off, reinterpret_cast<const char*>(dane + off), n);
+        }
+        if (!ok || rozmiar_pliku(sciezka) != w.rozmiar) {
+            (void)usun_twor(sciezka); ++bledne;
+            wypisz_log("[GALERIA] wpis nie miesci sie w RAM-dysku (usuniety w calosci):"); wypisz_log(sciezka);
+            continue;
+        }
+        ++nowe;
+    }
+    (void)psf_flush_cache();
+    galeria_log_liczba("[GALERIA] zdjecia zaimportowane: ", nowe);
+    galeria_log_liczba("[GALERIA] zdjecia pominiete (istnieja): ", pominiete);
+    if (bledne) galeria_log_liczba("[GALERIA] BLEDNE wpisy: ", bledne);
+    OdblokujZakres(g->start, g->rozmiar);
+}
+
+/*
+ * Instalator: opcjonalna kopia przykladowych zdjec na dysk docelowy (best effort). Wywolywana krokami z
+ * maszyny stanow instalatora (po tapetach). Nie nadpisuje istniejacych plikow, usuwa niepelny plik przy bledzie,
+ * a KAZDY blad konczy etap galerii BEZ przerywania instalacji systemu (instalacja jest wazniejsza niz zdjecia).
+ */
+struct GaleriaInstalacja {
+    bool aktywna{false};
+    uint32_t indeks{0};
+    uint32_t offset{0};
+    uint32_t crc{0};
+    bool plik_otwarty{false};
+    uint32_t zainstalowane{0}, pominiete{0}, bledne{0};
+    uint64_t bajty{0};
+};
+GaleriaInstalacja g_galeria_inst;
+
+bool galeria_inst_start(uint64_t mbi, uint64_t* razem) {
+    g_galeria_inst = GaleriaInstalacja{};
+    if (razem) *razem = 0;
+    GaleriaModul* g = &g_galeria_modul;
+    if (!galeria_otworz_modul(mbi, g)) return false;          // brak modulu = brak galerii, nie blad instalacji
+    PsfStanStartu stan{};
+    (void)zapewnij_katalog_startowy("/dane", &stan);
+    if (!zapewnij_katalog_startowy("/dane/zdjecia", &stan)) return false;
+    uint64_t suma = 0;
+    for (uint32_t i = 0; i < g->liczba; ++i) suma += g->wpisy[i].rozmiar;
+    if (razem) *razem = suma;
+    g_galeria_inst.aktywna = true;
+    return true;
+}
+
+// Jedna porcja (<= 64 KiB). *gotowe = true po ostatnim wpisie lub po bledzie (etap konczy sie bez przerywania instalacji).
+void galeria_inst_step(uint64_t* wykonane, bool* gotowe) {
+    GaleriaInstalacja& s = g_galeria_inst;
+    GaleriaModul* g = &g_galeria_modul;
+    if (wykonane) *wykonane = s.bajty;
+    if (gotowe) *gotowe = false;
+    if (!s.aktywna || s.indeks >= g->liczba) {
+        if (s.aktywna) {
+            (void)psf_flush_cache();
+            galeria_log_liczba("[INSTALL] galeria: zainstalowane=", s.zainstalowane);
+            galeria_log_liczba("[INSTALL] galeria: pominiete=", s.pominiete);
+            if (s.bledne) galeria_log_liczba("[INSTALL] galeria: bledne=", s.bledne);
+            s.aktywna = false;
+        }
+        if (gotowe) *gotowe = true;
+        return;
+    }
+    const GaleriaPak::Wpis& w = g->wpisy[s.indeks];
+    char sciezka[96];
+    const uint8_t* dane = g->dane + w.przesuniecie;
+    auto nastepny = [&]() { ++s.indeks; s.offset = 0; s.plik_otwarty = false; };
+    if (!galeria_sciezka(w, sciezka, sizeof(sciezka))) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
+    if (s.offset == 0 && !s.plik_otwarty) {
+        if (rozmiar_pliku(sciezka) > 0) { ++s.pominiete; s.bajty += w.rozmiar; nastepny(); return; }   // zdjecie uzytkownika
+        if (GaleriaPak::crc32(dane, w.rozmiar) != w.crc) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
+        (void)usun_twor(sciezka);
+        if (!utworz_plik(sciezka)) { ++s.bledne; s.bajty += w.rozmiar; nastepny(); return; }
+        s.plik_otwarty = true;
+    }
+    constexpr uint32_t PORCJA = 64U * 1024U;
+    const uint32_t n = (w.rozmiar - s.offset > PORCJA) ? PORCJA : (w.rozmiar - s.offset);
+    if (!zapisz_fragment_pliku(sciezka, s.offset, reinterpret_cast<const char*>(dane + s.offset), n)) {
+        // Brak miejsca albo blad zapisu: usun niepelny plik i zakoncz etap galerii (pozostale zdjecia pomijamy).
+        (void)usun_twor(sciezka);
+        ++s.bledne;
+        wypisz_log("[INSTALL] galeria: blad zapisu - etap galerii przerwany, instalacja systemu trwa.");
+        s.aktywna = false;
+        (void)psf_flush_cache();
+        if (gotowe) *gotowe = true;
+        return;
+    }
+    s.offset += n; s.bajty += n;
+    if (s.offset >= w.rozmiar) {
+        if (rozmiar_pliku(sciezka) != w.rozmiar) { (void)usun_twor(sciezka); ++s.bledne; }
+        else { ++s.zainstalowane; (void)psf_flush_cache(); }
+        nastepny();
+    }
+    if (wykonane) *wykonane = s.bajty;
+}
+
+// Zwolnienie modulu po zakonczeniu instalacji (instalator trzymal go przy zyciu).
+void galeria_inst_zakoncz() {
+    if (g_galeria_modul.start) OdblokujZakres(g_galeria_modul.start, g_galeria_modul.rozmiar);
+    g_galeria_modul.start = 0;
+}
+
 #include "bsf/bootstrap.inc"
 
 void instaluj_wbudowane_programy() {
@@ -1203,8 +1416,10 @@ void instaluj_wbudowane_programy() {
         "poziom_zaufania = 4\n"
         "plik_startowy = \"snake.bur\"\n"
         "uprawnienia = [\n"
-        "    \"okna\"\n"
-        "]\n";
+        "    \"okna\",\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"ustawienia_aplikacji\"\n"
+        "]\n";   // zapis tylko w /uzytkownicy/<u>/Ustawienia/snake (PRAWO_USTAWIENIA_APLIKACJI); brak ogolnego pliki_zapisz
 
     static const char MANIFEST_PRZEGLADARKA_OBRAZOW[] =
         "nazwa = \"Przeglądarka Obrazów\"\n"
@@ -2054,6 +2269,7 @@ void instaluj_wbudowane_programy() {
 #endif
 
     importuj_modul_test8k(g_multiboot_info_ptr);
+    importuj_galerie_z_modulu(g_multiboot_info_ptr);
 }
 
 /* =========================================================================
@@ -2106,6 +2322,12 @@ void wypisz_ilosc_ram() {
 }
 
 } // namespace
+
+// Interfejs dla instalatora (jadro/gui/instalator.cpp): kroki opcjonalnej kopii zdjec na dysk docelowy.
+extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem) { return galeria_inst_start(mbi, razem); }
+extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe) { galeria_inst_step(wykonane, gotowe); }
+extern "C" void galeria_instaluj_zakoncz() { galeria_inst_zakoncz(); }
+
 
     bool kernel_instaluj_system(){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
@@ -2788,6 +3010,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     aktualizacja_sprawdz_rozruch(g_multiboot_info_ptr);
     utworz_drabine_katalogow();
+    zapewnij_katalogi_ustawien_uzytkownika();
     /*
      * Rozszerzenia drzewa katalogow z pliku konfiguracyjnego.
      *

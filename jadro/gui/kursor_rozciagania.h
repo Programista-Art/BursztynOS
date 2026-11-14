@@ -16,6 +16,22 @@ struct OpisKursoraRozciagania {
     const uint32_t* piksele;   // ARGB, alfa 0 = przezroczysty
 };
 
+// Domyslna strzalka systemowa (GUI_CURSOR_ARROW = 0) z ikonki/kursor.png; hotspot = czubek.
+// nullptr = brak zasobu (uzyj wbudowanej strzalki 16x16).
+inline const OpisKursoraRozciagania* kursor_strzalki_opis() {
+#if KURSOR_STRZALKA_DOSTEPNY
+    static const OpisKursoraRozciagania opis = {kKursorStrzalkaSzer, kKursorStrzalkaWys,
+        kKursorStrzalkaHotX, kKursorStrzalkaHotY, kKursorStrzalka};
+    return &opis;
+#else
+    return nullptr;
+#endif
+}
+
+// Dowolny typ kursora objety zasobem: 0 = strzalka, 3..6 = zmiana rozmiaru; inne => nullptr
+// (reka, tekst, zajety, celownik, wlasny zachowuja dotychczasowe ksztalty).
+inline const OpisKursoraRozciagania* kursor_zasobu_opis(uint32_t typ);
+
 // typ: wartosci GUI_CURSOR_RESIZE_NS=3, EW=4, NWSE=5, NESW=6. nullptr = brak
 // zasobu (uzyj ksztaltu wbudowanego).
 inline const OpisKursoraRozciagania* kursor_rozciagania_opis(uint32_t typ) {
@@ -36,6 +52,10 @@ inline const OpisKursoraRozciagania* kursor_rozciagania_opis(uint32_t typ) {
     (void)typ;
     return nullptr;
 #endif
+}
+
+inline const OpisKursoraRozciagania* kursor_zasobu_opis(uint32_t typ) {
+    return typ == 0 ? kursor_strzalki_opis() : kursor_rozciagania_opis(typ);
 }
 
 inline bool kursor_rozciagania_piksel(const OpisKursoraRozciagania* o, int x, int y, uint32_t* kolor) {

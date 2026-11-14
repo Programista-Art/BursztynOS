@@ -71,6 +71,8 @@
 #define PRAWO_SYSTEM_CONFIG   (UINT64_C(1) << 5)
 #define PRAWO_STEROWNIK       (UINT64_C(1) << 6)
 #define PRAWO_DEBUG           (UINT64_C(1) << 7)
+/* Zapis WYLACZNIE w prywatnym katalogu ustawien wlasnej aplikacji (patrz ustawienia_aplikacji.h). */
+#define PRAWO_USTAWIENIA_APLIKACJI (UINT64_C(1) << 8)
 
 /*
  * Brak praw.
@@ -92,7 +94,8 @@
      PRAWO_URUCHOM_PROGRAM | \
      PRAWO_SYSTEM_CONFIG   | \
      PRAWO_STEROWNIK       | \
-     PRAWO_DEBUG)
+     PRAWO_DEBUG           | \
+     PRAWO_USTAWIENIA_APLIKACJI)
 
 /*
  * Prawa o szczegolnie wysokim ryzyku.

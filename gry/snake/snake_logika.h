@@ -16,7 +16,20 @@ constexpr int POLA_GRACZA_X = PLANSZA_X - 2;
 constexpr int POLA_GRACZA_Y = PLANSZA_Y - 2;
 constexpr int MAKS_DLUGOSC = POLA_GRACZA_X * POLA_GRACZA_Y;
 constexpr int DLUGOSC_START = 3;
-constexpr uint64_t KROK_NS = UINT64_C(125000000);   // 8 ruchow / s
+// Predkosc gry: odstep miedzy krokami logiki (zegar monotoniczny, nie zalezy od klatek).
+enum class Predkosc : uint8_t { Wolno = 0, Normalnie = 1, Szybko = 2 };
+constexpr int LICZBA_PREDKOSCI = 3;
+constexpr uint64_t KROK_WOLNO_NS = UINT64_C(300000000);       // 300 ms
+constexpr uint64_t KROK_NORMALNIE_NS = UINT64_C(220000000);   // 220 ms (domyslna)
+constexpr uint64_t KROK_SZYBKO_NS = UINT64_C(150000000);      // 150 ms
+constexpr Predkosc PREDKOSC_DOMYSLNA = Predkosc::Normalnie;
+constexpr uint64_t krok_ns(Predkosc p) {
+    return p == Predkosc::Wolno ? KROK_WOLNO_NS : (p == Predkosc::Szybko ? KROK_SZYBKO_NS : KROK_NORMALNIE_NS);
+}
+constexpr uint64_t KROK_NS = KROK_NORMALNIE_NS;
+// Widoczne pole gry (bez logicznych scian na obwodzie siatki 20x15).
+constexpr int WIDOCZNE_X = PLANSZA_X - 2;
+constexpr int WIDOCZNE_Y = PLANSZA_Y - 2;
 
 enum class Stan : uint8_t { Gotowa, Gra, Pauza, KoniecGry, Wygrana };
 enum class Kierunek : uint8_t { Gora, Dol, Lewo, Prawo };
@@ -85,12 +98,14 @@ struct Gra {
         if (stan != Stan::Gra) return;
         kx = okx; ky = oky;
         skret_w_kroku = false;
-        const PunktPlanszy stary_ogon = waz[dlugosc - 1];
-        for (int i = dlugosc - 1; i > 0; --i) waz[i] = waz[i - 1];
-        waz[0].x += kx; waz[0].y += ky;
-        if (waz[0].x <= 0 || waz[0].x >= PLANSZA_X - 1 || waz[0].y <= 0 || waz[0].y >= PLANSZA_Y - 1) {
+        // Uderzenie w sciane konczy gre bez ruchu: glowa zostaje na ostatnim polu planszy.
+        const int nx = waz[0].x + kx, ny = waz[0].y + ky;
+        if (nx <= 0 || nx >= PLANSZA_X - 1 || ny <= 0 || ny >= PLANSZA_Y - 1) {
             stan = Stan::KoniecGry; return;
         }
+        const PunktPlanszy stary_ogon = waz[dlugosc - 1];
+        for (int i = dlugosc - 1; i > 0; --i) waz[i] = waz[i - 1];
+        waz[0].x = nx; waz[0].y = ny;
         for (int i = 1; i < dlugosc; ++i)
             if (waz[0].x == waz[i].x && waz[0].y == waz[i].y) { stan = Stan::KoniecGry; return; }
         if (waz[0].x == jablko.x && waz[0].y == jablko.y) {
@@ -131,17 +146,17 @@ struct Gra {
 struct UkladPlanszy {
     int komorka;       // bok kwadratowej komorki w px (0 = widok za maly)
     int x, y;          // lewy gorny rog planszy w widoku
-    int szer, wys;     // rozmiar planszy w px = komorka * 20 / 15
+    int szer, wys;     // widoczne pole gry w px = komorka * 18 x 13 (logiczna siatka 20x15 ma sciany na obwodzie)
 };
 
 constexpr UkladPlanszy uklad_planszy(int widok_w, int widok_h, int margines) {
     if (margines < 0) margines = 0;
     const int64_t w = static_cast<int64_t>(widok_w) - 2LL * margines;
     const int64_t h = static_cast<int64_t>(widok_h) - 2LL * margines;
-    if (w < PLANSZA_X || h < PLANSZA_Y) return {0, 0, 0, 0, 0};
-    const int64_t k1 = w / PLANSZA_X, k2 = h / PLANSZA_Y;
+    if (w < WIDOCZNE_X || h < WIDOCZNE_Y) return {0, 0, 0, 0, 0};
+    const int64_t k1 = w / WIDOCZNE_X, k2 = h / WIDOCZNE_Y;
     const int k = static_cast<int>(k1 < k2 ? k1 : k2);
-    const int pw = k * PLANSZA_X, ph = k * PLANSZA_Y;
+    const int pw = k * WIDOCZNE_X, ph = k * WIDOCZNE_Y;
     return {k, static_cast<int>((widok_w - pw) / 2), static_cast<int>((widok_h - ph) / 2), pw, ph};
 }
 

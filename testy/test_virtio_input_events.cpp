@@ -45,7 +45,8 @@ extern "C" void zaktualizuj_mysze_wzgledne_zrodlo(int32_t dx,int32_t dy,uint8_t,
     g_last_dx=dx;g_last_dy=-int64_t(dy);++g_pub_count;
     g_mx=pointer_accumulate(g_mx,int64_t(dx),1280);g_my=pointer_accumulate(g_my,int64_t(dy),720);
 }
-extern "C" void zaktualizuj_kolo_myszy(int, int, uint8_t) {}
+static int g_wheel_sum = 0, g_wheel_calls = 0;
+extern "C" void zaktualizuj_kolo_myszy(int w, int, uint8_t) { g_wheel_sum += w; ++g_wheel_calls; }
 int grafika_pobierz_szerokosc(void) { return 1280; }
 int grafika_pobierz_wysokosc(void) { return 720; }
 extern "C" int grafika_pobierz_mysz_x() { return g_mx; }
@@ -319,7 +320,31 @@ static void test_keyboard_only_rel_does_not_accumulate() {
     CHECK(g_pub_count == 0, "still no publication");
 }
 
+// VirtIO tablet (tryb absolutny): kolo (EV_REL REL_WHEEL) musi dotrzec do GUI, ale REL_X/REL_Y nadal sa ignorowane.
+static void test_tablet_wheel_delivered_xy_ignored() {
+    InputDevice& d = g_dev_pool[g_dev_used++ % 4];
+    d = InputDevice{};
+    std::snprintf(d.name, sizeof(d.name), "QEMU Virtio Tablet");
+    d.kinds = INPUT_DEVICE_KIND_TABLET;
+    d.bus_type = INPUT_BUS_VIRTIO;
+    d.device_id = 2049;
+    d.pointer_mode = INPUT_POINTER_ABSOLUTE;
+    d.abs_x.min = 0; d.abs_x.max = 32767; d.abs_y.min = 0; d.abs_y.max = 32767;
+    arm(d);
+    reset_capture();
+    g_wheel_sum = g_wheel_calls = 0;
+    feed_triplet(d, INPUT_EV_ABS, INPUT_ABS_X, 1000, INPUT_EV_ABS, INPUT_ABS_Y, 2000, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+    CHECK(g_wheel_calls == 0, "ruch tabletu bez kola nie wywoluje kola");
+    feed_triplet(d, INPUT_EV_REL, INPUT_REL_WHEEL, -1, INPUT_EV_SYN, INPUT_SYN_REPORT, 0, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+    CHECK(g_wheel_calls == 1 && g_wheel_sum == -1, "REL_WHEEL z tabletu absolutnego dociera do GUI (raz, bez duplikatu)");
+    feed_triplet(d, INPUT_EV_REL, INPUT_REL_X, 50, INPUT_EV_REL, INPUT_REL_Y, 50, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+    CHECK(g_wheel_calls == 1 && g_last_dx == 0 && g_last_dy == 0, "REL_X/REL_Y w trybie absolutnym nadal ignorowane");
+    feed_triplet(d, INPUT_EV_REL, INPUT_REL_WHEEL, 1, INPUT_EV_REL, INPUT_REL_WHEEL, 1, INPUT_EV_SYN, INPUT_SYN_REPORT, 0);
+    CHECK(g_wheel_calls == 2 && g_wheel_sum == 1, "dwa zdarzenia kola w jednym raporcie sumuja sie (-1 + 2)");
+}
+
 int main() {
+    test_tablet_wheel_delivered_xy_ignored();
     test_wire_layout();
     test_rel_x3_y_neg2();
     test_negative_xy();

@@ -39,6 +39,32 @@ int main() {
 
     screen_w=1280;screen_h=720;metryki_ekranu();
     g_test_bws_hook=launch_hook;
+    {   // pasek zadan jako powierzchnia kompozytora + "Zawsze na wierzchu takze nad paskiem zadan"
+        RysujTaskbar();
+        assert(test_pasek_otwarty && test_pasek_rect[2]==desktop_geometry.taskbar_width &&
+               test_pasek_rect[1]==desktop_geometry.taskbar_y && test_pasek_rect[3]==desktop_geometry.taskbar_height);
+        liczba_okien_taskbara=2;okna_taskbara[0]={};okna_taskbara[1]={};
+        okna_taskbara[0].window_id=0x100000005ULL;okna_taskbara[1].window_id=0x200000007ULL;
+        strcpy(okna_taskbara[0].tytul,"Okno A");strcpy(okna_taskbara[1].tytul,"Okno B");
+        const int y0=screen_h-ui_skaluj(36,ui_skala_procent)+2;
+        const int bx1=TASK_BUTTON_X+2,bx2=TASK_BUTTON_X+TASK_BUTTON_W+TASK_BUTTON_GAP+2;
+        assert(!czy_nad_paskiem(okna_taskbara[0].window_id));                        // domyslnie wylaczone
+        assert(obsluz_prawy_klik_paska(bx1,y0) && czy_nad_paskiem(okna_taskbara[0].window_id));
+        assert(test_nad_paskiem[okna_taskbara[0].window_id]==true && !czy_nad_paskiem(okna_taskbara[1].window_id));
+        assert(obsluz_prawy_klik_paska(bx2,y0) && czy_nad_paskiem(okna_taskbara[1].window_id));
+        assert(obsluz_prawy_klik_paska(bx1,y0) && !czy_nad_paskiem(okna_taskbara[0].window_id));   // cofniecie
+        assert(test_nad_paskiem[okna_taskbara[0].window_id]==false);
+        assert(!obsluz_prawy_klik_paska(5,5));                                        // poza przyciskiem: bez efektu
+        okna_taskbara[1]={};liczba_okien_taskbara=1;                                 // okno zamkniete
+        wyczysc_nad_paskiem_zamknietych(okna_taskbara,liczba_okien_taskbara);
+        assert(!czy_nad_paskiem(0x200000007ULL) && nad_paskiem_liczba==0);
+        for(int i=0;i<MAKS_NAD_PASKIEM+3;++i){                                        // limit liczby wpisow
+            uint64_t id=0x300000000ULL+i;bool ok=przelacz_nad_paskiem(id);
+            assert(ok==(i<MAKS_NAD_PASKIEM));
+        }
+        nad_paskiem_liczba=0;
+        assert(!przelacz_nad_paskiem(0));                                             // zerowy id odrzucony
+    }
     auto menu_click=[](const char* query) {
         obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
         assert(menu_start_otwarte);

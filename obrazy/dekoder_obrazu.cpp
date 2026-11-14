@@ -64,9 +64,13 @@ uint32_t be32(const uint8_t* p) {
            (static_cast<uint32_t>(p[2]) << 8)  |
             static_cast<uint32_t>(p[3]);
 }
+// Limity biezacego wywolania. Domyslnie stale z dekoder_obrazu.h; zwiekszane tylko jawnie przez
+// dekoduj_obraz_z_alfa_limity() (zawsze z twardym sufitem) na czas jednego wywolania.
+uint64_t g_max_pikseli = OBRAZ_MAX_PIKSELE;
+size_t g_max_plik = OBRAZ_MAX_PLIK;
 bool limit(uint32_t w, uint32_t h) {
     return w && h && w <= OBRAZ_MAX_BOK && h <= OBRAZ_MAX_BOK &&
-           static_cast<uint64_t>(w) * h <= OBRAZ_MAX_PIKSELE;
+           static_cast<uint64_t>(w) * h <= g_max_pikseli;
 }
 }
 
@@ -86,7 +90,7 @@ BladObrazu sprawdz_gif(const uint8_t *p,size_t n,uint32_t *ow,uint32_t *oh) {
     if(ow)*ow=0;
     if(oh)*oh=0;
     if(!p || n<13 || rozpoznaj_obraz(p,n)!=FormatObrazu::GIF)return BladObrazu::Format;
-    if(n>OBRAZ_MAX_PLIK)return BladObrazu::ZaDuzy;
+    if(n>g_max_plik)return BladObrazu::ZaDuzy;
     auto le=[](const uint8_t *b)->unsigned{return unsigned(b[0])|(unsigned(b[1])<<8);};
     unsigned w=le(p+6),h=le(p+8);if(!limit(w,h))return BladObrazu::ZaDuzy;
     size_t at=13;unsigned global=(p[10]&128)?(2U<<(p[10]&7)):0;
@@ -124,7 +128,7 @@ BladObrazu sprawdz_gif(const uint8_t *p,size_t n,uint32_t *ow,uint32_t *oh) {
 BladObrazu sprawdz_jpeg(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) {
     if (ow) *ow = 0;
     if (oh) *oh = 0;
-    if (!p || n < 4 || p[0] != 0xff || p[1] != 0xd8 || n > OBRAZ_MAX_PLIK)
+    if (!p || n < 4 || p[0] != 0xff || p[1] != 0xd8 || n > g_max_plik)
         return BladObrazu::Format;
     uint8_t quant = 0, dc = 0, ac = 0, comp_ids[3]{}, qids[3]{};
     uint32_t w = 0, h = 0;
@@ -171,7 +175,10 @@ BladObrazu sprawdz_jpeg(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) 
                 if (i + 16 > end || (t >> 4) > 1 || (t & 15) > 3) return BladObrazu::Uszkodzony;
                 uint8_t& mask = (t >> 4) ? ac : dc;
                 const uint8_t bit = static_cast<uint8_t>(1U << (t & 15));
-                if (mask & bit) return BladObrazu::Uszkodzony;
+                // Redefinicja tablicy Huffmana jest dozwolona TYLKO miedzy skanami JPEG progresywnego
+                // (tak zapisuje libjpeg: kolejne DHT przed skanami AC). Duplikaty w baseline oraz przed
+                // pierwszym skanem nadal sa odrzucane.
+                if ((mask & bit) && !(progressive && scan)) return BladObrazu::Uszkodzony;
                 mask |= bit;
                 unsigned count = 0, available = 1;
                 for (unsigned k = 0; k < 16; ++k) {
@@ -288,7 +295,7 @@ BladObrazu sprawdz_jpeg(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) 
 BladObrazu sprawdz_png(const uint8_t* p, size_t n, uint32_t* ow, uint32_t* oh) {
     if (ow) *ow = 0;
     if (oh) *oh = 0;
-    if (!p || n < 8 + 12 + 13 + 12 || n > OBRAZ_MAX_PLIK)
+    if (!p || n < 8 + 12 + 13 + 12 || n > g_max_plik)
         return BladObrazu::Format;
     if (p[0] != 0x89 || p[1] != 'P' || p[2] != 'N' || p[3] != 'G' ||
         p[4] != 0x0d || p[5] != 0x0a || p[6] != 0x1a || p[7] != 0x0a)
@@ -348,7 +355,7 @@ static BladObrazu dekoduj_obraz_impl(const uint8_t* dane, size_t n, DekodowanyOb
                          AlokujObraz alokuj, ZwolnijObraz zwolnij, bool zachowaj_alfa) {
     if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
     *out = {};
-    if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
+    if (!dane || !n || n > g_max_plik) return BladObrazu::ZaDuzy;
     const FormatObrazu f = rozpoznaj_obraz(dane, n);
 #if defined(BURSZTYN_PNG_ONLY)
     if(f!=FormatObrazu::PNG)return BladObrazu::Format;
@@ -451,7 +458,7 @@ BladObrazu dekoduj_jpeg(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                         AlokujObraz alokuj, ZwolnijObraz zwolnij) {
     if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
     *out = {};
-    if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
+    if (!dane || !n || n > g_max_plik) return BladObrazu::ZaDuzy;
     if (rozpoznaj_obraz(dane, n) != FormatObrazu::JPEG) return BladObrazu::Format;
     return dekoduj_obraz(dane, n, out, alokuj, zwolnij);
 }
@@ -460,7 +467,7 @@ BladObrazu dekoduj_png(const uint8_t* dane, size_t n, DekodowanyObraz* out,
                        AlokujObraz alokuj, ZwolnijObraz zwolnij) {
     if (!out || !alokuj || !zwolnij) return BladObrazu::Argument;
     *out = {};
-    if (!dane || !n || n > OBRAZ_MAX_PLIK) return BladObrazu::ZaDuzy;
+    if (!dane || !n || n > g_max_plik) return BladObrazu::ZaDuzy;
     if (rozpoznaj_obraz(dane, n) != FormatObrazu::PNG) return BladObrazu::Format;
     return dekoduj_obraz(dane, n, out, alokuj, zwolnij);
 }
@@ -522,4 +529,20 @@ BladObrazu dekoduj_ikone_png(const uint8_t* data,size_t size,DekodowanyObraz* ou
   icon_release(temp.piksele);
  }
  icon_alloc=nullptr;icon_free=nullptr;return error;
+}
+
+// Jawnie podniesione limity dla jednego wywolania (np. Przegladarka Obrazow z zaufanym budzetem).
+// Twarde sufity: nie mozna ich przekroczyc niezaleznie od argumentow. Dekoder jest jednowatkowy.
+BladObrazu dekoduj_obraz_z_alfa_limity(const uint8_t* dane, size_t n, DekodowanyObraz* out,
+                                       AlokujObraz alokuj, ZwolnijObraz zwolnij,
+                                       uint64_t max_pikseli, size_t max_plik) {
+    if (max_pikseli > OBRAZ_TWARDY_MAX_PIKSELE) max_pikseli = OBRAZ_TWARDY_MAX_PIKSELE;
+    if (max_plik > OBRAZ_TWARDY_MAX_PLIK) max_plik = OBRAZ_TWARDY_MAX_PLIK;
+    if (max_pikseli < OBRAZ_MAX_PIKSELE) max_pikseli = OBRAZ_MAX_PIKSELE;
+    if (max_plik < OBRAZ_MAX_PLIK) max_plik = OBRAZ_MAX_PLIK;
+    const uint64_t stare_px = g_max_pikseli; const size_t stary_plik = g_max_plik;
+    g_max_pikseli = max_pikseli; g_max_plik = max_plik;
+    const BladObrazu b = dekoduj_obraz_z_alfa(dane, n, out, alokuj, zwolnij);
+    g_max_pikseli = stare_px; g_max_plik = stary_plik;
+    return b;
 }
