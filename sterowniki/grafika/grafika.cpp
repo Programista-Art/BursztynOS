@@ -927,6 +927,8 @@ static const uint8_t kursor_bitmapa[16][16] = {
     {0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0}
 };
 
+#include "jadro/gui/kursor_rozciagania.h"
+
 struct StanKursoraProcesu {
     uint32_t typ;
     uint32_t szer;
@@ -951,8 +953,12 @@ static void parametry_kursora(const StanKursoraProcesu* s,
         *hx = static_cast<int>(s->hotspot_x); *hy = static_cast<int>(s->hotspot_y);
         return;
     }
-    *w = 16; *h = 16;
     const uint32_t typ = s ? s->typ : GUI_CURSOR_ARROW;
+    if (const OpisKursoraRozciagania* o = kursor_rozciagania_opis(typ)) {
+        *w = o->szer; *h = o->wys; *hx = o->hotspot_x; *hy = o->hotspot_y;
+        return;
+    }
+    *w = 16; *h = 16;
     *hx = typ == GUI_CURSOR_ARROW ? 0 : 8;
     *hy = typ == GUI_CURSOR_HAND ? 1 : (typ == GUI_CURSOR_ARROW ? 0 : 8);
 }
@@ -970,6 +976,8 @@ static bool piksel_kursora(const StanKursoraProcesu* s, int x, int y,
         *kolor = p & 0x00FFFFFFU;
         return true;
     }
+    if (const OpisKursoraRozciagania* o = kursor_rozciagania_opis(typ))
+        return kursor_rozciagania_piksel(o, x, y, kolor);
     if (x >= 16 || y >= 16) return false;
     if (typ == GUI_CURSOR_ARROW) {
         const uint8_t p = kursor_bitmapa[y][x];

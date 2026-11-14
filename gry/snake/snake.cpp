@@ -1,651 +1,379 @@
 /*
- * Snake dla Bursztyn OS (Ring 3)
- * - standardowy naglowek .bur (60 bajtow)
- * - standardowa belka okna Bursztyna
- * - sterowanie zdarzeniami, bez petli busy-wait opartej o RDTSC
- * - poprawne rosniecie weza
- * - jablko nigdy nie pojawia sie na wezu
- * - blokada zawracania o 180 stopni i wielu skretow w jednym kroku
- * - WASD + strzalki (sekwencje ANSI)
+ * Bursztyn OS - Snake (BursztynUI)
+ *
+ * Aplikacja Ring 3 oparta na frameworku BursztynUI: standardowe okno (Okno) z
+ * dekoracjami, zmiana rozmiaru wszystkimi krawedziami i rogami, ruch, maksymalizacja,
+ * motywy systemowe i DPI zapewnia framework. Logika gry jest w snake_logika.h
+ * (bez GUI, testowana na hoscie); tu sa tylko: UI, czas i rysowanie planszy.
+ *
+ * Podzial odpowiedzialnosci:
+ *   snake_logika.h   - stan gry, ruch, kolizje, jablko, pauza, uklad planszy w widoku
+ *   AplikacjaSnake   - zegar gry (krok co KROK_NS niezaleznie od klatek), stan UI
+ *   rysuj_plansze()  - rysowanie w PowierzchniaRysunkowa kolorami z motywu
+ *   OknoSnake        - mapowanie klawiszy (WASD, strzalki, Spacja, R)
  */
 
+#include "loader.h"
+#include "bursztyn_ui/bursztyn_ui.h"
 #include "bursztyn_gui.h"
-#include "bws_zdarzenia.h"
+#include "gry/snake/snake_logika.h"
+#include <stddef.h>
+#include <stdint.h>
 
-/* ========================================================================
- * Standardowy naglowek programu .bur
- * UWAGA: musi pozostac zgodny z linkerem/loaderem Ring 3.
- * sizeof(NaglowekBur) == 60.
- * ======================================================================== */
-struct NaglowekBur {
-    uint8_t  magia[4];
-    uint64_t punkt_wejscia;
-    uint64_t tekst_przesuniecie;
-    uint64_t tekst_rozmiar;
-    uint64_t tekst_wirtualny;
-    uint64_t dane_przesuniecie;
-    uint64_t dane_rozmiar;
-    uint64_t dane_wirtualny;
-} __attribute__((packed));
+using namespace BursztynUI;
+using namespace SnakeLogika;
 
-static_assert(sizeof(NaglowekBur) == 60, "NaglowekBur musi miec dokladnie 60 bajtow");
-
+#ifndef SNAKE_HOST_TEST
 extern "C" __attribute__((noreturn)) void _start();
 
 extern "C" {
-    __attribute__((section(".naglowek"), used))
-    struct NaglowekBur naglowek = {
-        {'B', 'U', 'R', '\0'},
-        (uint64_t)&_start,
-        4096, 131072, 0x1001000,
-        135168, 262144, 0x1021000
-    };
+__attribute__((section(".naglowek"), used))
+NaglowekBur naglowek = {
+    {'B', 'U', 'R', '\0'},
+    reinterpret_cast<uint64_t>(&_start),
+    0x1000ULL, 0x30000ULL, 0x1001000ULL,
+    0x31000ULL, 0x20000ULL, 0x1031000ULL
+};
 }
+#endif
 
 namespace {
 
-/* ========================================================================
- * Parametry okna i planszy
- * ======================================================================== */
-constexpr int ROZMIAR_KAFELKA = 20;
-constexpr int PLANSZA_X = 20;
-constexpr int PLANSZA_Y = 15;
+constexpr int OKNO_SZER = 560;
+constexpr int OKNO_WYS = 560;
+constexpr int MIN_SZER = 440;
+constexpr int MIN_WYS = 380;
+constexpr uint32_t OKRES_TIMERA_TIKI = 8;            // ~32 ms przy 250 Hz; krok gry liczony zegarem
+constexpr int MAKS_KROKOW_NA_WYWOLANIE = 3;          // po dlugiej przerwie nie "doganiamy" gry
 
-/* Pole gry ma sciany na x=0/x=19 i y=0/y=14.
- * Rzeczywiste pole dostepne dla weza: 18 * 13 = 234 pola. */
-constexpr int POLA_GRACZA_X = PLANSZA_X - 2;
-constexpr int POLA_GRACZA_Y = PLANSZA_Y - 2;
-constexpr int MAKS_DLUGOSC_WEZA = POLA_GRACZA_X * POLA_GRACZA_Y;
-
-constexpr int WYSOKOSC_BELKI = 28;
-constexpr int SZEROKOSC_OKNA = PLANSZA_X * ROZMIAR_KAFELKA;
-constexpr int WYSOKOSC_PLANSZY = PLANSZA_Y * ROZMIAR_KAFELKA;
-constexpr int WYSOKOSC_OKNA = WYSOKOSC_BELKI + WYSOKOSC_PLANSZY;
-
-constexpr int OKNO_START_X = 150;
-constexpr int OKNO_START_Y = 150;
-constexpr int OKNO_Z_ORDER = 10;
-constexpr int WYSOKOSC_PASKA_SYSTEMOWEGO = 40;
-
-/*
- * Pozycja okna nie może być constexpr: BWS34 przesuwa warstwę w jądrze,
- * a aplikacja musi od tej chwili rysować pod nowymi współrzędnymi ekranowymi.
- */
-static int okno_x = OKNO_START_X;
-static int okno_y = OKNO_START_Y;
-static int ekran_w = 1024;
-static int ekran_h = 768;
-
-static bool przeciaganie_okna = false;
-static int chwyt_x = 0;
-static int chwyt_y = 0;
-static bool przerysuj_po_przeciaganiu = false;
-
-/* Typowy krok Snake ~125 ms = 8 ruchow/s.
- * Gdy timestamp zdarzen jest w ns, korzystamy z tego czasu.
- * Dla starego ABI z malym licznikiem mamy awaryjny licznik TIMER. */
-constexpr uint64_t KROK_NS = UINT64_C(125000000);
-constexpr uint32_t TIMER_FALLBACK_DZIELNIK = 8;
-
-constexpr uint32_t KOLOR_TLO = 0x00111111;
-constexpr uint32_t KOLOR_RAMKA = 0x00E58A00;
-constexpr uint32_t KOLOR_JABLKO = 0x00FF3333;
-constexpr uint32_t KOLOR_GLOWA = 0x0055FF55;
-constexpr uint32_t KOLOR_CIALO = 0x0022AA22;
-constexpr uint32_t KOLOR_NAKLADKA = 0x00222222;
-constexpr uint32_t KOLOR_BIALY = 0x00FFFFFF;
-constexpr uint32_t KOLOR_SZARY = 0x00AAAAAA;
-
-struct Punkt {
-    int x;
-    int y;
-};
-
-static Punkt waz[MAKS_DLUGOSC_WEZA] __attribute__((section(".data"))) = {};
-static Punkt jablko __attribute__((section(".data"))) = {1, 1};
-
-static int dlugosc_weza = 3;
-static int kierunek_x = 1;
-static int kierunek_y = 0;
-static int oczekiwany_kierunek_x = 1;
-static int oczekiwany_kierunek_y = 0;
-
-static bool zmiana_kierunku_w_tym_kroku = false;
-static bool gra_trwa = true;
-static bool gra_wygrana = false;
-static bool zamknij_aplikacje = false;
-
-static uint64_t rng_stan = UINT64_C(0x9E3779B97F4A7C15);
-static uint64_t ostatni_krok_timestamp = 0;
-static uint32_t fallback_timer_ticks = 0;
-
-enum class StanAnsi : uint8_t {
-    BRAK,
-    ESC,
-    CSI
-};
-
-static StanAnsi ansi = StanAnsi::BRAK;
-
-/* ========================================================================
- * Losowanie - RDTSC jest tu tylko ziarnem gry, a NIE zegarem logiki.
- * ======================================================================== */
-static inline uint64_t pobierz_cykle() {
-    uint32_t lo = 0;
-    uint32_t hi = 0;
-    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    return (static_cast<uint64_t>(hi) << 32) | lo;
+// ---- formatowanie liczb bez libc -------------------------------------------
+size_t dopisz_tekst(char* d, size_t cap, size_t poz, const char* s) {
+    while (*s && poz + 1 < cap) d[poz++] = *s++;
+    d[poz] = '\0';
+    return poz;
+}
+size_t dopisz_liczbe(char* d, size_t cap, size_t poz, int v) {
+    char t[12]; int n = 0;
+    unsigned u = v < 0 ? 0u : static_cast<unsigned>(v);
+    do { t[n++] = static_cast<char>('0' + u % 10); u /= 10; } while (u && n < 11);
+    while (n && poz + 1 < cap) d[poz++] = t[--n];
+    d[poz] = '\0';
+    return poz;
 }
 
-static uint32_t losuj_u32() {
-    /* xorshift64* - wystarczajacy PRNG do gry, nie do kryptografii. */
-    uint64_t x = rng_stan;
-    if (x == 0) x = UINT64_C(0xD1B54A32D192ED03);
-    x ^= x >> 12;
-    x ^= x << 25;
-    x ^= x >> 27;
-    rng_stan = x;
-    return static_cast<uint32_t>((x * UINT64_C(2685821657736338717)) >> 32);
+// Kolor -> jasnosc (0..255), do wyboru czytelnego koloru oczu glowy weza.
+int jasnosc(uint32_t rgb) {
+    return static_cast<int>((((rgb >> 16) & 255U) * 30U + ((rgb >> 8) & 255U) * 59U + (rgb & 255U) * 11U) / 100U);
 }
 
-static bool punkt_na_wezu(int x, int y) {
-    for (int i = 0; i < dlugosc_weza; ++i) {
-        if (waz[i].x == x && waz[i].y == y) return true;
-    }
-    return false;
-}
+struct AplikacjaSnake {
+    AplikacjaGUI* app{nullptr};
+    Okno* okno{nullptr};
+    PowierzchniaRysunkowa* plansza{nullptr};
+    Przycisk* btn_pauza{nullptr};
+    Przycisk* btn_nowa{nullptr};
+    Etykieta* lbl_wynik{nullptr};
+    PasekStanu* pasek{nullptr};
+    Gra gra{};
+    uint64_t ostatni_krok_ns{0};
+    uint64_t licznik_losowania{0x9E3779B97F4A7C15ULL};
+    Stan pokazany_stan{Stan::Gotowa};
+    int pokazany_wynik{-1};
+    int pokazana_komorka{-1};
+    bool timer_wlaczony{false};
 
-static void generuj_jablko() {
-    if (dlugosc_weza >= MAKS_DLUGOSC_WEZA) {
-        gra_trwa = false;
-        gra_wygrana = true;
-        return;
+    uint64_t ziarno() {
+        // Ziarno tylko dla jablek; zegar monotoniczny + licznik, bez RDTSC.
+        licznik_losowania = licznik_losowania * 6364136223846793005ULL + 1442695040888963407ULL;
+        return licznik_losowania ^ gui_czas_monotoniczny_ns();
     }
 
-    /* Najpierw szybkie losowanie. */
-    for (int proba = 0; proba < MAKS_DLUGOSC_WEZA * 2; ++proba) {
-        const int x = 1 + static_cast<int>(losuj_u32() % POLA_GRACZA_X);
-        const int y = 1 + static_cast<int>(losuj_u32() % POLA_GRACZA_Y);
-        if (!punkt_na_wezu(x, y)) {
-            jablko = {x, y};
+    void synchronizuj_timer() {
+        // Timer tylko dla aktywnej gry: pauza/koniec/gotowa => proces czeka na zdarzenia (0% CPU).
+        const bool potrzebny = gra.stan == Stan::Gra;
+        if (potrzebny == timer_wlaczony) return;
+        timer_wlaczony = potrzebny;
+        ostatni_krok_ns = 0;
+        if (app) app->ustaw_zadanie_okresowe(potrzebny ? OKRES_TIMERA_TIKI : 0, &AplikacjaSnake::tykniecie, this);
+    }
+
+    static void tykniecie(void* ctx) { static_cast<AplikacjaSnake*>(ctx)->tyk(); }
+
+    void tyk() {
+        if (gra.stan != Stan::Gra) return;
+        if (okno && okno->czy_zminimalizowane()) {          // minimalizacja wstrzymuje gre
+            gra.przelacz_pauze();
+            po_zmianie_stanu();
             return;
         }
+        const uint64_t teraz = gui_czas_monotoniczny_ns();
+        if (ostatni_krok_ns == 0 || teraz < ostatni_krok_ns) { ostatni_krok_ns = teraz; return; }
+        int kroki = 0;
+        while (teraz - ostatni_krok_ns >= KROK_NS && gra.stan == Stan::Gra) {
+            ostatni_krok_ns += KROK_NS;
+            gra.krok();
+            if (++kroki >= MAKS_KROKOW_NA_WYWOLANIE) { ostatni_krok_ns = teraz; break; }
+        }
+        if (kroki) po_zmianie_stanu();
     }
 
-    /* Deterministyczny fallback - gwarantuje znalezienie wolnego pola. */
-    for (int y = 1; y < PLANSZA_Y - 1; ++y) {
-        for (int x = 1; x < PLANSZA_X - 1; ++x) {
-            if (!punkt_na_wezu(x, y)) {
-                jablko = {x, y};
-                return;
+    void nowa_gra() {
+        gra.nowa_gra(ziarno(), true);
+        po_zmianie_stanu();
+    }
+
+    void przelacz_pauze() {
+        if (gra.zakonczona()) { nowa_gra(); return; }
+        if (gra.przelacz_pauze()) po_zmianie_stanu();
+    }
+
+    void kierunek(Kierunek k) {
+        if (gra.ustaw_kierunek(k)) po_zmianie_stanu();
+    }
+
+    const char* tekst_stanu() const {
+        switch (gra.stan) {
+            case Stan::Gotowa: return "Gotowy";
+            case Stan::Gra: return "Gra trwa";
+            case Stan::Pauza: return "Pauza";
+            case Stan::KoniecGry: return "Koniec gry";
+            case Stan::Wygrana: return "Wygrana!";
+        }
+        return "";
+    }
+
+    void po_zmianie_stanu() {
+        synchronizuj_timer();
+        odswiez_interfejs();
+        if (plansza) plansza->uniewaznij();
+    }
+
+    void odswiez_interfejs() {
+        char b[48];
+        if (lbl_wynik && pokazany_wynik != gra.wynik()) {
+            size_t p = dopisz_tekst(b, sizeof(b), 0, "Wynik: ");
+            dopisz_liczbe(b, sizeof(b), p, gra.wynik());
+            lbl_wynik->ustaw_tekst(b);
+        }
+        if (btn_pauza && pokazany_stan != gra.stan) {
+            btn_pauza->ustaw_tekst(gra.stan == Stan::Pauza ? "Wznów" : (gra.zakonczona() ? "Jeszcze raz" : "Pauza"));
+            btn_pauza->ustaw_wlaczona(true);
+        }
+        if (pasek) {
+            if (pokazany_stan != gra.stan) pasek->ustaw_tekst(0, tekst_stanu());
+            if (pokazany_wynik != gra.wynik()) {
+                size_t p = dopisz_tekst(b, sizeof(b), 0, "Dł.: ");
+                dopisz_liczbe(b, sizeof(b), p, gra.dlugosc);
+                pasek->ustaw_tekst(1, b);
             }
         }
+        pokazany_stan = gra.stan;
+        pokazany_wynik = gra.wynik();
     }
 
-    gra_trwa = false;
-    gra_wygrana = true;
+    void ustaw_rozmiar_komorki(int k) {
+        if (!pasek || k == pokazana_komorka) return;
+        pokazana_komorka = k;
+        char b[48];
+        size_t p = dopisz_tekst(b, sizeof(b), 0, "Pole: ");
+        p = dopisz_liczbe(b, sizeof(b), p, k);
+        dopisz_tekst(b, sizeof(b), p, " px");
+        pasek->ustaw_tekst(2, b);
+    }
+};
+
+AplikacjaSnake g_snake;
+
+uint32_t mieszaj(uint32_t a, uint32_t b, int procent_b) {
+    uint32_t wynik = 0;
+    for (int s = 0; s <= 16; s += 8) {
+        const uint32_t ca = (a >> s) & 255U, cb = (b >> s) & 255U;
+        wynik |= ((ca * static_cast<uint32_t>(100 - procent_b) + cb * static_cast<uint32_t>(procent_b)) / 100U) << s;
+    }
+    return wynik;
 }
 
-static void resetuj_gre() {
-    dlugosc_weza = 3;
+// Rysowanie planszy: tlo/ramka narysowane przez PowierzchniaRysunkowa z motywu; tu komorki.
+void rysuj_plansze(PowierzchniaRysunkowa* pow, KontekstRysowania& ctx, void*) {
+    AplikacjaSnake& s = g_snake;
+    const UkladPlanszy u = uklad_planszy(pow->szerokosc(), pow->wysokosc(), 6);
+    s.ustaw_rozmiar_komorki(u.komorka);
+    if (u.komorka <= 0) return;                         // okno za male: nic nie rysujemy
+    const uint32_t tlo = motyw_kolor(MOTYW_KOLOR_POLETEKSTOWE);
+    const uint32_t tekst = motyw_kolor(MOTYW_KOLOR_TEKST);
+    const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+    const uint32_t sciana = mieszaj(tlo, akcent, 55);
+    const uint32_t siatka = mieszaj(tlo, tekst, 8);
+    const uint32_t cialo = motyw_kolor(MOTYW_KOLOR_SUKCES);
+    const uint32_t glowa = mieszaj(cialo, jasnosc(cialo) > 128 ? 0x00000000U : 0x00FFFFFFU, 25);
+    const uint32_t jablko = motyw_kolor(MOTYW_KOLOR_BLAD);
+    const int k = u.komorka;
+    const int ox = u.x, oy = u.y;
 
-    waz[0] = {PLANSZA_X / 2, PLANSZA_Y / 2};
-    waz[1] = {PLANSZA_X / 2 - 1, PLANSZA_Y / 2};
-    waz[2] = {PLANSZA_X / 2 - 2, PLANSZA_Y / 2};
+    // Plansza: sciany (obwod), wnetrze z delikatna siatka.
+    ctx.rysuj_prostokat(Prostokat(ox, oy, u.szer, u.wys), sciana);
+    ctx.rysuj_prostokat(Prostokat(ox + k, oy + k, u.szer - 2 * k, u.wys - 2 * k), tlo);
+    for (int gx = 2; gx < PLANSZA_X - 1; ++gx) ctx.rysuj_linie_pionowa(ox + gx * k, oy + k, u.wys - 2 * k, siatka);
+    for (int gy = 2; gy < PLANSZA_Y - 1; ++gy) ctx.rysuj_linie_pozioma(ox + k, oy + gy * k, u.szer - 2 * k, siatka);
 
-    kierunek_x = 1;
-    kierunek_y = 0;
-    oczekiwany_kierunek_x = 1;
-    oczekiwany_kierunek_y = 0;
-    zmiana_kierunku_w_tym_kroku = false;
+    const int wc = k >= 8 ? 1 : 0;                      // odstep komorki od siatki
+    if (s.gra.stan != Stan::Wygrana) {
+        const int m = k >= 10 ? 3 : (k >= 6 ? 2 : 1);
+        ctx.rysuj_zaokraglony_prostokat(Prostokat(ox + s.gra.jablko.x * k + m, oy + s.gra.jablko.y * k + m,
+                                                  k - 2 * m, k - 2 * m), jablko, k >= 12 ? 3 : 1);
+    }
+    for (int i = s.gra.dlugosc - 1; i >= 0; --i) {
+        const PunktPlanszy& p = s.gra.waz[i];
+        ctx.rysuj_prostokat(Prostokat(ox + p.x * k + wc, oy + p.y * k + wc, k - 2 * wc, k - 2 * wc),
+                            i == 0 ? glowa : cialo);
+    }
+    if (k >= 10) {                                      // oczy glowy w kolorze tekstu motywu
+        const PunktPlanszy& h = s.gra.waz[0];
+        const int e = k / 5 > 1 ? k / 5 : 2;
+        const int hx = ox + h.x * k, hy = oy + h.y * k;
+        const bool poziomo = s.gra.kx != 0;
+        const int ax = poziomo ? (s.gra.kx > 0 ? k - k / 3 - e : k / 3) : k / 4;
+        const int ay = poziomo ? k / 4 : (s.gra.ky > 0 ? k - k / 3 - e : k / 3);
+        const int bx = poziomo ? ax : k - k / 4 - e;
+        const int by = poziomo ? k - k / 4 - e : ay;
+        ctx.rysuj_prostokat(Prostokat(hx + ax, hy + ay, e, e), tekst);
+        ctx.rysuj_prostokat(Prostokat(hx + bx, hy + by, e, e), tekst);
+    }
 
-    gra_trwa = true;
-    gra_wygrana = false;
-
-    rng_stan ^= pobierz_cykle();
-    if (rng_stan == 0) rng_stan = UINT64_C(0xA0761D6478BD642F);
-
-    generuj_jablko();
-
-    ostatni_krok_timestamp = 0;
-    fallback_timer_ticks = 0;
-    ansi = StanAnsi::BRAK;
+    // Nakladka stanu (Gotowa / Pauza / Koniec gry / Wygrana) - kolory motywu.
+    const char* tytul = nullptr;
+    const char* podpis = nullptr;
+    switch (s.gra.stan) {
+        case Stan::Pauza: tytul = "PAUZA"; podpis = "Spacja lub 'Wznów'"; break;
+        case Stan::KoniecGry: tytul = "KONIEC GRY"; podpis = "R lub 'Nowa gra'"; break;
+        case Stan::Wygrana: tytul = "WYGRANA!"; podpis = "R lub 'Nowa gra'"; break;
+        case Stan::Gotowa: tytul = "SNAKE"; podpis = "Strzałki/WASD lub Spacja"; break;
+        case Stan::Gra: break;
+    }
+    if (tytul) {
+        // Rozmiar nakladki wynika z zmierzonego tekstu (czytelna takze przy malych komorkach).
+        const int tw1 = ctx.zmierz_tekst(tytul, 1).szerokosc, tw2 = ctx.zmierz_tekst(podpis, 1).szerokosc;
+        const int fh = ctx.pobierz_wysokosc_czcionki(1);
+        int nw = (tw1 > tw2 ? tw1 : tw2) + 40, nh = fh * 2 + 36;
+        if (nw > u.szer - 8) nw = u.szer - 8;
+        if (nh > u.wys - 8) nh = u.wys - 8;
+        const int nx = ox + (u.szer - nw) / 2, ny = oy + (u.wys - nh) / 2;
+        const uint32_t kol = s.gra.stan == Stan::KoniecGry ? jablko : (s.gra.stan == Stan::Wygrana ? cialo : akcent);
+        ctx.rysuj_prostokat(Prostokat(nx, ny, nw, nh), motyw_kolor(MOTYW_KOLOR_PANEL));
+        ctx.rysuj_ramke(Prostokat(nx, ny, nw, nh), kol, 2);
+        const int polowa = nh / 2;
+        ctx.rysuj_tekst_wysrodkowany(Prostokat(nx, ny + 2, nw, polowa - 2), tytul, tekst, 1);
+        ctx.rysuj_tekst_wysrodkowany(Prostokat(nx, ny + polowa, nw, polowa - 2), podpis,
+                                     motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), 1);
+    }
 }
 
-/* ========================================================================
- * Sterowanie
- * ======================================================================== */
-static void ustaw_kierunek(int nx, int ny) {
-    if (!gra_trwa || zmiana_kierunku_w_tym_kroku) return;
-
-    /* Nie wolno zawrocic o 180 stopni w szyje weza. */
-    if (nx == -kierunek_x && ny == -kierunek_y) return;
-
-    /* Pusty/niepoprawny kierunek odrzucamy. */
-    if ((nx == 0 && ny == 0) || (nx != 0 && ny != 0)) return;
-
-    oczekiwany_kierunek_x = nx;
-    oczekiwany_kierunek_y = ny;
-    zmiana_kierunku_w_tym_kroku = true;
-}
-
-static void obsluz_klawisz(char klawisz) {
-    /* Strzalki moga przyjsc jako ESC [ A/B/C/D. */
-    if (ansi == StanAnsi::ESC) {
-        if (klawisz == '[') ansi = StanAnsi::CSI;
-        else ansi = StanAnsi::BRAK;
-        return;
+class OknoSnake : public Okno {
+public:
+    OknoSnake(const char* tytul, int w, int h) : Okno(tytul, w, h) {
+        ustaw_minimalny_rozmiar(MIN_SZER, MIN_WYS);
     }
 
-    if (ansi == StanAnsi::CSI) {
-        ansi = StanAnsi::BRAK;
-        if (klawisz == 'A') ustaw_kierunek(0, -1);
-        else if (klawisz == 'B') ustaw_kierunek(0, 1);
-        else if (klawisz == 'C') ustaw_kierunek(1, 0);
-        else if (klawisz == 'D') ustaw_kierunek(-1, 0);
-        return;
-    }
-
-    if (klawisz == '\x1B') {
-        ansi = StanAnsi::ESC;
-        return;
-    }
-
-    if (klawisz == 'q' || klawisz == 'Q') {
-        zamknij_aplikacje = true;
-        return;
-    }
-
-    if (!gra_trwa) {
-        if (klawisz == 'r' || klawisz == 'R') resetuj_gre();
-        return;
-    }
-
-    if (klawisz == 'w' || klawisz == 'W') ustaw_kierunek(0, -1);
-    else if (klawisz == 's' || klawisz == 'S') ustaw_kierunek(0, 1);
-    else if (klawisz == 'a' || klawisz == 'A') ustaw_kierunek(-1, 0);
-    else if (klawisz == 'd' || klawisz == 'D') ustaw_kierunek(1, 0);
-}
-
-/* ========================================================================
- * Logika gry
- * ======================================================================== */
-static void krok_gry() {
-    if (!gra_trwa) return;
-
-    kierunek_x = oczekiwany_kierunek_x;
-    kierunek_y = oczekiwany_kierunek_y;
-    zmiana_kierunku_w_tym_kroku = false;
-
-    const Punkt stary_ogon = waz[dlugosc_weza - 1];
-
-    for (int i = dlugosc_weza - 1; i > 0; --i) {
-        waz[i] = waz[i - 1];
-    }
-
-    waz[0].x += kierunek_x;
-    waz[0].y += kierunek_y;
-
-    if (waz[0].x <= 0 || waz[0].x >= PLANSZA_X - 1 ||
-        waz[0].y <= 0 || waz[0].y >= PLANSZA_Y - 1) {
-        gra_trwa = false;
-        return;
-    }
-
-    for (int i = 1; i < dlugosc_weza; ++i) {
-        if (waz[0].x == waz[i].x && waz[0].y == waz[i].y) {
-            gra_trwa = false;
-            return;
+    void obsluz_zdarzenie(const bws_zdarzenie& ev) override {
+        AplikacjaSnake& s = g_snake;
+        if (ev.typ == BWS_ZDARZENIE_KLAWISZ) {
+            switch (ev.kod) {
+                case 'w': case 'W': s.kierunek(Kierunek::Gora); return;
+                case 's': case 'S': s.kierunek(Kierunek::Dol); return;
+                case 'a': case 'A': s.kierunek(Kierunek::Lewo); return;
+                case 'd': case 'D': s.kierunek(Kierunek::Prawo); return;
+                case ' ': s.przelacz_pauze(); return;
+                case 'p': case 'P': if (!s.gra.zakonczona()) s.przelacz_pauze(); return;
+                case 'r': case 'R': s.nowa_gra(); return;
+                default: break;
+            }
+        } else if (ev.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && ev.x != 0) {
+            switch (klawisz_polecenia(ev)) {          // strzalki (kody 0x48/0x50/0x4b/0x4d)
+                case 0x48: s.kierunek(Kierunek::Gora); return;
+                case 0x50: s.kierunek(Kierunek::Dol); return;
+                case 0x4b: s.kierunek(Kierunek::Lewo); return;
+                case 0x4d: s.kierunek(Kierunek::Prawo); return;
+                default: break;
+            }
         }
+        Okno::obsluz_zdarzenie(ev);
     }
-
-    if (waz[0].x == jablko.x && waz[0].y == jablko.y) {
-        if (dlugosc_weza < MAKS_DLUGOSC_WEZA) {
-            /* Poprzedni kod tylko zwiekszal licznik, zostawiajac nowy segment
-             * niezainicjalizowany. Nowy segment powstaje dokladnie w miejscu
-             * starego ogona. */
-            waz[dlugosc_weza] = stary_ogon;
-            ++dlugosc_weza;
-        }
-        generuj_jablko();
-    }
-}
-
-static bool timer_ma_wykonac_krok(const bws_zdarzenie& zdarzenie) {
-    /* W aktualnym ABI timestamp jest zwykle wartoscia czasu w ns.
-     * Zachowujemy fallback dla starszej wersji, w ktorej byl malym tickiem. */
-    if (zdarzenie.timestamp >= UINT64_C(1000000000)) {
-        if (ostatni_krok_timestamp == 0) {
-            ostatni_krok_timestamp = zdarzenie.timestamp;
-            return false;
-        }
-
-        if (zdarzenie.timestamp < ostatni_krok_timestamp ||
-            zdarzenie.timestamp - ostatni_krok_timestamp >= KROK_NS) {
-            ostatni_krok_timestamp = zdarzenie.timestamp;
-            return true;
-        }
-        return false;
-    }
-
-    ++fallback_timer_ticks;
-    if (fallback_timer_ticks >= TIMER_FALLBACK_DZIELNIK) {
-        fallback_timer_ticks = 0;
-        return true;
-    }
-    return false;
-}
-
-/* ========================================================================
- * Rysowanie / obsługa okna
- * ======================================================================== */
-static void rysuj_gre();
-
-static int ogranicz_int(int wartosc, int minimum, int maksimum) {
-    if (maksimum < minimum) maksimum = minimum;
-    if (wartosc < minimum) return minimum;
-    if (wartosc > maksimum) return maksimum;
-    return wartosc;
-}
-
-static void zakoncz_przeciaganie() {
-    if (!przeciaganie_okna) return;
-    przeciaganie_okna = false;
-    gui_ustaw_capture_myszy(false);
-
-    if (przerysuj_po_przeciaganiu) {
-        przerysuj_po_przeciaganiu = false;
-        rysuj_gre();
-    }
-}
-
-static void rysuj_gre() {
-    const int plansza_x = okno_x;
-    const int plansza_y = okno_y + WYSOKOSC_BELKI;
-
-    /*
-     * W aktualnym GUI Ring 3 współrzędne rysowania są ekranowe.
-     * grafika.cpp odejmuje pozycję warstwy i zapisuje do jej lokalnego bufora.
-     */
-    gui_rysuj_standardowa_belke(
-        okno_x,
-        okno_y,
-        SZEROKOSC_OKNA,
-        "Snake",
-        false);
-
-    /*
-     * Aktualne ABI ma przesuwanie (BWS34) i minimalizację (BWS41),
-     * ale nie ma zmiany rozmiaru warstwy. Nie udajemy więc maksymalizacji:
-     * środkowy przycisk jest świadomie pokazany jako nieaktywny.
-     */
-    RysujPrzycisk(
-        okno_x + SZEROKOSC_OKNA - 50,
-        okno_y + 4,
-        20, 20,
-        0x00404040,
-        0x00808080,
-        "^");
-
-    gui_rysuj_prostokat(
-        plansza_x,
-        plansza_y,
-        SZEROKOSC_OKNA,
-        WYSOKOSC_PLANSZY,
-        KOLOR_TLO);
-
-    /* Ramka planszy. */
-    gui_rysuj_prostokat(
-        plansza_x, plansza_y,
-        SZEROKOSC_OKNA, 2, KOLOR_RAMKA);
-    gui_rysuj_prostokat(
-        plansza_x, plansza_y + WYSOKOSC_PLANSZY - 2,
-        SZEROKOSC_OKNA, 2, KOLOR_RAMKA);
-    gui_rysuj_prostokat(
-        plansza_x, plansza_y,
-        2, WYSOKOSC_PLANSZY, KOLOR_RAMKA);
-    gui_rysuj_prostokat(
-        plansza_x + SZEROKOSC_OKNA - 2, plansza_y,
-        2, WYSOKOSC_PLANSZY, KOLOR_RAMKA);
-
-    if (!gra_wygrana) {
-        gui_rysuj_prostokat(
-            plansza_x + jablko.x * ROZMIAR_KAFELKA + 3,
-            plansza_y + jablko.y * ROZMIAR_KAFELKA + 3,
-            ROZMIAR_KAFELKA - 6,
-            ROZMIAR_KAFELKA - 6,
-            KOLOR_JABLKO);
-    }
-
-    for (int i = dlugosc_weza - 1; i >= 0; --i) {
-        const uint32_t kolor =
-            (i == 0) ? KOLOR_GLOWA : KOLOR_CIALO;
-
-        gui_rysuj_prostokat(
-            plansza_x + waz[i].x * ROZMIAR_KAFELKA + 1,
-            plansza_y + waz[i].y * ROZMIAR_KAFELKA + 1,
-            ROZMIAR_KAFELKA - 2,
-            ROZMIAR_KAFELKA - 2,
-            kolor);
-    }
-
-    if (!gra_trwa) {
-        constexpr int NAKLADKA_W = 250;
-        constexpr int NAKLADKA_H = 82;
-
-        const int x =
-            plansza_x + (SZEROKOSC_OKNA - NAKLADKA_W) / 2;
-        const int y =
-            plansza_y + (WYSOKOSC_PLANSZY - NAKLADKA_H) / 2;
-
-        gui_rysuj_prostokat(
-            x, y,
-            NAKLADKA_W, NAKLADKA_H,
-            KOLOR_NAKLADKA);
-
-        gui_rysuj_prostokat(
-            x, y,
-            NAKLADKA_W, 2,
-            gra_wygrana ? KOLOR_RAMKA : KOLOR_JABLKO);
-
-        gui_rysuj_prostokat(
-            x, y + NAKLADKA_H - 2,
-            NAKLADKA_W, 2,
-            gra_wygrana ? KOLOR_RAMKA : KOLOR_JABLKO);
-
-        rysuj_tekst_wysrodkowany(
-            x,
-            y + 8,
-            NAKLADKA_W,
-            28,
-            1,
-            KOLOR_BIALY,
-            gra_wygrana ? "WYGRANA!" : "KONIEC GRY");
-
-        rysuj_tekst_wysrodkowany(
-            x,
-            y + 40,
-            NAKLADKA_W,
-            26,
-            1,
-            KOLOR_SZARY,
-            "R - ponownie   Q - wyjscie");
-    }
-
-    gui_odswiez();
-}
-
-static void obsluz_mysz_down(const bws_zdarzenie& zdarzenie) {
-    const gui_akcja_belki akcja =
-        gui_hit_test_belki(
-            zdarzenie.x,
-            zdarzenie.y,
-            okno_x,
-            okno_y,
-            SZEROKOSC_OKNA);
-
-    switch (akcja) {
-        case GUI_BELKA_ZAMKNIJ:
-            zakoncz_przeciaganie();
-            zamknij_aplikacje = true;
-            return;
-
-        case GUI_BELKA_MINIMALIZUJ:
-            zakoncz_przeciaganie();
-            (void)gui_minimalizuj_okno();
-            return;
-
-        case GUI_BELKA_MAKSYMALIZUJ:
-            /*
-             * Brak resize warstwy w obecnym publicznym ABI.
-             * Przycisk jest narysowany jako nieaktywny.
-             */
-            return;
-
-        case GUI_BELKA_DRAG:
-            przeciaganie_okna = true;
-            chwyt_x = zdarzenie.x - okno_x;
-            chwyt_y = zdarzenie.y - okno_y;
-            gui_ustaw_capture_myszy(true);
-            return;
-
-        case GUI_BELKA_BRAK:
-        default:
-            return;
-    }
-}
-
-static void obsluz_mysz_ruch(const bws_zdarzenie& zdarzenie) {
-    if (!przeciaganie_okna) return;
-
-    /* Capture powinien dostarczyć także ruch poza oknem. */
-    if ((zdarzenie.przyciski & 1U) == 0U) {
-        zakoncz_przeciaganie();
-        return;
-    }
-
-    int nowy_x = zdarzenie.x - chwyt_x;
-    int nowy_y = zdarzenie.y - chwyt_y;
-
-    int max_x = ekran_w - SZEROKOSC_OKNA;
-    int max_y = ekran_h - WYSOKOSC_PASKA_SYSTEMOWEGO - WYSOKOSC_OKNA;
-
-    if (max_x < 0) max_x = 0;
-    if (max_y < 0) max_y = 0;
-
-    nowy_x = ogranicz_int(nowy_x, 0, max_x);
-    nowy_y = ogranicz_int(nowy_y, 0, max_y);
-
-    if (nowy_x == okno_x && nowy_y == okno_y) return;
-
-    /*
-     * Nie przerysowujemy całej gry podczas przeciągania.
-     * Przesuwamy gotową warstwę, więc compositor może zrobić szybki drag.
-     */
-    bws_przesun_warstwe(nowy_x, nowy_y);
-    okno_x = nowy_x;
-    okno_y = nowy_y;
-    gui_odswiez();
-}
+};
 
 } // namespace
 
-/* ========================================================================
- * Punkt wejscia Ring 3
- * ======================================================================== */
-extern "C" __attribute__((noreturn)) void _start() {
-    gui_legacy_wlacz();
-    gui_pobierz_rozdzielczosc(&ekran_w, &ekran_h);
-    if (ekran_w <= 0 || ekran_h <= WYSOKOSC_PASKA_SYSTEMOWEGO) {
-        gui_zakoncz_aplikacje();
-    }
-
-    gui_ustaw_przejecie_myszy(true);
-
-    if (bws_utworz_warstwe(
-            okno_x,
-            okno_y,
-            SZEROKOSC_OKNA,
-            WYSOKOSC_OKNA,
-            OKNO_Z_ORDER) < 0) {
-        gui_zakoncz_aplikacje();
-    }
-    (void)gui_ustaw_tytul_okna("Snake");
-
-    resetuj_gre();
-    rysuj_gre();
-
-    while (!zamknij_aplikacje) {
-        bws_zdarzenie zdarzenie{};
-
-        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_EKRAN) {
-            gui_pobierz_rozdzielczosc(&ekran_w,&ekran_h);
-            if (bws_utworz_warstwe(okno_x,okno_y,SZEROKOSC_OKNA,
-                                   WYSOKOSC_OKNA,OKNO_Z_ORDER)<0)
-                gui_zakoncz_aplikacje();
-            (void)gui_ustaw_tytul_okna("Snake");
-            rysuj_gre();
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_ZAMKNIJ) {
-            zakoncz_przeciaganie();
-            zamknij_aplikacje = true;
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
-            zakoncz_przeciaganie();
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ) {
-            obsluz_klawisz(static_cast<char>(zdarzenie.kod));
-
-            /* Klawisz R może od razu zresetować ekran końca gry. */
-            if (!przeciaganie_okna && !zamknij_aplikacje) {
-                rysuj_gre();
-            } else if (przeciaganie_okna) {
-                przerysuj_po_przeciaganiu = true;
-            }
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
-            obsluz_mysz_down(zdarzenie);
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
-            obsluz_mysz_ruch(zdarzenie);
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_UP) {
-            zakoncz_przeciaganie();
-            continue;
-        }
-
-        if (zdarzenie.typ == BWS_ZDARZENIE_TIMER) {
-            if (timer_ma_wykonac_krok(zdarzenie)) {
-                krok_gry();
-
-                if (przeciaganie_okna) {
-                    /*
-                     * Logika gry może iść dalej, ale render odkładamy do UP.
-                     * Dzięki temu drag nie generuje pełnych redrawów planszy.
-                     */
-                    przerysuj_po_przeciaganiu = true;
-                } else {
-                    rysuj_gre();
-                }
-            }
-            continue;
-        }
-    }
-
-    zakoncz_przeciaganie();
-    gui_zakoncz_aplikacje();
+#ifndef SNAKE_HOST_TEST
+extern "C" {
+void* __dso_handle = nullptr;
+int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
 }
+#endif
+
+// Budowa interfejsu (wspolna dla aplikacji i testow hosta).
+static void snake_zbuduj_ui(AplikacjaGUI& app, OknoSnake& okno) {
+    g_snake.app = &app;
+    g_snake.okno = &okno;
+    app.ustaw_glowne_okno(&okno);
+
+    Panel* korzen = new Panel(Orientacja::Pionowa);
+    korzen->ustaw_wypelnienie(Marginesy(8, 8, 8, 0));
+    korzen->ustaw_odstep(6);
+    okno.ustaw_kontrolke_glowna(korzen);
+
+    Panel& gora = korzen->dodaj<Panel>(Orientacja::Pozioma);
+    gora.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    gora.ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
+    gora.ustaw_wypelnienie(Marginesy(0, 0, 0, 0));
+    gora.ustaw_odstep(8);
+
+    Etykieta& tytul = gora.dodaj<Etykieta>("Snake");
+    tytul.ustaw_preferowany_rozmiar(Rozmiar(56, 28));
+    tytul.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
+
+    Etykieta& wynik = gora.dodaj<Etykieta>("Wynik: 0");
+    g_snake.lbl_wynik = &wynik;
+    wynik.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    wynik.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
+
+    Przycisk& nowa = gora.dodaj<Przycisk>("Nowa gra");
+    g_snake.btn_nowa = &nowa;
+    nowa.ustaw_preferowany_rozmiar(Rozmiar(116, 28));
+    nowa.ustaw_mozliwosc_fokusu(false);                 // klawisze gry zostaja przy oknie
+    nowa.przy_kliknieciu([](Przycisk*, void*) { g_snake.nowa_gra(); });
+
+    Przycisk& pauza = gora.dodaj<Przycisk>("Pauza");
+    g_snake.btn_pauza = &pauza;
+    pauza.ustaw_preferowany_rozmiar(Rozmiar(116, 28));
+    pauza.ustaw_mozliwosc_fokusu(false);
+    pauza.przy_kliknieciu([](Przycisk*, void*) { g_snake.przelacz_pauze(); });
+
+    PowierzchniaRysunkowa* pole = new PowierzchniaRysunkowa();
+    g_snake.plansza = pole;
+    pole->ustaw_preferowany_rozmiar(Rozmiar(-1, -1));
+    pole->ustaw_mozliwosc_fokusu(false);
+    pole->przy_rysowaniu(&rysuj_plansze);
+    korzen->dodaj_kontrolke(pole);
+
+    PasekStanu& sb = korzen->dodaj<PasekStanu>();
+    g_snake.pasek = &sb;
+    sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
+    sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+    sb.dodaj_sekcje("Gotowy", 120, RozmiarSekcjiStanu::Rozciagnij);
+    sb.dodaj_sekcje("Dł.: 3", 70, RozmiarSekcjiStanu::Stala);
+    sb.dodaj_sekcje("Pole: 0 px", 100, RozmiarSekcjiStanu::Stala);
+
+    g_snake.gra.nowa_gra(g_snake.ziarno(), false);
+    g_snake.pokazany_wynik = -1;
+    g_snake.pokazany_stan = Stan::Pauza;                // wymusza pierwsze odswiezenie napisow
+    g_snake.odswiez_interfejs();
+}
+
+#ifndef SNAKE_HOST_TEST
+extern "C" __attribute__((noreturn)) void _start() {
+    AplikacjaGUI app;
+    OknoSnake okno("Snake", OKNO_SZER, OKNO_WYS);
+    snake_zbuduj_ui(app, okno);
+    app.uruchom(okno);
+    bws_zakoncz_proces();
+}
+#endif

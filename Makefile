@@ -1067,24 +1067,26 @@ $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 
 
 
-# Snake
-snake_tmp.o: gry/snake/snake.cpp jadro/gui/bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -c $< -o $@
+# Snake (BursztynUI)
+SNAKE_LINKER := gry/snake/snake_linker.ld
+snake_tmp.o: gry/snake/snake.cpp gry/snake/snake_logika.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(RING3_STD_LINKER)
-	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
+snake_blob.o: snake_tmp.o $(BSF_APP_GUI) $(SNAKE_LINKER)
+	$(LD) --gc-sections -T $(call bur_linker,$(SNAKE_LINKER)) $(RING3_LDFLAGS) \
 		snake_tmp.o $(BSF_APP_GUI) -o snake.elf
 	$(BUR_CONVERT) snake.elf snake.bin
 	$(PYTHON) narzedzia/kompresuj_blob.py snake.bin snake.bin.bz
 	$(LD) -r -b binary snake.bin.bz -o snake_blob.o
 
-# Przegladarka Obrazow
-przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp jadro/gui/bursztyn_gui.h
-	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+# Przegladarka Obrazow (BursztynUI + silnik BMP w silnik_obrazu.h)
+PRZEGLADARKA_OBRAZOW_LINKER := programy/przegladarka-obrazow/przegladarka_obrazow_linker.ld
+przegladarka_obrazow_tmp.o: programy/przegladarka-obrazow/przegladarka-obrazow.cpp programy/przegladarka-obrazow/silnik_obrazu.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Iprogramy/przegladarka-obrazow -Os -ffunction-sections -fdata-sections -c $< -o $@
 
-przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o bursztyn_gui.o $(RING3_STD_LINKER)
-	$(LD) -T $(call bur_linker,$(RING3_STD_LINKER)) $(RING3_LDFLAGS) \
-		przegladarka_obrazow_tmp.o bursztyn_gui.o -o przegladarka_obrazow.elf
+przegladarka_obrazow_blob.o: przegladarka_obrazow_tmp.o $(BSF_APP_GUI) $(PRZEGLADARKA_OBRAZOW_LINKER)
+	$(LD) --gc-sections -T $(call bur_linker,$(PRZEGLADARKA_OBRAZOW_LINKER)) $(RING3_LDFLAGS) \
+		przegladarka_obrazow_tmp.o $(BSF_APP_GUI) -o przegladarka_obrazow.elf
 	$(BUR_CONVERT) przegladarka_obrazow.elf przegladarka_obrazow.bin
 	$(PYTHON) narzedzia/kompresuj_blob.py przegladarka_obrazow.bin przegladarka_obrazow.bin.bz
 	$(LD) -r -b binary przegladarka_obrazow.bin.bz -o przegladarka_obrazow_blob.o
@@ -3059,6 +3061,15 @@ $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemo
 		/programy/test_dzwieku.cebula/test_dzwieku.bur=test_dzwieku.bin \
 		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
 		/programy/ekran.cebula/ekran.bur=ekran.bin
+# Kursor zmiany rozmiaru: opcjonalne ikonki/kursor_rozciagania.png (brak pliku nie psuje budowania).
+KURSOR_ROZCIAGANIA_H := jadro/gui/kursor_rozciagania.generated.h
+KURSOR_ROZCIAGANIA_PNG := ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
+.PHONY: FORCE
+FORCE:
+$(KURSOR_ROZCIAGANIA_H): narzedzia/generuj_kursor_rozciagania.py FORCE
+	$(PYTHON) narzedzia/generuj_kursor_rozciagania.py $@ $(KURSOR_ROZCIAGANIA_PNG)
+grafika.o: $(KURSOR_ROZCIAGANIA_H) jadro/gui/kursor_rozciagania.h
+
 loader.o: $(SKROTY_SYSTEMOWE_H) jadro/fs/tozsamosc_systemowa.h jadro/fs/tozsamosc_typy.h
 
 .PHONY: test-system-binary-protection-host
@@ -3078,3 +3089,23 @@ test-kernel-blobz-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_blob_skompresowany.cpp -lz -o .bsf-test/blobz
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
+
+# Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-resize-cursor-host
+test-resize-cursor-host: $(KURSOR_ROZCIAGANIA_H)
+	$(PYTHON) testy/test_kursor_rozciagania_generator.py
+	mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -I. -Ijadro/gui testy/test_kursor_rozciagania_host.cpp -o .bsf-test/kursor_rozciagania_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/kursor_rozciagania_host
+
+.PHONY: test-snake-host
+test-snake-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_snake_host.cpp -o .bursztyn-ui-test/test-snake
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bursztyn-ui-test/test-snake
+
+.PHONY: test-przegladarka-obrazow-host
+test-przegladarka-obrazow-host:
+	@mkdir -p .bursztyn-ui-test
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -Iprogramy/przegladarka-obrazow -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_przegladarka_obrazow_host.cpp -o .bursztyn-ui-test/test-przegladarka-obrazow
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bursztyn-ui-test/test-przegladarka-obrazow

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Test generatora kursora: brak PNG, uszkodzony PNG, determinizm, walidacja wejscia."""
+import subprocess, sys, tempfile, struct, zlib
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+GEN = ROOT / 'narzedzia/generuj_kursor_rozciagania.py'
+sys.path.insert(0, str(ROOT / 'narzedzia'))
+import generuj_kursor_rozciagania as g
+
+def run(out, *src):
+    r = subprocess.run([sys.executable, str(GEN), str(out), *map(str, src)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stderr
+
+def png(w, h, rgba, ctype=6, filt=0):
+    bpp = 4 if ctype == 6 else 3
+    raw = b''.join(bytes([filt]) + bytes(rgba * w) [:w * bpp] for _ in range(h))
+    def chunk(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, ctype, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    # 1. brak pliku -> naglowek 'niedostepny', build nie pada
+    run(d / 'a.h', d / 'nie_ma.png')
+    assert 'KURSOR_ROZCIAGANIA_DOSTEPNY 0' in (d / 'a.h').read_text()
+    # 2. uszkodzony plik -> ostrzezenie + niedostepny
+    (d / 'zly.png').write_bytes(b'to nie jest png')
+    err = run(d / 'b.h', d / 'zly.png')
+    assert 'OSTRZEZENIE' in err and 'DOSTEPNY 0' in (d / 'b.h').read_text()
+    # 3. PNG z nieobslugiwanym formatem (16-bit / przeplot) odrzucony
+    bad = bytearray(png(8, 4, [255, 255, 255, 255])); bad[24] = 16
+    for tryb in (bad,):
+        (d / 'c.png').write_bytes(bytes(tryb))
+        run(d / 'c.h', d / 'c.png'); assert 'DOSTEPNY 0' in (d / 'c.h').read_text()
+    # 4. poprawny PNG -> dostepny, deterministyczny, w limitach
+    (d / 'ok.png').write_bytes(png(64, 32, [255, 255, 255, 255]))
+    run(d / 'e1.h', d / 'ok.png'); run(d / 'e2.h', d / 'ok.png')
+    t = (d / 'e1.h').read_text()
+    assert 'DOSTEPNY 1' in t and t == (d / 'e2.h').read_text()
+    # 5. rzeczywisty plik repo (jesli jest): wszystkie warianty <= 64 i niepuste
+    real = ROOT / 'ikonki/kursor_rozciagania.png'
+    if real.is_file():
+        w = g.zbuduj(real)[0]
+        for n, (W, H, data) in w:
+            assert 0 < W <= 64 and 0 < H <= 64 and len(data) == W * H and any(data), n
+            assert all((v >> 24) in (0, 255) for v in data)
+        print('PNG repo: OK', [(n, W, H) for n, (W, H, _) in w])
+    else:
+        print('PNG repo: BRAK (pominieto)')
+    # 6. nie zapisuje pliku, gdy tresc bez zmian (mtime stabilny => brak zbednych rebuildow)
+    m = (d / 'e1.h').stat().st_mtime_ns; run(d / 'e1.h', d / 'ok.png')
+    assert (d / 'e1.h').stat().st_mtime_ns == m
+print('PASS test_kursor_rozciagania_generator')
