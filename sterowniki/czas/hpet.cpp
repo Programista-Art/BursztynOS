@@ -1,3 +1,4 @@
+#include "jadro/mm/zarezerwowane_va.h"
 #include "hpet.h"
 #include "acpi.h"
 #include "pamiec.h"
@@ -6,6 +7,7 @@
 extern void wypisz_log(const char* tekst);
 namespace {
 constexpr uint64_t STRONA=4096, LIMIT_IDENTITY=4ULL*1024*1024*1024, HPET_VA=0x141000000ULL;
+static_assert(HPET_VA == ZarezerwowaneVA::HPET_VA_START, "HPET_VA musi zgadzac sie z zarezerwowane_va.h");
 constexpr uint32_t REG_CAPS=0, REG_CONFIG=0x10, REG_COUNTER=0xF0;
 constexpr uint64_t CONFIG_ENABLE=1, FEMTO_NA_SEKUNDE=1000000000000000ULL, NANO_NA_SEKUNDE=1000000000ULL;
 constexpr uint32_t FLAGI_MMIO=VMM_FLAGA_PRESENT|VMM_FLAGA_ZAPIS|VMM_FLAGA_PWT|VMM_FLAGA_PCD;

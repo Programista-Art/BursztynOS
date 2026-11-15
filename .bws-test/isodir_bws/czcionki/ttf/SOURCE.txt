@@ -13,3 +13,13 @@ SHA-256 of distributed font bytes:
 ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280  DejaVuSans.ttf
 dfbac4c793ca4b896c34af5c7ccbbaf37924b46cd521a5ecff9130b9c331f575  DejaVuSansMono.ttf
 768a97e45559f627a05acc0709938db5b75f017dc38ef5ba00e95043d6476f60  DejaVuSerifCondensed-Italic.ttf
+
+Noto Color Emoji (COLRv1), googlefonts/noto-emoji tag v2.047,
+https://raw.githubusercontent.com/googlefonts/noto-emoji/v2.047/fonts/Noto-COLRv1.ttf
+distributed unmodified as NotoColorEmoji-COLRv1.ttf. License: SIL OFL 1.1 (LICENSE-NotoEmoji.txt).
+SHA-256: 23549f29b5ad741fcb4c025b8dc44652ff0f459892467ebcccec1e6bbe839b44  NotoColorEmoji-COLRv1.ttf
+
+Noto Sans OpenType CFF (Regular, Bold) in /czcionki/otf: notofonts NotoSans-v2.015,
+NotoSans/unhinted/otf, unmodified, SIL OFL 1.1 (LICENSE-NotoSans.txt).
+SHA-256: bfb44de2c2031c391ff856943fe8f105ebb5d725cb9a04d493d211d5bbd5c21b  NotoSans-Regular.otf
+SHA-256: ad862ec2c77ce672bd9013dc756d058e77b8b49f0a70f6c3be5148017c99c5ed  NotoSans-Bold.otf

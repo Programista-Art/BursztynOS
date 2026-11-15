@@ -19,6 +19,7 @@
  * nie publikuja niedokonczonego wpisu liscia.
  */
 
+#include "vmm_zakres.h"
 #include "pamiec.h"
 
 #include <stdint.h>
@@ -2018,11 +2019,10 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
         !adres_user_kanoniczny(adres) || (adres & 4095U) ||
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
     const auto obecne = sprawdz_mapowanie(pml4, adres);
-    if (obecne.obecna && obecne.user) return false;
     /* Powyzej identity-mapy 4 GiB w przestrzeni procesu nie ma niczego, co wolno zastapic: obecna strona
      * jadra (okna zarezerwowane_va.h, klonowane z dolnej polowy) NIE moze zostac nadpisana strona
      * uzytkownika (jadro pisaloby/czytalo wtedy pamiec procesu). Identity-mapa < 4 GiB nadal jest dzielona. */
-    if (obecne.obecna && adres >= 0x100000000ULL) return false;
+    if (!VmmZakres::wolno_mapowac_strone_uzytkownika(obecne.obecna, obecne.user, adres)) return false;
 
     uint64_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;
@@ -2038,6 +2038,18 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
 
     return mapuj_strone_wewnetrznie(pml4, adres,
         reinterpret_cast<uint64_t>(pa), flagi);
+}
+
+/* Czy w BAZOWEJ przestrzeni jadra (zrodlo klonow procesow) zakres [start,koniec) jest calkowicie niezmapowany?
+ * ASLR loadera losuje ponownie, gdy nie - niezaleznie od recznej listy zarezerwowane_va.h. */
+extern "C" bool VmmZakresWolnyWBazie(uint64_t start, uint64_t koniec) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany || !bazowe_pml4_jadra) return false;
+    return VmmZakres::zakres_wolny(bazowe_pml4_jadra, start, koniec,
+        [](uint64_t wpis) -> const uint64_t* {
+            if (!tabela_fizyczna_bezposrednio_dostepna(wpis & MASKA_ADRESU_4K)) return nullptr;
+            return static_cast<const uint64_t*>(FizycznyZakresDoWirtualnego(wpis & MASKA_ADRESU_4K, ROZMIAR_STRONY_4K));
+        });
 }
 
 extern "C" bool VmmNxGotowy() { return nx_aktywny; }

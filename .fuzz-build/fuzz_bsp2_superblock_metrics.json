@@ -3,8 +3,8 @@
   "executions": 2525,
   "seed_corpus_count": 25,
   "final_corpus_count": 28,
-  "unique_edges": 558,
+  "unique_edges": 557,
   "regressions_verified": 0,
-  "elapsed_ms": 5287,
+  "elapsed_ms": 5095,
   "crashes_found": 0
 }

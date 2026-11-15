@@ -2,9 +2,9 @@
   "target": "fuzz_bsp2_dir",
   "executions": 2518,
   "seed_corpus_count": 18,
-  "final_corpus_count": 33,
-  "unique_edges": 869,
+  "final_corpus_count": 31,
+  "unique_edges": 873,
   "regressions_verified": 0,
-  "elapsed_ms": 8235,
+  "elapsed_ms": 9392,
   "crashes_found": 0
 }

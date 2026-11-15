@@ -3123,6 +3123,12 @@ test-kernel-blobz-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
 
 # Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-vmm-zakres-host
+test-vmm-zakres-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_vmm_zakres_host.cpp -o .bsf-test/vmm_zakres_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/vmm_zakres_host
+
 .PHONY: test-rozszerzenie-powierzchni-host
 test-rozszerzenie-powierzchni-host:
 	@mkdir -p .bsf-test

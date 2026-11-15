@@ -1307,6 +1307,17 @@ static bool uruchom_program_z_pliku_impl(
 #endif
             layout = {};
             zaplanowano = bur_v2_zaplanuj_aslr(n2, random[0], random[1], random[2], random[3], &layout);
+#ifndef BURSZTYN_LOADER_HOST_TEST
+            // Niezalezna od listy zarezerwowane_va.h weryfikacja FAKTYCZNEGO stanu tabel: obraz, sterta i SHM
+            // musza lezec w calosci w niezmapowanych zakresach bazowej przestrzeni jadra (zrodla klonow).
+            if (zaplanowano) {
+                const uint64_t koniec_obrazu = layout.dane_va + n2.dane_rozmiar_pamieci;
+                zaplanowano = VmmZakresWolnyWBazie(layout.baza_obrazu, koniec_obrazu) &&
+                              VmmZakresWolnyWBazie(layout.sterta_baza, layout.sterta_limit) &&
+                              VmmZakresWolnyWBazie(layout.shm_baza, layout.shm_limit) &&
+                              VmmZakresWolnyWBazie(layout.stos_guard_dolny, layout.stos_guard_gorny + 4096ULL);
+            }
+#endif
             if (!zaplanowano) {
                 char linia[200] = "[LOADER] plan ASLR odrzucony (kolizja z oknem jadra), losowanie ponowne: ";
                 size_t n_l = 0; while (linia[n_l]) ++n_l;

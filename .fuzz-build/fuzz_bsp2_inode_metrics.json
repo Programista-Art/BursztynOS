@@ -2,9 +2,9 @@
   "target": "fuzz_bsp2_inode",
   "executions": 2518,
   "seed_corpus_count": 18,
-  "final_corpus_count": 46,
-  "unique_edges": 1213,
+  "final_corpus_count": 45,
+  "unique_edges": 1201,
   "regressions_verified": 0,
-  "elapsed_ms": 8103,
+  "elapsed_ms": 10106,
   "crashes_found": 0
 }
