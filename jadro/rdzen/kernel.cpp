@@ -2,6 +2,7 @@
 #include "galeria_kopiowanie.h"
 extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
 #include "jadro/gui/display_mode_policy.h"
+#include "jadro/mm/zarezerwowane_va.h"
 #include "system_identity.h"
 #include "diagnostyka_systemu.h"
 #include "diagnostyka_systemu_format.h"
@@ -183,6 +184,8 @@ extern "C" uint8_t _binary_ikonki_app_aktualizacje_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_ustawienia_png_start[], _binary_ikonki_app_ustawienia_png_end[];
 extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_app_test_dzwieku_png_end[];
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
+extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
+extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
@@ -281,6 +284,11 @@ constexpr uint64_t ROZMIAR_STERTY_JADRA =
 constexpr uint64_t ADRES_RAM_DYSKU_PSF = 0x200000000ULL;
 constexpr uint32_t ROZMIAR_RAM_DYSKU_PSF =
     128U * 1024U * 1024U;
+
+static_assert(ADRES_RAM_DYSKU_PSF == ZarezerwowaneVA::RAM_DYSK_PSF_START && ROZMIAR_RAM_DYSKU_PSF == ZarezerwowaneVA::RAM_DYSK_PSF_ROZMIAR,
+              "okno VA RAM-dysku PSF musi zgadzac sie z zarezerwowane_va.h");
+static_assert(ADRES_STERTY_JADRA == ZarezerwowaneVA::STERTA_JADRA_START && ROZMIAR_STERTY_JADRA == ZarezerwowaneVA::STERTA_JADRA_ROZMIAR,
+              "okno VA sterty jadra musi zgadzac sie z zarezerwowane_va.h");
 
 constexpr uint16_t PORT_COM1 = 0x3F8;
 
@@ -1547,6 +1555,8 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_ustawienia.png",_binary_ikonki_app_ustawienia_png_start,_binary_ikonki_app_ustawienia_png_end},
         {"/ikonki/app_test_dzwieku.png",_binary_ikonki_app_test_dzwieku_png_start,_binary_ikonki_app_test_dzwieku_png_end},
         {"/ikonki/app_diagnostyka.png",_binary_ikonki_app_diagnostyka_png_start,_binary_ikonki_app_diagnostyka_png_end},
+        {"/ikonki/app_shell.png",_binary_ikonki_app_shell_png_start,_binary_ikonki_app_shell_png_end},
+        {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;

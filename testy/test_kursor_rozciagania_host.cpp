@@ -51,12 +51,18 @@ int main() {
     const auto* ew = kursor_rozciagania_opis(GUI_CURSOR_RESIZE_EW);
     const auto* ns = kursor_rozciagania_opis(GUI_CURSOR_RESIZE_NS);
     CHECK(ew->szer > ew->wys && ns->wys > ns->szer && ew->szer == ns->wys && ew->wys == ns->szer);
+    // Rozmiary po redukcji (wczesniej EW 32x15, ukosne 33x33): EW 24x11, NS 11x24, ukosne 25x25.
+    CHECK(ew->szer == 24 && ew->wys == 11 && ns->szer == 11 && ns->wys == 24);
+    for (uint32_t t : {uint32_t(GUI_CURSOR_RESIZE_NWSE), uint32_t(GUI_CURSOR_RESIZE_NESW)}) {
+        const auto* dg = kursor_rozciagania_opis(t);
+        CHECK(dg->szer == 25 && dg->wys == 25);
+    }
     // Proporcje zrodla 128x66 zachowane (bez znieksztalcenia): |szer/wys - 128/66| < 0.2 po przycieciu do bbox +-1 px.
     int bx0 = 999, bx1 = -1, by0 = 999, by1 = -1; uint32_t c;
     for (int y = 0; y < ew->wys; ++y) for (int x = 0; x < ew->szer; ++x)
         if (kursor_rozciagania_piksel(ew, x, y, &c)) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
     const double wspol = double(bx1 - bx0 + 1) / double(by1 - by0 + 1);
-    CHECK(wspol > 1.7 && wspol < 2.1);
+    CHECK(wspol > 2.0 && wspol < 2.8);   // tresc zrodla ~2,3-2,6 (bbox bez marginesow)
     // NS jest dokladnym obrotem EW o 90 stopni: pikselowa zgodnosc ksztaltu (liczba pikseli taka sama).
     int n_ew = 0, n_ns = 0;
     for (int y = 0; y < ew->wys; ++y) for (int x = 0; x < ew->szer; ++x) n_ew += kursor_rozciagania_piksel(ew, x, y, &c);
@@ -88,7 +94,8 @@ int main() {
         CHECK(kursor_rozciagania_piksel(a, a->hotspot_x, a->hotspot_y, &k2));   // hotspot lezy na kryjacym pikselu
         CHECK(a->hotspot_x >= minx && a->hotspot_x <= maxx);
         // Proporcje zrodla 128x128 zachowane (kwadrat po pomniejszeniu).
-        CHECK(a->szer == a->wys);
+        CHECK(a->szer == 16 && a->wys == 18 && a->hotspot_x == 1 && a->hotspot_y == 0);   // 18 px (wczesniej 28x32)
+        CHECK(a->szer * 61 >= a->wys * 53 - 61 && a->szer * 61 <= a->wys * 53 + 61);       // proporcje 53x61
         // Inne typy specjalne nie sa zastepowane strzalka.
         for (uint32_t t : {uint32_t(GUI_CURSOR_HAND), uint32_t(GUI_CURSOR_TEXT), uint32_t(GUI_CURSOR_WAIT),
                            uint32_t(GUI_CURSOR_CROSSHAIR), uint32_t(GUI_CURSOR_CUSTOM)})

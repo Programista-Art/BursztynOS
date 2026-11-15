@@ -237,6 +237,14 @@ bur_linker = $(1)
 BUR_ORPHANS = --orphan-handling=error
 endif
 
+BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE ?=
+ifneq ($(strip $(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE=$(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)ULL
+endif
+BURSZTYN_DIAG_RESIZE_LATENCY ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_RESIZE_LATENCY)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_RESIZE_LATENCY=1
+endif
 BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
 RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
@@ -537,6 +545,8 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_ustawienia_blob.o \
 	ikona_app_test_dzwieku_blob.o \
 	ikona_app_diagnostyka_blob.o \
+	ikona_app_shell_blob.o \
+	ikona_app_tapety_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -2729,6 +2739,12 @@ ikona_app_test_dzwieku_blob.o: ikonki/app_test_dzwieku.png
 ikona_app_diagnostyka_blob.o: ikonki/app_diagnostyka.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_app_shell_blob.o: ikonki/app_shell.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_tapety_blob.o: ikonki/app_tapety.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_png_ring3.o: bursztyn_ui/ikona_png.cpp bursztyn_ui/ikona_png.h
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
@@ -3107,6 +3123,16 @@ test-kernel-blobz-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
 
 # Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-rozszerzenie-powierzchni-host
+test-rozszerzenie-powierzchni-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_rozszerzenie_powierzchni_host.cpp -o .bsf-test/rozszerzenie_powierzchni_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/rozszerzenie_powierzchni_host
+
+.PHONY: test-ikony-aplikacji
+test-ikony-aplikacji:
+	$(PYTHON) testy/test_ikony_aplikacji.py
+
 .PHONY: test-resize-cursor-host
 test-resize-cursor-host: $(KURSOR_ROZCIAGANIA_H)
 	$(PYTHON) testy/test_kursor_rozciagania_generator.py

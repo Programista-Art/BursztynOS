@@ -21,11 +21,11 @@ zewnetrznych bibliotek; tylko PNG 8-bit RGBA/RGB bez przeplotu).
 import math, struct, sys, zlib
 from pathlib import Path
 
-DOCELOWA_SZEROKOSC = 32      # px poziomej strzalki (1x); pozostale warianty z niej wynikaja
-DOCELOWA_STRZALKA = 32       # px dluzszego boku domyslnej strzalki (128 -> 32)
+DOCELOWA_SZEROKOSC = 24      # px poziomej strzalki (1x): 24x11, NS 11x24, ukosne 25x25 (19 -> 24; pierwotnie 32)
+DOCELOWA_STRZALKA = 18       # px dluzszego boku domyslnej strzalki (61 -> 18; wczesniej 32)
 MAKS_BOK = 64                # limit plane kursora w jadrze (kursor_plane_piksele 64x64)
 PROG_ALFY = 128
-PROBKI = 4                   # PROBKI x PROBKI probek na piksel docelowy
+PROBKI = 8                   # PROBKI x PROBKI probek na piksel docelowy (jakosc przy ~3,4x redukcji)
 
 
 def wczytaj_png(data):

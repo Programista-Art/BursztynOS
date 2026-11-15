@@ -1,0 +1,41 @@
+[INPUT REGISTER] dev='usb-keyboard' bus=USB id=1 kinds=0x1 prio=20
+[USB-HID] First Interrupt IN transfer queued.
+[USB HID] controller=0 port=5 slot=1 interface=0 endpoint=0x81 DCI=3 MPS=8 interval=6 role=boot-keyboard result=interrupt IN armed
+
+========================================================
+  KRYTYCZNY BLAD SYSTEMU (BSOD) - WYJATEK PROCESORA
+========================================================
+  Typ: #PF Page Fault
+  Wektor:       0x000000000000000E
+  Kod bledu:    0x0000000000000003
+  RIP:          0x0000000000117BB1
+  CS:           0x0000000000000008
+  RFLAGS:       0x0000000000000287
+  CR2:          0x0000000120236000
+[PF] pid=2
+[PF] program=/programy/tapety.cebula/tapety.bur
+[PF] lastbws=69
+[PF] rip=0x0000000000117BB1
+[PF] cr2=0x0000000120236000
+[PF] rsp=0xFFFF940000050A20
+  RSP:          0xFFFF940000050A20
+  Stos [top 8]:
+    [+0x00]:    0x0000000120000000
+[PF] stos[0]=0x0000000120000000
+    [+0x08]:    0xFFFF900014000000
+[PF] stos[1]=0xFFFF900014000000
+    [+0x10]:    0xFFFF900018000000
+[PF] stos[2]=0xFFFF900018000000
+    [+0x18]:    0x000002D000000001
+[PF] stos[3]=0x000002D000000001
+    [+0x20]:    0x000000000019C73E
+[PF] stos[4]=0x000000000019C73E
+    [+0x28]:    0x0000000002000000
+[PF] stos[5]=0x0000000002000000
+    [+0x30]:    0x0000000000384000
+[PF] stos[6]=0x0000000000384000
+    [+0x38]:    0x000000000012BF71
+[PF] stos[7]=0x000000000012BF71
+  Zrodlo:       Ring 0
+
+System zostal zatrzymany ze wzgledow bezpieczenstwa.

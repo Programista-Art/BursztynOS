@@ -1,10 +1,10 @@
 {
   "target": "fuzz_bsp2_inode",
-  "executions": 2516,
-  "seed_corpus_count": 16,
-  "final_corpus_count": 38,
-  "unique_edges": 1194,
+  "executions": 2518,
+  "seed_corpus_count": 18,
+  "final_corpus_count": 46,
+  "unique_edges": 1213,
   "regressions_verified": 0,
-  "elapsed_ms": 10730,
+  "elapsed_ms": 8103,
   "crashes_found": 0
 }

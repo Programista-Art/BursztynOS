@@ -43,6 +43,10 @@
  */
 
 #include "skladacz_obrazu.h"
+#include "rozszerzenie_powierzchni.h"
+#ifndef BURSZTYN_DIAG_RESIZE_LATENCY
+#define BURSZTYN_DIAG_RESIZE_LATENCY 0
+#endif
 #include "desktop_modeset.h"
 #include "graphics_perf.h"
 #include "graphics_copy.h"
@@ -132,6 +136,11 @@ uint64_t rozmiar_alokacji_warstwy[
 bool widocznosc_warstwy[MAKS_WARSTW] = {};
 // Registration permits drawing; only an explicit completed frame permits composition.
 bool klatka_gotowa[MAKS_WARSTW] = {};
+#if BURSZTYN_DIAG_RESIZE_LATENCY
+static uint64_t g_rl_geom_us[MAKS_WARSTW];   // chwila zastosowania nowej geometrii w jadrze (BWS 61)
+static uint64_t g_rl_pub_us;                 // chwila publikacji nowej klatki przez aplikacje (0 = brak oczekujacej)
+static int g_rl_pub_pid=-1;
+#endif
 // Po zmianie rozmiaru zywego okna: warstwa niesie skopiowana, ostatnio opublikowana
 // tresc, wiec jest skladana, zanim aplikacja opublikuje klatke w nowym rozmiarze.
 bool tresc_zachowana[MAKS_WARSTW] = {};
@@ -1220,13 +1229,9 @@ int utworz_warstwe(
         liczba_pikseli
     );
     if (zachowaj_tresc && stary_bufor && stary_szer > 0 && stary_wys > 0) {
-        const int kw = stary_szer < szer ? stary_szer : szer;
-        const int kh = stary_wys < wys ? stary_wys : wys;
-        for (int row = 0; row < kh; ++row) {
-            const uint32_t* from = stary_bufor + static_cast<size_t>(row) * static_cast<size_t>(stary_szer);
-            uint32_t* to = nowy_bufor + static_cast<size_t>(row) * static_cast<size_t>(szer);
-            for (int col = 0; col < kw; ++col) to[col] = from[col];
-        }
+        // Tresc + kryjace rozszerzenie w kolorze tla okna (motyw) (brak przezroczystej luki do czasu nowej klatki aplikacji).
+        RozszerzeniePowierzchni::kopiuj_i_rozszerz(stary_bufor, stary_szer, stary_wys, nowy_bufor, szer, wys,
+                                                   motyw_pobierz_aktywny()->oknotlo);
     }
 
     /*
@@ -1400,6 +1405,14 @@ bool zmien_geometrie_warstwy(
         return true;
     }
 
+#if BURSZTYN_DIAG_RESIZE_LATENCY
+    if(pid_poprawny(pid)){g_rl_geom_us[pid]=czas_monotoniczny_us();char b[128]={};size_t k=0;
+        perf_txt(b,sizeof(b),&k,"[RESIZE-LAT] resize pid=");perf_num(b,sizeof(b),&k,pid);
+        perf_txt(b,sizeof(b),&k," ready=");perf_num(b,sizeof(b),&k,klatka_gotowa[pid]?1:0);
+        perf_txt(b,sizeof(b),&k," kept=");perf_num(b,sizeof(b),&k,tresc_zachowana[pid]?1:0);
+        perf_txt(b,sizeof(b),&k," new=");perf_num(b,sizeof(b),&k,szer);perf_txt(b,sizeof(b),&k,"x");perf_num(b,sizeof(b),&k,wys);
+        wypisz_log(b);}
+#endif
     const int z_order = warstwa->z_order;
     const bool widoczna = widocznosc_warstwy[pid];
     const uint32_t stan = stan_okna[pid];
@@ -2324,6 +2337,14 @@ void skladacz_obrazu_obsluz_dirty() {
     if(drag_frame_work)++drag_frames_presented;
     MoveTrace::compose();
     const uint64_t present_end=hpet_dostepny()?czas_monotoniczny_us():0;
+#if BURSZTYN_DIAG_RESIZE_LATENCY
+    if(count&&g_rl_pub_us){char b[128]={};size_t k=0;
+        perf_txt(b,sizeof(b),&k,"[RESIZE-LAT] pid=");perf_num(b,sizeof(b),&k,g_rl_pub_pid);
+        perf_txt(b,sizeof(b),&k," publish_to_presented_us=");perf_num(b,sizeof(b),&k,static_cast<uint32_t>(present_end-g_rl_pub_us));
+        perf_txt(b,sizeof(b),&k," compose_us=");perf_num(b,sizeof(b),&k,static_cast<uint32_t>(compose_end-start));
+        perf_txt(b,sizeof(b),&k," present_us=");perf_num(b,sizeof(b),&k,static_cast<uint32_t>(present_end-compose_end));
+        wypisz_log(b);g_rl_pub_us=0;}
+#endif
 #if BURSZTYN_DIAG_BOOT
     static bool logged_first_compose = false;
     if (!logged_first_compose && count > 0) {
@@ -2407,6 +2428,9 @@ uint64_t skladacz_obrazu_id_okna(int pid) {
            static_cast<uint32_t>(pid);
 }
 
+bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int pid){
+    return pid_poprawny(pid) && tresc_zachowana[pid] && !klatka_gotowa[pid];
+}
 // Weak: testy hosta linkuja kompozytor bez loadera/grafiki.
 extern "C" __attribute__((weak)) void loader_perf_pierwsza_klatka(int pid);
 bool skladacz_obrazu_publikuj_klatke(int pid) {
@@ -2414,6 +2438,12 @@ bool skladacz_obrazu_publikuj_klatke(int pid) {
     if (klatka_gotowa[pid]) return false;
     klatka_gotowa[pid] = true;
     tresc_zachowana[pid] = false;
+#if BURSZTYN_DIAG_RESIZE_LATENCY
+    if(g_rl_geom_us[pid]){const uint64_t n=czas_monotoniczny_us();char b[96]={};size_t k=0;
+        perf_txt(b,sizeof(b),&k,"[RESIZE-LAT] pid=");perf_num(b,sizeof(b),&k,pid);
+        perf_txt(b,sizeof(b),&k," app_redraw_us=");perf_num(b,sizeof(b),&k,static_cast<uint32_t>(n-g_rl_geom_us[pid]));
+        wypisz_log(b);g_rl_pub_us=n;g_rl_pub_pid=pid;g_rl_geom_us[pid]=0;}
+#endif
     if (loader_perf_pierwsza_klatka) loader_perf_pierwsza_klatka(pid);
     if (widocznosc_warstwy[pid]) {
         const auto& w = tablica_warstw[pid];

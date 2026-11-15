@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "../mm/zarezerwowane_va.h"
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -542,6 +543,10 @@ inline bool bur_v2_zaplanuj_aslr(
     if (p.shm_limit <= p.shm_baza || p.shm_limit >= p.stos_guard_dolny) return false;
     if (p.stos_guard_gorny + ROZMIAR_RAMKI_4K >= 0x0000800000000000ULL) return false;
     if ((p.stos_szczyt & 0xFULL) != 0ULL) return false;
+    // Obraz, sterta i SHM nie moga zachodzic na stale okna VA jadra (zob. zarezerwowane_va.h); loader losuje ponownie.
+    if (ZarezerwowaneVA::koliduje_z_jadrem(p.baza_obrazu, koniec_obrazu) ||
+        ZarezerwowaneVA::koliduje_z_jadrem(p.sterta_baza, p.sterta_limit) ||
+        ZarezerwowaneVA::koliduje_z_jadrem(p.shm_baza, p.shm_limit)) return false;
 
     *out_plan = p;
     return true;

@@ -399,6 +399,12 @@ bool skladacz_obrazu_przywroc(uint64_t window_id);
 // Called by BWS refresh after client drawing. Also invalidates initial chrome.
 // Recreated/cleared-on-resize surfaces require a new commit; restore does not.
 bool skladacz_obrazu_publikuj_klatke(int pid);
+
+/* Po zmianie rozmiaru okna (zmien_geometrie_warstwy) bufor niesie ostatnia tresc + nieprzezroczyste
+ * rozszerzenie, a aplikacja jeszcze nie opublikowala nowej klatki. Wtedy pelne odrysowanie
+ * (BWS 19, gui_odswiez_pulpit) NIE moze zerowac powierzchni: przez czas rysowania (setki ms w TCG)
+ * kompozytor pokazywalby przezroczysty, czesciowo namalowany bufor. */
+bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int pid);
 bool skladacz_obrazu_czy_widoczna(int pid);
 bool skladacz_obrazu_ksztalt_w_punkcie(int pid,int x,int y);
 uint64_t skladacz_obrazu_id_okna(int pid);

@@ -54,17 +54,63 @@ int main() {
         assert(scene[300*sw+300]==0x123456);
         assert(skladacz_obrazu_przywroc(id));compose();
         assert(scene[300*sw+300]==theme->oknotlo);
-        // Failed allocation/geometry must preserve a previously committed surface.
-        assert(utworz_warstwe(2,0,0,sw+1,h,10)<0);
-        assert(skladacz_obrazu_czy_widoczna(2));
+        // Aktualna polityka geometrii: okno moze byc szersze/wyzsze od ekranu i lezec czesciowo poza nim (do 2x ekranu na osi),
+        // ale nie dowolnie. Nieprawidlowa geometria nie moze zniszczyc ostatnio opublikowanej powierzchni.
+        {
+            const uint32_t before=app->bufor_pikseli[w/2+(h/2)*w];
+            auto still_committed=[&]{
+                return skladacz_obrazu_czy_widoczna(2)&&pobierz_warstwe(2)&&
+                       pobierz_warstwe(2)->szerokosc==w&&pobierz_warstwe(2)->wysokosc==h&&
+                       pobierz_warstwe(2)->bufor_pikseli[w/2+(h/2)*w]==before;
+            };
+            // Odrzucane: zero, ujemne, 2x ekranu + 1 na kazdej osi, przepelnienia int, nadmierna alokacja.
+            assert(utworz_warstwe(2,0,0,0,h,10)<0);            assert(still_committed());
+            assert(utworz_warstwe(2,0,0,w,0,10)<0);            assert(still_committed());
+            assert(utworz_warstwe(2,0,0,-5,h,10)<0);           assert(still_committed());
+            assert(utworz_warstwe(2,0,0,w,-1,10)<0);           assert(still_committed());
+            assert(utworz_warstwe(2,0,0,2*sw+1,h,10)<0);       assert(still_committed());
+            assert(utworz_warstwe(2,0,0,w,2*sh+1,10)<0);       assert(still_committed());
+            assert(utworz_warstwe(2,0,0,0x7FFFFFFF,0x7FFFFFFF,10)<0); assert(still_committed());
+            assert(utworz_warstwe(2,0,0,0x40000000,4,10)<0);   assert(still_committed());
+            assert(!zmien_geometrie_warstwy(2,0,0,2*sw+1,h));  assert(still_committed());
+            assert(!zmien_geometrie_warstwy(2,0,0,w,2*sh+1));  assert(still_committed());
+            assert(!zmien_geometrie_warstwy(2,0,0,0,0));       assert(still_committed());
+            assert(!zmien_geometrie_warstwy(2,0,0,-1,-1));     assert(still_committed());
+            // Dozwolone: ekran+1, dokladnie 2x ekranu, wspolrzedne ujemne i poza ekranem (kompozytor przycina, nie pisze poza scene).
+            assert(utworz_warstwe(3,-40,-30,sw+1,h,11)==3);
+            assert(utworz_warstwe(3,-100000,-100000,sw+1,h,11)==3);
+            assert(utworz_warstwe(3,sw-3,sh-3,w,h,11)==3);
+            assert(skladacz_obrazu_publikuj_klatke(3));compose();   // czesciowo poza ekranem: brak zapisu poza scene (ASan)
+            assert(utworz_warstwe(3,-sw,-sh,2*sw,2*sh,11)==3);
+            assert(skladacz_obrazu_publikuj_klatke(3));compose();
+            assert(utworz_warstwe(3,0,0,2*sw,2*sh,11)==3);
+            usun_warstwe(3);
+            assert(skladacz_obrazu_czy_widoczna(2));
+            // Rozmiar krawedziowy w gore: 2*sw-1 / 2*sh-1 jeszcze dozwolone
+            assert(zmien_geometrie_warstwy(2,200,200,2*sw-1,h));
+            assert(zmien_geometrie_warstwy(2,200,200,w,h));
+            assert(skladacz_obrazu_czy_widoczna(2));        // zmiana rozmiaru zachowuje ostatnia klatke (nie chowa okna)
+        }
         // Reuse, resize and PID reuse must require another completed frame.
         assert(utworz_warstwe(2,200,200,w,h,10)==2);
         assert(pobierz_warstwe(2));assert(!skladacz_obrazu_czy_widoczna(2));
         compose();assert(scene[300*sw+300]==0x123456);
         assert(skladacz_obrazu_publikuj_klatke(2));
+        for(int i=0;i<w*h;++i)pobierz_warstwe(2)->bufor_pikseli[i]=theme->oknotlo^0x00010101U;   // znana tresc poprzedniej klatki
         assert(zmien_geometrie_warstwy(2,200,200,w+10,h+10));
-        assert(!skladacz_obrazu_czy_widoczna(2));
-        compose();assert(scene[300*sw+300]==0x123456);
+        // Zatwierdzona polityka: zmiana rozmiaru zachowuje ostatnia klatke i nie chowa okna ...
+        assert(skladacz_obrazu_czy_widoczna(2));
+        {
+            auto* r=pobierz_warstwe(2);assert(r&&r->szerokosc==w+10&&r->wysokosc==h+10);
+            assert(r->bufor_pikseli[(h/2)*(w+10)+w/2]==(theme->oknotlo^0x00010101U));   // stara tresc w lewym gornym rogu
+            // ... a powiekszony pas jest KRYJACY w kolorze tla okna (nie wylacznie zera => brak tapety w oknie).
+            for(int y=0;y<h+10;++y)for(int x=0;x<w+10;++x)
+                if(x>=w||y>=h)assert(r->bufor_pikseli[y*(w+10)+x]==(theme->oknotlo&0x00FFFFFFU));
+        }
+        compose();
+        assert(scene[(200+h/2)*sw+200+w+5]==theme->oknotlo);   // wnetrze rozszerzenia na scenie = tlo okna, nie tapeta 0x123456
+        // Do czasu nowej klatki aplikacji nadal trzeba opublikowac klatke (flaga resetowana), pozniej juz nie.
+        assert(skladacz_obrazu_publikuj_klatke(2));assert(!skladacz_obrazu_publikuj_klatke(2));
         usun_warstwe(2);
         assert(!skladacz_obrazu_przywroc(id));
         assert(utworz_warstwe(2,200,200,w,h,10)==2);

@@ -42,8 +42,10 @@ with tempfile.TemporaryDirectory() as d:
     realk = ROOT / 'ikonki/kursor.png'
     if realk.is_file():
         W, H, dane, hx, hy = g.zbuduj_strzalke(realk)
-        assert W == H == 32 and 0 <= hx < W and 0 <= hy < H and dane[hy * W + hx], 'hotspot na czubku'
+        assert (W, H) == (16, 18) and 0 <= hx < W and 0 <= hy < H and dane[hy * W + hx], 'hotspot na czubku'
         assert all((v >> 24) in (0, 255) for v in dane)
+        assert abs(W / H - 53 / 61) < 0.06, 'proporcje zrodla 53x61 zachowane'
+        assert (hx, hy) == (1, 0) and (dane[hy * W + hx] >> 16) & 255 < 128, 'czubek = ciemny kontur'
         assert not any(dane[y * W + x] for y in range(hy) for x in range(W)), 'brak pikseli nad czubkiem'
         print('Strzalka repo: OK', (W, H, hx, hy))
     real = ROOT / 'ikonki/kursor_rozciagania.png'
@@ -52,6 +54,8 @@ with tempfile.TemporaryDirectory() as d:
         for n, (W, H, data) in w:
             assert 0 < W <= 64 and 0 < H <= 64 and len(data) == W * H and any(data), n
             assert all((v >> 24) in (0, 255) for v in data)
+        d_ = {n: (W, H) for n, (W, H, _) in w}
+        assert d_['EW'] == (24, 11) and d_['NS'] == (11, 24) and d_['NWSE'] == d_['NESW'] == (25, 25), d_
         print('PNG repo: OK', [(n, W, H) for n, (W, H, _) in w])
     else:
         print('PNG repo: BRAK (pominieto)')

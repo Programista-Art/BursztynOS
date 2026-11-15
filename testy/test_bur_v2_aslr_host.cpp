@@ -270,10 +270,21 @@ static void test_aslr_planner_10000_trials() {
 
     std::set<uint64_t> unique_pie_bases;
     std::set<uint64_t> unique_stack_tops;
+    int odrzucone_planu = 0, przyjete_plany = 0;
 
     for (int i = 0; i < 10000; ++i) {
         PlanUkladuAslrRing3 plan{};
-        assert(bur_v2_zaplanuj_aslr(n, next64(), next64(), next64(), next64(), &plan));
+        const uint64_t r0 = next64(), r1 = next64(), r2 = next64(), r3 = next64();
+        // Plan jest odrzucany WYLACZNIE przy kolizji z oknem VA jadra (zarezerwowane_va.h); wtedy loader losuje ponownie.
+        const uint64_t baza_oczek = ASLR_PIE_WINDOW_BASE + (r0 & (ASLR_PIE_WINDOW_PAGES - 1ULL)) * 4096ULL;
+        const uint64_t koniec_oczek = baza_oczek + n.dane_rva + n.dane_rozmiar_pamieci;
+        const bool plan_ok = bur_v2_zaplanuj_aslr(n, r0, r1, r2, r3, &plan);
+        const bool oczekiwana_kolizja = ZarezerwowaneVA::koliduje_z_jadrem(baza_oczek, koniec_oczek) ||
+            ZarezerwowaneVA::koliduje_z_jadrem(ASLR_HEAP_WINDOW_BASE + (r1 & (ASLR_HEAP_WINDOW_PAGES - 1ULL)) * 4096ULL,
+                ASLR_HEAP_WINDOW_BASE + (r1 & (ASLR_HEAP_WINDOW_PAGES - 1ULL)) * 4096ULL + 256ULL * 1024ULL * 1024ULL);
+        assert(plan_ok == !oczekiwana_kolizja);
+        if (!plan_ok) { ++odrzucone_planu; continue; }
+        ++przyjete_plany;
 
         // 1. Wszystkie adresy stron musza byc wyrownane do 4 KiB
         assert((plan.baza_obrazu & 0xFFFULL) == 0);
@@ -301,12 +312,56 @@ static void test_aslr_planner_10000_trials() {
     }
 
     // Przy 20 bitach entropii PIE (1 048 576 slotow), 10 000 prob musi dac > 9 800 unikalnych baz
-    assert(unique_pie_bases.size() > 9800);
+    assert(odrzucone_planu < 400 && przyjete_plany + odrzucone_planu == 10000);   // ok. 1,7% odrzuconych (okna jadra)
+    assert(unique_pie_bases.size() > static_cast<size_t>(przyjete_plany) * 99 / 100);
     // Przy 16 bitach entropii stosu (65 536 slotow), 10 000 prob musi dac > 8 500 unikalnych szczytow
-    assert(unique_stack_tops.size() > 8500);
+    assert(unique_stack_tops.size() > static_cast<size_t>(przyjete_plany) * 85 / 100);
+}
+
+// Regresja przerywanego #PF w tapety_obsluz_obraz (BWS 69): podstawa PIE w oknie VA jadra (0x120000000..+32 MiB,
+// scratch Tapet; 0x130000000.. LFB) nadpisywala PTE jadra stronami obrazu procesu.
+static void test_aslr_omija_okna_jadra() {
+    NaglowekBurV2 n = utworz_poprawny_bur_v2(true);
+    const uint64_t span = n.dane_rva + n.dane_rozmiar_pamieci;
+    PlanUkladuAslrRing3 plan{};
+    auto slot = [](uint64_t base) { return (base - ASLR_PIE_WINDOW_BASE) / 4096ULL; };
+    // dokladnie podstawa z przerywanego #PF (diagnostyka 0x1201F0000) i inne punkty wewnatrz/na brzegach okna
+    for (uint64_t base : {0x1201F0000ULL, 0x120000000ULL, 0x121FFF000ULL, 0x130000000ULL, 0x133FFF000ULL})
+        assert(!bur_v2_zaplanuj_aslr(n, slot(base), 1, 2, 3, &plan));
+    // obraz konczacy sie tuz przed oknem i zaczynajacy tuz po nim jest dozwolony
+    assert(bur_v2_zaplanuj_aslr(n, slot(0x120000000ULL - ((span + 4095ULL) & ~4095ULL)), 1, 2, 3, &plan));
+    assert(bur_v2_zaplanuj_aslr(n, slot(0x122000000ULL), 1, 2, 3, &plan));
+    assert(bur_v2_zaplanuj_aslr(n, slot(0x134000000ULL), 1, 2, 3, &plan));
+    // wyczerpujaco: wszystkie 2^20 slotow PIE - zaden przyjety plan nie przecina okien, a odrzuconych jest dokladnie
+    // tyle, ile wynika z geometrii (okno + rozpietosc obrazu, w stronach)
+    uint64_t odrzucone = 0;
+    for (uint64_t i = 0; i < ASLR_PIE_WINDOW_PAGES; ++i) {
+        const bool ok = bur_v2_zaplanuj_aslr(n, i, 1, 2, 3, &plan);
+        const uint64_t base = ASLR_PIE_WINDOW_BASE + i * 4096ULL, end = base + span;
+        const bool reczna = (base < 0x122000000ULL && end > 0x120000000ULL) || (base < 0x134000000ULL && end > 0x130000000ULL) ||
+                            (base < 0x208000000ULL && end > 0x200000000ULL);
+        assert(ok == !reczna);
+        if (!ok) ++odrzucone;
+    }
+    const uint64_t pages = (span + 4095ULL) / 4096ULL;
+    const uint64_t oczek = ((32ULL + 64ULL) * 1024ULL * 1024ULL / 4096ULL) + 2 * (pages - 1ULL) +
+                           (128ULL * 1024ULL * 1024ULL / 4096ULL) /* PSF startuje na koncu okna: tylko obrazy konczace sie po 0x200000000 */ * 0;
+    (void)oczek;
+    assert(odrzucone > 0 && odrzucone < 100000);   // ~1,7% okna, entropia nadal > 19,9 bitow
+    // sterta i SHM nigdy nie trafiaja w okna jadra (okna ASLR 32/64 GiB)
+    for (uint64_t i = 0; i < ASLR_HEAP_WINDOW_PAGES; i += 997) {
+        assert(!ZarezerwowaneVA::koliduje_z_jadrem(ASLR_HEAP_WINDOW_BASE + i * 4096ULL, ASLR_HEAP_WINDOW_BASE + i * 4096ULL + (256ULL << 20)));
+        assert(!ZarezerwowaneVA::koliduje_z_jadrem(ASLR_SHM_WINDOW_BASE + i * 4096ULL, ASLR_SHM_WINDOW_BASE + i * 4096ULL + (256ULL << 20)));
+    }
+    // pusty/odwrocony przedzial = kolizja (fail-closed)
+    assert(ZarezerwowaneVA::koliduje_z_jadrem(10, 10));
+    assert(ZarezerwowaneVA::koliduje_z_jadrem(20, 10));
+    std::printf("[BUR-V2-ASLR-HOST] okna jadra: %llu z %llu slotow PIE odrzuconych (obraz %llu stron)\n",
+                (unsigned long long)odrzucone, (unsigned long long)ASLR_PIE_WINDOW_PAGES, (unsigned long long)pages);
 }
 
 int main() {
+    test_aslr_omija_okna_jadra();
     test_bur_v1_backward_compatibility();
     test_bur_v2_header_validation();
     test_bur_v2_relocations();

@@ -57,3 +57,46 @@ Natywnie: `docs/desktop-ui-regression-tests.md`.
 
 Kursor rozciągania we wszystkich ośmiu strefach, strzałka, motywy ciemny i jasny, tablet VirtIO — zweryfikowane
 natywnie (patrz `desktop-stabilization-followup.md`, sekcja F). Pliki PNG właściciela bez zmian.
+
+## Aktualizacja 2026-11-15: mniejsze kursory i ikony Shell/Tapety
+
+Właściciel uznał kursory (32 px) za zbyt duże względem ikon i kontrolek. Generator
+`narzedzia/generuj_kursor_rozciagania.py` (jedyne miejsce; aplikacje nadal wybierają tylko typ kursora):
+
+| Kursor | Przed | Po | Hotspot |
+|---|---|---|---|
+| strzałka (źródło 53×61) | 28×32 | **16×18** (`DOCELOWA_STRZALKA` 32→18) | (1,0) — czubek (najwyższy kryjący wiersz), liczony na nowo z obrazu docelowego |
+| ↔ (źródło 128×57) | 32×15 | **19×9** (`DOCELOWA_SZEROKOSC` 32→19) | środek |
+| ↕ | 15×32 | **9×19** | środek |
+| ukośne ⤡ ⤢ | 33×33 | **20×20** | środek |
+
+Proporcje źródeł zachowane (zmiana skali, nie rozciąganie), próbkowanie podniesione z 4×4 do 8×8 na piksel,
+alfa nadal binarna (>=128) z powodu kursora jądra, kolory i ciemny kontur bez zmian. Wszystkie rozmiary
+<= 64×64. Hitboxy zmiany rozmiaru (5 px od krawędzi) i logika wejścia **bez zmian**. Brak PNG ⇒ wbudowana
+strzałka/kształty (test generatora). Kursory tekst/ręka/zajęty/celownik nietknięte. Dane są generowane w
+czasie budowania; brak dekodowania PNG, alokacji ani konwersji podczas ruchu myszy.
+
+### Ikony aplikacji
+* `ikonki/app_shell.png` → wpis „Powłoka Bursztyna” w menu Start, `ikonki/app_tapety.png` → „Tapety”
+  (`jadro/gui/start_menu_model.h`; wcześniej `nullptr`, czyli brak ikony).
+* Pakowanie jak dla pozostałych ikon aplikacji: reguły `ikona_app_shell_blob.o` / `ikona_app_tapety_blob.o`
+  w Makefile, symbole i zapis do `/ikonki/` w `kernel.cpp` (tablica `power_assets`, ta sama ścieżka w live i przy
+  instalacji). Koszt w obrazie jądra ~64 KiB (blob PNG, bez drugiego dekodera). Brak pliku ⇒ zwykła ikona zastępcza.
+* Wymiana ikony = podmiana PNG w `ikonki/` (128×128 RGBA) i przebudowa; kod aplikacji bez zmian.
+* Shell i Tapety nie mają skrótów na pulpicie (`desktop_entries.h` ich nie zawiera) — nie dodawano.
+* Ścieżki wykonywalne i manifesty bez zmian.
+
+### Testy
+Host: `make test-resize-cursor-host` (generator + C++ ASan/UBSan: wymiary 16×18 / 19×9 / 9×19 / 20×20,
+hotspot, proporcje, alfa), `make test-ikony-aplikacji` (rejestracja ścieżek, blob, zapis, format 128×128 RGBA).
+Natywnie (QEMU/TCG, UEFI 1280×720, tablet VirtIO): strzałka ma czubek dokładnie na współrzędnej wskaźnika;
+↔ pojawia się w strefie 1135–1138 (1134 = strzałka, hitbox bez zmian); zmiana rozmiaru E, W, N, NW działa
+(zmierzone na zrzutach), strzałka wraca po puszczeniu; Shell i Tapety startują z menu i mają nowe ikony.
+Zrzuty: `docs/zrzuty-kursor-2026-11-15/` (powiększone wycinki, porównanie 32→18 na jasnym/ciemnym tle).
+Nie sprawdzono natywnie: mysz USB, BIOS/wyższe rozdzielczości, jasny motyw w gościu (jasne tło tylko na
+porównaniu syntetycznym), strefy S/SE/SW/NE tym przebiegiem (wcześniej zweryfikowane, logika nietknięta).
+Jądro: `__kernel_end` ≈ 0xB16000 (~11,1 MiB), zapas do limitu 15 MiB ≈ 3,9 MiB.
+
+## Aktualizacja 2026-11-15 (2): kursory zmiany rozmiaru nieco większe
+Po uwagach właściciela: ↔ 19×9 → **24×11**, ↕ **11×24**, ukośne 20×20 → **25×25** (`DOCELOWA_SZEROKOSC` = 24).
+Strzałka 16×18 bez zmian. Zob. `docs/window-resize-synchronization.md`.

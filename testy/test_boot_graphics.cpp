@@ -8,6 +8,8 @@
 #define __cxa_atexit boot_test_cxa_atexit
 #include "../sterowniki/grafika/grafika.cpp"
 #include "../jadro/gui/ekran_powitalny.cpp"
+// Test nie ma sterownika VirtIO-GPU: grafika.cpp (przygotuj_wlasnosc_sceny) pyta o niego tylko dla backendu VIRTIO.
+VirtioGpuDriver* virtio_gpu_get_driver(uint32_t) { return nullptr; }
 #undef __dso_handle
 #undef __cxa_atexit
 static unsigned checks=0,commits=0,invalidations=0,presents=0,shown=0;
@@ -28,6 +30,9 @@ bool skladacz_obrazu_publikuj_klatke(int pid) {assert(pobierz_warstwe(pid));if(p
 void skladacz_obrazu_oznacz_dirty_rect(int,int,int,int) {++invalidations;}
 void skladacz_obrazu_oznacz_dirty_rect_dokladny(int,int,int,int) {++invalidations;}
 void skladacz_obrazu_oznacz_dirty() {++invalidations;}
+static bool test_zachowana_po_resize=false;
+bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int) {return test_zachowana_po_resize;}
+void wyczysc_warstwe(int pid) {auto* w=pobierz_warstwe(pid);if(w)memset(w->bufor_pikseli,0,size_t(w->szerokosc)*w->wysokosc*4);++invalidations;}
 void skladacz_obrazu_wznow() {}
 void skladacz_obrazu_podnies_warstwe(int) {}
 bool skladacz_obrazu_ustaw_popup_aplikacji(int,bool,int,int,int,int) {return true;}
@@ -92,6 +97,31 @@ int main() {
     bws_gui_odswiez();assert(commits==1 && shown==1);
     bws_gui_rysuj_prostokat(100,100,100,100,test_theme.oknotlo);
     bws_gui_odswiez();assert(commits==1 && shown==1);
+    // BWS 19 (gui_odswiez_pulpit) = transakcja rysowania: ostatnia opublikowana klatka jest widoczna (cien) az do gui_odswiez,
+    // nawet gdy bufor zywy zostal wyzerowany; po gui_odswiez kompozytor znow czyta bufor na zywo.
+    {
+        const size_t px=size_t(layer.szerokosc)*layer.wysokosc;
+        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00ABCDEF;
+        assert(!bws_gui_warstwa_w_trakcie_rysowania(2));
+        bws_gui_odswiez_pulpit();
+        assert(layer.bufor_pikseli[5]==0);                                  // bufor zywy wyzerowany ...
+        assert(bws_gui_warstwa_w_trakcie_rysowania(2));                     // ... ale to trwa transakcja
+        const uint32_t* cien=bws_gui_cien_warstwy(2,px*4);
+        assert(cien&&cien!=layer.bufor_pikseli&&cien[5]==0x00ABCDEF&&cien[px-1]==0x00ABCDEF);   // kompozytor widzi ostatnia klatke
+        assert(!bws_gui_cien_warstwy(2,px*4+4));                            // zly rozmiar => brak cienia (nigdy zly bufor)
+        bws_gui_odswiez();
+        assert(!bws_gui_warstwa_w_trakcie_rysowania(2)&&!bws_gui_cien_warstwy(2,px*4));
+        // Po zmianie rozmiaru (stara tresc + kryjace rozszerzenie) bufor NIE jest zerowany
+        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00FEDCBA;
+        test_zachowana_po_resize=true;
+        bws_gui_odswiez_pulpit();
+        assert(layer.bufor_pikseli[7]==0x00FEDCBA&&bws_gui_warstwa_w_trakcie_rysowania(2));
+        test_zachowana_po_resize=false;
+        bws_gui_odswiez();
+        // zwolnienie warstwy zwalnia cien (bez wyciekow przy ASan)
+        bws_gui_odswiez_pulpit();assert(bws_gui_cien_warstwy(2,px*4));
+        bws_gui_odswiez();
+    }
     // The real dirty-region replacement copies transparency without clearing
     // or publishing the layer between preparation and the one BWS17 commit.
     const uint32_t replacement[]={0,0x123456,0,0x654321};

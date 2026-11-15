@@ -1,10 +1,10 @@
 {
   "target": "fuzz_bsp2_ops",
-  "executions": 2508,
-  "seed_corpus_count": 8,
-  "final_corpus_count": 154,
-  "unique_edges": 1145,
+  "executions": 2511,
+  "seed_corpus_count": 11,
+  "final_corpus_count": 157,
+  "unique_edges": 1161,
   "regressions_verified": 0,
-  "elapsed_ms": 6694,
+  "elapsed_ms": 5556,
   "crashes_found": 0
 }

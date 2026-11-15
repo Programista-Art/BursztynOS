@@ -2019,6 +2019,10 @@ static bool vmm_mapuj_nowa_strone_procesu_wewnetrznie(
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
     const auto obecne = sprawdz_mapowanie(pml4, adres);
     if (obecne.obecna && obecne.user) return false;
+    /* Powyzej identity-mapy 4 GiB w przestrzeni procesu nie ma niczego, co wolno zastapic: obecna strona
+     * jadra (okna zarezerwowane_va.h, klonowane z dolnej polowy) NIE moze zostac nadpisana strona
+     * uzytkownika (jadro pisaloby/czytalo wtedy pamiec procesu). Identity-mapa < 4 GiB nadal jest dzielona. */
+    if (obecne.obecna && adres >= 0x100000000ULL) return false;
 
     uint64_t flagi = VMM_FLAGA_OBECNA | VMM_FLAGA_USER;
     if (zapis) flagi |= VMM_FLAGA_ZAPIS;

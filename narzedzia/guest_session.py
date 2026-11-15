@@ -6,7 +6,7 @@
 
 One command per connection, one reply line (JSON). Commands:
   ping | click X Y | dclick X Y | rclick X Y | move X Y | drag X0 Y0 X1 Y1 [steps]
-  wheel DZ | key K1 [K2..] | type TEXT | shot NAME | launch QUERY | wait SECONDS
+  down X Y | up (przycisk przytrzymany: zrzuty w trakcie przeciagania) | wheel DZ | key K1 [K2..] | type TEXT | shot NAME | launch QUERY | wait SECONDS
   peek SYMBOL [OFF..] | ctrlwheel N | perf (aggregated [GUI PERF] since last perf call) | serial N (last N lines)
   grep PATTERN (count/last match in serial) | cursor | quit
 Scenarios script their own flow from outside, reading screenshots in between.
@@ -77,6 +77,11 @@ def handle(cmd):
         time.sleep(.5)
     elif op == 'move':
         G.move(int(a[0]), int(a[1]))
+    elif op == 'down':
+        G.move(int(a[0]), int(a[1]))
+        G.button(True)
+    elif op == 'up':
+        G.button(False)
     elif op == 'drag':
         G.drag(int(a[0]), int(a[1]), int(a[2]), int(a[3]), int(a[4]) if len(a) > 4 else 8)
     elif op == 'wheel':

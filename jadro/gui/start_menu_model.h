@@ -3,7 +3,7 @@
 namespace StartMenu {
 struct App {const char* name;const char* alias;int action;const char* icon_png;};
 inline constexpr App apps[]={
- {"Powłoka Bursztyna","terminal shell",0,nullptr},
+ {"Powłoka Bursztyna","terminal shell",0,"/ikonki/app_shell.png"},
  {"Eksplorator Plików","pliki foldery",1,"/ikonki/app_eksplorator.png"},
  {"Notatnik","tekst",2,"/ikonki/app_notatnik.png"},
  {"Kalkulator","liczenie",3,"/ikonki/app_kalkulator.png"},
@@ -14,7 +14,7 @@ inline constexpr App apps[]={
  {"Kontrolki 3","",8,"/ikonki/app_kontrolki3.png"},
  {"Kontrolki 4","",9,"/ikonki/app_kontrolki4.png"},
  {"Testy systemu","",10,"/ikonki/app_testy.png"},
- {"Tapety","",11,nullptr},
+ {"Tapety","",11,"/ikonki/app_tapety.png"},
  {"Ustawienia ekranu","monitor rozdzielczość",12,nullptr},
  {"Aktualizacje Systemu","",13,"/ikonki/app_aktualizacje.png"},
  {"Test dźwięku","audio",15,"/ikonki/app_test_dzwieku.png"},

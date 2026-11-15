@@ -1,4 +1,5 @@
 #include "jadro/gui/display_mode_policy.h"
+#include "jadro/mm/zarezerwowane_va.h"
 #include "jadro/gui/graphics_perf.h"
 #include "jadro/gui/graphics_copy.h"
 #include "kolor_alfa.h"
@@ -86,10 +87,11 @@ namespace {
 
 constexpr uint64_t ROZMIAR_STRONY = 4096ULL;
 
-constexpr uint64_t VADDR_RAW_BMP      = 0x120000000ULL;
-constexpr uint64_t VADDR_FRAMEBUFFER  = 0x130000000ULL;
+// Adresy stale wspolne dla wszystkich procesow; ASLR procesow omija je (jadro/mm/zarezerwowane_va.h).
+constexpr uint64_t VADDR_RAW_BMP      = ZarezerwowaneVA::SUROWY_BMP_START;
+constexpr uint64_t VADDR_FRAMEBUFFER  = ZarezerwowaneVA::FRAMEBUFFER_START;
 
-constexpr uint64_t MAX_RAW_BMP = 32ULL * 1024ULL * 1024ULL;
+constexpr uint64_t MAX_RAW_BMP = ZarezerwowaneVA::SUROWY_BMP_ROZMIAR;
 
 /*
  * LFB jest MMIO, nie zwykla pamiecia RAM. Na obecnym sprzecie nie
@@ -3959,8 +3961,21 @@ extern "C" void bws_gui_odswiez_pulpit() {
     if (!warstwa)
         return;
 
-    wyczysc_warstwe(aktualny_pid);
-    ma_oczekujacy_dirty[aktualny_pid]=false;
+    /*
+     * Pelne odrysowanie okna aplikacji to transakcja rysowania jak kazda inna: zanim zerujemy bufor, robimy
+     * cien ostatniej opublikowanej klatki (kompozytor pokazuje go az do gui_odswiez() wlasciciela) i
+     * oznaczamy oczekujacy dirty na cala warstwe. Bez tego kompozytor skladal na zywo wyzerowany, w polowie
+     * namalowany bufor: okno z przezroczysta trescia na setki ms (Eksplorator, draw_full(true)).
+     * Warstwa pulpitu (z_order 0) zachowuje dotychczasowa semantyke (bez cienia).
+     */
+    if(warstwa->z_order!=0){
+        cien_warstwy_przed_rysowaniem();
+        zapamietaj_dirty_rysowania(0,0,warstwa->szerokosc,warstwa->wysokosc);
+    }
+    // Zaraz po zmianie rozmiaru bufor niesie stara tresc i kryjace rozszerzenie (skladacz_obrazu.h): nie zerujemy go.
+    if(!skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(aktualny_pid))
+        wyczysc_warstwe(aktualny_pid);
+    if(warstwa->z_order==0)ma_oczekujacy_dirty[aktualny_pid]=false;
 }
 
 extern "C" void bws_gui_wypisz_tekst_kolor(

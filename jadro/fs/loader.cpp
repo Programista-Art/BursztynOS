@@ -1294,8 +1294,28 @@ static bool uruchom_program_z_pliku_impl(
             zwolnij_rezerwacje_procesu(pid); return false;
         }
         uint64_t random[5]{};
-        if (!entropia_pobierz_bajty(reinterpret_cast<uint8_t*>(random), sizeof(random)) ||
-            !bur_v2_zaplanuj_aslr(n2, random[0], random[1], random[2], random[3], &layout)) {
+        /* Plan ASLR moze zostac odrzucony, gdy obraz/sterta/SHM trafilyby w stale okno VA jadra
+         * (zarezerwowane_va.h): losujemy ponownie (skonczona liczba prob, fail-closed). */
+        bool zaplanowano = false;
+        for (unsigned proba_aslr = 0; proba_aslr < 64U && !zaplanowano; ++proba_aslr) {
+            if (!entropia_pobierz_bajty(reinterpret_cast<uint8_t*>(random), sizeof(random))) break;
+#ifdef BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE
+            // DIAGNOSTYKA (domyslnie wylaczona): pierwsza proba wymusza podstawe PIE Tapet, by odtworzyc kolizje
+            // z oknem VA jadra; kolejne proby sa losowe (sprawdza, ze poprawka przelosowuje).
+            if (proba_aslr == 0 && takie_same_sciezki(bezpieczna_sciezka, "/programy/tapety.cebula/tapety.bur"))
+                random[0] = (static_cast<uint64_t>(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE) - ASLR_PIE_WINDOW_BASE) / 4096ULL;
+#endif
+            layout = {};
+            zaplanowano = bur_v2_zaplanuj_aslr(n2, random[0], random[1], random[2], random[3], &layout);
+            if (!zaplanowano) {
+                char linia[200] = "[LOADER] plan ASLR odrzucony (kolizja z oknem jadra), losowanie ponowne: ";
+                size_t n_l = 0; while (linia[n_l]) ++n_l;
+                for (size_t k = 0; bezpieczna_sciezka[k] && n_l + 1 < sizeof(linia); ++k) linia[n_l++] = bezpieczna_sciezka[k];
+                linia[n_l] = '\0';
+                wypisz_log(linia);
+            }
+        }
+        if (!zaplanowano) {
             proba.obraz.blad = "bur-v2-secure-entropy-or-layout-unavailable";
             zwolnij_rezerwacje_procesu(pid); return false;
         }
