@@ -4,7 +4,7 @@
 #include "jadro/bws/pzb.h"
 
 /*
- * Bursztyn OS - mapowanie anonimowe dla ABI SysV (mmap/munmap/mprotect).
+ * Bursztyn OS - mapowanie dla ABI SysV (mmap/munmap/mprotect).
  *
  * Zakres: `RING3_MMAP_BASE .. RING3_MMAP_LIMIT` - nowe okno w przestrzeni
  * procesu, pomiedzy SHM (36 GiB) a stosem. Nie koliduje z:
@@ -12,7 +12,7 @@
  *   .bur obraz  16 MiB ..            (RING3_BASE)
  *   sterta      32 GiB .. 32 GiB+256M (RING3_HEAP_BASE)
  *   SHM         36 GiB .. 36 GiB+8M   (RING3_SHM_BASE)
- *   mmap        40 GiB .. 40 GiB+256M (ten modul)
+ *   mmap        40 GiB .. 44 GiB       (ten modul)
  *   stos        ~512 GiB              (RING3_STACK_TOP)
  *
  * Model jest prosty i celowo zachowawczy: mapowanie jest EAGER (ramka
@@ -26,7 +26,7 @@
 
 /* Okno adresowe mmap. Wartosci sa swiadomie poza obecnymi zakresami. */
 inline constexpr uint64_t RING3_MMAP_BASE = 0x0000000A00000000ULL;  /* 40 GiB */
-inline constexpr uint64_t RING3_MMAP_ROZMIAR = 256ULL * 1024ULL * 1024ULL;
+inline constexpr uint64_t RING3_MMAP_ROZMIAR = 4ULL * 1024ULL * 1024ULL * 1024ULL;
 inline constexpr uint64_t RING3_MMAP_LIMIT = RING3_MMAP_BASE + RING3_MMAP_ROZMIAR;
 
 static_assert(RING3_MMAP_BASE > 0x0000000900000000ULL,
@@ -64,14 +64,17 @@ struct MmapRegion {
     uint64_t adres;       /* poczatek, wyrownany do strony */
     uint64_t dlugosc;     /* rozmiar w bajtach, wielokrotnosc strony */
     uint32_t ochrona;     /* PROT_* */
+    int64_t  fd;          /* -1 dla MAP_ANONYMOUS */
+    uint64_t offset;      /* offset pliku dla mapowania file-backed */
+    uint32_t typ;         /* POSIX_MAP_PRIVATE albo POSIX_MAP_SHARED */
     bool     uzywany;
 };
 
 /* Maksymalna liczba jednoczesnych mapowan na proces. */
-inline constexpr uint32_t MMAP_MAKS_REGIONOW = 16;
+inline constexpr uint32_t MMAP_MAKS_REGIONOW = 256;
 /* Minimalna i maksymalna dlugosc jednego mapowania. */
 inline constexpr uint64_t MMAP_MIN_DLUGOSC = 4096ULL;
-inline constexpr uint64_t MMAP_MAKS_DLUGOSC = 64ULL * 1024ULL * 1024ULL;
+inline constexpr uint64_t MMAP_MAKS_DLUGOSC = 512ULL * 1024ULL * 1024ULL;
 
 /*
  * Znajduje wolne miejsce na mapowanie `dlugosc` bajtow.
@@ -88,6 +91,10 @@ uint64_t mmap_znajdz_miejsce(const MmapRegion* regiony, uint32_t liczba,
 
 /* Sprawdza, czy adres jest poprawny dla mmap (wyrownanie, okno, zakres). */
 bool mmap_adres_poprawny(uint64_t adres, uint64_t dlugosc);
+
+/* Sprawdza, czy eager zakres file-backed miesci sie w pliku. */
+bool mmap_zakres_pliku_poprawny(uint64_t rozmiar_pliku, uint64_t offset,
+                                uint64_t dlugosc);
 
 /* Sprawdza zestaw flag. Zwraca -errno albo 0. */
 int64_t mmap_waliduj_flagi(uint64_t flagi, uint64_t ochrona);

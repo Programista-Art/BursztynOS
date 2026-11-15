@@ -24,7 +24,10 @@
 .bws-test/
 .ssp-test/
 .posix-test/
+.musl-build/
+.cpython-build/
 .elf-test/
+.elf-exec-test/
 .blit-test/
 .tapety-sources.manifest
 

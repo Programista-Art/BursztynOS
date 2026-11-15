@@ -416,6 +416,13 @@ struct ModulMB2 {
  */
 void* ZaalokujRamke();
 
+/*
+ * Rezerwuje ramke dla pamieci uzytkownika. Alokator preferuje pule
+ * powyzej 1 GiB, a na maszynach z mniejsza iloscia RAM bezpiecznie
+ * korzysta z pozostalej puli. Ramki sa zerowane przed publikacja.
+ */
+void* ZaalokujRamkeUzytkownika();
+
 /* Fizycznie ciagly przebieg ramek 4 KiB (dla DMA). */
 void* ZaalokujCiagleRamki(size_t liczba_ramek);
 
@@ -500,6 +507,17 @@ extern "C" bool VmmMapujNowaStroneWPrzestrzeniProcesu(
     bool wykonuj
 );
 
+/*
+ * Tlumaczy VA z zaufanego, nieaktywnego PML4 na PA bez zmiany CR3.
+ * Dozwolone sa wylacznie obecne strony USER; wynik obejmuje offset
+ * wewnatrz strony. Wywolujacy powinien uzyc HHDM do dostepu do PA.
+ */
+extern "C" bool VmmTlumaczWirtualnyNaFizyczny(
+    void* pml4,
+    uint64_t adres_wirtualny,
+    uint64_t* adres_fizyczny
+);
+
 /* Waskie API dla natywnych obiektow SHM. Operuje tylko na aktualnym CR3,
  * stronach 4 KiB USER i nigdy nie publikuje adresu fizycznego Ring 3. */
 extern "C" bool VmmMapujStroneWspoldzielona(
@@ -510,6 +528,29 @@ extern "C" bool VmmMapujStroneWspoldzielona(
 
 extern "C" bool VmmOdmapujStroneWspoldzielona(
     void* adres_wirtualny
+);
+
+/* Zdejmuje prywatna strone USER z aktywnego CR3 i zwraca jej PA.
+ * Wylacznie wywolujacy, ktory posiada wlasnosc ramki, moze przekazac
+ * wynik do ZwolnijRamke(). Stron WSPOLDZIELONA ta funkcja nie zdejmuje. */
+extern "C" void* VmmOdmapujStroneProcesu(
+    void* adres_wirtualny
+);
+
+/* Sprawdza, czy aktywny CR3 ma prywatny lisc USER 4 KiB pod VA. */
+extern "C" bool VmmCzyPrywatnaStronaProcesu(
+    void* adres_wirtualny
+);
+
+/* Zmienia RW/NX dla calego, juz zmapowanego zakresu USER w aktywnym CR3.
+ * Funkcja najpierw sprawdza caly zakres, potem modyfikuje PTE i flushuje TLB.
+ * PROT_NONE nie jest reprezentowalne przez sam zestaw RW/NX i nie jest
+ * obslugiwane przez ten waski interfejs. */
+extern "C" bool VmmZmienOchronaZakresuProcesu(
+    void* adres_wirtualny,
+    size_t rozmiar,
+    bool zapis,
+    bool wykonuj
 );
 
 /* Czy sprzet obsluguje bit NX i czy EFER.NXE jest wlaczony.

@@ -60,6 +60,38 @@ struct Zapisane {
     uint64_t uname_bufor, brk_wartosc, munmap_adres, munmap_dlugosc;
     uint64_t mprotect_adres, mprotect_dlugosc, mprotect_ochrona;
     uint64_t gettimeofday_tv, gettimeofday_tz;
+    /* nowe: open/read/close/lseek/fstat/stat */
+    uint64_t open_sciezka, open_flagi, open_tryb;
+    int read_fd;
+    uint64_t read_bufor, read_dlugosc;
+    int close_fd_arg;
+    int lseek_fd, lseek_skad;
+    int64_t lseek_przesuniecie;
+    int fstat_fd_arg;
+    uint64_t fstat_bufor;
+    uint64_t stat_sciezka, stat_bufor;
+    /* nowe: startowe libc */
+    uint64_t tid_wskaznik;
+    uint64_t robust_naglowek, robust_dlugosc;
+    int prlimit_pid, prlimit_zasob;
+    uint64_t prlimit_nowy, prlimit_stary;
+    int affinity_pid;
+    uint64_t affinity_rozmiar, affinity_maska;
+    int getrlimit_zasob;
+    uint64_t getrlimit_bufor;
+    uint64_t sysinfo_bufor;
+    uint64_t access_sciezka;
+    int access_tryb;
+    int socket_domena, socket_typ, socket_protokol;
+    int connect_fd;
+    uint64_t connect_adres;
+    uint32_t connect_dlugosc;
+    int send_fd;
+    uint64_t send_bufor, send_dlugosc, send_adres;
+    uint32_t send_flagi, send_dlugosc_adresu;
+    int recv_fd;
+    uint64_t recv_bufor, recv_dlugosc, recv_adres, recv_dlugosc_adresu;
+    uint32_t recv_flagi;
 };
 
 Zapisane g_z{};
@@ -148,6 +180,125 @@ int64_t usl_futex(void*, uint64_t adres, uint64_t op, uint64_t wartosc,
     return 0;
 }
 
+/* ---- Stuby nowych uslug: zapisuja argumenty, zwracaja sukces ---------- */
+
+int64_t usl_read(void*, int fd, uint64_t bufor, uint64_t dlugosc) {
+    g_z.read_fd = fd;
+    g_z.read_bufor = bufor;
+    g_z.read_dlugosc = dlugosc;
+    return static_cast<int64_t>(dlugosc);
+}
+
+int64_t usl_open(void*, uint64_t sciezka, uint64_t flagi, uint64_t tryb) {
+    g_z.open_sciezka = sciezka;
+    g_z.open_flagi = flagi;
+    g_z.open_tryb = tryb;
+    return 5;
+}
+
+int64_t usl_close(void*, int fd) {
+    g_z.close_fd_arg = fd;
+    return 0;
+}
+
+int64_t usl_lseek(void*, int fd, int64_t przesuniecie, int skad) {
+    g_z.lseek_fd = fd;
+    g_z.lseek_przesuniecie = przesuniecie;
+    g_z.lseek_skad = skad;
+    return przesuniecie;
+}
+
+int64_t usl_fstat(void*, int fd, uint64_t bufor) {
+    g_z.fstat_fd_arg = fd;
+    g_z.fstat_bufor = bufor;
+    return 0;
+}
+
+int64_t usl_stat(void*, uint64_t sciezka, uint64_t bufor) {
+    g_z.stat_sciezka = sciezka;
+    g_z.stat_bufor = bufor;
+    return 0;
+}
+
+int64_t usl_set_tid(void*, uint64_t wskaznik) {
+    g_z.tid_wskaznik = wskaznik;
+    return 42;
+}
+
+int64_t usl_robust(void*, uint64_t naglowek, uint64_t dlugosc) {
+    g_z.robust_naglowek = naglowek;
+    g_z.robust_dlugosc = dlugosc;
+    return 0;
+}
+
+int64_t usl_prlimit(void*, int pid, int zasob, uint64_t nowy, uint64_t stary) {
+    g_z.prlimit_pid = pid;
+    g_z.prlimit_zasob = zasob;
+    g_z.prlimit_nowy = nowy;
+    g_z.prlimit_stary = stary;
+    return 0;
+}
+
+int64_t usl_affinity(void*, int pid, uint64_t rozmiar, uint64_t maska) {
+    g_z.affinity_pid = pid;
+    g_z.affinity_rozmiar = rozmiar;
+    g_z.affinity_maska = maska;
+    return static_cast<int64_t>(rozmiar);
+}
+
+int64_t usl_getrlimit(void*, int zasob, uint64_t bufor) {
+    g_z.getrlimit_zasob = zasob;
+    g_z.getrlimit_bufor = bufor;
+    return 0;
+}
+
+int64_t usl_sysinfo(void*, uint64_t bufor) {
+    g_z.sysinfo_bufor = bufor;
+    return 0;
+}
+
+int64_t usl_access(void*, uint64_t sciezka, int tryb) {
+    g_z.access_sciezka = sciezka;
+    g_z.access_tryb = tryb;
+    return 0;
+}
+
+int64_t usl_socket(void*, int domena, int typ, int protokol) {
+    g_z.socket_domena = domena;
+    g_z.socket_typ = typ;
+    g_z.socket_protokol = protokol;
+    return 42;
+}
+
+int64_t usl_connect(void*, int fd, uint64_t adres, uint32_t dlugosc) {
+    g_z.connect_fd = fd;
+    g_z.connect_adres = adres;
+    g_z.connect_dlugosc = dlugosc;
+    return 0;
+}
+
+int64_t usl_sendto(void*, int fd, uint64_t bufor, uint64_t dlugosc,
+                   uint32_t flagi, uint64_t adres, uint32_t dlugosc_adresu) {
+    g_z.send_fd = fd;
+    g_z.send_bufor = bufor;
+    g_z.send_dlugosc = dlugosc;
+    g_z.send_flagi = flagi;
+    g_z.send_adres = adres;
+    g_z.send_dlugosc_adresu = dlugosc_adresu;
+    return 0;
+}
+
+int64_t usl_recvfrom(void*, int fd, uint64_t bufor, uint64_t dlugosc,
+                     uint32_t flagi, uint64_t adres, uint64_t dlugosc_adresu) {
+    g_z.recv_fd = fd;
+    g_z.recv_bufor = bufor;
+    g_z.recv_dlugosc = dlugosc;
+    g_z.recv_flagi = flagi;
+    g_z.recv_adres = adres;
+    g_z.recv_dlugosc_adresu = dlugosc_adresu;
+    return 0;
+}
+
 PosixUslugi pelne_uslugi() {
     PosixUslugi u{};
     u.write = usl_write;
@@ -164,7 +315,29 @@ PosixUslugi pelne_uslugi() {
     u.munmap = usl_munmap;
     u.mprotect = usl_mprotect;
     u.futex = usl_futex;
+    u.read = usl_read;
+    u.open = usl_open;
+    u.close_fd = usl_close;
+    u.lseek_fd = usl_lseek;
+    u.fstat_fd = usl_fstat;
+    u.stat_sciezka = usl_stat;
+    u.set_tid_address = usl_set_tid;
+    u.set_robust_list = usl_robust;
+    u.prlimit64 = usl_prlimit;
+    u.sched_getaffinity = usl_affinity;
+    u.getrlimit_zasob = usl_getrlimit;
+    u.sysinfo_ogolny = usl_sysinfo;
+    u.access_sciezka = usl_access;
     u.kontekst = nullptr;
+    return u;
+}
+
+PosixUslugi socket_uslugi() {
+    PosixUslugi u{};
+    u.socket = usl_socket;
+    u.connect = usl_connect;
+    u.sendto = usl_sendto;
+    u.recvfrom = usl_recvfrom;
     return u;
 }
 
@@ -412,6 +585,268 @@ void test_abi() {
     check(sizeof(PosixRama) == 80, "rama ABI");
     check(sizeof(PosixTimespec) == 16, "timespec ABI");
     check(sizeof(PosixTimeval) == 16, "timeval ABI");
+
+    /*
+     * Struktury startowe libc: kazdy naglowek <sys/resource.h> i
+     * <sys/sysinfo.h> w obcym libc zaklada te offsety. Zla kolejnosc pol
+     * nie daje bledu kompilacji, tylko smieci w aplikacji.
+     */
+    check(sizeof(PosixRlimit) == 16, "rlimit ABI");
+    check(sizeof(PosixSysinfo) == 112, "sysinfo ABI");
+    check(offsetof(PosixSysinfo, totalram) == 32, "sysinfo: totalram@32");
+    check(offsetof(PosixSysinfo, freeram) == 40, "sysinfo: freeram@40");
+    check(offsetof(PosixSysinfo, procs) == 80, "sysinfo: procs@80");
+    check(offsetof(PosixSysinfo, totalhigh) == 88, "sysinfo: totalhigh@88");
+    check(offsetof(PosixSysinfo, mem_unit) == 104, "sysinfo: mem_unit@104");
+
+    /* RLIM_INFINITY jest porownywane wprost przez musl. */
+    check(POSIX_RLIM_INFINITY == ~0ULL, "RLIM_INFINITY = wszystkie bity");
+
+    /*
+     * Numery wywolan startowych musza byc linuxowe. Pomylka numeru to
+     * ciche przeklamanie ABI: aplikacja wywola istniejaca usluge z innymi
+     * argumentami i dostanie losowy blad zamiast dzialac.
+     */
+    check(POSIX_SYS_set_tid_address == 218, "set_tid_address = 218");
+    check(POSIX_SYS_set_robust_list == 273, "set_robust_list = 273");
+    check(POSIX_SYS_prlimit64 == 302, "prlimit64 = 302");
+    check(POSIX_SYS_sched_getaffinity == 204, "sched_getaffinity = 204");
+    check(POSIX_SYS_openat == 257, "openat = 257");
+    check(POSIX_SYS_newfstatat == 262, "newfstatat = 262");
+
+    /* Kontrakt futexa: rozpoznajemy tylko WAIT/WAKE oraz PRIVATE. */
+    check(posix_futex_polecenie(POSIX_FUTEX_WAKE |
+                                 POSIX_FUTEX_PRIVATE_FLAG) == POSIX_FUTEX_WAKE,
+          "futex: PRIVATE nie zmienia polecenia");
+    check(!posix_futex_ma_nieznane_flagi(POSIX_FUTEX_WAIT |
+                                         POSIX_FUTEX_PRIVATE_FLAG),
+          "futex: WAIT|PRIVATE ma znane flagi");
+    check(posix_futex_ma_nieznane_flagi(POSIX_FUTEX_WAIT |
+                                        POSIX_FUTEX_CLOCK_REALTIME),
+          "futex: CLOCK_REALTIME pozostaje nieobslugiwany");
+    check(posix_futex_ma_nieznane_flagi(UINT64_MAX),
+          "futex: bity poza ABI nie sa obcinane");
+    check(posix_futex_sprawdz_wartosc(7, 7) == 0,
+          "futex: zgodna wartosc pozwala obserwowac dalej");
+    check(posix_futex_sprawdz_wartosc(7, 8) == posix_blad(POSIX_EAGAIN),
+          "futex: rozna wartosc -> EAGAIN");
+    check(posix_futex_wynik_po_spinie(true) == 0,
+          "futex: zmiana podczas spinu -> sukces");
+    check(posix_futex_wynik_po_spinie(false) == posix_blad(POSIX_ENOSYS),
+          "futex: brak zmiany po limicie -> ENOSYS");
+}
+
+void test_nieobslugiwane_process_thread_signal() {
+    /*
+     * Te bramki sa nazwane i maja jawny kontrakt -ENOSYS. Nie testujemy
+     * atrap procesu, deskryptora ani delivery sygnalu jako sukcesu.
+     */
+    const PosixUslugi puste{};
+    const uint64_t numery[] = {
+        POSIX_SYS_pipe, POSIX_SYS_pipe2, POSIX_SYS_dup, POSIX_SYS_dup2,
+        POSIX_SYS_dup3, POSIX_SYS_fcntl, POSIX_SYS_clone, POSIX_SYS_fork,
+        POSIX_SYS_vfork, POSIX_SYS_execve, POSIX_SYS_wait4, POSIX_SYS_kill,
+        POSIX_SYS_rt_sigaction, POSIX_SYS_rt_sigprocmask
+    };
+    for (uint64_t numer : numery) {
+        check(posix_obsluz(puste, rama(numer), nullptr) ==
+                  posix_blad(POSIX_ENOSYS),
+              "process/thread/signal bez implementacji -> -ENOSYS");
+        check(std::strcmp(posix_nazwa_wywolania(numer), "nieznane") != 0,
+              "process/thread/signal ma nazwe diagnostyczna");
+    }
+}
+
+/* =========================================================================
+ * 6. NOWE WYWOLANIA: mapowanie argumentow i semantyka
+ * ========================================================================= */
+
+void test_nowe_wywolania() {
+    const PosixUslugi u = pelne_uslugi();
+    PosixDiagnostyka d{};
+
+    /*
+     * open(sciezka, flagi, tryb): RDI=sciezka, RSI=flagi, RDX=tryb.
+     * Sprawdzamy, ze tryb NIE jest obcinany do zera - aplikacja z O_CREAT
+     * podaje go i oczekuje, ze dotrze.
+     */
+    (void)posix_obsluz(u, rama(POSIX_SYS_open, 0x1000, 0x42, 0644), &d);
+    check(g_z.open_sciezka == 0x1000, "open: sciezka z RDI");
+    check(g_z.open_flagi == 0x42, "open: flagi z RSI");
+    check(g_z.open_tryb == 0644, "open: tryb z RDX (nie obcięty)");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_read, 7, 0x2000, 4096), &d);
+    check(g_z.read_fd == 7, "read: fd z RDI");
+    check(g_z.read_bufor == 0x2000, "read: bufor z RSI");
+    check(g_z.read_dlugosc == 4096, "read: dlugosc z RDX");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_close, 9), &d);
+    check(g_z.close_fd_arg == 9, "close: fd z RDI");
+
+    /* lseek: przesuniecie jest SIGNED i musi dotrzec bez zmiany znaku. */
+    (void)posix_obsluz(u, rama(POSIX_SYS_lseek, 3,
+                               static_cast<uint64_t>(-512LL), 2), &d);
+    check(g_z.lseek_fd == 3, "lseek: fd z RDI");
+    check(g_z.lseek_przesuniecie == -512, "lseek: ujemne przesuniecie zachowane");
+    check(g_z.lseek_skad == 2, "lseek: skad z RDX");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_fstat, 4, 0x3000), &d);
+    check(g_z.fstat_fd_arg == 4, "fstat: fd z RDI");
+    check(g_z.fstat_bufor == 0x3000, "fstat: bufor z RSI");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_newfstatat, 0, 0, 0), &d);
+    check(g_z.futex_op == 0, "nieznany numer nie wywoluje zadnej uslugi");
+
+    /* set_tid_address zwraca PID - musl wymaga tej wartosci w crt1. */
+    const int64_t tid = posix_obsluz(u, rama(POSIX_SYS_set_tid_address, 0x7000), &d);
+    check(tid == 42, "set_tid_address zwraca wartosc uslugi");
+    check(g_z.tid_wskaznik == 0x7000, "set_tid_address: wskaznik z RDI");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_set_robust_list, 0x8000, 24), &d);
+    check(g_z.robust_naglowek == 0x8000, "set_robust_list: naglowek z RDI");
+    check(g_z.robust_dlugosc == 24, "set_robust_list: dlugosc z RSI");
+
+    /*
+     * prlimit64: pid, zasob, nowy i stary limit. Cztery argumenty, wiec
+     * czwarty musi przyjsc z R10 - to jedyne miejsce, gdzie pomylka
+     * R10/RDX jest niewidoczna bez testu.
+     */
+    (void)posix_obsluz(u, rama(POSIX_SYS_prlimit64, 0, 7, 0, 0x9000), &d);
+    check(g_z.prlimit_pid == 0, "prlimit64: pid z RDI");
+    check(g_z.prlimit_zasob == 7, "prlimit64: zasob z RSI (RLIMIT_NOFILE)");
+    check(g_z.prlimit_nowy == 0, "prlimit64: nowy limit z RDX");
+    check(g_z.prlimit_stary == 0x9000, "prlimit64: stary limit z R10");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_sched_getaffinity, 0, 8, 0xA000), &d);
+    check(g_z.affinity_pid == 0, "sched_getaffinity: pid z RDI");
+    check(g_z.affinity_rozmiar == 8, "sched_getaffinity: rozmiar z RSI");
+    check(g_z.affinity_maska == 0xA000, "sched_getaffinity: maska z RDX");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_getrlimit, 7, 0xB000), &d);
+    check(g_z.getrlimit_zasob == 7, "getrlimit: zasob z RDI");
+    check(g_z.getrlimit_bufor == 0xB000, "getrlimit: bufor z RSI");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_sysinfo, 0xC000), &d);
+    check(g_z.sysinfo_bufor == 0xC000, "sysinfo: bufor z RDI");
+
+    (void)posix_obsluz(u, rama(POSIX_SYS_access, 0xD000, 4), &d);
+    check(g_z.access_sciezka == 0xD000, "access: sciezka z RDI");
+    check(g_z.access_tryb == 4, "access: tryb (R_OK) z RSI");
+
+    /*
+     * Brak uslugi w tablicy nadal musi dawac -ENOSYS, a nie segfault.
+     * To sprawdzenie jest wazne, bo dyspozytor wola wskazniki z tablicy.
+     */
+    PosixUslugi puste{};
+    const int64_t r = posix_obsluz(puste, rama(POSIX_SYS_set_tid_address, 1), &d);
+    check(r == -POSIX_ENOSYS, "brak set_tid_address -> -ENOSYS");
+
+    /* Kazde nowe wywolanie ma nazwe - logi musza byc czytelne. */
+    const uint64_t nowe[] = {
+        POSIX_SYS_open, POSIX_SYS_read, POSIX_SYS_close, POSIX_SYS_lseek,
+        POSIX_SYS_fstat, POSIX_SYS_set_tid_address, POSIX_SYS_set_robust_list,
+        POSIX_SYS_prlimit64, POSIX_SYS_sched_getaffinity, POSIX_SYS_getrlimit,
+        POSIX_SYS_sysinfo, POSIX_SYS_access, POSIX_SYS_openat,
+        POSIX_SYS_newfstatat, POSIX_SYS_getdents64
+    };
+    for (uint64_t numer : nowe) {
+        const char* nazwa = posix_nazwa_wywolania(numer);
+        check(nazwa != nullptr && std::strcmp(nazwa, "nieznane") != 0,
+              "nowe wywolanie ma nazwe");
+    }
+
+    const PosixUslugi su = socket_uslugi();
+    g_z = Zapisane{};
+    check(posix_obsluz(su, rama(POSIX_SYS_socket, POSIX_AF_INET,
+                                POSIX_SOCK_STREAM, POSIX_IPPROTO_TCP), &d) == 42,
+          "socket: callback");
+    check(g_z.socket_domena == POSIX_AF_INET &&
+              g_z.socket_typ == POSIX_SOCK_STREAM &&
+              g_z.socket_protokol == POSIX_IPPROTO_TCP,
+          "socket: trzy argumenty");
+
+    g_z = Zapisane{};
+    check(posix_obsluz(su, rama(POSIX_SYS_connect, 7, 0x1000, 16), &d) == 0,
+          "connect: callback");
+    check(g_z.connect_fd == 7 && g_z.connect_adres == 0x1000 &&
+              g_z.connect_dlugosc == 16,
+          "connect: RDI/RSI/RDX");
+
+    g_z = Zapisane{};
+    check(posix_obsluz(su, rama(POSIX_SYS_sendto, 8, 0x2000, 99,
+                                0x4000, 0x3000, 16), &d) == 0,
+          "sendto: callback");
+    check(g_z.send_fd == 8 && g_z.send_bufor == 0x2000 &&
+              g_z.send_dlugosc == 99 && g_z.send_flagi == 0x4000 &&
+              g_z.send_adres == 0x3000 && g_z.send_dlugosc_adresu == 16,
+          "sendto: szesc argumentow");
+
+    g_z = Zapisane{};
+    check(posix_obsluz(su, rama(POSIX_SYS_recvfrom, 9, 0x5000, 77,
+                                3, 0x6000, 0x7000), &d) == 0,
+          "recvfrom: callback");
+    check(g_z.recv_fd == 9 && g_z.recv_bufor == 0x5000 &&
+              g_z.recv_dlugosc == 77 && g_z.recv_flagi == 3 &&
+              g_z.recv_adres == 0x6000 &&
+              g_z.recv_dlugosc_adresu == 0x7000,
+          "recvfrom: szesc argumentow");
+
+    const uint64_t siec[] = {
+        POSIX_SYS_socket, POSIX_SYS_connect, POSIX_SYS_sendto,
+        POSIX_SYS_recvfrom, POSIX_SYS_bind, POSIX_SYS_listen,
+        POSIX_SYS_accept, POSIX_SYS_shutdown, POSIX_SYS_getsockopt,
+        POSIX_SYS_setsockopt
+    };
+    for (uint64_t numer : siec) {
+        check(std::strcmp(posix_nazwa_wywolania(numer), "nieznane") != 0,
+              "socket syscall ma nazwe diagnostyczna");
+    }
+}
+
+/* =========================================================================
+ * 7. TELEMETRIA -ENOSYS PER NUMER
+ * ========================================================================= */
+
+void test_telemetria() {
+    /*
+     * Telemetria jest narzedziem diagnostycznym, nie ozdoba: bez niej
+     * "musl nie startuje" znaczy "zgaduj, ktorego wywolania brakuje".
+     * Test sprawdza, ze liczniki trafiaja pod wlasciwy indeks i ze
+     * pomylka indeksu (np. wszystko pod 0) jest wykrywalna.
+     */
+    PosixDiagnostyka d{};
+    PosixUslugi puste{};  /* brak wszystkich uslug -> kazde wywolanie ENOSYS */
+
+    for (int i = 0; i < 3; ++i) {
+        (void)posix_obsluz(puste, rama(POSIX_SYS_set_tid_address, 1), &d);
+    }
+    (void)posix_obsluz(puste, rama(POSIX_SYS_prlimit64, 0, 7, 0, 0), &d);
+
+    check(d.liczba_wywolan_per_numer[POSIX_SYS_set_tid_address] == 3,
+          "telemetria: set_tid_address liczone osobno");
+    check(d.liczba_enosys_per_numer[POSIX_SYS_set_tid_address] == 3,
+          "telemetria: set_tid_address ENOSYS policzone");
+    check(d.liczba_wywolan_per_numer[POSIX_SYS_prlimit64] == 1,
+          "telemetria: prlimit64 liczone osobno");
+    check(d.liczba_wywolan_per_numer[0] == 0,
+          "telemetria: read (0) nie zostalo policzone za inne wywolanie");
+    check(d.licznik_wywolan == 4, "telemetria: suma wywolan");
+    check(d.licznik_enosys == 4, "telemetria: suma ENOSYS");
+
+    /* Numer spoza zakresu jest pomijany, nie zawija indeksu. */
+    (void)posix_obsluz(puste, rama(9999), &d);
+    check(d.licznik_wywolan == 5, "telemetria: numer spoza zakresu policzony w sumie");
+    check(d.liczba_wywolan_per_numer[0] == 0,
+          "telemetria: numer spoza zakresu nie trafil pod indeks 0");
+
+    /* Wywolanie, ktore sie udaje, nie moze zwiekszac licznika ENOSYS. */
+    PosixDiagnostyka d2{};
+    const PosixUslugi u = pelne_uslugi();
+    (void)posix_obsluz(u, rama(POSIX_SYS_set_tid_address, 0), &d2);
+    check(d2.liczba_enosys_per_numer[POSIX_SYS_set_tid_address] == 0,
+          "telemetria: sukces nie jest liczony jako ENOSYS");
+    check(d2.liczba_wywolan_per_numer[POSIX_SYS_set_tid_address] == 1,
+          "telemetria: sukces policzony jako wywolanie");
 }
 
 }  // namespace
@@ -422,6 +857,9 @@ int main() {
     test_skrajne();
     test_nazwy();
     test_abi();
+    test_nieobslugiwane_process_thread_signal();
+    test_nowe_wywolania();
+    test_telemetria();
 
     if (g_failures != 0) {
         std::printf("[POSIX-ABI-HOST] FAIL %d/%d\n", g_failures, g_checks);

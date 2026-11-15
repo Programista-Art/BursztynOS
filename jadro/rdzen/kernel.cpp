@@ -30,6 +30,7 @@ extern "C" void odblokuj_ekran();
 #include <stddef.h>
 #include <stdbool.h>
 
+#include "jadro/vfs/vfs_jadro.h"
 #include "pamiec.h"
 #include "psf.h"
 #include "psf_bootstrap.h"
@@ -1151,7 +1152,12 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"uruchom_program\",\n"
-        "    \"pliki_czytaj\"\n"
+        "    \"pliki_czytaj\",\n"
+        /* Testy systemu weryfikuja takze zapis przez VFS (open/write/read).
+         * PZB-4 nadal blokuje /system, /jadro, /programy, /sterowniki
+         * i /sloty - prawo dziala wylacznie poza drzewami chronionymi
+         * (np. /tymczasowe), co test regresyjny sprawdza wprost. */
+        "    \"pliki_zapisz\"\n"
         "]\n";
 
     static const char MANIFEST_SNAKE[] =
@@ -2778,6 +2784,13 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     // Restoring the display mode can compose immediately, before WM exists.
     // Resolve the current palette before that first composition.
     motyw_inicjalizuj();
+    /*
+     * Tablica deskryptorow VFS musi byc wyzerowana PRZED uruchomieniem
+     * pierwszego procesu Ring 3: loader zaklada 0/1/2 w chwili publikacji
+     * procesu, a vfs_zarezerwuj() odmawia dzialania na niezainicjalizowanej
+     * tablicy (fail-closed).
+     */
+    vfs_jadro_inicjalizuj();
     tapety_inicjalizuj(g_multiboot_info_ptr);
     ekran_inicjalizuj();
     PrezentacjaStartu::zakoncz_inicjalizacje();

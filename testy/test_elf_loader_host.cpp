@@ -101,14 +101,48 @@ struct Budowniczy {
         put64(off + 40, memsz);
         put64(off + 48, 0x1000);
     }
+
+    void section(size_t off, uint32_t typ, uint64_t file_off,
+                 uint64_t size, uint64_t entsize) {
+        put32(off + 0, 0);       /* sh_name */
+        put32(off + 4, typ);
+        put64(off + 8, 0);       /* sh_flags */
+        put64(off + 16, 0);      /* sh_addr */
+        put64(off + 24, file_off);
+        put64(off + 32, size);
+        put32(off + 40, 0);      /* sh_link */
+        put32(off + 44, 0);      /* sh_info */
+        put64(off + 48, 8);      /* sh_addralign */
+        put64(off + 56, entsize);
+    }
 };
 
 /* Poprawny obraz: dwa segmenty (RX .text + RW .data z BSS). */
 Budowniczy obraz_poprawny(uint16_t typ = ET_EXEC) {
     Budowniczy b(0x2000);
     b.naglowek(typ, 0x400000 + 0x80, 64, 2);
-    b.phdr(64, PT_LOAD, PF_R | PF_X, 0x1000, 0x400000, 0x200, 0x200);
-    b.phdr(64 + 56, PT_LOAD, PF_R | PF_W, 0x1200, 0x401000, 0x100, 0x400);
+    b.phdr(64, PT_LOAD, PF_R | PF_X, 0, 0x400000, 0x200, 0x200);
+    b.phdr(64 + 56, PT_LOAD, PF_R | PF_W, 0x200, 0x401000, 0x100, 0x400);
+    return b;
+}
+
+/* Minimalny statyczny PIE: bez PT_DYNAMIC/PT_INTERP, z SHT_RELA. */
+Budowniczy obraz_pie_z_relokacja() {
+    Budowniczy b(0x2000);
+    b.naglowek(ET_DYN, 0x80, 64, 3);
+    b.put64(40, 0x1800);  /* e_shoff */
+    b.put16(60, 2);       /* e_shnum: NULL + .rela.dyn */
+    b.phdr(64, PT_LOAD, PF_R | PF_X, 0, 0, 0x200, 0x200);
+    b.phdr(64 + 56, PT_LOAD, PF_R | PF_W, 0x200, 0x1000, 0x100, 0x200);
+    b.phdr(64 + 112, PT_PHDR, PF_R, 64, 0x40, 3 * sizeof(Elf64_Phdr),
+           3 * sizeof(Elf64_Phdr));
+
+    constexpr size_t rela = 0x1600;
+    b.put64(rela + 0, 0x1040); /* target in RW PT_LOAD */
+    b.put64(rela + 8, static_cast<uint64_t>(R_X86_64_RELATIVE));
+    b.put64(rela + 16, 0x80);  /* addend */
+    b.section(0x1800 + sizeof(Elf64_Shdr), SHT_RELA,
+              rela, sizeof(Elf64_Rela), sizeof(Elf64_Rela));
     return b;
 }
 
@@ -123,6 +157,9 @@ void test_pozytywne() {
     ElfObraz obraz{};
     check_status(elf_opisz(b.baza(), b.rozmiar(), &obraz), ELF_OK, "opis poprawnego obrazu");
     check(obraz.wejscie == 0x400080, "e_entry");
+    check(obraz.phdr == 0x400040, "AT_PHDR: tablica w PT_LOAD");
+    check(obraz.phent == sizeof(Elf64_Phdr), "AT_PHENT");
+    check(obraz.phnum == 2, "AT_PHNUM");
     check(obraz.liczba_segmentow == 2, "liczba segmentow");
     check(obraz.dolny_adres == 0x400000, "dolny adres");
     check(obraz.gorny_adres == 0x401400, "gorny adres (z BSS)");
@@ -141,6 +178,53 @@ void test_pozytywne() {
 
     ElfObraz obraz_dyn{};
     check_status(elf_opisz(dyn.baza(), dyn.rozmiar(), &obraz_dyn), ELF_OK, "opis DYN");
+
+    {
+        const Budowniczy pie = obraz_pie_z_relokacja();
+        ElfRelokacja relokacje[2]{};
+        uint32_t liczba = 0;
+        check_status(elf_zbierz_relokacje(
+                         pie.baza(), pie.rozmiar(), relokacje, 2, &liczba),
+                     ELF_OK, "statyczny PIE bez PT_DYNAMIC");
+        check(liczba == 1, "jedna relokacja RELATIVE");
+        check(relokacje[0].offset == 0x1040 &&
+                  relokacje[0].addend == 0x80 &&
+                  relokacje[0].typ == R_X86_64_RELATIVE &&
+                  relokacje[0].symbol == 0,
+              "pola relokacji RELATIVE");
+
+        uint64_t wartosc = 0;
+        check(elf_oblicz_relative(relokacje[0], 0x200000, &wartosc) &&
+                  wartosc == 0x200080,
+              "wartosc B+A relokacji RELATIVE");
+        ElfRelokacja ujemna = relokacje[0];
+        ujemna.addend = -0x20;
+        check(elf_oblicz_relative(ujemna, 0x200000, &wartosc) &&
+                  wartosc == 0x1FFFE0,
+              "ujemny addend relokacji bez signed overflow");
+        ujemna.addend = INT64_MIN;
+        check(!elf_oblicz_relative(ujemna, 0, &wartosc),
+              "INT64_MIN addend odrzucony bez UB");
+        ElfRelokacja dodatnia = relokacje[0];
+        dodatnia.addend = INT64_MAX;
+        check(!elf_oblicz_relative(
+                  dodatnia, 0x8000000000000001ULL, &wartosc),
+              "overflow B+A odrzucony");
+
+        ElfObraz opis_pie{};
+        check_status(elf_opisz(pie.baza(), pie.rozmiar(), &opis_pie),
+                     ELF_OK, "opis statycznego PIE");
+        check(opis_pie.phdr == 0x40, "PIE AT_PHDR przed bias");
+        check_status(elf_przesun_obraz(&opis_pie, 0x200000),
+                     ELF_OK, "load bias statycznego PIE");
+        check(opis_pie.wejscie == 0x200080 &&
+                  opis_pie.phdr == 0x200040 &&
+                  opis_pie.segmenty[0].wirtualny == 0x200000,
+              "load bias aktualizuje entry/phdr/PT_LOAD");
+        check_status(elf_przesun_obraz(&opis_pie, 1),
+                     ELF_BIAS_NIEPOPRAWNY,
+                     "load bias musi byc page-aligned");
+    }
 
     /* PT_GNU_STACK bez PF_X => NX stos. */
     Budowniczy stack = obraz_poprawny();
@@ -298,6 +382,48 @@ void test_negatywne() {
         check_status(elf_waliduj(m.baza(), m.rozmiar()), ELF_LINKOWANIE_DYNAMICZNE,
                      "PT_INTERP");
     }
+
+    {
+        Budowniczy m = obraz_pie_z_relokacja();
+        m.put64(0x1600 + 8, 1); /* R_X86_64_64 - brak symboli nadal nie wystarcza */
+        ElfRelokacja relokacje[1]{};
+        uint32_t liczba = 0;
+        check_status(elf_zbierz_relokacje(
+                         m.baza(), m.rozmiar(), relokacje, 1, &liczba),
+                     ELF_RELOKACJE_NIEOBSLUGIWANE,
+                     "PIE odrzuca obca relokacje");
+    }
+    {
+        Budowniczy m = obraz_pie_z_relokacja();
+        m.put64(0x1600 + 8, static_cast<uint64_t>(1ULL << 32) |
+                                      R_X86_64_RELATIVE);
+        ElfRelokacja relokacje[1]{};
+        uint32_t liczba = 0;
+        check_status(elf_zbierz_relokacje(
+                         m.baza(), m.rozmiar(), relokacje, 1, &liczba),
+                     ELF_RELOKACJE_NIEOBSLUGIWANE,
+                     "PIE odrzuca relokacje symboliczna");
+    }
+    {
+        Budowniczy m = obraz_pie_z_relokacja();
+        m.put64(0x1600, 0x80); /* target w RX, nie w danych */
+        ElfRelokacja relokacje[1]{};
+        uint32_t liczba = 0;
+        check_status(elf_zbierz_relokacje(
+                         m.baza(), m.rozmiar(), relokacje, 1, &liczba),
+                     ELF_RELOKACJA_POZA_OBRAZEM,
+                     "PIE odrzuca relokacje do RX");
+    }
+    {
+        Budowniczy m = obraz_pie_z_relokacja();
+        m.put32(0x1800 + sizeof(Elf64_Shdr) + 4, SHT_REL);
+        ElfRelokacja relokacje[1]{};
+        uint32_t liczba = 0;
+        check_status(elf_zbierz_relokacje(
+                         m.baza(), m.rozmiar(), relokacje, 1, &liczba),
+                     ELF_RELOKACJE_NIEOBSLUGIWANE,
+                     "PIE odrzuca SHT_REL");
+    }
     {
         Budowniczy m = obraz_poprawny();
         m.naglowek(ET_EXEC, 0x400080, 64, 3);
@@ -432,13 +558,49 @@ void test_opisy() {
         ELF_ZLA_WERSJA, ELF_ZLY_TYP, ELF_ZLA_ARCHITEKTURA,
         ELF_ZLY_NAGLOWEK_PROGRAMU, ELF_ZLY_SEGMENT, ELF_SEGMENTY_NACHODZA,
         ELF_WEJSCIE_POZA_KODEM, ELF_WX_NARUSZONE, ELF_LINKOWANIE_DYNAMICZNE,
-        ELF_ZLY_ROZMIAR,
+        ELF_ZLY_ROZMIAR, ELF_ZLA_TABLICA_SEKCJI,
+        ELF_RELOKACJE_NIEOBSLUGIWANE, ELF_RELOKACJA_POZA_OBRAZEM,
+        ELF_RELOKACJE_ZA_DUZO, ELF_BIAS_NIEPOPRAWNY,
     };
     for (ElfStatus s : wszystkie) {
         check(elf_status_opis(s) != nullptr && elf_status_opis(s)[0] != '\0',
               "kazdy status ma opis");
     }
     check_status(elf_waliduj(nullptr, 0), ELF_ZLA_MAGIA, "nullptr -> konkretny status");
+}
+
+/* =========================================================================
+ * TYP OBRAZU (elf_typ) - decyzja loadera o obsludze relokacji
+ * ========================================================================= */
+
+void test_typ() {
+    /*
+     * Loader rozroznia ET_EXEC i statyczny ET_DYN. Rozpoznanie typu musi
+     * byc jednoznaczne:
+     *
+     *   - ET_EXEC -> ET_EXEC (uruchamialny),
+     *   - ET_DYN  -> ET_DYN  (rozpoznany, loader dobiera bias i relokuje),
+     *   - obraz   -> 0       (0 nie jest zadnym poprawnym e_type).
+     */
+    const Budowniczy exec = obraz_poprawny(ET_EXEC);
+    check(elf_typ(exec.baza(), exec.rozmiar()) == ET_EXEC,
+          "elf_typ: ET_EXEC rozpoznany");
+
+    const Budowniczy dyn = obraz_poprawny(ET_DYN);
+    check(elf_typ(dyn.baza(), dyn.rozmiar()) == ET_DYN,
+          "elf_typ: ET_DYN rozpoznany (loader obsluguje statyczny PIE)");
+
+    /* Niepoprawny obraz nie moze udawac ET_EXEC przez przypadkowe zero. */
+    uint8_t smiec[64] = {};
+    check(elf_typ(smiec, sizeof(smiec)) == 0,
+          "elf_typ: niepoprawny obraz zwraca 0, nie ET_EXEC");
+    check(elf_typ(nullptr, 0) == 0, "elf_typ: nullptr zwraca 0");
+
+    /*
+     * Obciecie obrazu do samego naglowka nie moze zgubic typu, ale musi
+     * pozostac odrzucone przez walidator (brak tablicy programow).
+     */
+    check(elf_typ(exec.baza(), 63) == 0, "elf_typ: obciety naglowek odrzucony");
 }
 
 }  // namespace
@@ -448,6 +610,7 @@ int main() {
     test_negatywne();
     test_mutacje();
     test_opisy();
+    test_typ();
 
     if (g_failures != 0) {
         std::printf("[ELF-LOADER-HOST] FAIL %d/%d\n", g_failures, g_checks);

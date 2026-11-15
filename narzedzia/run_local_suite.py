@@ -25,6 +25,7 @@ REPORT_DIR = ROOT / ".local-ci"
 # (make_target, timeout_seconds)
 SUITE_JOBS: dict[str, list[tuple[str, int]]] = {
     "smoke": [
+        ("test-python-contract", 180),
         ("test-stack-protector-host", 300),
         ("test-bur-v2-aslr-host", 300),
         ("test-fuzz-smoke", 900),
@@ -109,12 +110,24 @@ def run_make_target(
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(proc.stdout or "", encoding="utf-8", errors="replace")
 
+        skip_lines = [
+            line for line in (proc.stdout or "").splitlines()
+            if " SKIP:" in line or " BLOCKED:" in line
+        ]
+        pass_lines = [
+            line for line in (proc.stdout or "").splitlines()
+            if " PASS" in line
+        ]
+        status = "pass" if proc.returncode == 0 else "fail"
+        if status == "pass" and skip_lines and not pass_lines:
+            status = "skipped"
         result.update(
             {
-                "status": "pass" if proc.returncode == 0 else "fail",
+                "status": status,
                 "exit_code": proc.returncode,
                 "duration_s": round(duration, 3),
                 "log": str(log_path.relative_to(ROOT)).replace("\\", "/"),
+                "skip_reasons": skip_lines,
             }
         )
     except subprocess.TimeoutExpired as exc:

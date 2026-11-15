@@ -4057,6 +4057,45 @@ extern "C" bool bsp_wczytaj_obraz_bur(const char* sciezka, BurObrazPliku* out,
 }
 
 /* =========================================================================
+ * PUBLICZNE API - SUROWY ODCZYT OBRAZU (ELF i inne formaty nie-BUR)
+ * ========================================================================= */
+
+extern "C" bool bsp_wczytaj_obraz_binarny(const char* sciezka, uint8_t** dane,
+    uint64_t* rozmiar, uint64_t maks) {
+    if (!dane || !rozmiar) return false;
+    *dane = nullptr;
+    *rozmiar = 0;
+    if (!psf_gotowy || !sciezka) return false;
+    /*
+     * Limit musi byc sensowny na trzech poziomach: polityka loadera,
+     * typ u32 uzywany przez PSF oraz zdolnosc adresowa procesora.
+     */
+    if (maks == 0 || maks > BUR_MAKS_ROZMIAR_PLIKU || maks > UINT32_MAX ||
+        maks > SIZE_MAX)
+        return false;
+    BlokadaPSF blokada;
+    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+    const wezel_indeksowy* w = id ? pobierz_wezel(id) : nullptr;
+    if (!w) return false;
+    if (w->typ != TYP_PLIK) return false;
+    const uint64_t dlugosc = w->rozmiar_w_bajtach;
+    /* Rozmiar sprawdzany PRZED alokacja - brak alokacji na zly plik. */
+    if (dlugosc == 0 || dlugosc > maks) return false;
+    auto* obraz = static_cast<uint8_t*>(kmalloc(dlugosc));
+    if (!obraz) return false;
+    uint32_t odczytano = 0;
+    if (!czytaj_fragment_pliku_wewn(sciezka, 0, reinterpret_cast<char*>(obraz),
+            static_cast<uint32_t>(dlugosc), &odczytano) ||
+        odczytano != dlugosc) {
+        kfree(obraz);
+        return false;
+    }
+    *dane = obraz;
+    *rozmiar = dlugosc;
+    return true;
+}
+
+/* =========================================================================
  * PUBLICZNE API - LISTOWANIE
  * ========================================================================= */
 
@@ -4212,6 +4251,61 @@ extern "C" bool wylistuj_katalog(
 
     bufor[pozycja] = '\0';
     return true;
+}
+
+extern "C" enum PsfKatalogWynik psf_pobierz_wpis_katalogu(
+    const char* sciezka,
+    uint64_t indeks,
+    struct PsfKatalogWpis* wpis
+) {
+    BlokadaPSF blokada;
+
+    if (!psf_gotowy || !sciezka || !wpis ||
+        !bezpieczna_sciezka(sciezka)) {
+        return PSF_KATALOG_BLAD;
+    }
+    *wpis = {};
+
+    const uint64_t katalog_id = rozwiaz_sciezke(sciezka, nullptr, false);
+    if (katalog_id == 0) return PSF_KATALOG_BLAD;
+
+    wezel_indeksowy* katalog = pobierz_wezel(katalog_id);
+    if (!katalog || katalog->typ != TYP_KATALOG) {
+        return PSF_KATALOG_BLAD;
+    }
+
+    uint64_t znalezionych = 0;
+    const uint64_t wpisow_na_blok = wpisow_katalogowych_na_blok();
+    for (size_t k = 0; k < static_cast<size_t>(PSF_MAX_BLOKOW_W_WEZLE); ++k) {
+        const uint64_t id_bloku = katalog->wskazniki_blokow[k];
+        if (id_bloku == BARK_BLOKU) continue;
+        if (!id_bloku_danych_poprawne(id_bloku)) return PSF_KATALOG_BLAD;
+
+        wpis_katalogowy* wpisy = pobierz_wpisy_katalogowe(id_bloku);
+        if (!wpisy) return PSF_KATALOG_BLAD;
+        for (uint64_t j = 0; j < wpisow_na_blok; ++j) {
+            if (wpisy[j].id_wezla == 0) continue;
+
+            wezel_indeksowy* element = pobierz_wezel(wpisy[j].id_wezla);
+            if (!element ||
+                (element->typ != TYP_PLIK && element->typ != TYP_KATALOG) ||
+                !poprawna_nazwa(wpisy[j].nazwa)) {
+                return PSF_KATALOG_BLAD;
+            }
+            if (znalezionych == indeks) {
+                wpis->inode = wpisy[j].id_wezla;
+                wpis->typ = element->typ;
+                for (size_t n = 0; n < PSF_MAX_NAZWA; ++n) {
+                    wpis->nazwa[n] = wpisy[j].nazwa[n];
+                    if (wpis->nazwa[n] == '\0') break;
+                }
+                return PSF_KATALOG_WPIS;
+            }
+            ++znalezionych;
+        }
+    }
+
+    return PSF_KATALOG_KONIEC;
 }
 
 /* =========================================================================

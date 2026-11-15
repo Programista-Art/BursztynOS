@@ -53,8 +53,8 @@ void test_okno() {
     check(RING3_MMAP_BASE > RING3_SHM_BASE, "mmap powyzej SHM");
     check(RING3_MMAP_LIMIT < RING3_STACK_TOP, "mmap ponizej stosu");
     check(RING3_MMAP_BASE > RING3_BASE, "mmap powyzej obrazu .bur");
-    check(RING3_MMAP_ROZMIAR >= 64ULL * 1024ULL * 1024ULL,
-          "okno mmap ma co najmniej 64 MiB");
+    check(RING3_MMAP_ROZMIAR >= 4ULL * 1024ULL * 1024ULL * 1024ULL,
+          "okno mmap ma co najmniej 4 GiB");
     check(RING3_MMAP_LIMIT == RING3_MMAP_BASE + RING3_MMAP_ROZMIAR,
           "granica okna spojna");
 }
@@ -116,6 +116,19 @@ void test_flagi() {
           "samo W dozwolone");
 }
 
+void test_zakres_pliku() {
+    check(mmap_zakres_pliku_poprawny(8192, 0, 4096),
+          "file-backed: pierwsza strona miesci sie w pliku");
+    check(mmap_zakres_pliku_poprawny(8192, 4096, 4096),
+          "file-backed: zakres do konca pliku");
+    check(!mmap_zakres_pliku_poprawny(8192, 4096, 4097),
+          "file-backed: przekroczenie konca pliku");
+    check(!mmap_zakres_pliku_poprawny(8192, UINT64_MAX, 1),
+          "file-backed: offset bez zawijania arytmetyki");
+    check(!mmap_zakres_pliku_poprawny(0, 0, 4096),
+          "file-backed: pusty plik odrzucony");
+}
+
 /* --- 4. First-fit ---------------------------------------------------- */
 
 void test_first_fit() {
@@ -163,14 +176,18 @@ void test_first_fit() {
           "dlugosc bez wyrownania -> 0");
     check(mmap_znajdz_miejsce(r, MMAP_MAKS_REGIONOW, RING3_MMAP_ROZMIAR + 4096) == 0,
           "dlugosc wieksza od okna -> 0");
+    check(mmap_znajdz_miejsce(r, MMAP_MAKS_REGIONOW,
+                               512ULL * 1024ULL * 1024ULL) ==
+              RING3_MMAP_BASE,
+          "mapowanie 512 MiB miesci sie w oknie");
 
-    /* Wyczerpanie 16 regionow nie musi blokowac, jesli jest miejsce. */
+    /* Wyczerpanie 256 regionow nie musi blokowac, jesli jest miejsce. */
     for (auto& e : r) e = pusty();
     for (uint32_t i = 0; i < MMAP_MAKS_REGIONOW; ++i)
         r[i] = region(RING3_MMAP_BASE + 4096ULL * i, 4096);
     check(mmap_znajdz_miejsce(r, MMAP_MAKS_REGIONOW, 4096) ==
               RING3_MMAP_BASE + 4096ULL * MMAP_MAKS_REGIONOW,
-          "16 regionow: nastepne miejsce za nimi");
+          "256 regionow: nastepne miejsce za nimi");
 }
 
 /* --- 5. Wyszukiwanie regionu ---------------------------------------- */
@@ -213,6 +230,7 @@ int main() {
     test_okno();
     test_adres();
     test_flagi();
+    test_zakres_pliku();
     test_first_fit();
     test_region();
 

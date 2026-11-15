@@ -32,6 +32,7 @@
 #include "elf_loader.h"
 #include "tls.h"
 #include "jadro/posix/posix_jadro.h"
+#include "jadro/vfs/vfs_jadro.h"
 #include "entropia.h"
 #include "uklad_procesu.h"
 UkladProcesu uklady_procesow[PZB_MAKS_PROCESOW]{};
@@ -887,7 +888,7 @@ static bool mapuj_segment_z_pliku(
     uint64_t przesuniecie = 0;
 
     while (przesuniecie < rozmiar_w_pamieci) {
-        void* ramka = ZaalokujRamke();
+        void* ramka = ZaalokujRamkeUzytkownika();
         if (!ramka) return false;
 
         const uint64_t pa = reinterpret_cast<uint64_t>(ramka);
@@ -953,7 +954,7 @@ static bool mapuj_stos_uzytkownika(
     for (uint64_t i = 0;
          i < liczba_stron;
          ++i) {
-        void* ramka = ZaalokujRamke();
+        void* ramka = ZaalokujRamkeUzytkownika();
         if (!ramka) return false;
 
         const uint64_t pa = reinterpret_cast<uint64_t>(ramka);
@@ -986,6 +987,438 @@ static bool mapuj_stos_uzytkownika(
         }
     }
 
+    return true;
+}
+
+/*
+ * Mapuje jeden segment PT_LOAD obrazu ELF64 do przestrzeni procesu.
+ *
+ * Kontrakt jest identyczny z mapuj_segment_z_pliku (BUR): ramka jest
+ * wypelniana przez alias HHDM *przed* utworzeniem PTE uzytkownika, wiec
+ * segment kodu nigdy nie istnieje jako jednoczesnie zapisywalny i
+ * wykonywalny. BSS (p_memsz > p_filesz) jest zerowane, bo kazda ramka
+ * startuje wyzerowana, a kopiowany jest wylacznie zakres pliku.
+ */
+static bool mapuj_segment_elf(
+    void* pml4,
+    const ElfSegment& segment,
+    const uint8_t* obraz,
+    uint64_t rozmiar_obrazu
+) {
+    if (segment.rozmiar_pamieci == 0) return true;
+    if (segment.rozmiar_pliku > segment.rozmiar_pamieci) return false;
+    if (segment.przesuniecie > rozmiar_obrazu ||
+        segment.rozmiar_pliku > rozmiar_obrazu - segment.przesuniecie)
+        return false;
+
+    /*
+     * W^X jest juz zagwarantowane przez elf_waliduj, ale powtarzamy je tutaj
+     * jako lokalny warunek: loader nie mapuje strony RWX nawet gdyby walidator
+     * kiedys zostal rozluzniony.
+     */
+    const bool wykonuj = segment.wykonywalny != 0;
+    const bool zapis = segment.zapisywalny != 0;
+    if (wykonuj && zapis) return false;
+
+    const uint64_t poczatek =
+        segment.wirtualny & ~(ROZMIAR_STRONY - 1ULL);
+    const uint64_t koniec =
+        (segment.wirtualny + segment.rozmiar_pamieci + ROZMIAR_STRONY - 1ULL)
+        & ~(ROZMIAR_STRONY - 1ULL);
+    if (koniec <= poczatek) return false;
+
+    for (uint64_t va = poczatek; va < koniec; va += ROZMIAR_STRONY) {
+        void* ramka = ZaalokujRamkeUzytkownika();
+        if (!ramka) return false;
+
+        const uint64_t pa = reinterpret_cast<uint64_t>(ramka);
+        uint8_t* cel = static_cast<uint8_t*>(
+            FizycznyZakresDoWirtualnego(pa, ROZMIAR_STRONY));
+        if (!cel) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
+
+        for (uint64_t i = 0; i < ROZMIAR_STRONY; ++i) cel[i] = 0;
+
+        /*
+         * Zakres pliku, ktory trafia w te strone: przeciecie [va, va+4K)
+         * z [segment.wirtualny, segment.wirtualny+p_filesz). Reszta strony
+         * zostaje wyzerowana, co daje poprawny BSS bez osobnego przebiegu.
+         */
+        const uint64_t segment_koniec_pliku =
+            segment.wirtualny + segment.rozmiar_pliku;
+        uint64_t lo = va > segment.wirtualny ? va : segment.wirtualny;
+        const uint64_t strona_koniec = va + ROZMIAR_STRONY;
+        const uint64_t hi =
+            strona_koniec < segment_koniec_pliku ? strona_koniec
+                                                 : segment_koniec_pliku;
+        if (lo < hi) {
+            KopiujPamiec(cel + (lo - va),
+                obraz + segment.przesuniecie + (lo - segment.wirtualny),
+                hi - lo);
+        }
+
+        if (!VmmMapujNowaStroneWPrzestrzeniProcesu(
+                pml4,
+                reinterpret_cast<void*>(va),
+                ramka,
+                zapis,
+                wykonuj)) {
+            ZwolnijRamke(ramka);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool zapisz_do_nieaktywnej_przestrzeni(
+    void* pml4,
+    uint64_t adres_wirtualny,
+    const void* zrodlo,
+    size_t rozmiar
+) {
+    if (!pml4 || (!zrodlo && rozmiar != 0)) return false;
+
+    const uint8_t* src = static_cast<const uint8_t*>(zrodlo);
+    size_t zapisano = 0;
+    while (zapisano < rozmiar) {
+        if (adres_wirtualny >
+                UINT64_MAX - static_cast<uint64_t>(zapisano)) {
+            return false;
+        }
+
+        uint64_t fizyczny = 0;
+        if (!VmmTlumaczWirtualnyNaFizyczny(
+                pml4,
+                adres_wirtualny + zapisano,
+                &fizyczny)) {
+            return false;
+        }
+
+        const uint64_t offset_strony =
+            fizyczny & (ROZMIAR_STRONY - 1ULL);
+        const size_t pozostalo_na_stronie =
+            static_cast<size_t>(ROZMIAR_STRONY - offset_strony);
+        const size_t porcja =
+            (rozmiar - zapisano) < pozostalo_na_stronie
+                ? rozmiar - zapisano
+                : pozostalo_na_stronie;
+        uint8_t* cel = static_cast<uint8_t*>(
+            FizycznyZakresDoWirtualnego(
+                fizyczny - offset_strony,
+                ROZMIAR_STRONY));
+        if (!cel) return false;
+
+        KopiujPamiec(cel + offset_strony, src + zapisano, porcja);
+        zapisano += porcja;
+    }
+    return true;
+}
+
+static bool przygotuj_poczatkowy_stos_elf(
+    void* pml4,
+    uint64_t baza_stosu,
+    uint64_t rozmiar_stosu,
+    const char* sciezka,
+    const char* argument,
+    const ElfObraz& elf,
+    uint64_t* rsp
+) {
+    if (!pml4 || !sciezka || !rsp ||
+        elf.phdr == 0 ||
+        elf.phent != sizeof(Elf64_Phdr) ||
+        elf.phnum == 0) {
+        return false;
+    }
+
+    const size_t sciezka_dlugosc = [&]() {
+        size_t n = 0;
+        while (n < MAKS_DLUGOSC_SCIEZKI && sciezka[n] != '\0') ++n;
+        return n;
+    }();
+    if (sciezka_dlugosc == 0 ||
+        sciezka_dlugosc >= MAKS_DLUGOSC_SCIEZKI) {
+        return false;
+    }
+
+    const bool ma_argument =
+        argument && argument[0] != '\0';
+    size_t argument_dlugosc = 0;
+    if (ma_argument) {
+        while (argument_dlugosc < MAKS_ARGUMENT_STARTOWY &&
+               argument[argument_dlugosc] != '\0') {
+            ++argument_dlugosc;
+        }
+        if (argument_dlugosc == 0 ||
+            argument_dlugosc >= MAKS_ARGUMENT_STARTOWY) {
+            return false;
+        }
+    }
+
+    if (baza_stosu > UINT64_MAX - rozmiar_stosu) return false;
+    const uint64_t koniec_stosu = baza_stosu + rozmiar_stosu;
+    uint64_t kursor = koniec_stosu;
+    uint64_t argv0 = 0;
+    uint64_t argv1 = 0;
+    uint64_t random_va = 0;
+    uint64_t vectors = 0;
+
+    const auto zarezerwuj = [&](uint64_t bytes, uint64_t align,
+                                uint64_t* out) {
+        if (!out || kursor < baza_stosu ||
+            align == 0 || (align & (align - 1ULL)) != 0 ||
+            bytes > kursor - baza_stosu) {
+            return false;
+        }
+        uint64_t nowy_kursor = kursor - bytes;
+        nowy_kursor &= ~(align - 1ULL);
+        if (nowy_kursor < baza_stosu) return false;
+        kursor = nowy_kursor;
+        *out = nowy_kursor;
+        return true;
+    };
+
+    if (ma_argument &&
+        !zarezerwuj(
+            static_cast<uint64_t>(argument_dlugosc + 1),
+            1,
+            &argv1)) {
+        return false;
+    }
+    if (!zarezerwuj(
+            static_cast<uint64_t>(sciezka_dlugosc + 1),
+            1,
+            &argv0) ||
+        !zarezerwuj(16, 16, &random_va)) {
+        return false;
+    }
+
+    enum : uint64_t {
+        AT_PHDR = 3,
+        AT_PHENT = 4,
+        AT_PHNUM = 5,
+        AT_PAGESZ = 6,
+        AT_ENTRY = 9,
+        AT_RANDOM = 25,
+        AT_EXECFN = 31,
+        AT_NULL = 0
+    };
+
+    const uint64_t argc = ma_argument ? 2ULL : 1ULL;
+    const uint64_t liczba_slow =
+        1ULL + argc + 1ULL + 1ULL + (8ULL * 2ULL);
+    const uint64_t rozmiar_wektorow =
+        liczba_slow * sizeof(uint64_t);
+    if (!zarezerwuj(rozmiar_wektorow, 16, &vectors)) return false;
+
+    uint8_t losowe[16]{};
+    if (!entropia_pobierz_bajty(losowe, sizeof(losowe))) return false;
+
+    uint64_t slowa[24]{};
+    size_t i = 0;
+    slowa[i++] = argc;
+    slowa[i++] = argv0;
+    if (ma_argument) slowa[i++] = argv1;
+    slowa[i++] = 0; /* argv[] */
+    slowa[i++] = 0; /* envp[] */
+    slowa[i++] = AT_PAGESZ; slowa[i++] = ROZMIAR_STRONY;
+    slowa[i++] = AT_ENTRY;  slowa[i++] = elf.wejscie;
+    slowa[i++] = AT_PHDR;   slowa[i++] = elf.phdr;
+    slowa[i++] = AT_PHENT;  slowa[i++] = elf.phent;
+    slowa[i++] = AT_PHNUM;  slowa[i++] = elf.phnum;
+    slowa[i++] = AT_EXECFN; slowa[i++] = argv0;
+    slowa[i++] = AT_RANDOM; slowa[i++] = random_va;
+    slowa[i++] = AT_NULL;   slowa[i++] = 0;
+    if (i != liczba_slow) return false;
+
+    if (!zapisz_do_nieaktywnej_przestrzeni(
+            pml4, argv0, sciezka, sciezka_dlugosc + 1) ||
+        (ma_argument &&
+         !zapisz_do_nieaktywnej_przestrzeni(
+             pml4, argv1, argument, argument_dlugosc + 1)) ||
+        !zapisz_do_nieaktywnej_przestrzeni(
+            pml4, random_va, losowe, sizeof(losowe)) ||
+        !zapisz_do_nieaktywnej_przestrzeni(
+            pml4, vectors, slowa, static_cast<size_t>(rozmiar_wektorow))) {
+        return false;
+    }
+
+    /*
+     * W punkcie wejscia ELF %rsp wskazuje na argc i jest wyrównany do 16
+     * bajtow. To jest kontrakt crt1 musl, a nie kontrakt zwyklej funkcji.
+     */
+    *rsp = vectors;
+    return true;
+}
+
+namespace {
+struct ProbaUruchomienia {
+    char sciezka[MAKS_DLUGOSC_SCIEZKI]{};
+    BurObrazPliku obraz{};
+    /* Obraz ELF64 jest trzymany osobno: nie jest obrazem BUR i nie ma
+       naglowka BUR, wiec nie wolno go interpretowac przez bur_formatuj_blad. */
+    uint8_t* obraz_elf{nullptr};
+    uint64_t rozmiar_elf{0};
+    bool sukces{false};
+    ProbaUruchomienia() { obraz.blad = "invalid-launch-arguments"; }
+    ~ProbaUruchomienia() {
+        if (!sukces) {
+            char rekord[640];
+            bur_formatuj_blad(rekord, sizeof(rekord), sciezka, obraz);
+            wypisz_log(rekord);
+        }
+        if (obraz.dane) kfree(obraz.dane);
+        if (obraz_elf) kfree(obraz_elf);
+    }
+};
+}
+
+/*
+ * Wspolny ogon uruchomienia procesu Ring 3.
+ *
+ * Wydzielony swiadomie: BUR v1, BUR v2 i ELF64 roznia sie wylacznie
+ * mapowaniem obrazu i punktem wejscia. Rama iretq, CR3, pola proces_t,
+ * uklad procesu i publikacja stanu GOTOWY musza byc identyczne we
+ * wszystkich trzech sciezkach - duplikacja tego kodu to najkrotsza droga
+ * do rozjazdu w mechanizmie bezpieczenstwa.
+ */
+struct UkladUruchomienia {
+    int pid;
+    uint64_t entry;
+    uint64_t stack_base;
+    uint64_t rozmiar_stosu;
+    uint64_t baza_stosu_jadra;
+    uint64_t szczyt_stosu_jadra;
+    void* pml4_procesu;
+    void* poprzednie_pml4;
+    RejestryStanowe* rama;            /* rama iretq na stosie jadra */
+    const ElfObraz* elf;              /* nullptr zachowuje start .bur */
+    /* Metadane widoczne w uklady_procesow[] (diagnostyka i #PF). */
+    uint64_t baza_obrazu;
+    uint64_t sterta_baza;
+    uint64_t sterta_limit;
+    uint64_t shm_baza;
+    uint64_t canary_va;
+    uint32_t wersja_ukladu;
+};
+
+static void posprzataj_przestrzen_po_bledzie(void* pml4_procesu);
+
+static bool opublikuj_proces_uzytkownika(
+    UkladUruchomienia& u,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    const char* bezpieczny_argument,
+    const char* sciezka_pliku,
+    ProbaUruchomienia& proba
+) {
+    if (!u.rama || !u.pml4_procesu || u.pid <= 0) return false;
+
+    /*
+     * Stary kontrakt .bur ustawia RSP jak dla zwyklej funkcji. Dla ELF
+     * przygotowany nizej stos POSIX nadpisuje ten punkt wejscia.
+     */
+    const uint64_t wirtualny_szczyt_stosu =
+        u.stack_base + u.rozmiar_stosu - 8ULL;
+    uint64_t poczatkowy_rsp = wirtualny_szczyt_stosu;
+    if (u.elf &&
+        !przygotuj_poczatkowy_stos_elf(
+            u.pml4_procesu,
+            u.stack_base,
+            u.rozmiar_stosu,
+            sciezka_pliku,
+            bezpieczny_argument,
+            *u.elf,
+            &poczatkowy_rsp)) {
+        proba.obraz.blad = "elf-initial-stack-failed";
+        posprzataj_przestrzen_po_bledzie(u.pml4_procesu);
+        stos_jadra_zwolnij(u.pid);
+        zwolnij_rezerwacje_procesu(u.pid);
+        return false;
+    }
+
+    /*
+     * Koncowka RejestryStanowe odpowiada ramie iretq wracajacej do Ring 3.
+     * GDT Bursztyna: 0x1B = User Data | RPL 3, 0x23 = User Code | RPL 3.
+     */
+    u.rama->wektor_przerwania = 0;
+    u.rama->kod_bledu = 0;
+    u.rama->adres_powrotu = u.entry;
+    u.rama->rejestr_cs = 0x23;
+    u.rama->rflags = 0x202;
+    u.rama->stary_rsp = poczatkowy_rsp;
+    u.rama->stary_ss = 0x1B;
+
+    uint64_t pml4_procesu_fiz = 0;
+    if (!WirtualnyDoFizycznego(u.pml4_procesu, &pml4_procesu_fiz)) {
+        proba.obraz.blad = "process-cr3-translation-failed";
+        posprzataj_przestrzen_po_bledzie(u.pml4_procesu);
+        stos_jadra_zwolnij(u.pid);
+        zwolnij_rezerwacje_procesu(u.pid);
+        return false;
+    }
+
+    /*
+     * Wszystkie pola procesu musza byc gotowe zanim stan zmieni sie
+     * z ZABLOKOWANY na GOTOWY.
+     */
+    proces_t& proces = tablica_procesow[u.pid];
+
+    proces.pid = static_cast<uint64_t>(u.pid);
+    proces.poziom_zaufania = bzl_poziom;
+    proces.uprawnienia = flagi_praw;
+    proces.przestrzen_adresowa = u.pml4_procesu;
+    proces.kernel_rsp = reinterpret_cast<uint64_t>(u.rama);
+    proces.baza_stosu_jadra = u.baza_stosu_jadra;
+    proces.szczyt_stosu_jadra = u.szczyt_stosu_jadra;
+    proces.cr3 = pml4_procesu_fiz;
+    proces.granica_sterty = u.sterta_baza;
+    uklady_procesow[u.pid] = {u.baza_obrazu, u.entry, u.stack_base,
+        u.stack_base + u.rozmiar_stosu, u.canary_va, u.sterta_baza,
+        u.sterta_limit, u.shm_baza, u.wersja_ukladu};
+
+    if (!kopiuj_argument_startowy(
+            argument_startowy_procesu[u.pid], bezpieczny_argument)) {
+        return false;
+    }
+
+    /*
+     * Deskryptory 0/1/2 musza istniec ZANIM proces dostanie stan GOTOWY.
+     * Inaczej pierwsze write() w nowym procesie dostaloby EBADF, bo jego
+     * tablica deskryptorow bylaby pusta.
+     */
+    vfs_jadro_przygotuj_proces(u.pid);
+
+    if (takie_same_sciezki(sciezka_pliku,
+            "/programy/aktualizacje.cebula/aktualizacje.bur")) {
+#if BURSZTYN_OTA_TRACE
+        wypisz_log("[OTA TRACE] Loader mapped segments, entering Ring 3\n");
+#endif
+    }
+
+    /*
+     * RELEASE gwarantuje, ze scheduler po zobaczeniu PROCES_GOTOWY
+     * zobaczy rowniez wszystkie wyzej zapisane pola.
+     */
+    __atomic_store_n(&proces.stan, PROCES_GOTOWY, __ATOMIC_RELEASE);
+
+#if BURSZTYN_DIAG_BOOT
+    if (takie_same_sciezki(sciezka_pliku, "/menedzer_okien.bur")) {
+        char msg[64] = "[WM-BOOT] process-created pid=";
+        size_t n = 0;
+        // PID is bounded by MAKS_PROCESOW; avoid allocation during boot.
+        while (msg[n]) ++n;
+        char digits[12]; unsigned count = 0, value = static_cast<unsigned>(u.pid);
+        do { digits[count++] = '0' + value % 10; value /= 10; } while (value);
+        while (count) msg[n++] = digits[--count];
+        msg[n] = 0;
+        wypisz_log(msg);
+    }
+#endif
+
+    proba.sukces = true;
     return true;
 }
 
@@ -1022,23 +1455,6 @@ static void posprzataj_przestrzen_po_bledzie(
 
 } // namespace
 
-namespace {
-struct ProbaUruchomienia {
-    char sciezka[MAKS_DLUGOSC_SCIEZKI]{};
-    BurObrazPliku obraz{};
-    bool sukces{false};
-    ProbaUruchomienia() { obraz.blad = "invalid-launch-arguments"; }
-    ~ProbaUruchomienia() {
-        if (!sukces) {
-            char rekord[640];
-            bur_formatuj_blad(rekord, sizeof(rekord), sciezka, obraz);
-            wypisz_log(rekord);
-        }
-        if (obraz.dane) kfree(obraz.dane);
-    }
-};
-}
-
 // Each page is populated through its supervisor HHDM alias before its final
 // user PTE exists. No user-visible writable executable preparation mapping.
 static bool mapuj_segment_v2(void* pml4, uint64_t va, uint64_t mem, const uint8_t* src,
@@ -1046,7 +1462,7 @@ static bool mapuj_segment_v2(void* pml4, uint64_t va, uint64_t mem, const uint8_
     const BurV2Relokacja* reloc, uint64_t base, bool data_segment = false) {
     uint32_t next = 0;
     for (uint64_t off = 0; off < mem; off += 4096) {
-        void* frame = ZaalokujRamke();
+        void* frame = ZaalokujRamkeUzytkownika();
         if (!frame) return false;
         auto* dst = static_cast<uint8_t*>(FizycznyZakresDoWirtualnego(
             reinterpret_cast<uint64_t>(frame), 4096));
@@ -1069,6 +1485,312 @@ static bool mapuj_segment_v2(void* pml4, uint64_t va, uint64_t mem, const uint8_
         }
     }
     return true;
+}
+
+/*
+ * Stos Ring 3 dla obrazow ELF64.
+ *
+ * Wiekszy niz dla .bur, bo programy z upstreamu (musl, busybox, docelowo
+ * CPython) zakladaja realny zapas. 2 MiB to nadal ulamek okna ASLR i nie
+ * koliduje z SHM ani mmap.
+ */
+constexpr uint64_t LICZBA_STRON_STOSU_ELF = 512ULL;
+constexpr uint64_t ROZMIAR_STOSU_ELF =
+    LICZBA_STRON_STOSU_ELF * ROZMIAR_STRONY;
+constexpr uint64_t GORNA_BAZA_STOSU_ELF =
+    RING3_STACK_TOP - ROZMIAR_STOSU_ELF;
+constexpr uint64_t MIN_BAZA_STOSU_ELF =
+    GORNA_BAZA_STOSU_ELF - ASLR_STOS_ROZMIAR;
+
+static_assert(GORNA_BAZA_STOSU_ELF > RING3_HEAP_BASE + 1024ULL * 1024ULL * 1024ULL,
+              "stos ELF musi pozostac daleko powyzej sterty i mmap");
+
+/*
+ * Gorny limit obrazu ELF64 w przestrzeni Ring 3.
+ *
+ * Obraz nie moze wejsc w okna sterty (32 GiB), SHM (36 GiB), mmap (40 GiB)
+ * ani stosu. Jeden prog dla calego obrazu jest prostszy do zweryfikowania
+ * niz cztery osobne warunki i nie da sie go obejsc segmentem pominietym
+ * przez walidator.
+ */
+constexpr uint64_t ELF_MAKS_GORNY_ADRES = RING3_HEAP_BASE;
+
+static bool wybierz_bias_elf_dyn(
+    const ElfObraz& opis,
+    uint64_t* bias
+) {
+    if (!bias ||
+        opis.gorny_adres <= opis.dolny_adres ||
+        opis.gorny_adres > ELF_MAKS_GORNY_ADRES) {
+        return false;
+    }
+
+    /*
+     * Bias jest page-aligned. Dolna granica wynika z rzeczywistego RVA
+     * obrazu, a gorna z calego zakresu PT_LOAD - nie z samego e_entry.
+     */
+    uint64_t minimum = 0;
+    if (opis.dolny_adres < MIN_ADRES_USER) {
+        minimum = MIN_ADRES_USER - opis.dolny_adres;
+    }
+    if (minimum > UINT64_MAX - (ROZMIAR_STRONY - 1ULL)) return false;
+    minimum = (minimum + ROZMIAR_STRONY - 1ULL) &
+              ~(ROZMIAR_STRONY - 1ULL);
+
+    const uint64_t maksimum = ELF_MAKS_GORNY_ADRES - opis.gorny_adres;
+    const uint64_t maksimum_wyrownane =
+        maksimum & ~(ROZMIAR_STRONY - 1ULL);
+    if (minimum > maksimum_wyrownane) return false;
+
+    const uint64_t liczba_slotow =
+        ((maksimum_wyrownane - minimum) / ROZMIAR_STRONY) + 1ULL;
+    if (liczba_slotow == 0) return false;
+
+    uint64_t losowe = 0;
+    if (!entropia_pobierz_bajty(
+            reinterpret_cast<uint8_t*>(&losowe),
+            sizeof(losowe))) {
+        return false;
+    }
+    const uint64_t slot = losowe % liczba_slotow;
+    if (slot > (UINT64_MAX - minimum) / ROZMIAR_STRONY) return false;
+    *bias = minimum + slot * ROZMIAR_STRONY;
+    return true;
+}
+
+static bool relokacja_elf_w_zakresie(
+    const ElfObraz& opis,
+    uint64_t adres
+) {
+    if (adres > UINT64_MAX - sizeof(uint64_t)) return false;
+    for (uint32_t i = 0; i < opis.liczba_segmentow; ++i) {
+        const ElfSegment& segment = opis.segmenty[i];
+        if (!segment.zapisywalny ||
+            segment.rozmiar_pamieci < sizeof(uint64_t) ||
+            adres < segment.wirtualny ||
+            adres - segment.wirtualny >
+                segment.rozmiar_pamieci - sizeof(uint64_t)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Uruchamia obraz ELF64 (ET_EXEC albo statyczny ET_DYN) w nowej przestrzeni
+ * adresowej. PT_INTERP/PT_DYNAMIC sa odrzucane jako nieobslugiwane
+ * linkowanie dynamiczne.
+ *
+ * Wywolujacy rezerwuje PID i wylicza baze stosu; ta funkcja odpowiada
+ * wylacznie za czytanie pliku, walidacje, podpis, mapowanie i publikacje.
+ * Przy kazdym bledzie zasoby PID sa zwalniane dokladnie raz.
+ */
+static bool uruchom_elf_impl(
+    const char* bezpieczna_sciezka,
+    int pid,
+    uint64_t baza_stosu,
+    uint8_t bzl_poziom,
+    uint64_t flagi_praw,
+    const char* bezpieczny_argument,
+    ProbaUruchomienia& proba
+) {
+    if (!bsp_wczytaj_obraz_binarny(bezpieczna_sciezka, &proba.obraz_elf,
+            &proba.rozmiar_elf, BUR_MAKS_ROZMIAR_PLIKU)) {
+        proba.obraz.blad = "elf-read-failed";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    const uint8_t* obraz = proba.obraz_elf;
+    const uint64_t rozmiar = proba.rozmiar_elf;
+
+    /*
+     * Walidacja jest kompletna PRZED pierwsza alokacja ramki. Komunikat
+     * bledu jest dokladny, bo bez niego diagnostyka sprowadza sie do
+     * "proces sie nie uruchomil".
+     */
+    const ElfStatus status = elf_waliduj(obraz, rozmiar);
+    if (status != ELF_OK) {
+        /*
+         * To nie jest brak relokacji statycznego PIE. PT_INTERP/PT_DYNAMIC
+         * oznaczaja zaleznosci, dla ktorych nie mamy jeszcze ld.so/GOT/PLT.
+         * Zachowujemy osobny, stabilny status telemetryczny.
+         */
+        proba.obraz.blad =
+            status == ELF_LINKOWANIE_DYNAMICZNE
+                ? "elf-dynamic-linking-unsupported"
+                : elf_status_opis(status);
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    const uint16_t typ = elf_typ(obraz, rozmiar);
+    ElfRelokacja relokacje[ELF_MAKS_RELOKACJI]{};
+    uint32_t liczba_relokacji = 0;
+    uint64_t bias = 0;
+    if (typ == ET_DYN) {
+        const ElfStatus relokacje_status = elf_zbierz_relokacje(
+            obraz,
+            rozmiar,
+            relokacje,
+            ELF_MAKS_RELOKACJI,
+            &liczba_relokacji);
+        if (relokacje_status != ELF_OK) {
+            proba.obraz.blad = elf_status_opis(relokacje_status);
+            zwolnij_rezerwacje_procesu(pid);
+            return false;
+        }
+    } else if (typ != ET_EXEC) {
+        proba.obraz.blad = "elf-unknown-type";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    ElfObraz opis{};
+    if (elf_opisz(obraz, rozmiar, &opis) != ELF_OK) {
+        proba.obraz.blad = "elf-opis-failed";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    if (typ == ET_DYN) {
+        if (!wybierz_bias_elf_dyn(opis, &bias) ||
+            elf_przesun_obraz(&opis, bias) != ELF_OK ||
+            !elf_wejscie_w_kodzie(opis)) {
+            proba.obraz.blad = "elf-dyn-load-bias-failed";
+            zwolnij_rezerwacje_procesu(pid);
+            return false;
+        }
+    }
+
+    /*
+     * Segmenty nie moga wejsc w okna sterty, SHM, mmap ani stosu. Sprawdzamy
+     * gorny adres calego obrazu, wiec nie da sie tego obejsc segmentem,
+     * ktory walidator pominalby w przyszlosci.
+     */
+    if (opis.gorny_adres > ELF_MAKS_GORNY_ADRES ||
+        opis.dolny_adres < MIN_ADRES_USER) {
+        proba.obraz.blad = "elf-obraz-poza-oknem-ring3";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+    if (opis.phdr == 0) {
+        proba.obraz.blad = "elf-program-headers-not-mapped";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    /*
+     * Integralnosc: ta sama polityka co dla .bur. Paczki z zaufanych
+     * katalogow obrazu sa zaufane przez pochodzenie medium; wszystko inne
+     * wymaga podpisu. Weryfikacja jest PRZED alokacja ramek.
+     */
+    if (!zakres_sciezki_systemowej(bezpieczna_sciezka) ||
+        loader_wymaga_podpisu_wszystkiego()) {
+        const PodpisPaczkiWynik podpis =
+            podpis_paczki_weryfikuj(bezpieczna_sciezka, obraz, rozmiar);
+        if (podpis != PodpisPaczkiWynik::Ok) {
+            proba.obraz.blad = podpis_paczki_blad(podpis);
+            zwolnij_rezerwacje_procesu(pid);
+            return false;
+        }
+    }
+
+    g_baza_stosu_user[pid] = baza_stosu;
+
+    uint64_t baza_stosu_jadra = 0;
+    uint64_t szczyt_stosu_jadra = 0;
+    if (!stos_jadra_przydziel(pid, &baza_stosu_jadra, &szczyt_stosu_jadra)) {
+        proba.obraz.blad = "stos_jadra_przydziel-failed";
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    RejestryStanowe* rama = reinterpret_cast<RejestryStanowe*>(
+        szczyt_stosu_jadra - sizeof(RejestryStanowe));
+    wyzeruj_rame_rejestrow(rama);
+
+    void* poprzednie_pml4 = PobierzAktualnePML4();
+    if (!poprzednie_pml4) {
+        proba.obraz.blad = "PobierzAktualnePML4-failed";
+        stos_jadra_zwolnij(pid);
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    void* pml4_procesu = UtworzPrzestrzenAdresowaProcesu();
+    if (!pml4_procesu) {
+        proba.obraz.blad = "UtworzPrzestrzenAdresowaProcesu-failed";
+        stos_jadra_zwolnij(pid);
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    bool mapowanie_ok = true;
+    for (uint32_t i = 0; i < opis.liczba_segmentow && mapowanie_ok; ++i) {
+        if (!mapuj_segment_elf(pml4_procesu, opis.segmenty[i], obraz, rozmiar)) {
+            proba.obraz.blad = "elf-segment-mapping-failed";
+            mapowanie_ok = false;
+        }
+    }
+
+    for (uint32_t i = 0; i < liczba_relokacji && mapowanie_ok; ++i) {
+        uint64_t adres = 0;
+        uint64_t wartosc = 0;
+        if (bias > UINT64_MAX - relokacje[i].offset ||
+            !elf_oblicz_relative(relokacje[i], bias, &wartosc)) {
+            proba.obraz.blad = "elf-relative-relocation-overflow";
+            mapowanie_ok = false;
+            break;
+        }
+        adres = bias + relokacje[i].offset;
+        if (!relokacja_elf_w_zakresie(opis, adres) ||
+            !zapisz_do_nieaktywnej_przestrzeni(
+                pml4_procesu,
+                adres,
+                &wartosc,
+                sizeof(wartosc))) {
+            proba.obraz.blad = "elf-relative-relocation-failed";
+            mapowanie_ok = false;
+        }
+    }
+
+    const uint32_t flagi_dane = FLAGA_OBECNA | FLAGA_ZAPIS | FLAGA_USER;
+    if (mapowanie_ok && !mapuj_stos_uzytkownika(pml4_procesu, flagi_dane,
+            LICZBA_STRON_STOSU_ELF, baza_stosu)) {
+        proba.obraz.blad = "mapuj_stos_uzytkownika-failed";
+        mapowanie_ok = false;
+    }
+
+    if (!mapowanie_ok) {
+        posprzataj_przestrzen_po_bledzie(pml4_procesu);
+        stos_jadra_zwolnij(pid);
+        zwolnij_rezerwacje_procesu(pid);
+        return false;
+    }
+
+    UkladUruchomienia u{};
+    u.pid = pid;
+    u.entry = opis.wejscie;
+    u.stack_base = baza_stosu;
+    u.rozmiar_stosu = ROZMIAR_STOSU_ELF;
+    u.baza_stosu_jadra = baza_stosu_jadra;
+    u.szczyt_stosu_jadra = szczyt_stosu_jadra;
+    u.pml4_procesu = pml4_procesu;
+    u.poprzednie_pml4 = poprzednie_pml4;
+    u.rama = rama;
+    u.elf = &opis;
+    u.baza_obrazu = opis.dolny_adres;
+    u.sterta_baza = RING3_HEAP_BASE;
+    u.sterta_limit = RING3_HEAP_BASE + 256ULL * 1024ULL * 1024ULL;
+    u.shm_baza = RING3_SHM_BASE;
+    u.canary_va = 0;
+    /* Wersja 1: ten sam kontrakt sterty i SHM co .bur v1. */
+    u.wersja_ukladu = 1;
+
+    return opublikuj_proces_uzytkownika(u, bzl_poziom, flagi_praw,
+        bezpieczny_argument, bezpieczna_sciezka, proba);
 }
 
 static bool uruchom_program_z_pliku_impl(
@@ -1173,6 +1895,42 @@ static bool uruchom_program_z_pliku_impl(
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_image_start = loader_perf_now();
 #endif
+    /*
+     * Rozpoznanie formatu PRZED odczytem calego obrazu.
+     *
+     * bsp_wczytaj_obraz_bur waliduje naglowek BUR, wiec plik ELF nie
+     * przeszedlby przez te sciezke. Czytamy wiec naglowek surowo i dopiero
+     * na jego podstawie wybieramy loader. Magic jest rozstrzygajaca i lezy
+     * w pierwszych 4 bajtach obu formatow.
+     */
+    {
+        char naglowek_surowy[sizeof(Elf64_Ehdr)]{};
+        uint32_t odczytano = 0;
+        const bool ma_naglowek = czytaj_fragment_pliku(bezpieczna_sciezka, 0,
+            naglowek_surowy, sizeof(naglowek_surowy), &odczytano) &&
+            odczytano >= 4;
+        const bool to_elf = ma_naglowek &&
+            static_cast<uint8_t>(naglowek_surowy[0]) == ELF_MAGIA[0] &&
+            static_cast<uint8_t>(naglowek_surowy[1]) == ELF_MAGIA[1] &&
+            static_cast<uint8_t>(naglowek_surowy[2]) == ELF_MAGIA[2] &&
+            static_cast<uint8_t>(naglowek_surowy[3]) == ELF_MAGIA[3];
+        if (to_elf) {
+            const uint64_t baza_stosu_elf =
+                GORNA_BAZA_STOSU_ELF -
+                stack_protector_losowy_offset_stron(
+                    ASLR_STOS_STRON,
+                    static_cast<uint64_t>(pid) * 0x9E3779B97F4A7C15ULL) *
+                    ROZMIAR_STRONY;
+            if (baza_stosu_elf < MIN_BAZA_STOSU_ELF ||
+                baza_stosu_elf > GORNA_BAZA_STOSU_ELF) {
+                proba.obraz.blad = "elf-stack-aslr-out-of-window";
+                zwolnij_rezerwacje_procesu(pid);
+                return false;
+            }
+            return uruchom_elf_impl(bezpieczna_sciezka, pid, baza_stosu_elf,
+                bzl_poziom, flagi_praw, bezpieczny_argument, proba);
+        }
+    }
     if (!bsp_wczytaj_obraz_bur(bezpieczna_sciezka, &proba.obraz,
             BUR_MAKS_ROZMIAR_PLIKU, bur_blad_naglowka)) {
         zwolnij_rezerwacje_procesu(pid);
@@ -1435,116 +2193,30 @@ static bool uruchom_program_z_pliku_impl(
     if (trace_app) wypisz_log("[TEST DZWIEKU] Ring3 pages mapped");
 #endif
 
-    /*
-     * SysV AMD64: zwykla funkcja zaczyna z RSP == 16n + 8.
-     * _start programow BUR jest obecnie kompilowany jak funkcja C/C++,
-     * dlatego zachowujemy takie ustawienie.
-     */
-    const uint64_t wirtualny_szczyt_stosu =
-        stack_base +
-        rozmiar_stosu -
-        8ULL;
+    UkladUruchomienia u{};
+    u.pid = pid;
+    u.entry = entry;
+    u.stack_base = stack_base;
+    u.rozmiar_stosu = rozmiar_stosu;
+    u.baza_stosu_jadra = baza_stosu_jadra;
+    u.szczyt_stosu_jadra = szczyt_stosu_jadra;
+    u.pml4_procesu = pml4_procesu;
+    u.poprzednie_pml4 = poprzednie_pml4;
+    u.rama = rama;
+    u.baza_obrazu = v2 ? layout.baza_obrazu : RING3_BASE;
+    u.sterta_baza = v2 ? layout.sterta_baza : BAZA_STERTY_USER;
+    u.sterta_limit = v2 ? layout.sterta_limit
+                        : (RING3_HEAP_BASE + 256ULL * 1024ULL * 1024ULL);
+    u.shm_baza = v2 ? layout.shm_baza : RING3_SHM_BASE;
+    u.canary_va = v2 ? layout.straznik_stosu_va : 0;
+    u.wersja_ukladu = v2 ? 2U : 1U;
 
-    /*
-     * Koncowka RejestryStanowe odpowiada ramie iretq wracajacej do Ring 3.
-     *
-     * GDT Bursztyna:
-     *   0x1B = User Data | RPL 3
-     *   0x23 = User Code | RPL 3
-     */
-    rama->wektor_przerwania = 0;
-    rama->kod_bledu = 0;
-    rama->adres_powrotu = entry;
-    rama->rejestr_cs = 0x23;
-    rama->rflags = 0x202;
-    rama->stary_rsp =
-        wirtualny_szczyt_stosu;
-    rama->stary_ss = 0x1B;
-
-    uint64_t pml4_procesu_fiz = 0;
-    if (!WirtualnyDoFizycznego(
-            pml4_procesu,
-            &pml4_procesu_fiz)) {
-        proba.obraz.blad = "process-cr3-translation-failed";
-        posprzataj_przestrzen_po_bledzie(
-            pml4_procesu
-        );
-        stos_jadra_zwolnij(pid);
-        zwolnij_rezerwacje_procesu(pid);
-        return false;
-    }
-
-    /*
-     * Wszystkie pola procesu musza byc gotowe zanim stan zmieni sie
-     * z ZABLOKOWANY na GOTOWY.
-     */
-    proces_t& proces =
-        tablica_procesow[pid];
-
-    proces.pid =
-        static_cast<uint64_t>(pid);
-    proces.poziom_zaufania =
-        bzl_poziom;
-    proces.uprawnienia =
-        flagi_praw;
-    proces.przestrzen_adresowa =
-        pml4_procesu;
-    proces.kernel_rsp =
-        reinterpret_cast<uint64_t>(
-            rama
-        );
-    proces.baza_stosu_jadra =
-        baza_stosu_jadra;
-    proces.szczyt_stosu_jadra =
-        szczyt_stosu_jadra;
-    proces.cr3 =
-        pml4_procesu_fiz;
-    proces.granica_sterty = v2 ? layout.sterta_baza : BAZA_STERTY_USER;
-    uklady_procesow[pid] = {v2 ? layout.baza_obrazu : RING3_BASE,
-        entry, stack_base, stack_base + rozmiar_stosu,
-        v2 ? layout.straznik_stosu_va : 0,
-        proces.granica_sterty, v2 ? layout.sterta_limit : (RING3_HEAP_BASE + 256ULL*1024*1024),
-        v2 ? layout.shm_baza : RING3_SHM_BASE, v2 ? 2U : 1U};
-
-    if (!kopiuj_argument_startowy(
-            argument_startowy_procesu[pid], bezpieczny_argument)) {
-        return false;
-    }
-
-    if (takie_same_sciezki(sciezka_pliku, "/programy/aktualizacje.cebula/aktualizacje.bur")) {
-#if BURSZTYN_OTA_TRACE
-        wypisz_log("[OTA TRACE] Loader mapped segments, entering Ring 3\n");
-#endif
-    }
-
-    /*
-     * RELEASE gwarantuje, ze scheduler po zobaczeniu PROCES_GOTOWY
-     * zobaczy rowniez wszystkie wyzej zapisane pola.
-     */
-    __atomic_store_n(
-        &proces.stan,
-        PROCES_GOTOWY,
-        __ATOMIC_RELEASE
-    );
+    const bool opublikowano = opublikuj_proces_uzytkownika(u, bzl_poziom,
+        flagi_praw, bezpieczny_argument, bezpieczna_sciezka, proba);
 #if BURSZTYNDIAGTESTDZWIEKU
-    if (trace_app) wypisz_log("[TEST DZWIEKU] process scheduled (ready)");
+    if (trace_app && opublikowano)
+        wypisz_log("[TEST DZWIEKU] process scheduled (ready)");
 #endif
-
-#if BURSZTYN_DIAG_BOOT
-    if (takie_same_sciezki(sciezka_pliku, "/menedzer_okien.bur")) {
-        char msg[64] = "[WM-BOOT] process-created pid=";
-        size_t n = 0;
-        // PID is bounded by MAKS_PROCESOW; avoid allocation during boot.
-        while (msg[n]) ++n;
-        char digits[12]; unsigned count = 0, value = static_cast<unsigned>(pid);
-        do { digits[count++] = '0' + value % 10; value /= 10; } while (value);
-        while (count) msg[n++] = digits[--count];
-        msg[n] = 0;
-        wypisz_log(msg);
-    }
-#endif
-
-    proba.sukces = true;
 
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_map_end = loader_perf_now();
@@ -1553,7 +2225,7 @@ static bool uruchom_program_z_pliku_impl(
                     loader_perf_map_start, loader_perf_map_end,
                     loader_perf_now());
 #endif
-    return true;
+    return opublikowano;
 }
 
 extern "C" bool bws_uruchom_program_z_pliku(

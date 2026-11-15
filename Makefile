@@ -443,6 +443,8 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	watek_tls.o \
 	mmap.o \
 	mmap_jadro.o \
+	vfs.o \
+	vfs_jadro.o \
 	pci.o \
 	virtio_pci.o \
 	virtqueue.o \
@@ -531,7 +533,13 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	check-kernel check-test8k check-tools check-ovmf \
 	prepare-disk clean clear distclean cdysk rm help \
 	test test-smoke test-security test-security-host test-regression test-nightly \
-	test-local-suite
+	test-local-suite test-cpython-manifest test-python-contract \
+	test-musl-sysroot-contract cpython-build \
+	test-musl-guest-qemu test-python-hello-qemu \
+	test-python-stdlib-import-qemu test-python-threading-qemu \
+	test-python-subprocess-qemu test-python-socket-asyncio-qemu \
+	test-python-pip-pure-qemu test-python-c-extension-qemu \
+	test-python-posix test-python-security test-python-regression
 
 all: $(KERNEL) $(TAPETY_PAK)
 
@@ -659,7 +667,7 @@ tls.o: jadro/siec/tls.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 tss.o: jadro/arch/tss.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
-vmm.o: jadro/mm/vmm.cpp
+vmm.o: jadro/mm/vmm.cpp jadro/mm/pamiec.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 # ============================================================================
@@ -693,10 +701,18 @@ syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
 # Bramka ABI SysV (int 0x80). Dyspozytor jest przenosny; posix_jadro.cpp
 # spina go z podsystemami jadra.
 posix_dyspozytor.o: jadro/posix/posix_dyspozytor.cpp jadro/posix/posix_dyspozytor.h jadro/posix/posix_abi.h
-	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
-posix_jadro.o: jadro/posix/posix_jadro.cpp jadro/posix/posix_jadro.h jadro/posix/posix_dyspozytor.h jadro/posix/posix_abi.h jadro/bws/pzb.h
-	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+posix_jadro.o: jadro/posix/posix_jadro.cpp jadro/posix/posix_jadro.h jadro/posix/posix_dyspozytor.h jadro/posix/posix_abi.h jadro/bws/pzb.h jadro/vfs/vfs_jadro.h jadro/siec/siec.h sterowniki/siec/sockets.h jadro/mm/heap.h
+	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
+
+# VFS: tablica deskryptorow plikow. vfs.o to czysta logika (host-testowalna),
+# vfs_jadro.o to jedyne miejsce, ktore dotyka PSF i pamieci Ring 3.
+vfs.o: jadro/vfs/vfs.cpp jadro/vfs/vfs.h
+	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
+
+vfs_jadro.o: jadro/vfs/vfs_jadro.cpp jadro/vfs/vfs_jadro.h jadro/vfs/vfs.h jadro/posix/posix_abi.h jadro/bws/pzb.h jadro/fs/psf.h
+	$(CXX) $(KERNEL_CXXFLAGS) -Os -c $< -o $@
 
 # TLS per proces (%fs). Obiekt nosi nazwe watek_tls.o, bo `tls.o` jest juz
 # zajety przez mbedTLS (jadro/siec/tls.cpp); kolizja nazw zerwala link.
@@ -707,7 +723,7 @@ watek_tls.o: jadro/mm/tls.cpp jadro/mm/tls.h jadro/bws/pzb.h
 mmap.o: jadro/mm/mmap.cpp jadro/mm/mmap.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-mmap_jadro.o: jadro/mm/mmap_jadro.cpp jadro/mm/mmap_jadro.h jadro/mm/mmap.h jadro/mm/pamiec.h
+mmap_jadro.o: jadro/mm/mmap_jadro.cpp jadro/mm/mmap_jadro.h jadro/mm/mmap.h jadro/mm/pamiec.h jadro/fs/psf.h jadro/vfs/vfs_jadro.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
@@ -1875,6 +1891,10 @@ help:
 	@echo "  make test-nightly      - security + regression + fuzz-extended"
 	@echo "  make test-local-suite MODE=smoke|security|regression|nightly"
 	@echo "                         - orkiestrator JSON (.local-ci/)"
+	@echo "  make test-python-contract - manifest/ELF/sysroot/POSIX ABI (offline)"
+	@echo "  make test-cpython-manifest - walidacja layoutu CPython (bez pobierania)"
+	@echo "  make test-python-posix/security/regression - macierz CPython/POSIX"
+	@echo "  make cpython-build     - jawny cross-build CPython w WSL"
 
 # Manifest zmienia timestamp tylko wtedy, gdy zmieni sie posortowany zestaw nazw.
 # Zaleznosc od katalogu wykrywa dodanie, usuniecie i zmiane nazwy pliku.
@@ -1986,8 +2006,35 @@ test-elf-loader-host:
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_elf_loader_host.cpp jadro/fs/elf_loader.cpp -o .elf-test/test-elf-loader
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .elf-test/test-elf-loader
 
-# Fuzz loadera ELF: mutacje poprawnego obrazu pod ASan/UBSan.
-.PHONY: fuzz-elf-loader
+# VFS: tablica deskryptorow (izolacja PID, limity, flagi) - czysta logika.
+.PHONY: test-vfs-host
+test-vfs-host:
+	@mkdir -p .vfs-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -fsanitize=address,undefined testy/test_vfs_host.cpp jadro/vfs/vfs.cpp -o .vfs-test/test-vfs
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .vfs-test/test-vfs
+
+# POSIX/VFS: rekordy linux_dirent64, limity buforow i mapowanie nowych ABI.
+# Cel jest osobny, aby nie zwiekszac smoke bez potrzeby linkowania jadra.
+.PHONY: test-posix-vfs-host
+test-posix-vfs-host:
+	@mkdir -p .posix-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -fsanitize=address,undefined testy/test_posix_vfs_host.cpp jadro/vfs/vfs.cpp jadro/posix/posix_dyspozytor.cpp -o .posix-test/test-posix-vfs
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-posix-vfs
+
+# Bezpieczny podzakres process/thread/signal: kontrakt futexa oraz jawne
+# -ENOSYS dla clone/fork/exec/wait, pipe/dup/fcntl i delivery sygnalow.
+# Zaleznosci uruchamiaja hostowe testy ABI i izolacji VFS; QEMU nie jest
+# elementem tego gate'u.
+.PHONY: test-process-thread-signal-host
+test-process-thread-signal-host: test-posix-abi-host test-vfs-host test-posix-vfs-host
+
+# Loader ELF64 w prawdziwym Ring 3: mapa segmentow, BSS, stos 2 MiB i brak
+# regresji BWS. Statyczny ET_DYN/PIE jest sprawdzany przez gate hostowy.
+.PHONY: test-elf-exec-qemu
+test-elf-exec-qemu: iso
+	python3 testy/test_elf_exec_qemu.py
+
+# Fuzz loadera ELF: mutacje poprawnego obrazu pod ASan/UBSan..PHONY: fuzz-elf-loader
 fuzz-elf-loader:
 	@mkdir -p .elf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/fuzz/fuzz_elf_loader.cpp jadro/fs/elf_loader.cpp -o .elf-test/fuzz-elf-loader
@@ -2006,6 +2053,74 @@ test-mmap-host:
 	@mkdir -p .posix-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_mmap_host.cpp jadro/mm/mmap.cpp -o .posix-test/test-mmap
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-mmap
+
+# Pula stron uzytkownika preferuje RAM powyzej 1 GiB, z bezpiecznym
+# fallbackiem do nizszej pamieci na maszynach z mniejsza iloscia RAM.
+.PHONY: test-pmm-user-host
+test-pmm-user-host:
+	@mkdir -p .posix-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_PMM_HOST_TEST=1 -fsanitize=address,undefined testy/test_pmm_user_host.cpp jadro/mm/pmm.cpp -o .posix-test/test-pmm-user
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .posix-test/test-pmm-user
+
+# Budowa sysrootu musl z syscallami zgodnymi z bramka POSIX BursztynOS.
+.PHONY: musl-sysroot test-musl-host test-musl-sysroot-contract test-musl-guest-qemu
+musl-sysroot:
+	bash narzedzia/musl/buduj_musl.sh
+
+test-musl-host: musl-sysroot
+	python3 testy/test_musl_sysroot.py
+
+test-musl-sysroot-contract:
+	$(PYTHON) testy/test_musl_sysroot_contract.py
+
+# Guest gate never bootstraps/downloads the sysroot implicitly.  Run
+# `make musl-sysroot` explicitly when the staged dependency is intended.
+test-musl-guest-qemu:
+	$(PYTHON) testy/test_musl_guest_qemu.py
+
+# CPython is deliberately opt-in: this target downloads/builds in WSL and
+# stages a runtime only after the caller has prepared the musl sysroot.
+.PHONY: test-cpython-manifest test-python-contract cpython-build
+test-cpython-manifest:
+	$(PYTHON) testy/test_cpython_manifest.py
+
+test-python-contract: test-cpython-manifest test-elf-loader-host \
+		test-posix-abi-host test-musl-sysroot-contract
+
+cpython-build:
+	bash narzedzia/python/buduj_cpython.sh
+
+# CPython/POSIX matrix.  The individual rows are intentionally separate so
+# an unavailable facility is visible as SKIP instead of an invented PASS.
+test-python-hello-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case hello
+
+test-python-stdlib-import-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case stdlib-import
+
+test-python-threading-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case threading
+
+test-python-subprocess-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case subprocess
+
+test-python-socket-asyncio-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case socket-asyncio
+
+test-python-pip-pure-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case pip-pure
+
+test-python-c-extension-qemu:
+	$(PYTHON) testy/test_cpython_matrix.py --case c-extension
+
+test-python-posix: test-python-hello-qemu test-python-stdlib-import-qemu \
+		test-python-threading-qemu test-python-subprocess-qemu \
+		test-python-socket-asyncio-qemu
+
+test-python-security: test-python-contract test-musl-guest-qemu
+
+test-python-regression: test-python-posix test-python-pip-pure-qemu \
+		test-python-c-extension-qemu
 
 # Weryfikacja backendu Ozone bez pobierania Chromium: numery BWS, args.gn,
 # brak niedostepnych API, manifest PZB.
@@ -2792,9 +2907,12 @@ test-security: test-security-host test-stack-protector-qemu test-bws-abuse-qemu 
 test-security-hardening: test-security
 
 # Szybki lokalny gate przed commitem (bez fuzz-extended).
-test-smoke: test-stack-protector-host test-bur-v2-aslr-host test-fuzz-smoke \
+test-smoke: test-python-contract test-stack-protector-host \
+	test-bur-v2-aslr-host test-fuzz-smoke \
 	test-virtio-pci test-motywy-unit test-wm-click-routing test-normal-boot \
-	test-startup-visibility test-compositor-cursor test-powitanie
+	test-startup-visibility test-compositor-cursor test-powitanie \
+	test-elf-loader-host test-elf-exec-qemu test-vfs-host test-mmap-host \
+	test-pmm-user-host
 
 test: test-smoke
 

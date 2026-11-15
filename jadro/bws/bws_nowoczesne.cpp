@@ -278,7 +278,7 @@ uint64_t shm_create(proces_t& proces, uint64_t size, uint64_t flags64) {
     nowy.generacja = gen;
 
     for (uint32_t p = 0; p < nowy.stron; ++p) {
-        void* frame = ZaalokujRamke();
+        void* frame = ZaalokujRamkeUzytkownika();
         if (!frame) {
             for (uint32_t j = 0; j < p; ++j)
                 ZwolnijRamke(reinterpret_cast<void*>(nowy.fizyczne[j]));

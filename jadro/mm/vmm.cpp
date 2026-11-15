@@ -1216,6 +1216,39 @@ static bool odmapuj_wspoldzielona_wewnetrznie(
     return true;
 }
 
+static void* odmapuj_prywatna_wewnetrznie(
+    uint64_t* pml4,
+    uint64_t adres_wirtualny
+) {
+    if (!pml4 || !adres_strony_poprawny(adres_wirtualny) ||
+        !adres_user_kanoniczny(adres_wirtualny) ||
+        adres_wirtualny < ROZMIAR_STRONY_4K) return nullptr;
+
+    const uint64_t e4 = pml4[indeks_pml4(adres_wirtualny)];
+    if ((e4 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER))
+        return nullptr;
+    uint64_t* pdp = tabela_z_wpisu(e4);
+    if (!pdp) return nullptr;
+    const uint64_t e3 = pdp[indeks_pdp(adres_wirtualny)];
+    if ((e3 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (e3 & PDE_PS) != 0) return nullptr;
+    uint64_t* pd = tabela_z_wpisu(e3);
+    if (!pd) return nullptr;
+    const uint64_t e2 = pd[indeks_pd(adres_wirtualny)];
+    if ((e2 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (e2 & PDE_PS) != 0) return nullptr;
+    uint64_t* pt = tabela_z_wpisu(e2);
+    if (!pt) return nullptr;
+    uint64_t& e1 = pt[indeks_pt(adres_wirtualny)];
+    if ((e1 & (PTE_PRESENT | PTE_USER)) != (PTE_PRESENT | PTE_USER) ||
+        (e1 & PTE_SHARED) != 0) return nullptr;
+
+    void* pa = reinterpret_cast<void*>(e1 & MASKA_ADRESU_4K);
+    e1 = 0;
+    uniewaznij_tlb(adres_wirtualny);
+    return pa;
+}
+
 /* =========================================================================
  * WALKER TABLIC STRON
  * ========================================================================= */
@@ -1352,6 +1385,98 @@ static WynikWalkera sprawdz_mapowanie(
         ROZMIAR_STRONY_4K;
 
     return wynik;
+}
+
+static bool zmien_ochrone_zakresu_wewnetrznie(
+    uint64_t* pml4,
+    uint64_t adres,
+    size_t rozmiar,
+    bool zapis,
+    bool wykonuj
+) {
+    if (!pml4 || !nx_aktywny || (zapis && wykonuj) ||
+        !adres_strony_poprawny(adres) || rozmiar == 0 ||
+        (rozmiar & (ROZMIAR_STRONY_4K - 1ULL)) != 0 ||
+        !adres_user_kanoniczny(adres) ||
+        adres > UINT64_MAX - (static_cast<uint64_t>(rozmiar) - 1ULL)) {
+        return false;
+    }
+
+    const uint64_t koniec = adres + static_cast<uint64_t>(rozmiar) - 1ULL;
+    if (!adres_user_kanoniczny(koniec)) return false;
+    const uint64_t ostatnia = koniec & ~(ROZMIAR_STRONY_4K - 1ULL);
+
+    /*
+     * Najpierw sprawdzamy caly zakres. Dzieki temu pojedynczy zly PTE nie
+     * zostawi polowy mprotect zmienionej.
+     */
+    for (uint64_t va = adres;; va += ROZMIAR_STRONY_4K) {
+        const WynikWalkera wpis = sprawdz_mapowanie(pml4, va);
+        if (!wpis.obecna || !wpis.user || wpis.duza ||
+            (wpis.wpis & PTE_SHARED) != 0) {
+            return false;
+        }
+        if (va == ostatnia) break;
+    }
+
+    for (uint64_t va = adres;; va += ROZMIAR_STRONY_4K) {
+        uint64_t* pdp = tabela_z_wpisu(pml4[indeks_pml4(va)]);
+        uint64_t* pd = pdp ? tabela_z_wpisu(pdp[indeks_pdp(va)]) : nullptr;
+        uint64_t* pt = pd ? tabela_z_wpisu(pd[indeks_pd(va)]) : nullptr;
+        if (!pt) return false; /* preflight powinien wykluczyc ten przypadek */
+        uint64_t& pte = pt[indeks_pt(va)];
+        pte = (pte & ~(PTE_WRITE | PTE_NX)) |
+              (zapis ? PTE_WRITE : 0) |
+              (wykonuj ? 0 : PTE_NX);
+        uniewaznij_tlb(va);
+        if (va == ostatnia) break;
+    }
+    return true;
+}
+
+extern "C" bool VmmTlumaczWirtualnyNaFizyczny(
+    void* pml4_wskaznik,
+    uint64_t adres_wirtualny,
+    uint64_t* adres_fizyczny
+) {
+    if (adres_fizyczny) *adres_fizyczny = 0;
+    if (!adres_fizyczny ||
+        !pml4_wskaznik ||
+        adres_wirtualny < RING3_BASE ||
+        !adres_user_kanoniczny(adres_wirtualny)) {
+        return false;
+    }
+
+    /*
+     * PML4 jest wskaznikiem jadra do ramki zmapowanej przez HHDM. To
+     * sprawdzenie ogranicza API do tablic stron zaufanych przez jadro i
+     * jednoczesnie nie wymaga przelaczenia CR3.
+     */
+    uint64_t pml4_fizyczny = 0;
+    if (!WirtualnyDoFizycznego(pml4_wskaznik, &pml4_fizyczny) ||
+        (pml4_fizyczny & (ROZMIAR_STRONY_4K - 1ULL)) != 0) {
+        return false;
+    }
+
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return false;
+
+    const WynikWalkera wynik = sprawdz_mapowanie(
+        static_cast<uint64_t*>(pml4_wskaznik),
+        adres_wirtualny
+    );
+    if (!wynik.obecna || !wynik.user ||
+        wynik.rozmiar_strony == 0) {
+        return false;
+    }
+
+    const uint64_t maska_strony = wynik.rozmiar_strony - 1ULL;
+    const uint64_t baza_fizyczna = wynik.wpis & ~maska_strony;
+    const uint64_t offset = adres_wirtualny & maska_strony;
+    if (baza_fizyczna > UINT64_MAX - offset) return false;
+
+    *adres_fizyczny = baza_fizyczna + offset;
+    return true;
 }
 
 /* =========================================================================
@@ -2110,6 +2235,43 @@ extern "C" bool VmmOdmapujStroneWspoldzielona(
     uint64_t* aktualne = pml4_z_cr3();
     return aktualne && odmapuj_wspoldzielona_wewnetrznie(
         aktualne, reinterpret_cast<uint64_t>(adres_wirtualny));
+}
+
+extern "C" void* VmmOdmapujStroneProcesu(
+    void* adres_wirtualny
+) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return nullptr;
+    uint64_t* aktualne = pml4_z_cr3();
+    return aktualne ? odmapuj_prywatna_wewnetrznie(
+        aktualne, reinterpret_cast<uint64_t>(adres_wirtualny)) : nullptr;
+}
+
+extern "C" bool VmmCzyPrywatnaStronaProcesu(
+    void* adres_wirtualny
+) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return false;
+    uint64_t* aktualne = pml4_z_cr3();
+    if (!aktualne) return false;
+    const WynikWalkera wynik = sprawdz_mapowanie(
+        aktualne, reinterpret_cast<uint64_t>(adres_wirtualny));
+    return wynik.obecna && wynik.user && !wynik.duza &&
+           (wynik.wpis & PTE_SHARED) == 0;
+}
+
+extern "C" bool VmmZmienOchronaZakresuProcesu(
+    void* adres_wirtualny,
+    size_t rozmiar,
+    bool zapis,
+    bool wykonuj
+) {
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany) return false;
+    uint64_t* aktualne = pml4_z_cr3();
+    return aktualne && zmien_ochrone_zakresu_wewnetrznie(
+        aktualne, reinterpret_cast<uint64_t>(adres_wirtualny),
+        rozmiar, zapis, wykonuj);
 }
 
 /* =========================================================================

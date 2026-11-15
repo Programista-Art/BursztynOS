@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "package": "cpython-runtime",
+  "implementation": "CPython",
+  "version": "3.12.8",
+  "source": {
+    "url": "https://www.python.org/ftp/python/3.12.8/Python-3.12.8.tgz",
+    "sha256": "5978435c479a376648cb02854df3b892ace9ed7d32b1fead652712bee9d03a45"
+  },
+  "target": {
+    "abi": "x86_64-bursztynos",
+    "libc": "musl",
+    "sysroot": ".musl-build/sysroot",
+    "linkage": "static",
+    "elf_type": "ET_EXEC",
+    "dynamic_loader": false
+  },
+  "build": {
+    "script": "narzedzia/python/buduj_cpython.sh",
+    "build_root": ".cpython-build",
+    "configure": [
+      "--prefix=/usr",
+      "--exec-prefix=/usr",
+      "--with-platlibdir=lib",
+      "--disable-shared",
+      "--with-static-libpython",
+      "--without-ensurepip",
+      "--without-lto",
+      "--disable-ipv6",
+      "--disable-test-modules"
+    ],
+    "linker_flags": [
+      "-static",
+      "-fno-pie",
+      "-no-pie",
+      "-Wl,--build-id=none"
+    ],
+    "disabled_syscall_facilities": [
+      "fork/vfork",
+      "pthread_create/pthread_atfork",
+      "dlopen",
+      "openat/*at",
+      "epoll/eventfd/inotify/signalfd/timerfd",
+      "posix_spawn",
+      "getrandom/getentropy",
+      "sendfile/copy_file_range"
+    ]
+  },
+  "runtime_layout": {
+    "prefix": "/usr",
+    "interpreter": "/usr/bin/python3",
+    "versioned_interpreter": "/usr/bin/python3.12",
+    "stdlib": "/usr/lib/python3.12",
+    "encodings": "/usr/lib/python3.12/encodings",
+    "sysconfig_module": "/usr/lib/python3.12/sysconfig.py",
+    "site_packages": "/usr/lib/python3.12/site-packages",
+    "extension_modules": "omitted; requires ld.so and dlopen"
+  },
+  "support": {
+    "pure_python": "planned after the static guest gate passes",
+    "pip": "unsupported; ensurepip is disabled and no package manager is shipped",
+    "c_extensions": "unsupported until BursztynOS provides ld.so/dlopen; only statically built CPython core modules may exist",
+    "threads_processes": "unsupported where the disabled syscall facilities are required",
+    "guest_execution": "not claimed by this manifest; use the dedicated QEMU gate separately"
+  }
+}

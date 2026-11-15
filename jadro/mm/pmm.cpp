@@ -141,6 +141,8 @@ size_t liczba_wylaczen_hhdm = 0;
 bool zakresy_hhdm_przepelnione = false;
 
 uint64_t ostatnia_alokacja = 0;
+uint64_t ostatnia_alokacja_uzytkownika_wysoka = 0;
+uint64_t ostatnia_alokacja_uzytkownika_niska = 0;
 
 bool pmm_zainicjalizowany = false;
 
@@ -1109,6 +1111,8 @@ static void wyzeruj_stan_pmm() {
 
     najwyzsza_znaleziona_ramka = 0;
     ostatnia_alokacja = 0;
+    ostatnia_alokacja_uzytkownika_wysoka = 0;
+    ostatnia_alokacja_uzytkownika_niska = 0;
     pmm_zainicjalizowany = false;
 }
 
@@ -1714,6 +1718,70 @@ void* ZaalokujRamke() {
     }
 
     return nullptr;
+}
+
+static void wyzeruj_ramke_uzytkownika(uint64_t numer_ramki) {
+#ifndef BURSZTYN_PMM_HOST_TEST
+    const uint64_t adres = numer_ramki * ROZMIAR_STRONY;
+    if (adres <= ROZMIAR_MAPOWANIA_FIZYCZNEGO - ROZMIAR_STRONY &&
+        !zakresy_hhdm_przepelnione) {
+        volatile uint64_t* slowa =
+            reinterpret_cast<volatile uint64_t*>(
+                BAZA_MAPOWANIA_FIZYCZNEGO + adres);
+        for (size_t i = 0; i < ROZMIAR_STRONY / sizeof(uint64_t); ++i)
+            slowa[i] = 0;
+    }
+#else
+    (void)numer_ramki;
+#endif
+}
+
+/*
+ * Alokator stron Ring 3. Najpierw wykorzystuje RAM powyzej 1 GiB, aby
+ * odseparowac zwykle strony procesu od puli DMA. Na maszynach z mniejsza
+ * iloscia pamieci wraca do pozostalego zakresu niskiego, inaczej minimalne
+ * konfiguracje QEMU nie moglyby uruchomic nawet pierwszego procesu.
+ */
+void* ZaalokujRamkeUzytkownika() {
+    BlokadaPMM blokada;
+    if (!pmm_zainicjalizowany) return nullptr;
+
+    const uint64_t limit = najwyzsza_znaleziona_ramka < MAX_RAMEK
+                               ? najwyzsza_znaleziona_ramka
+                               : MAX_RAMEK;
+    const uint64_t granica_wysoka = MAX_RAMEK_ALOKOWALNYCH;
+    const uint64_t granica_niska = GRANICA_NISKIEJ_PAMIECI / ROZMIAR_STRONY;
+
+    auto szukaj = [&](uint64_t poczatek, uint64_t koniec,
+                      uint64_t& kursor) -> void* {
+        if (poczatek >= koniec) return nullptr;
+        if (kursor < poczatek || kursor >= koniec) kursor = poczatek;
+
+        for (int przebieg = 0; przebieg < 2; ++przebieg) {
+            const uint64_t od = przebieg == 0 ? kursor : poczatek;
+            const uint64_t do_ = przebieg == 0 ? koniec : kursor;
+            for (uint64_t ramka = od; ramka < do_; ++ramka) {
+                if (!ramka_dostepna(ramka) || !ramka_wolna(ramka))
+                    continue;
+
+                ustaw_ramke_zajeta(ramka);
+                kursor = ramka + 1ULL;
+                if (kursor >= koniec) kursor = poczatek;
+                wyzeruj_ramke_uzytkownika(ramka);
+                return reinterpret_cast<void*>(ramka * ROZMIAR_STRONY);
+            }
+        }
+        return nullptr;
+    };
+
+    if (void* ramka = szukaj(granica_wysoka, limit,
+                             ostatnia_alokacja_uzytkownika_wysoka))
+        return ramka;
+
+    const uint64_t koniec_niski =
+        limit < granica_wysoka ? limit : granica_wysoka;
+    return szukaj(granica_niska, koniec_niski,
+                  ostatnia_alokacja_uzytkownika_niska);
 }
 
 void* ZaalokujCiagleRamki(size_t liczba_ramek) {

@@ -128,6 +128,19 @@ int main(int argc, char** argv) {
         }
 
         const ElfStatus status = elf_waliduj(obraz.data(), obraz.size());
+        ElfRelokacja relokacje[ELF_MAKS_RELOKACJI]{};
+        uint32_t liczba_relokacji = 0;
+        /*
+         * Skan sekcji RELA jest osobna granica wejscia dla ET_DYN. Nie
+         * wymagamy konkretnego statusu, ale kazdy wynik musi byc bezpieczny
+         * i nie moze czytac poza obcietym buforem (ASan).
+         */
+        (void)elf_zbierz_relokacje(
+            obraz.data(),
+            obraz.size(),
+            relokacje,
+            ELF_MAKS_RELOKACJI,
+            &liczba_relokacji);
         if (status != ELF_OK) {
             ++odrzucone;
             /* Odrzucony obraz nie moze byc opisany jako poprawny. */

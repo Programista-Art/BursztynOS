@@ -17,9 +17,12 @@
  *
  *   - MAP_ANONYMOUS z MAP_PRIVATE albo MAP_SHARED: mapowanie EAGER, ramki
  *     zerowane przy alokacji (PMM juz to robi),
+ *   - file-backed MAP_PRIVATE oraz read-only MAP_SHARED: EAGER, pelne strony
+ *     sa kopiowane z PSF do prywatnych ramek,
  *   - MAP_FIXED: tylko wewnatrz okna mmap,
- *   - mmap plikowy (-1 fd z MAP_ANONYMOUS jest wymagane): zwraca -ENOSYS,
- *   - COW i demand paging: nie, patrz dlug techniczny w dokumentacji.
+ *   - mmap plikowy wymaga istniejacego, czytelnego fd VFS, offsetu 4 KiB
+ *     i zakresu w calosci mieszczacego sie w pliku,
+ *   - MAP_SHARED z PROT_WRITE, COW, write-back i demand paging: -ENOSYS.
  */
 
 /* Stan mmap jednego procesu. */
@@ -51,3 +54,9 @@ int64_t mmap_jadro_odmapuj(int pid, uint64_t adres, uint64_t dlugosc);
 /* mprotect(2): zmienia ochrone istniejacego regionu. */
 int64_t mmap_jadro_ochrona(int pid, uint64_t adres, uint64_t dlugosc,
                            uint64_t ochrona);
+
+/*
+ * brk(2): przesuwa granice sterty i mapuje brakujace strony.
+ * Zwraca nowa granice albo 0 przy bledzie.
+ */
+uint64_t mmap_jadro_sterta_rozszerz(int pid, uint64_t nowa_granica);

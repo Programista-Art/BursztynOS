@@ -489,6 +489,17 @@ bool bsp_wczytaj_obraz_bur(const char*, struct BurObrazPliku*, uint64_t,
     const char* (*walidator)(const struct NaglowekBur&, uint64_t));
 
 /*
+ * Surowy, ograniczony odczyt pliku wykonywalnego bez interpretacji naglowka.
+ *
+ * Potrzebny formatom, ktore maja wlasny walidator poza BUR (ELF64). Kontrakt
+ * bezpieczenstwa jest identyczny jak powyzej: rozmiar sprawdzany PRZED
+ * alokacja, wynik jest prywatna kopia w pamieci jadra, a zwolnienie nalezy
+ * do wywolujacego (kfree). Zwraca false i nie alokuje przy kazdym bledzie.
+ */
+bool bsp_wczytaj_obraz_binarny(const char* sciezka, uint8_t** dane,
+    uint64_t* rozmiar, uint64_t maks);
+
+/*
  * Zapisuje tekstowa liste elementow katalogu do bufora.
  *
  * Bufor zawsze jest zakonczony '\0', jezeli max_dlugosc > 0 i argumenty
@@ -498,6 +509,34 @@ bool wylistuj_katalog(
     const char* sciezka,
     char* bufor,
     uint32_t max_dlugosc
+);
+
+/*
+ * Typowany, ograniczony odczyt jednego wpisu katalogu. Jest przeznaczony
+ * dla VFS: w przeciwienstwie do wylistuj_katalog() nie parsuje tekstowego
+ * formatu i nie zwraca danych z dysku bez sprawdzenia wezla oraz nazwy.
+ */
+struct PsfKatalogWpis {
+    uint64_t inode;
+    uint8_t typ;
+    char nazwa[PSF_MAX_NAZWA];
+};
+
+enum PsfKatalogWynik : uint8_t {
+    PSF_KATALOG_BLAD = 0,
+    PSF_KATALOG_KONIEC = 1,
+    PSF_KATALOG_WPIS = 2
+};
+
+/*
+ * `indeks` jest logicznym offsetem wpisu (bez pustych slotow). Zwraca
+ * KONIEC dla poprawnego, ale wyczerpanego katalogu i BLAD dla zlego PSF,
+ * sciezki lub obiektu niebedacego katalogiem.
+ */
+enum PsfKatalogWynik psf_pobierz_wpis_katalogu(
+    const char* sciezka,
+    uint64_t indeks,
+    struct PsfKatalogWpis* wpis
 );
 
 /*

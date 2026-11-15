@@ -30,6 +30,12 @@ bool mmap_adres_poprawny(uint64_t adres, uint64_t dlugosc) {
     return true;
 }
 
+bool mmap_zakres_pliku_poprawny(uint64_t rozmiar_pliku, uint64_t offset,
+                                uint64_t dlugosc) {
+    if (dlugosc == 0 || offset > rozmiar_pliku) return false;
+    return dlugosc <= rozmiar_pliku - offset;
+}
+
 int64_t mmap_waliduj_flagi(uint64_t flagi, uint64_t ochrona) {
     /* Musi byc dokladnie jeden z MAP_SHARED / MAP_PRIVATE. */
     const uint64_t typ = flagi & POSIX_MAP_TYP_MASKA;

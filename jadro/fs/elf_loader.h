@@ -59,6 +59,27 @@ struct Elf64_Phdr {
 };
 static_assert(sizeof(Elf64_Phdr) == 56, "Elf64_Phdr ABI");
 
+struct Elf64_Shdr {
+    uint32_t sh_name;
+    uint32_t sh_type;
+    uint64_t sh_flags;
+    uint64_t sh_addr;
+    uint64_t sh_offset;
+    uint64_t sh_size;
+    uint32_t sh_link;
+    uint32_t sh_info;
+    uint64_t sh_addralign;
+    uint64_t sh_entsize;
+};
+static_assert(sizeof(Elf64_Shdr) == 64, "Elf64_Shdr ABI");
+
+struct Elf64_Rela {
+    uint64_t r_offset;
+    uint64_t r_info;
+    int64_t  r_addend;
+};
+static_assert(sizeof(Elf64_Rela) == 24, "Elf64_Rela ABI");
+
 constexpr uint8_t ELF_MAGIA[4] = {0x7F, 'E', 'L', 'F'};
 constexpr uint8_t ELFCLASS64 = 2;
 constexpr uint8_t ELFDATA2LSB = 1;
@@ -69,10 +90,15 @@ constexpr uint16_t EM_X86_64 = 62;
 constexpr uint32_t PT_LOAD = 1;
 constexpr uint32_t PT_DYNAMIC = 2;
 constexpr uint32_t PT_INTERP = 3;
+constexpr uint32_t PT_PHDR = 6;
 constexpr uint32_t PT_GNU_STACK = 0x6474E551U;
 constexpr uint32_t PF_X = 1U;
 constexpr uint32_t PF_W = 2U;
 constexpr uint32_t PF_R = 4U;
+constexpr uint32_t SHT_RELA = 4U;
+constexpr uint32_t SHT_REL = 9U;
+constexpr uint32_t SHT_RELR = 19U;
+constexpr uint32_t R_X86_64_RELATIVE = 8U;
 
 /* =========================================================================
  * WYNIK WALIDACJI
@@ -93,7 +119,12 @@ enum ElfStatus : int32_t {
     ELF_WEJSCIE_POZA_KODEM = 11,
     ELF_WX_NARUSZONE = 12,
     ELF_LINKOWANIE_DYNAMICZNE = 13,
-    ELF_ZLY_ROZMIAR = 14
+    ELF_ZLY_ROZMIAR = 14,
+    ELF_ZLA_TABLICA_SEKCJI = 15,
+    ELF_RELOKACJE_NIEOBSLUGIWANE = 16,
+    ELF_RELOKACJA_POZA_OBRAZEM = 17,
+    ELF_RELOKACJE_ZA_DUZO = 18,
+    ELF_BIAS_NIEPOPRAWNY = 19
 };
 
 const char* elf_status_opis(ElfStatus status);
@@ -113,6 +144,7 @@ ElfStatus elf_waliduj(const uint8_t* obraz, size_t rozmiar);
 
 /* Maksymalna liczba segmentow PT_LOAD, ktore przyjmujemy. */
 constexpr uint32_t ELF_MAKS_SEGMENTOW = 8;
+constexpr uint32_t ELF_MAKS_RELOKACJI = 1024;
 
 struct ElfSegment {
     uint64_t wirtualny;      /* adres docelowy w Ring 3 */
@@ -128,6 +160,9 @@ static_assert(sizeof(ElfSegment) == 48, "ElfSegment ABI");
 
 struct ElfObraz {
     uint64_t wejscie;        /* e_entry */
+    uint64_t phdr;           /* user VA tablicy Elf64_Phdr (AT_PHDR) */
+    uint64_t phent;          /* e_phentsize (AT_PHENT) */
+    uint64_t phnum;          /* e_phnum (AT_PHNUM) */
     uint32_t liczba_segmentow;
     ElfSegment segmenty[ELF_MAKS_SEGMENTOW];
     uint64_t dolny_adres;    /* najnizszy p_vaddr */
@@ -136,12 +171,54 @@ struct ElfObraz {
     uint32_t suma_flag;      /* OR flag wszystkich segmentow */
 };
 
+struct ElfRelokacja {
+    uint64_t offset;    /* r_offset, wzgl. baza obrazu ET_DYN */
+    int64_t  addend;    /* r_addend */
+    uint32_t typ;       /* obecnie tylko R_X86_64_RELATIVE */
+    uint32_t symbol;    /* dla RELATIVE musi byc 0 */
+};
+
+static_assert(sizeof(ElfRelokacja) == 24, "ElfRelokacja ABI");
+
 /*
  * Wypelnia ElfObraz po udanej walidacji. Zwraca ELF_OK albo blad.
  * Wywoluj dopiero po elf_waliduj() == ELF_OK; funkcja i tak waliduje
  * ponownie, bo taniej jest sprawdzic dwa razy niz mapowac zly segment.
  */
 ElfStatus elf_opisz(const uint8_t* obraz, size_t rozmiar, ElfObraz* wynik);
+
+/*
+ * Zbiera relokacje SHT_RELA z obrazu ET_DYN. PT_DYNAMIC i PT_INTERP nie sa
+ * akceptowane przez elf_waliduj(), wiec ta funkcja nie udaje dynamicznego
+ * linkera: obsluguje wyłącznie bezsymbolowe R_X86_64_RELATIVE zapisane w
+ * statycznym obrazie. Relokacje sa walidowane przed mapowaniem.
+ */
+ElfStatus elf_zbierz_relokacje(
+    const uint8_t* obraz,
+    size_t rozmiar,
+    ElfRelokacja* wynik,
+    uint32_t pojemnosc,
+    uint32_t* liczba
+);
+
+/* Przesuwa opis ET_DYN o page-aligned load bias z kontrola overflow. */
+ElfStatus elf_przesun_obraz(ElfObraz* obraz, uint64_t bias);
+
+/* Oblicza B + A dla R_X86_64_RELATIVE bez arytmetyki ze znakiem UB. */
+bool elf_oblicz_relative(
+    const ElfRelokacja& relokacja,
+    uint64_t bias,
+    uint64_t* wartosc
+);
+
+/*
+ * Zwraca e_type (ET_EXEC / ET_DYN) po samej walidacji naglowka.
+ *
+ * Potrzebne loaderowi, bo ET_DYN wymaga przetworzenia relokacji, ktorych
+ * ten etap jeszcze nie ma. Zwraca 0, gdy obraz jest niepoprawny - 0 nie jest
+ * zadnym poprawnym e_type, wiec wywolujacy nie pomyli braku z ET_EXEC.
+ */
+uint16_t elf_typ(const uint8_t* obraz, size_t rozmiar);
 
 /* Czy adres wejscia lezy w segmencie wykonywalnym. */
 bool elf_wejscie_w_kodzie(const ElfObraz& obraz);
