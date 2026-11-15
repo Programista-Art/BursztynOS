@@ -645,6 +645,17 @@ bool uruchom_program_z_argumentem_uzytkownika(const char* program,
         0, 0) == 1ULL;
 }
 
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dlugosc) {
+    if (!tytul || !tresc || dlugosc == 0) return 0;
+    return static_cast<uint32_t>(bws_wywolaj(101, rodzaj, reinterpret_cast<uint64_t>(tresc), dlugosc,
+                                              reinterpret_cast<uint64_t>(tytul)));
+}
+
+uint32_t gui_okno_podrzedne_tresc(char* bufor, uint32_t pojemnosc) {
+    if (!bufor || pojemnosc == 0) return 0;
+    return static_cast<uint32_t>(bws_wywolaj(102, reinterpret_cast<uint64_t>(bufor), pojemnosc, 0, 0));
+}
+
 bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
     if (!bufor || pojemnosc == 0) return false;
     return bws_wywolaj(

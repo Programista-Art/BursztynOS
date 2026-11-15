@@ -257,6 +257,11 @@ BURSZTYN_DIAG_RESIZE_LATENCY ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_RESIZE_LATENCY)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_RESIZE_LATENCY=1
 endif
+# Log cyklu zycia procesow (wolne ramki PMM przy zwolnieniu slotu) - pomiar wyciekow w testach natywnych. Domyslnie wylaczone.
+BURSZTYN_DIAG_PROC_LIFECYCLE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_PROC_LIFECYCLE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_PROC_LIFECYCLE=1
+endif
 BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
 RING3_FLAGS += -DBURSZTYN_DIAG_GEOM_TRACE=1
@@ -574,6 +579,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	kontrolki4blob.o \
 	repro_blob.o \
 	snake_blob.o \
+	okno_informacyjne_blob.o \
 	przegladarka_obrazow_blob.o \
 	aktualizacje_blob.o \
 	motyw.o \
@@ -1093,6 +1099,18 @@ $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 
 
 
+
+# Okno informacyjne (okna podrzedne BursztynUI; uruchamiane wylacznie przez BWS 101)
+OKNO_INFORMACYJNE_LINKER := programy/okno_informacyjne/okno_informacyjne_linker.ld
+okno_informacyjne_tmp.o: programy/okno_informacyjne/okno_informacyjne.cpp bursztyn_ui/okno_podrzedne.h bursztyn_ui/tresc_uklad.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+okno_informacyjne_blob.o: okno_informacyjne_tmp.o $(BSF_APP_GUI) $(OKNO_INFORMACYJNE_LINKER)
+	$(LD) --gc-sections -T $(call bur_linker,$(OKNO_INFORMACYJNE_LINKER)) $(RING3_LDFLAGS) \
+		okno_informacyjne_tmp.o $(BSF_APP_GUI) -o okno_informacyjne.elf
+	$(BUR_CONVERT) okno_informacyjne.elf okno_informacyjne.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py okno_informacyjne.bin okno_informacyjne.bin.bz
+	$(LD) -r -b binary okno_informacyjne.bin.bz -o okno_informacyjne_blob.o
 
 # Snake (BursztynUI)
 SNAKE_LINKER := gry/snake/snake_linker.ld
@@ -2835,7 +2853,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
@@ -3096,7 +3114,7 @@ test-window-geometry-host:
 
 # Tozsamosc aplikacji systemowych: SHA-256 plikow .bur zbudowanych razem z jadrem.
 SKROTY_SYSTEMOWE_H := jadro/fs/skroty_systemowe.generated.h
-SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o
+SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o okno_informacyjne_blob.o
 $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemowe.py
 	$(PYTHON) narzedzia/generuj_skroty_systemowe.py $@ \
 		/programy/ustawienia.cebula/ustawienia.bur=ustawienia.bin \
@@ -3104,7 +3122,8 @@ $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemo
 		/programy/test_dzwieku.cebula/test_dzwieku.bur=test_dzwieku.bin \
 		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
 		/programy/ekran.cebula/ekran.bur=ekran.bin \
-		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin
+		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin \
+		/programy/okno-informacyjne.cebula/okno-informacyjne.bur=okno_informacyjne.bin
 # Kursor zmiany rozmiaru: opcjonalne ikonki/kursor_rozciagania.png (brak pliku nie psuje budowania).
 KURSOR_ROZCIAGANIA_H := jadro/gui/kursor_rozciagania.generated.h
 KURSOR_ROZCIAGANIA_PNG := ikonki/kursor.png ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
@@ -3135,6 +3154,24 @@ test-kernel-blobz-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
 
 # Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-okna-podrzedne-host
+test-okna-podrzedne-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_okna_podrzedne_host.cpp -o .bsf-test/okna_podrzedne_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/okna_podrzedne_host
+
+.PHONY: test-zakonczenie-procesu-host
+test-zakonczenie-procesu-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_zakonczenie_procesu_host.cpp -o .bsf-test/zakonczenie_procesu_host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/zakonczenie_procesu_host
+
+.PHONY: test-tresc-uklad-host
+test-tresc-uklad-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_tresc_uklad_host.cpp -o .bsf-test/tresc_uklad_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/tresc_uklad_host
+
 .PHONY: test-vmm-synchronizacja-host
 test-vmm-synchronizacja-host:
 	@mkdir -p .bsf-test

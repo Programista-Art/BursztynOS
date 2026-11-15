@@ -447,6 +447,10 @@ uint64_t PrzelaczKontekst(
  */
 void zakoncz_aktualny_proces();
 
+/* Zadanie zakonczenia procesu nie-biezacego: 1 = zaakceptowano, 2 = juz w trakcie, 0 = odmowa (zob. zakonczenie_procesu.h). */
+extern "C" int scheduler_zazadaj_zakonczenia(int pid);
+extern "C" int scheduler_zazadaj_zakonczenia_z_timera(int pid);
+
 /* =========================================================================
  * 8. ZDARZENIA MYSZY
  * ========================================================================= */

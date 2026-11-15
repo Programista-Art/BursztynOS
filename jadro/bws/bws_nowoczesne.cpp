@@ -26,6 +26,9 @@
 #include "motyw.h"
 #include "bws_hda_diag.h"
 #include "bws_procesy.h"
+#include "okna_podrzedne.h"
+#include "zakonczenie_procesu.h"
+#include "loader.h"
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_diag.h"
 #include "sterowniki/dzwiek/hda_transport.h"
@@ -41,12 +44,15 @@ extern bool skopiuj_string_z_uzytkownika(char*, const char*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void*, size_t);
 extern volatile bool ekran_zajety;
+extern void klog_serial(const char*);
 #include "bsf/config_kernel.inc"
 
 
 extern "C" bool bws_gui_ustaw_kursor_ksztalt(int pid, uint32_t typ);
 extern "C" bool bws_gui_ustaw_kursor_custom(
     int pid, const GuiCustomCursorInfo* info, const uint32_t* piksele);
+
+static bool czy_sciezka_menedzera_okien(const char* sciezka);   // definicja nizej
 
 namespace {
 
@@ -1041,32 +1047,147 @@ uint64_t proces_zabij(proces_t& p, uint64_t pid64) {
     if (pid == aktualny_pid) return 0;
 
     proces_t& cel = tablica_procesow[pid];
+    if (__atomic_load_n(&cel.stan, __ATOMIC_ACQUIRE) == PROCES_PUSTY) return 0;
 
-    if (cel.stan == PROCES_PUSTY || cel.stan == PROCES_KONCZACY) {
+    /*
+     * Cel nie moze byc bardziej zaufany od wywolujacego, soba ani menedzerem okien (zakonczenie pulpitu zostawiloby
+     * system bez GUI). Regula: zakonczenie_procesu.h (testy hosta).
+     */
+    if (!ZakonczenieProcesu::czy_wolno_zabic(static_cast<int>(p.pid), static_cast<int>(p.poziom_zaufania), pid,
+                                             static_cast<int>(cel.poziom_zaufania),
+                                             czy_sciezka_menedzera_okien(cel.sciezka_pliku))) return 0;
+
+    /*
+     * Zakonczenie realizuje scheduler (scheduler_zazadaj_zakonczenia): zapisuje zasoby do odroczonego zwolnienia,
+     * odbiera prawa i ustawia KONCZACY; PML4, strony Ring 3, stos jadra, warstwe okna i zasoby BWS zwalnia pozniej
+     * posprzataj_zakonczone_procesy() w kontekscie timera - nigdy w tym syscallu. Powtorne zadanie jest idempotentne.
+     */
+    return scheduler_zazadaj_zakonczenia(pid) != 0 ? BWS_ZABIJ_OK : BWS_ZABIJ_NIE_WOLNO;
+}
+
+/* =========================================================================
+ * OKNA PODRZEDNE (BWS 101/102): wlasnosc, limity, czas zycia - zob. okna_podrzedne.h
+ * ========================================================================= */
+constexpr const char* SCIEZKA_OKNA_INFORMACYJNEGO = "/programy/okno-informacyjne.cebula/okno-informacyjne.bur";
+OknaPodrzedne::Rejestr g_okna_podrzedne;
+
+/* Rejestr jest dotykany takze z kontekstu sprzatania procesow (timer): krotkie sekcje z wylaczonymi przerwaniami. */
+class BlokadaIrqOkien {
+public:
+    BlokadaIrqOkien() { asm volatile("pushfq\n\tpopq %0\n\tcli" : "=r"(flagi_) : : "memory", "cc"); }
+    ~BlokadaIrqOkien() { if (flagi_ & (1ULL << 9)) asm volatile("sti" ::: "memory"); }
+    BlokadaIrqOkien(const BlokadaIrqOkien&) = delete;
+    BlokadaIrqOkien& operator=(const BlokadaIrqOkien&) = delete;
+private:
+    uint64_t flagi_{};
+};
+
+/* Czas dla terminow zamykania okien (HPET; bez HPET - przyblizenie z ticku schedulera). */
+uint64_t czas_okien_ns() {
+    return hpet_dostepny() ? czas_monotoniczny_ns() : scheduler_pobierz_tick() * 10000000ULL;
+}
+/* Osierocone dziecko ma tyle czasu na samodzielne zamkniecie (ZAMKNIJ); potem jest zakonczone przez scheduler. */
+constexpr uint64_t TERMIN_ZAMKNIECIA_DZIECKA_NS = 1500ULL * 1000ULL * 1000ULL;
+
+/* Linia diagnostyczna na porcie szeregowym: "[OKNA-PODRZEDNE] <zdarzenie> a=.. b=.. c=.." (do testow natywnych). */
+void log_okna_podrzedne(const char* zdarzenie, long a, long b, long c) {
+    char buf[112]; size_t n = 0;
+    auto txt = [&](const char* t) { while (*t && n + 1 < sizeof(buf)) buf[n++] = *t++; };
+    auto num = [&](long v) { char t[24]; int k = 0; unsigned long u = v < 0 ? 0UL : static_cast<unsigned long>(v);
+        do { t[k++] = char('0' + u % 10); u /= 10; } while (u); while (k && n + 1 < sizeof(buf)) buf[n++] = t[--k]; };
+    txt("[OKNA-PODRZEDNE] "); txt(zdarzenie); txt(" a="); num(a); txt(" b="); num(b); txt(" c="); num(c);
+    txt(" wolne_ramki="); num(static_cast<long>(pmm_pobierz_wolne_ramki()));
+    buf[n] = 0; klog_serial(buf);
+}
+
+bool proces_zyje(int pid) {
+    if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return false;
+    const uint32_t st = __atomic_load_n(&tablica_procesow[pid].stan, __ATOMIC_ACQUIRE);
+    return st != PROCES_PUSTY && st != PROCES_KONCZACY;
+}
+
+/* a1 = rodzaj, a2 = tresc (UTF-8), a3 = dlugosc, a4 = tytul (NUL, <= 63 B). 1 = utworzono, 2 = aktywowano, 0 = odmowa. */
+uint64_t okno_podrzedne_otworz(proces_t& p, uint64_t rodzaj, uint64_t tresc_user, uint64_t dl, uint64_t tytul_user) {
+    if (!ma_prawo(p, PRAWO_OKNO_PODRZEDNE)) return 0;
+    const int wlasciciel = static_cast<int>(p.pid);
+    if (rodzaj == 0 || rodzaj > OknaPodrzedne::RODZAJ_MAKS || dl == 0 || dl > OknaPodrzedne::MAKS_TRESC ||
+        tresc_user == 0 || tytul_user == 0) return 0;
+    char tytul[OknaPodrzedne::MAKS_TYTUL] = {};
+    static char tresc[OknaPodrzedne::MAKS_TRESC + 1];            // wspolny bufor: dostep tylko pod GuardEkranu
+    int idx = -1;
+    {
+        GuardEkranu guard;                                        // zwalniany PRZED uruchomieniem procesu (loader jest wolny)
+        if (!czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(tresc_user), static_cast<size_t>(dl)) ||
+            !skopiuj_z_przestrzeni_uzytkownika(tresc, reinterpret_cast<const void*>(tresc_user), static_cast<size_t>(dl)) ||
+            !skopiuj_string_z_uzytkownika(tytul, reinterpret_cast<const char*>(tytul_user), sizeof(tytul))) return 0;
+        size_t dl_tytulu = 0;
+        while (dl_tytulu < sizeof(tytul) && tytul[dl_tytulu]) ++dl_tytulu;
+
+        // Istniejaca instancja (ten sam wlasciciel i rodzaj): aktywujemy zamiast tworzyc duplikat.
+        int istniejacy = 0;
+        {
+            BlokadaIrqOkien irq;
+            const int i = g_okna_podrzedne.indeks(wlasciciel, static_cast<uint32_t>(rodzaj));
+            if (i >= 0 && g_okna_podrzedne.w[i].uruchomiony) istniejacy = g_okna_podrzedne.w[i].pid_dziecka;
+        }
+        if (istniejacy > 0 && proces_zyje(istniejacy)) {
+            // Aktywacja istniejacego okna + odswiezenie jego tresci (np. dane innego obrazu): dziecko dostaje zdarzenie
+            // OTWORZ_PLIK i ponownie pobiera tresc przez BWS 102.
+            bool odswiez = false;
+            {
+                BlokadaIrqOkien irq;
+                const int i = g_okna_podrzedne.indeks(wlasciciel, static_cast<uint32_t>(rodzaj));
+                odswiez = i >= 0 && g_okna_podrzedne.zaktualizuj_tresc(i, tresc, static_cast<size_t>(dl)) == OknaPodrzedne::Wynik::OK;
+            }
+            if (odswiez) {
+                bws_zdarzenie ev{};
+                ev.typ = BWS_ZDARZENIE_OTWORZ_PLIK;
+                ev.timestamp = scheduler_pobierz_tick();
+                (void)scheduler_dodaj_zdarzenie(istniejacy, &ev);
+            }
+            (void)bws_gui_aktywuj_okno(skladacz_obrazu_id_okna(istniejacy));   // przywroc (gdy zminimalizowane), podnies i daj fokus
+            log_okna_podrzedne("aktywowano", wlasciciel, static_cast<long>(rodzaj), istniejacy);
+            return 2;
+        }
+        BlokadaIrqOkien irq;
+        if (istniejacy > 0) (void)g_okna_podrzedne.usun_dziecko(istniejacy);     // martwy wpis (dziecko sie konczy)
+        if (g_okna_podrzedne.zarezerwuj(wlasciciel, static_cast<uint32_t>(rodzaj), tytul, dl_tytulu, tresc,
+                                        static_cast<size_t>(dl), &idx) != OknaPodrzedne::Wynik::OK) return 0;
+    }
+    // Wlasciciel dostaje tylko to jedno, stale okno: bez ogolnego prawa do uruchamiania programow.
+    if (!bws_uruchom_program_wbudowany(SCIEZKA_OKNA_INFORMACYJNEGO, PZB_UZYTKOWNIK, PRAWO_GUI, false, nullptr)) {
+        BlokadaIrqOkien irq;
+        g_okna_podrzedne.anuluj(idx);
         return 0;
     }
+    const int pid_dziecka = loader_ostatni_pid_uruchomiony();
+    {
+        BlokadaIrqOkien irq;
+        if (pid_dziecka <= 0 || pid_dziecka >= static_cast<int>(PZB_MAKS_PROCESOW) ||
+            !g_okna_podrzedne.ustaw_pid(idx, pid_dziecka)) {
+            g_okna_podrzedne.anuluj(idx);
+            // Niespojny stan (pid juz zarejestrowany): konczymy swiezo uruchomiony proces zamiast zostawiac sierote.
+            if (pid_dziecka > 0 && pid_dziecka < static_cast<int>(PZB_MAKS_PROCESOW)) (void)scheduler_zazadaj_zakonczenia(pid_dziecka);
+            return 0;
+        }
+    }
+    log_okna_podrzedne("utworzono", wlasciciel, static_cast<long>(rodzaj), pid_dziecka);
+    return 1;
+}
 
-    /*
-     * Proces o wyzszym (nizszym numerycznie) zaufaniu nie moze byc
-     * zakonczony przez mniej uprzywilejowanego wywolujacego.
-     */
-    if (cel.poziom_zaufania < p.poziom_zaufania) return 0;
-
-    /*
-     * Zakonczenie realizuje scheduler: oznacza stan i czeka na timer,
-     * ktory bezpiecznie przeniesie CPU na inny stos jadra. Nie zwalniamy
-     * tu PML4 ani stron - robi to posprzataj_zakonczone_procesy().
-     *
-     * Zapis stanu jest atomowy (RELEASE), dokladnie jak w loaderze, aby
-     * timer nie zobaczyl czesciowo zmienionego deskryptora.
-     */
-    cel.poziom_zaufania = PZB_PIASKOWNICA;
-    cel.uprawnienia = 0;
-    __atomic_store_n(&cel.stan, PROCES_KONCZACY, __ATOMIC_RELEASE);
-
-    scheduler_usun_zdarzenia_procesu(pid);
-
-    return BWS_ZABIJ_OK;
+/* Tylko proces zarejestrowany jako dziecko: pobiera "tytul\n\ntresc" (UTF-8, NUL). Zwraca liczbe bajtow albo 0. */
+uint64_t okno_podrzedne_tresc(proces_t& p, uint64_t bufor_user, uint64_t pojemnosc) {
+    if (bufor_user == 0 || pojemnosc < 8 || pojemnosc > OknaPodrzedne::MAKS_TRESC + OknaPodrzedne::MAKS_TYTUL + 8) return 0;
+    char wynik[OknaPodrzedne::MAKS_TRESC + OknaPodrzedne::MAKS_TYTUL + 8];
+    size_t n = 0;
+    {
+        BlokadaIrqOkien irq;
+        n = g_okna_podrzedne.kopiuj_dla_dziecka(static_cast<int>(p.pid), wynik, sizeof(wynik));
+    }
+    if (n == 0 || n + 1 > pojemnosc) return 0;
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor_user), n + 1) ||
+        !skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor_user), wynik, n + 1)) return 0;
+    return n;
 }
 
 } // namespace
@@ -1113,6 +1234,64 @@ extern "C" void bws_powiadom_zmiane_pliku(const char* sciezka,
         e.timestamp = timestamp();
         (void)scheduler_dodaj_zdarzenie(w.owner_pid, &e);
     }
+}
+
+/* Wolane z procesu sprzatania (kontekst timera, PRZED usunieciem stanu GUI i warstwy zakonczonego procesu):
+ *  - zakonczony wlasciciel: jego okna podrzedne sa konczone (jak BWS 97);
+ *  - zakonczone dziecko: wpis zwolniony, a wlasciciel (z jego pozostalymi oknami) wraca na wierzch,
+ *    wiec jadro przekazuje mu fokus (bws_gui_usun_stan_procesu wybiera najwyzsza warstwe). */
+extern "C" void okna_podrzedne_przed_sprzataniem(int pid) {
+    if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
+    int dzieci[OknaPodrzedne::MAKS_NA_WLASCICIELA] = {};
+    size_t n = 0;
+    int wlasciciel = 0;
+    {
+        BlokadaIrqOkien irq;
+        n = g_okna_podrzedne.osieroc(pid, dzieci, OknaPodrzedne::MAKS_NA_WLASCICIELA, czas_okien_ns() + TERMIN_ZAMKNIECIA_DZIECKA_NS);
+        wlasciciel = g_okna_podrzedne.usun_dziecko(pid);
+    }
+    // Zakonczony wlasciciel: dzieci dostaja prosbe o zamkniecie i koncza sie same (poprawne zwolnienie zasobow);
+    // wpisy sa juz osierocone, wiec nowy proces o tym samym PID ich nie odziedziczy.
+    for (size_t i = 0; i < n; ++i) {
+        if (!proces_zyje(dzieci[i])) continue;
+        bws_zdarzenie ev{};
+        ev.typ = BWS_ZDARZENIE_ZAMKNIJ;
+        ev.timestamp = scheduler_pobierz_tick();
+        (void)scheduler_dodaj_zdarzenie(dzieci[i], &ev);
+    }
+    if (wlasciciel > 0 && proces_zyje(wlasciciel)) skladacz_obrazu_podnies_warstwe(wlasciciel);
+    if (wlasciciel > 0) log_okna_podrzedne("zamknieto-dziecko", pid, wlasciciel, 0);
+    if (n) log_okna_podrzedne("zamykanie-dzieci-wlasciciela", pid, static_cast<long>(n), 0);
+}
+
+/* Wolane co tick schedulera (kontekst timera): wymusza zakonczenie osieroconych okien, ktore nie zamknely sie w terminie
+ * (np. zawieszone). Zasoby zwalnia standardowa sciezka odroczonego sprzatania. */
+extern "C" void okna_podrzedne_tick() {
+    int pids[OknaPodrzedne::MAKS_OKIEN] = {};
+    size_t n = 0;
+    {
+        BlokadaIrqOkien irq;
+        bool ktos = false;
+        for (size_t i = 0; i < OknaPodrzedne::MAKS_OKIEN; ++i) if (g_okna_podrzedne.w[i].aktywny && g_okna_podrzedne.w[i].termin_ns) ktos = true;
+        if (!ktos) return;                                    // szybka sciezka: zadnych osieroconych okien
+        n = g_okna_podrzedne.przeterminowane(czas_okien_ns(), pids, OknaPodrzedne::MAKS_OKIEN);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const int r = scheduler_zazadaj_zakonczenia_z_timera(pids[i]);
+        log_okna_podrzedne("wymuszone-zakonczenie-dziecka", pids[i], r, 0);
+        if (r == 0 && proces_zyje(pids[i])) {                  // odmowa przy zywym procesie: ponow za 50 ms
+            BlokadaIrqOkien irq;
+            g_okna_podrzedne.ponow_termin(pids[i], czas_okien_ns() + 50ULL * 1000ULL * 1000ULL);
+        }
+    }
+}
+
+/* Dla kompozytora: dzieci wlasciciela (pid-y), zeby dzieci pozostaly NAD wlascicielem po jego podniesieniu
+ * oraz minimalizowaly/przywracaly sie razem z nim. */
+extern "C" size_t okna_podrzedne_dzieci(int wlasciciel, int* out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    BlokadaIrqOkien irq;
+    return g_okna_podrzedne.dzieci(wlasciciel, out, cap);
 }
 
 extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
@@ -1476,6 +1655,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SOCKET_CLOSE: return socket_close(*proces, a1);
         case BWS_PROCESY_LISTA: return procesy_lista(*proces, a1, a2);
         case BWS_PROCES_ZABIJ: return proces_zabij(*proces, a1);
+        case BWS_OKNO_PODRZEDNE_OTWORZ: return okno_podrzedne_otworz(*proces, a1, a2, a3, a4);
+        case BWS_OKNO_PODRZEDNE_TRESC: return okno_podrzedne_tresc(*proces, a1, a2);
         case BWS_OTA_STATUS:
             return aktualizacja_bws_status(proces, a1);
         case BWS_OTA_POLECENIE:

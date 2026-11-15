@@ -23,6 +23,7 @@
  */
 
 #include "scheduler.h"
+#include "zakonczenie_procesu.h"
 #include "fpu.h"
 #include "gui_runtime_diag.h"
 #include "pzb.h"
@@ -31,6 +32,10 @@
 #include "stos_jadra.h"
 #include "grafika.h"
 
+#ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
+extern void klog_serial(const char*);
+extern "C" uint64_t pmm_pobierz_wolne_ramki();
+#endif
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -143,6 +148,12 @@ extern "C" void usun_warstwe(
 extern "C" void bws_gui_usun_stan_procesu(
     int pid
 ) __attribute__((weak));
+
+/* Okna podrzedne: zakonczenie wlasciciela konczy dzieci, zakonczenie dziecka oddaje fokus wlascicielowi. */
+extern "C" void okna_podrzedne_przed_sprzataniem(
+    int pid
+) __attribute__((weak));
+extern "C" void okna_podrzedne_tick() __attribute__((weak));
 
 extern "C" void bws_gui_zwolnij_mysz_procesu(
     int pid
@@ -516,6 +527,8 @@ static void posprzataj_zakonczone_procesy(
             continue;
         }
 
+        if (okna_podrzedne_przed_sprzataniem)
+            okna_podrzedne_przed_sprzataniem(pid);
         if (bws_gui_usun_stan_procesu)
             bws_gui_usun_stan_procesu(pid);
         if (bws_gui_zwolnij_mysz_procesu)
@@ -570,6 +583,19 @@ static void posprzataj_zakonczone_procesy(
         fpu_reset_process(pid);
         __atomic_store_n(&jawne_czekanie_sieci[pid],false,__ATOMIC_RELEASE);
         ustaw_stan_procesu(proces,PROCES_PUSTY);
+#ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
+        {
+            char buf[64] = "[PROC-CLEANUP] pid=";
+            size_t n = 19;
+            auto num = [&](uint64_t v) { char t[24]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v);
+                while (k) buf[n++] = t[--k]; };
+            num(static_cast<uint64_t>(pid));
+            const char* r = " wolne_ramki="; while (*r) buf[n++] = *r++;
+            num(static_cast<uint64_t>(pmm_pobierz_wolne_ramki()));
+            buf[n] = 0;
+            klog_serial(buf);
+        }
+#endif
     }
 }
 
@@ -1211,6 +1237,8 @@ extern "C" uint64_t PrzelaczKontekst(
 
     ++licznik_tykniec_zegara;
 
+    if (okna_podrzedne_tick) okna_podrzedne_tick();   // eskalacja: wymuszone zakonczenie niezamknietych okien podrzednych
+
     obsluz_timeouty_myszy();
 
     const int nastepny_pid =
@@ -1446,6 +1474,49 @@ extern "C" void zakoncz_aktualny_proces() {
         );
     }
 }
+
+/*
+ * Zadanie zakonczenia procesu NIE-biezacego (BWS 97, eskalacja okien podrzednych). Zob. docs/zakonczenie-procesow.md:
+ * zapisuje zasoby do odroczonego zwolnienia (jak samozakonczenie), odbiera prawa, czysci zdarzenia i ustawia KONCZACY;
+ * przestrzen adresowa, stos jadra, okno i zasoby BWS zwalnia pozniej posprzataj_zakonczone_procesy() w kontekscie timera.
+ * Zwraca 1 (zaakceptowano), 2 (juz w trakcie - idempotentnie), 0 (brak procesu / rezerwacja loadera / PID 0 / proces biezacy).
+ * Wolane z syscallu albo z kontekstu timera (IF=0 lub krotka sekcja z cli).
+ */
+static int zazadaj_zakonczenia_impl(int pid, bool z_timera) {
+    const StanPrzerwan stan_irq = zapisz_i_wylacz_przerwania();
+    int wynik = 0;
+    if (pid >= 0 && pid < MAKS_PROCESOW) {
+        proces_t& proces = tablica_procesow[pid];
+        const int stan = odczytaj_stan_procesu(proces);
+        const ZakonczenieProcesu::Decyzja d = ZakonczenieProcesu::ocen_zadanie(pid, z_timera ? -1 : aktualny_pid, stan, MAKS_PROCESOW);
+        ZasobyDoZwolnienia& zasoby = zasoby_do_zwolnienia[pid];
+        if (d == ZakonczenieProcesu::Decyzja::Zakoncz || d == ZakonczenieProcesu::Decyzja::JuzWTrakcie) {
+            if (!zasoby.oczekuje && (proces.przestrzen_adresowa || proces.baza_stosu_jadra)) {
+                // takze dla slotu juz oznaczonego KONCZACY bez zapisanych zasobow (stary BWS 97): dopisz je teraz
+                zasoby.przestrzen_adresowa = proces.przestrzen_adresowa;
+                zasoby.baza_stosu_jadra = reinterpret_cast<void*>(proces.baza_stosu_jadra);
+                zasoby.oczekuje = true;
+            }
+            if (d == ZakonczenieProcesu::Decyzja::Zakoncz) {
+                proces.poziom_zaufania = PZB_PIASKOWNICA;
+                proces.uprawnienia = PRAWA_BRAK;
+                scheduler_usun_zdarzenia_procesu(pid);
+                ustaw_stan_procesu(proces, PROCES_KONCZACY);
+                wynik = 1;
+            } else wynik = 2;
+        }
+    }
+    przywroc_przerwania(stan_irq);
+    return wynik;
+}
+
+/* Syscall (BWS 97): proces biezacy to wywolujacy - nigdy nie jest celem. */
+extern "C" int scheduler_zazadaj_zakonczenia(int pid) { return zazadaj_zakonczenia_impl(pid, false); }
+
+/* Kontekst timera (PrzelaczKontekst przed wyborem nastepnego procesu): cel moze byc procesem przerwanym przez tick (np.
+ * zawieszona petla w Ring 3). Przechodzi w KONCZACY, scheduler nigdy go juz nie wybierze, a jego zasoby zwolni
+ * NASTEPNY tick (posprzataj pomija pid_biezacy), juz na stosie innego procesu. */
+extern "C" int scheduler_zazadaj_zakonczenia_z_timera(int pid) { return zazadaj_zakonczenia_impl(pid, true); }
 
 /* =========================================================================
  * KONTROLA SINGLE-INSTANCE

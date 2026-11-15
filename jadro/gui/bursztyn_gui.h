@@ -95,6 +95,11 @@ bool uruchom_program_z_argumentem_uzytkownika(const char* program,
 /* BWS 45: argument startowy biezacego procesu. */
 bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc);
 
+/* BWS 101: otwiera (1) albo aktywuje istniejace (2) okno podrzedne wlasciciela; 0 = odmowa (brak prawa, limit, zla tresc). */
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dlugosc);
+/* BWS 102 (tylko proces okna podrzednego): "tytul\n\ntresc" w buforze (NUL); zwraca liczbe bajtow albo 0. */
+uint32_t gui_okno_podrzedne_tresc(char* bufor, uint32_t pojemnosc);
+
 enum wynik_otwarcia_skojarzonego : uint32_t {
     OTWORZ_PLIK_BRAK_SKOJARZENIA = 0,
     OTWORZ_PLIK_URUCHOMIONO = 1,

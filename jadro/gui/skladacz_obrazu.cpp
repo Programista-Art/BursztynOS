@@ -44,6 +44,10 @@
 
 #include "skladacz_obrazu.h"
 #include "rozszerzenie_powierzchni.h"
+#include <stddef.h>
+/* Okna podrzedne (jadro/bws/okna_podrzedne.h): dzieci wlasciciela pozostaja nad nim i minimalizuja/przywracaja sie razem z nim. */
+extern "C" size_t okna_podrzedne_dzieci(int wlasciciel, int* out, size_t cap) __attribute__((weak));
+static constexpr size_t MAKS_DZIECI_OKNA = 4;
 #ifndef BURSZTYN_DIAG_RESIZE_LATENCY
 #define BURSZTYN_DIAG_RESIZE_LATENCY 0
 #endif
@@ -2379,7 +2383,7 @@ void skladacz_obrazu_obsluz_dirty() {
     if(hpet_dostepny()){uint64_t compose=compose_end>=start?compose_end-start:0;uint64_t present=present_end>=compose_end?present_end-compose_end:0;suma_compose_us+=compose;suma_present_us+=present;if(compose>maks_compose_us)maks_compose_us=compose;if(present>maks_present_us)maks_present_us=present;perf_log(present_end*1000ULL);}
 }
 
-void skladacz_obrazu_podnies_warstwe(int pid) {
+static void podnies_jedna_warstwe(int pid) {
     warstwa_obrazu* cel = pobierz_warstwe(pid);
     if (!cel || cel->z_order <= 0) return; /* pulpit pozostaje na dole */
     int maks = cel->z_order;
@@ -2406,6 +2410,14 @@ void skladacz_obrazu_podnies_warstwe(int pid) {
         cel->z_order=kolejny;
     }
     skladacz_obrazu_oznacz_dirty_rect(cel->x,cel->y,cel->szerokosc,cel->wysokosc);
+}
+
+void skladacz_obrazu_podnies_warstwe(int pid) {
+    podnies_jedna_warstwe(pid);
+    // Okna podrzedne zostaja NAD wlascicielem (kazde podniesienie wlasciciela podnosi tez jego dzieci).
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i) if (dzieci[i] != pid) podnies_jedna_warstwe(dzieci[i]);
 }
 
 bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
@@ -2456,7 +2468,7 @@ bool skladacz_obrazu_czy_widoczna(int pid) {
     return warstwa_ma_spojny_bufor(pid);
 }
 
-bool skladacz_obrazu_minimalizuj(int pid) {
+static bool minimalizuj_jedna_warstwe(int pid) {
     if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid) ||
         !widocznosc_warstwy[pid]) return false;
     warstwa_obrazu& w = tablica_warstw[pid];
@@ -2486,17 +2498,34 @@ bool skladacz_obrazu_minimalizuj(int pid) {
     return true;
 }
 
+bool skladacz_obrazu_minimalizuj(int pid) {
+    const bool ok = minimalizuj_jedna_warstwe(pid);
+    if (!ok) return false;
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i) if (dzieci[i] != pid) (void)minimalizuj_jedna_warstwe(dzieci[i]);
+    return true;
+}
+
+static void przywroc_jedna_warstwe(int pid) {
+    widocznosc_warstwy[pid] = true;
+    if (stan_okna[pid] == GUI_OKNO_ZMINIMALIZOWANE)
+        stan_okna[pid] = GUI_OKNO_NORMALNE;
+    const warstwa_obrazu& w = tablica_warstw[pid];
+    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+}
+
 bool skladacz_obrazu_przywroc(uint64_t window_id) {
     const int pid = static_cast<int>(static_cast<uint32_t>(window_id));
     const uint32_t generation = static_cast<uint32_t>(window_id >> 32U);
     if (!pid_poprawny(pid) || generation == 0 ||
         generacja_okna[pid] != generation || !warstwa_bufor_spojny(pid))
         return false;
-    widocznosc_warstwy[pid] = true;
-    if (stan_okna[pid] == GUI_OKNO_ZMINIMALIZOWANE)
-        stan_okna[pid] = GUI_OKNO_NORMALNE;
-    const warstwa_obrazu& w = tablica_warstw[pid];
-    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    przywroc_jedna_warstwe(pid);
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i)
+        if (dzieci[i] != pid && pid_poprawny(dzieci[i]) && warstwa_bufor_spojny(dzieci[i])) przywroc_jedna_warstwe(dzieci[i]);
     return true;
 }
 

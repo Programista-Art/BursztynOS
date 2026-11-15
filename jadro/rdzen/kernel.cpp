@@ -221,6 +221,8 @@ extern "C" uint8_t _binary_test_bin_bz_end[];
 
 extern "C" uint8_t _binary_snake_bin_bz_start[];
 extern "C" uint8_t _binary_snake_bin_bz_end[];
+extern "C" uint8_t _binary_okno_informacyjne_bin_bz_start[];
+extern "C" uint8_t _binary_okno_informacyjne_bin_bz_end[];
 
 extern "C" uint8_t _binary_demo_ui_bin_bz_start[];
 extern "C" uint8_t _binary_demo_ui_bin_bz_end[];
@@ -607,12 +609,14 @@ bool scisla_instalacja=false,pliki_instalacja_ok=true;
 bool ekran_aplikacja_instalacja_ok=false;
 bool tapety_aplikacja_instalacja_ok=false;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
-PlikKontrolny pliki_kontrolne[96]{};
+constexpr unsigned MAKS_PLIKOW_KONTROLNYCH = 112;   // = MAKS_PLANOWANYCH_PLIKOW (limit 96 zostal osiagniety)
+PlikKontrolny pliki_kontrolne[MAKS_PLIKOW_KONTROLNYCH]{};
 unsigned liczba_plikow_kontrolnych=0;
 // Kompresja blobow (2.2): data/koniec wskazuja skompresowany blob, a size
 // to rozmiar surowy; dane sa rozpakowywane dopiero przy zapisie pliku.
 struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;};
-PlanowanyPlik planowane_pliki[96]{};
+constexpr unsigned MAKS_PLANOWANYCH_PLIKOW = 112;   // plik .bur + manifest na aplikacje, ikony, dane; bylo 96 (limit osiagniety)
+PlanowanyPlik planowane_pliki[MAKS_PLANOWANYCH_PLIKOW]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
 size_t planowane_katalog_indeks=0;
 uint32_t planowane_offset=0,planowane_crc=~0U;
@@ -665,8 +669,11 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
      */
     (void)usun_twor(sciezka);
 
-    if (!utworz_plik(sciezka))
+    if (!utworz_plik(sciezka)) {
+        wypisz_log("[BSP-BLAD] utworz_plik nieudane (katalog nadrzedny/limit PSF):");
+        wypisz_log(sciezka);
         return false;
+    }
 
     if (rozmiar == 0)
         return true;
@@ -688,7 +695,7 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
 
 bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     if(planowanie_instalacji){
-        if(!path||(size&&!data)||planowane_liczba>=96||planowane_bajty_razem>UINT64_MAX-size){
+        if(!path||(size&&!data)||planowane_liczba>=MAKS_PLANOWANYCH_PLIKOW||planowane_bajty_razem>UINT64_MAX-size){
             pliki_instalacja_ok=false;return false;
         }
         auto&e=planowane_pliki[planowane_liczba++];unsigned i=0;
@@ -701,7 +708,7 @@ bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     if(scisla_instalacja&&!pliki_instalacja_ok)return false;
     bool ok=zapisz_plik_od_nowa_impl(path,data,size);
     if(scisla_instalacja){
-        if(!ok||liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        if(!ok||liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
         auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];unsigned i=0;
         for(;i+1<sizeof(e.path)&&path[i];++i){
             e.path[i]=path[i];
@@ -802,6 +809,8 @@ bool instaluj_paczke(
     if (!zapisz_manifest(
             sciezka_manifestu,
             manifest)) {
+        wypisz_log("[BSP-BLAD] instaluj_paczke: zapis manifestu nieudany");
+        wypisz_log(sciezka_manifestu);
         return false;
     }
 
@@ -811,6 +820,8 @@ bool instaluj_paczke(
             blob_end)) {
         (void)usun_twor(
             sciezka_manifestu);
+        wypisz_log("[BSP-BLAD] instaluj_paczke: zapis programu nieudany");
+        wypisz_log(sciezka_programu);
 
         return false;
     }
@@ -1381,8 +1392,20 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
-        "    \"ustawienia_aplikacji\"\n"
+        "    \"ustawienia_aplikacji\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";   // zapis tylko w /uzytkownicy/<u>/Ustawienia/snake (PRAWO_USTAWIENIA_APLIKACJI); brak ogolnego pliki_zapisz
+
+    // Okno informacyjne: tylko GUI (bez plikow/sieci/uruchamiania); uruchamiane wylacznie przez BWS 101.
+    static const char MANIFEST_OKNO_INFORMACYJNE[] =
+        "nazwa = \"Okno informacyjne\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"okno-informacyjne.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
 
     static const char MANIFEST_PRZEGLADARKA_OBRAZOW[] =
         "nazwa = \"Przeglądarka Obrazów\"\n"
@@ -1392,7 +1415,8 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"przegladarka-obrazow.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\",\n"
-        "    \"pliki_czytaj\"\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";
 
     static const char MANIFEST_DEMO_UI[] =
@@ -1953,6 +1977,16 @@ void instaluj_wbudowane_programy() {
     }
 
     if (!instaluj_paczke(
+            "/programy/okno-informacyjne.cebula/opis.aplikacji",
+            MANIFEST_OKNO_INFORMACYJNE,
+            "/programy/okno-informacyjne.cebula/okno-informacyjne.bur",
+            _binary_okno_informacyjne_bin_bz_start,
+            _binary_okno_informacyjne_bin_bz_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac okna informacyjnego.");
+    }
+
+    if (!instaluj_paczke(
             "/programy/przegladarka-obrazow.cebula/opis.aplikacji",
             MANIFEST_PRZEGLADARKA_OBRAZOW,
             "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur",
@@ -2398,7 +2432,7 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     }
     planowane_offset+=n;planowane_bajty+=n;
     if(planowane_offset==e.size){
-        if(liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        if(liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
         auto&k=pliki_kontrolne[liczba_plikow_kontrolnych++];
         unsigned i=0;for(;i+1<sizeof(k.path)&&e.path[i];++i){k.path[i]=e.path[i];}k.path[i]=0;
         k.size=e.size;k.crc=~planowane_crc;
