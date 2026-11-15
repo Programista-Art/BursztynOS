@@ -327,7 +327,8 @@ static void test_aslr_omija_okna_jadra() {
     auto slot = [](uint64_t base) { return (base - ASLR_PIE_WINDOW_BASE) / 4096ULL; };
     // dokladnie podstawa z przerywanego #PF (diagnostyka 0x1201F0000) i inne punkty wewnatrz/na brzegach okna
     for (uint64_t base : {0x1201F0000ULL, 0x120000000ULL, 0x121FFF000ULL, 0x130000000ULL, 0x133FFF000ULL,
-                          0x140000000ULL, 0x1400FF000ULL, 0x141000000ULL, 0x144000000ULL})   // + okno ACPI, HPET, OHCI
+                          0x140000000ULL, 0x1400FF000ULL, 0x141000000ULL, 0x144000000ULL,
+                          0x146000000ULL, 0x1463FF000ULL})   // + okno ACPI, HPET, OHCI, samotest VMM
         assert(!bur_v2_zaplanuj_aslr(n, slot(base), 1, 2, 3, &plan));
     // obraz konczacy sie tuz przed oknem i zaczynajacy tuz po nim jest dozwolony
     assert(bur_v2_zaplanuj_aslr(n, slot(0x120000000ULL - ((span + 4095ULL) & ~4095ULL)), 1, 2, 3, &plan));
@@ -342,6 +343,7 @@ static void test_aslr_omija_okna_jadra() {
         const bool reczna = (base < 0x122000000ULL && end > 0x120000000ULL) || (base < 0x134000000ULL && end > 0x130000000ULL) ||
                             (base < 0x140100000ULL && end > 0x140000000ULL) || (base < 0x141001000ULL && end > 0x141000000ULL) ||
                             (base < 0x144001000ULL && end > 0x144000000ULL) ||
+                            (base < 0x146400000ULL && end > 0x146000000ULL) ||
                             (base < 0x208000000ULL && end > 0x200000000ULL);
         assert(ok == !reczna);
         if (!ok) ++odrzucone;

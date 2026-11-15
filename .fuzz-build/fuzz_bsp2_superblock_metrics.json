@@ -2,9 +2,9 @@
   "target": "fuzz_bsp2_superblock",
   "executions": 2525,
   "seed_corpus_count": 25,
-  "final_corpus_count": 28,
-  "unique_edges": 557,
+  "final_corpus_count": 30,
+  "unique_edges": 556,
   "regressions_verified": 0,
-  "elapsed_ms": 5095,
+  "elapsed_ms": 7060,
   "crashes_found": 0
 }

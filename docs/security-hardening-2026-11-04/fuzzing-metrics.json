@@ -7,8 +7,8 @@
     "SanitizerCoverage(trace-pc)"
   ],
   "total_targets": 8,
-  "total_executions": 45158,
-  "sum_unique_edges_across_targets": 5215,
+  "total_executions": 45160,
+  "sum_unique_edges_across_targets": 5205,
   "total_crashes": 0,
   "deterministic_regression_bugs_verified": [
     {
@@ -66,12 +66,12 @@
   "targets": [
     {
       "target": "fuzz_bur_v2",
-      "executions": 10018,
-      "seed_corpus_count": 13,
-      "final_corpus_count": 68,
-      "unique_edges": 250,
+      "executions": 10019,
+      "seed_corpus_count": 14,
+      "final_corpus_count": 70,
+      "unique_edges": 249,
       "regressions_verified": 5,
-      "elapsed_ms": 4194,
+      "elapsed_ms": 3145,
       "crashes_found": 0
     },
     {
@@ -79,69 +79,69 @@
       "executions": 10023,
       "seed_corpus_count": 21,
       "final_corpus_count": 120,
-      "unique_edges": 211,
+      "unique_edges": 210,
       "regressions_verified": 2,
-      "elapsed_ms": 2788,
+      "elapsed_ms": 3015,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bur_loader",
       "executions": 10021,
       "seed_corpus_count": 19,
-      "final_corpus_count": 152,
-      "unique_edges": 407,
+      "final_corpus_count": 148,
+      "unique_edges": 404,
       "regressions_verified": 2,
-      "elapsed_ms": 2506,
+      "elapsed_ms": 4239,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bsp2_superblock",
       "executions": 2525,
       "seed_corpus_count": 25,
-      "final_corpus_count": 28,
-      "unique_edges": 557,
+      "final_corpus_count": 30,
+      "unique_edges": 556,
       "regressions_verified": 0,
-      "elapsed_ms": 5095,
+      "elapsed_ms": 7060,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bsp2_inode",
       "executions": 2518,
       "seed_corpus_count": 18,
-      "final_corpus_count": 45,
-      "unique_edges": 1201,
+      "final_corpus_count": 48,
+      "unique_edges": 1219,
       "regressions_verified": 0,
-      "elapsed_ms": 10106,
+      "elapsed_ms": 9413,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bsp2_dir",
       "executions": 2518,
       "seed_corpus_count": 18,
-      "final_corpus_count": 31,
-      "unique_edges": 873,
+      "final_corpus_count": 32,
+      "unique_edges": 861,
       "regressions_verified": 0,
-      "elapsed_ms": 9392,
+      "elapsed_ms": 12461,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bsp2_path",
       "executions": 5023,
       "seed_corpus_count": 23,
-      "final_corpus_count": 76,
-      "unique_edges": 561,
+      "final_corpus_count": 69,
+      "unique_edges": 550,
       "regressions_verified": 0,
-      "elapsed_ms": 1555,
+      "elapsed_ms": 2442,
       "crashes_found": 0
     },
     {
       "target": "fuzz_bsp2_ops",
-      "executions": 2512,
-      "seed_corpus_count": 12,
-      "final_corpus_count": 164,
-      "unique_edges": 1155,
+      "executions": 2513,
+      "seed_corpus_count": 13,
+      "final_corpus_count": 165,
+      "unique_edges": 1156,
       "regressions_verified": 0,
-      "elapsed_ms": 5778,
+      "elapsed_ms": 6964,
       "crashes_found": 0
     }
   ]

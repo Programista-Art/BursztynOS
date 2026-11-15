@@ -20,6 +20,8 @@
  */
 
 #include "vmm_zakres.h"
+#include "vmm_synchronizacja.h"
+#include "zarezerwowane_va.h"
 #include "pamiec.h"
 
 #include <stdint.h>
@@ -714,7 +716,17 @@ void WyzerujStrone(
     }
 }
 
+#ifndef BURSZTYN_DIAG_VMM_SELFTEST
+#define BURSZTYN_DIAG_VMM_SELFTEST 0
+#endif
+#if BURSZTYN_DIAG_VMM_SELFTEST
+static int g_diag_alok_do_porazki = -1;   // >=0: tyle udanych alokacji tablic stron, potem porazka (wstrzykiwanie bledow)
+#endif
 static uint64_t* alokuj_tabele_stron() {
+#if BURSZTYN_DIAG_VMM_SELFTEST
+    if (g_diag_alok_do_porazki == 0) return nullptr;
+    if (g_diag_alok_do_porazki > 0) --g_diag_alok_do_porazki;
+#endif
     void* ramka =
         ZaalokujRamke();
 
@@ -1098,6 +1110,47 @@ static bool pobierz_lub_utworz_pt(
  * MAPOWANIE STRONY 4 KiB
  * ========================================================================= */
 
+extern "C" void SerialLog(const char*);
+/* Rejestr zywych klonow PML4 procesow (pod BlokadaVMM): cele synchronizacji pozniejszych mapowan jadra. */
+constexpr size_t VMM_MAKS_PRZESTRZENI = 256;
+static VmmSynchronizacja::Rejestr<VMM_MAKS_PRZESTRZENI> g_rejestr_przestrzeni;
+static bool zapewnij_slot_jadra_vmm(unsigned idx);
+
+#ifndef BURSZTYN_DIAG_LATE_KMAP
+#define BURSZTYN_DIAG_LATE_KMAP 0
+#endif
+#if BURSZTYN_DIAG_LATE_KMAP
+extern "C" void SerialLog(const char*);
+static bool g_diag_proces_utworzony = false;
+static unsigned g_diag_late_log = 0;
+static void diag_late_kmap(const uint64_t* pml4, uint64_t va, bool user) {
+    if (user || !g_diag_proces_utworzony) return;
+    static unsigned razem = 0, niskich = 0, w_procesie = 0;
+    ++razem; if (va < 0x0000800000000000ULL) ++niskich; if (pml4 != bazowe_pml4_jadra) ++w_procesie;
+    if ((razem & 63U) == 1U) {
+        char c[120]; size_t m = 0;
+        auto put2 = [&](const char* t) { while (*t && m + 1 < sizeof(c)) c[m++] = *t++; };
+        auto num = [&](unsigned v) { char t[12]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) c[m++] = t[--k]; };
+        put2("[LATE-KMAP] total="); num(razem); put2(" low="); num(niskich); put2(" under_process_cr3="); num(w_procesie);
+        c[m] = 0; SerialLog(c);
+    }
+    if (g_diag_late_log > 200) return;
+    const bool niska = va < 0x0000800000000000ULL;
+    const unsigned slot = static_cast<unsigned>((va >> 39) & 511U);
+    const bool w_bazie = bazowe_pml4_jadra && (bazowe_pml4_jadra[slot] & PTE_PRESENT);
+    const bool w_biezacym = (pml4[slot] & PTE_PRESENT) != 0;
+    const bool baza = pml4 == bazowe_pml4_jadra;
+    if (!niska && w_bazie && w_biezacym) return;     // gorna polowa, slot wspolny: bez logu
+    ++g_diag_late_log;
+    char b[160]; size_t n = 0;
+    auto put = [&](const char* t) { while (*t && n + 1 < sizeof(b)) b[n++] = *t++; };
+    auto hex = [&](uint64_t v) { put("0x"); for (int sh = 60; sh >= 0; sh -= 4) { char c = "0123456789abcdef"[(v >> sh) & 15]; if (n + 1 < sizeof(b)) b[n++] = c; } };
+    put("[LATE-KMAP] va="); hex(va); put(niska ? " low" : " high"); put(baza ? " base" : " proc");
+    put(w_bazie ? " slot_in_base" : " NO_SLOT_IN_BASE"); put(w_biezacym ? " slot_in_cur" : " NO_SLOT_IN_CUR");
+    b[n] = 0; SerialLog(b);
+}
+#endif
+
 static bool mapuj_strone_wewnetrznie(
     uint64_t* pml4,
     uint64_t adres_wirtualny,
@@ -1134,6 +1187,20 @@ static bool mapuj_strone_wewnetrznie(
         }
     }
 
+#if BURSZTYN_DIAG_LATE_KMAP
+    diag_late_kmap(pml4, adres_wirtualny, user);
+#endif
+    /* Mapowanie jadra w gornej polowie wymaga SPOLNEGO slotu PML4: tworzymy go w bazie i propagujemy do zywych klonow,
+     * zamiast zakladac prywatny PDP w tej (byc moze procesowej) przestrzeni. */
+#if defined(BURSZTYN_DIAG_VMM_NO_SYNC) && BURSZTYN_DIAG_VMM_NO_SYNC
+    if (false &&
+#else
+    if (
+#endif
+        !user && indeks_pml4(adres_wirtualny) >= 256 && bazowe_pml4_jadra &&
+        !zapewnij_slot_jadra_vmm(indeks_pml4(adres_wirtualny))) {
+        return false;
+    }
     uint64_t* pdp = nullptr;
     uint64_t* pd = nullptr;
     uint64_t* pt = nullptr;
@@ -1366,6 +1433,90 @@ static WynikWalkera sprawdz_mapowanie(
  *   2 = PD
  *   1 = PT
  */
+/* =========================================================================
+ * SYNCHRONIZACJA MAPOWAN JADRA Z KLONAMI PROCESOW (zob. vmm_synchronizacja.h)
+ * ========================================================================= */
+
+static uint64_t* wskaznik_liscia_4k(uint64_t* pml4, uint64_t va, bool* huge) {
+    if (huge) *huge = false;
+    if (!pml4 || !adres_kanoniczny(va)) return nullptr;
+    uint64_t* tab = pml4;
+    const unsigned idx[4] = {unsigned(indeks_pml4(va)), unsigned(indeks_pdp(va)), unsigned(indeks_pd(va)), unsigned(indeks_pt(va))};
+    for (unsigned i = 0; i < 3; ++i) {
+        const uint64_t e = tab[idx[i]];
+        if (!(e & PTE_PRESENT)) return nullptr;
+        if (i > 0 && (e & PDE_PS)) { if (huge) *huge = true; return nullptr; }
+        tab = tabela_z_wpisu(e);
+        if (!tab) return nullptr;
+    }
+    return &tab[idx[3]];
+}
+
+struct OpsVmm {
+    uint64_t* cele[1 + VMM_MAKS_PRZESTRZENI];
+    size_t n;
+    OpsVmm() : n(g_rejestr_przestrzeni.cele(bazowe_pml4_jadra, cele, sizeof(cele) / sizeof(cele[0]))) {}
+    size_t liczba_celow() const { return n; }
+    bool konflikt_uzytkownika(size_t i, uint64_t va) {
+        const WynikWalkera w = sprawdz_mapowanie(cele[i], va);
+        return w.obecna && w.user;
+    }
+    bool przygotuj_tabele(size_t i, uint64_t va) {
+        uint64_t *pdp = nullptr, *pd = nullptr, *pt = nullptr;
+        return pobierz_lub_utworz_pdp(cele[i], indeks_pml4(va), false, &pdp) &&
+               pobierz_lub_utworz_pd(pdp, indeks_pdp(va), false, &pd) &&
+               pobierz_lub_utworz_pt(pd, indeks_pd(va), false, &pt);
+    }
+    uint64_t odczytaj_lisc(size_t i, uint64_t va) {
+        uint64_t* p = wskaznik_liscia_4k(cele[i], va, nullptr);
+        return p ? *p : 0;
+    }
+    bool zapisz_lisc(size_t i, uint64_t va, uint64_t pa, uint64_t flagi) {
+        return mapuj_strone_wewnetrznie(cele[i], va, pa, flagi);
+    }
+    void ustaw_lisc_surowy(size_t i, uint64_t va, uint64_t wpis) {
+        uint64_t* p = wskaznik_liscia_4k(cele[i], va, nullptr);
+        if (p) { *p = wpis; uniewaznij_tlb(va); }
+    }
+    bool lisc_jest_4k(size_t i, uint64_t va) {
+        bool huge = false;
+        (void)wskaznik_liscia_4k(cele[i], va, &huge);
+        return !huge;
+    }
+    uint64_t slot_celu(size_t i, unsigned idx) { return cele[i][idx]; }
+    void ustaw_slot_celu(size_t i, unsigned idx, uint64_t wpis) { cele[i][idx] = wpis; }
+    uint64_t alokuj_slot_pdp() {
+        uint64_t* t = alokuj_tabele_stron();
+        if (!t) return 0;
+        const uint64_t fiz = fizyczny_adres_tabeli(t);
+        if (!fiz) return 0;
+        return (fiz & MASKA_ADRESU_4K) | flagi_tabeli_posredniej(false);
+    }
+};
+
+static bool zapewnij_slot_jadra_vmm(unsigned idx) {
+    OpsVmm o;
+    return VmmSynchronizacja::zapewnij_slot_jadra(o, idx);
+}
+
+/* Wspolne wejscie mapowan jadra: dolna polowa po utworzeniu pierwszego procesu jest synchronizowana ze WSZYSTKIMI
+ * przestrzeniami; gorna idzie zwyklym torem (slot PML4 zapewnia mapuj_strone_wewnetrznie). Pod BlokadaVMM. */
+static bool mapuj_jadro_z_routingiem(uint64_t* aktualne, uint64_t va, uint64_t pa, uint64_t flagi) {
+#if defined(BURSZTYN_DIAG_VMM_NO_SYNC) && BURSZTYN_DIAG_VMM_NO_SYNC
+    return mapuj_strone_wewnetrznie(aktualne, va, pa, flagi);   // KONTROLA NEGATYWNA: zachowanie sprzed poprawki
+#endif
+    if (!(flagi & PTE_USER) && va < VmmZakres::KONIEC_DOLNEJ_POLOWY && g_rejestr_przestrzeni.liczba > 0) {
+        /* Nowe stale VA jadra w dolnej polowie musza byc centralnie zarezerwowane (identity-mapa < 4 GiB wyjatkiem). */
+        if (!(va < VmmZakres::LIMIT_IDENTITY_MAPY || ZarezerwowaneVA::koliduje_z_jadrem(va, va + ROZMIAR_STRONY_4K))) {
+            SerialLog("[VMM] pozne mapowanie jadra poza zarezerwowanymi oknami VA: odmowa");
+            return false;
+        }
+        OpsVmm o;
+        return VmmSynchronizacja::mapuj_globalnie(o, va, pa, flagi) == VmmSynchronizacja::Wynik::OK;
+    }
+    return mapuj_strone_wewnetrznie(aktualne, va, pa, flagi);
+}
+
 static void zwolnij_sklonowane_tabele_bez_lisci(
     uint64_t* tabela,
     int poziom
@@ -1961,7 +2112,7 @@ bool ZmapujStroneSprawdzona(
     globalne_pml4 =
         aktualne;
 
-    return mapuj_strone_wewnetrznie(
+    return mapuj_jadro_z_routingiem(
         aktualne,
         reinterpret_cast<uint64_t>(
             adres_wirtualny),
@@ -1997,7 +2148,7 @@ bool ZmapujStrone64Sprawdzona(
     globalne_pml4 =
         aktualne;
 
-    return mapuj_strone_wewnetrznie(
+    return mapuj_jadro_z_routingiem(
         aktualne,
         reinterpret_cast<uint64_t>(
             adres_wirtualny),
@@ -2094,9 +2245,33 @@ extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa) {
         (reinterpret_cast<uint64_t>(pa) & 4095U)) return false;
     uint64_t* pml4 = pml4_z_cr3();
     if (!pml4 || sprawdz_mapowanie(pml4, reinterpret_cast<uint64_t>(va)).obecna) return false;
-    return mapuj_strone_wewnetrznie(pml4, reinterpret_cast<uint64_t>(va),
+    return mapuj_jadro_z_routingiem(pml4, reinterpret_cast<uint64_t>(va),
         reinterpret_cast<uint64_t>(pa), VMM_FLAGA_OBECNA | VMM_FLAGA_ZAPIS);
 }
+
+/* Odmapowanie strony jadra z dolnej polowy WE WSZYSTKICH przestrzeniach (liscie 4K, nie-uzytkownika). Zwraca PA z
+ * przestrzeni bazowej (ramke zwalnia wlasciciel mapowania) albo nullptr (brak/konflikt/huge-page). */
+extern "C" void* VmmOdmapujStroneJadraGlobalnie(void* va_) {
+    const uint64_t va = reinterpret_cast<uint64_t>(va_);
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany || !bazowe_pml4_jadra || !adres_strony_poprawny(va) ||
+        va >= VmmZakres::KONIEC_DOLNEJ_POLOWY) return nullptr;
+    if (!(va < VmmZakres::LIMIT_IDENTITY_MAPY || ZarezerwowaneVA::koliduje_z_jadrem(va, va + ROZMIAR_STRONY_4K))) return nullptr;
+    OpsVmm o;
+    uint64_t stary = 0;
+    if (VmmSynchronizacja::odmapuj_globalnie(o, va, &stary) != VmmSynchronizacja::Wynik::OK || !(stary & PTE_PRESENT)) return nullptr;
+    return reinterpret_cast<void*>(stary & MASKA_ADRESU_4K);
+}
+
+/* Diagnostyka/testy natywne: surowy wpis liscia 4K w wybranej przestrzeni (0 = brak/huge). */
+extern "C" uint64_t VmmDiagWpisLiscia(void* pml4, uint64_t va) {
+    BlokadaVMM blokada;
+    uint64_t* p = wskaznik_liscia_4k(static_cast<uint64_t*>(pml4), va, nullptr);
+    return p ? *p : 0;
+}
+extern "C" void* VmmDiagBazowePml4() { return bazowe_pml4_jadra; }
+extern "C" uint64_t VmmDiagWpisPml4(void* pml4, unsigned idx) { return (pml4 && idx < 512) ? static_cast<uint64_t*>(pml4)[idx] : 0; }
+extern "C" uint64_t VmmDiagLiczbaPrzestrzeni() { return g_rejestr_przestrzeni.liczba; }
 
 extern "C" bool VmmMapujStroneWspoldzielona(
     void* adres_wirtualny,
@@ -2218,11 +2393,21 @@ void* UtworzPrzestrzenAdresowaProcesu() {
      * Gdy proces tworzy kolejny proces przez syscall, jego prywatne mapowania
      * Ring 3 nie moga przeciec do nowego programu.
      */
+#if BURSZTYN_DIAG_LATE_KMAP
+    g_diag_proces_utworzony = true;
+#endif
     uint64_t* nowe_pml4 =
         sklonuj_hierarchie(
             bazowe_pml4_jadra,
             4
         );
+
+    /* Klon + rejestracja sa atomowe wzgledem pozniejszych mapowan jadra (obie czynnosci pod BlokadaVMM): kazde
+     * mapowanie albo trafia do klonu przy klonowaniu, albo jest do niego rozgloszone po rejestracji. */
+    if (nowe_pml4 && !g_rejestr_przestrzeni.dodaj(nowe_pml4)) {
+        zniszcz_hierarchie_procesu(nowe_pml4, 4);
+        return nullptr;
+    }
 
     return nowe_pml4;
 }
@@ -2315,6 +2500,9 @@ extern "C" void ZniszczPrzestrzenAdresowaProcesu(
             fiz)) {
         return;
     }
+
+    /* Najpierw wyrejestrowanie: pozniejsze mapowania jadra nie moga dotknac tablic w trakcie zwalniania. */
+    g_rejestr_przestrzeni.usun(do_zniszczenia);
 
     zniszcz_hierarchie_procesu(
         do_zniszczenia,
@@ -2613,3 +2801,149 @@ extern "C" bool VmmTestujWspoldzieloneMapowanieJadra(const void* adres) {    con
 
     return true;
 }
+
+
+#if BURSZTYN_DIAG_VMM_SELFTEST
+/* =========================================================================
+ * NATYWNY SAMOTEST SYNCHRONIZACJI MAPOWAN JADRA (tylko build diagnostyczny)
+ * Uruchamiany, gdy procesy juz dzialaja: prawdziwe klony PML4, prawdziwe przelaczenia CR3 (z IRQ wylaczonymi),
+ * pozne mapowania jadra (dolna polowa i NOWY slot PML4 gornej polowy), konflikt z mapowaniem uzytkownika,
+ * wstrzykniety brak pamieci, wielokrotne map/unmap, niszczenie procesow.
+ * ========================================================================= */
+static void st_log(const char* a, const char* b = "") {
+    SerialLog("[VMM-SELFTEST] "); SerialLog(a); SerialLog(b); SerialLog("\n");
+}
+static unsigned st_bledy = 0, st_ok = 0;
+static void st_ok_if(bool c, const char* nazwa) { if (c) ++st_ok; else ++st_bledy; st_log(c ? "PASS " : "FAIL ", nazwa); }
+
+/* Czyta 64-bitowe slowo pod `va` PRZY CR3 = pml4 (IRQ wylaczone na czas odczytu); false, gdy walker nie widzi mapowania
+ * (zeby zly wynik testu nie skonczyl sie #PF jadra). */
+static bool st_czytaj_w(uint64_t* pml4, uint64_t va, uint64_t* wynik) {
+    BlokadaVMM blokada;
+    if (!sprawdz_mapowanie(pml4, va).obecna) return false;
+    uint64_t* biezace = pml4_z_cr3();
+    if (!biezace) return false;
+    zapisz_cr3(pml4);
+    const uint64_t v = *reinterpret_cast<volatile uint64_t*>(va);
+    zapisz_cr3(biezace);
+    *wynik = v;
+    return true;
+}
+static bool st_widoczne_wszedzie(uint64_t* const* sp, size_t n, uint64_t va, uint64_t wzorzec) {
+    for (size_t i = 0; i < n; ++i) { uint64_t v = 0; if (!st_czytaj_w(sp[i], va, &v) || v != wzorzec) return false; }
+    return true;
+}
+static uint64_t* st_ramka_ze_wzorcem(uint64_t wzorzec, void** pa_out) {
+    void* pa = ZaalokujRamke();
+    if (!pa) return nullptr;
+    uint64_t* w = static_cast<uint64_t*>(FizycznyZakresDoWirtualnego(reinterpret_cast<uint64_t>(pa), ROZMIAR_STRONY_4K));
+    if (!w) { ZwolnijRamke(pa); return nullptr; }
+    for (size_t i = 0; i < 512; ++i) w[i] = wzorzec;
+    *pa_out = pa; return w;
+}
+
+extern "C" void VmmSamotestSynchronizacji() {
+    static unsigned przebieg = 0;
+    ++przebieg;
+    st_bledy = 0;
+    st_log(przebieg == 1 ? "PRZEBIEG 1 (tworzy trwale wspolne tablice PDP/PD/PT)" : "PRZEBIEG 2 (bilans ramek musi byc DOKLADNY)");
+    st_log("START (procesow zywych: ", "");
+    { char b[24]; size_t n = 0; uint64_t v = g_rejestr_przestrzeni.liczba; char t[20]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) b[n++] = t[--k]; b[n++] = ')'; b[n] = 0; st_log(b); }
+    constexpr uint64_t W1 = 0x1111111111111111ULL, W2 = 0x2222222222222222ULL, W3 = 0x3333333333333333ULL;
+    constexpr uint64_t VA_L = ZarezerwowaneVA::VMM_SAMOTEST_NISKIE_START;
+    constexpr uint64_t VA_H = ZarezerwowaneVA::VMM_SAMOTEST_WYSOKIE;
+    const uint64_t wolne0 = pmm_pobierz_wolne_ramki();
+    uint64_t* baza = bazowe_pml4_jadra;
+
+    uint64_t* przestrzenie[4] = {baza, nullptr, nullptr, nullptr};
+    for (int i = 1; i < 4; ++i) przestrzenie[i] = static_cast<uint64_t*>(UtworzPrzestrzenAdresowaProcesu());
+    st_ok_if(przestrzenie[1] && przestrzenie[2] && przestrzenie[3], "utworzono 3 klony procesow");
+    if (!(przestrzenie[1] && przestrzenie[2] && przestrzenie[3])) return;
+    uint64_t* A = przestrzenie[1]; uint64_t* B = przestrzenie[2]; uint64_t* C = przestrzenie[3];
+
+    // T1: pozne mapowanie jadra w dolnej polowie (okno zarezerwowane) - widoczne w bazie i wszystkich klonach (prawdziwe CR3)
+    void *f1 = nullptr, *f2 = nullptr, *f3 = nullptr, *f4 = nullptr, *f5 = nullptr;
+    st_ramka_ze_wzorcem(W1, &f1); st_ramka_ze_wzorcem(W2, &f2); st_ramka_ze_wzorcem(W3, &f3);
+    st_ok_if(f1 && f2 && f3, "ramki testowe");
+    st_ok_if(VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_L), f1), "T1 pozne mapowanie dolnej polowy");
+    st_ok_if(st_widoczne_wszedzie(przestrzenie, 4, VA_L, W1), "T1 widoczne w bazie + 3 klonach po przelaczeniu CR3");
+
+    // T2: NOWY slot PML4 gornej polowy tworzony z CR3 procesu (A) - propagowany do bazy i wszystkich klonow
+    const unsigned slot_h = ZarezerwowaneVA::slot_pml4(VA_H);
+    st_ok_if(przebieg > 1 || (baza[slot_h] == 0 && A[slot_h] == 0 && B[slot_h] == 0), "T2 slot PML4 gornej polowy nie istnieje przed testem (przebieg 1; w 2. trwa z 1.)");
+    { const StanPrzerwan stan = wylacz_przerwania();       // bez preempcji: CR3 = A na czas wywolania publicznego API
+      uint64_t* biezace = pml4_z_cr3(); UstawPrzestrzenAdresowa(A);
+      const bool m = VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_H), f2);
+      UstawPrzestrzenAdresowa(biezace); przywroc_przerwania(stan);
+      st_ok_if(m, "T2 mapowanie jadra (API publiczne) z CR3 klonu procesu"); }
+    st_ok_if(baza[slot_h] != 0 && baza[slot_h] == A[slot_h] && A[slot_h] == B[slot_h] && B[slot_h] == C[slot_h], "T2 slot PML4 propagowany do bazy i wszystkich klonow");
+    st_ok_if(st_widoczne_wszedzie(przestrzenie, 4, VA_H, W2), "T2 mapowanie gornej polowy widoczne wszedzie (CR3)");
+    st_ok_if((baza[slot_h] & PTE_USER) == 0, "T2 slot jadra bez PTE_USER (SMAP/izolacja)");
+
+    // T3: konflikt z mapowaniem UZYTKOWNIKA w jednym klonie -> odmowa, zadna przestrzen nie zmieniona
+    const uint64_t VA_C = VA_L + 0x2000;
+    void* fu = ZaalokujRamke();
+    st_ok_if(fu && VmmMapujNowaStroneWPrzestrzeniProcesu(B, reinterpret_cast<void*>(VA_C), fu, true, false), "T3 mapowanie uzytkownika w B pod adresem testowym");
+    st_ok_if(!VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_C), f3), "T3 pozne mapowanie jadra pod mapowaniem uzytkownika: odmowa");
+    st_ok_if(VmmDiagWpisLiscia(A, VA_C) == 0 && VmmDiagWpisLiscia(C, VA_C) == 0 && VmmDiagWpisLiscia(baza, VA_C) == 0, "T3 A/C/baza niezmienione");
+    { const uint64_t e = VmmDiagWpisLiscia(B, VA_C);
+      st_ok_if((e & PTE_USER) && (e & MASKA_ADRESU_4K) == reinterpret_cast<uint64_t>(fu), "T3 mapowanie uzytkownika w B nienaruszone"); }
+    // poza zarezerwowanymi oknami (>= 4 GiB, nie na liscie): odmowa
+    st_ok_if(!VmmMapujNowaStroneJadra(reinterpret_cast<void*>(0x150000000ULL), f3), "T3 pozne mapowanie poza zarezerwowanym oknem: odmowa");
+
+    // T4: brak pamieci przy tworzeniu tablic w drugim regionie 2 MiB: false, brak lisci gdziekolwiek, potem sukces
+    const uint64_t VA_5 = VA_L + 0x200000 + 0x1000;
+    f4 = nullptr; st_ramka_ze_wzorcem(W3 ^ 0xF, &f4);
+    if (przebieg == 1) {          // tablice regionu jeszcze nie istnieja (w 2. przebiegu trwaja z 1. - wstrzykniecie bez efektu)
+        g_diag_alok_do_porazki = 1;   // pierwsza alokacja tablicy OK, druga zawodzi
+        const bool m5 = VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_5), f4);
+        g_diag_alok_do_porazki = -1;
+        st_ok_if(!m5, "T4 wstrzyknieta porazka alokacji tablic: mapowanie odrzucone");
+        st_ok_if(VmmDiagWpisLiscia(baza, VA_5) == 0 && VmmDiagWpisLiscia(A, VA_5) == 0 && VmmDiagWpisLiscia(B, VA_5) == 0 && VmmDiagWpisLiscia(C, VA_5) == 0, "T4 brak lisci w jakiejkolwiek przestrzeni");
+    }
+    st_ok_if(VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_5), f4) && st_widoczne_wszedzie(przestrzenie, 4, VA_5, W3 ^ 0xF), "T4 ponowienie po ustapieniu bledu dziala i jest widoczne wszedzie");
+
+    // T5: wielokrotne map/unmap (300x) - brak wycieku ramek tablic po pierwszym obiegu, ramka wlasciciela zwracana
+    const uint64_t VA_6 = VA_L + 0x4000;
+    st_ramka_ze_wzorcem(0x6666, &f5);
+    uint64_t wolne_po_pierwszym = 0; bool petla_ok = true;
+    for (int i = 0; i < 300 && petla_ok; ++i) {
+        petla_ok = VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_6), f5) && st_widoczne_wszedzie(przestrzenie, 4, VA_6, 0x6666);
+        void* pa = petla_ok ? VmmOdmapujStroneJadraGlobalnie(reinterpret_cast<void*>(VA_6)) : nullptr;
+        petla_ok = petla_ok && pa == f5 && VmmDiagWpisLiscia(baza, VA_6) == 0 && VmmDiagWpisLiscia(A, VA_6) == 0 &&
+                   VmmDiagWpisLiscia(B, VA_6) == 0 && VmmDiagWpisLiscia(C, VA_6) == 0;
+        if (i == 0) wolne_po_pierwszym = pmm_pobierz_wolne_ramki();
+    }
+    st_ok_if(petla_ok, "T5 300x map/unmap globalne: widocznosc i odmapowanie we wszystkich przestrzeniach");
+    st_ok_if(pmm_pobierz_wolne_ramki() == wolne_po_pierwszym, "T5 brak wycieku ramek tablic w petli");
+
+    // T6: niszczenie procesow - ich tablice wracaja do PMM, ramka jadra (nadal uzywana) NIE jest zwolniona
+    const uint64_t wolne_przed_zniszczeniem = pmm_pobierz_wolne_ramki();
+    const uint64_t zywe_przed = g_rejestr_przestrzeni.liczba;
+    ZniszczPrzestrzenAdresowaProcesu(B); ZniszczPrzestrzenAdresowaProcesu(C);
+    st_ok_if(g_rejestr_przestrzeni.liczba == zywe_przed - 2, "T6 klony wyrejestrowane");
+    st_ok_if(pmm_pobierz_wolne_ramki() > wolne_przed_zniszczeniem, "T6 tablice zniszczonych procesow zwrocone do PMM (razem z ramka uzytkownika B)");
+    uint64_t* pozostale[2] = {baza, A};
+    st_ok_if(st_widoczne_wszedzie(pozostale, 2, VA_L, W1) && st_widoczne_wszedzie(pozostale, 2, VA_H, W2), "T6 mapowania jadra nadal wazne w bazie i zywym klonie");
+    // pozne mapowanie po zniszczeniu: dociera do zywych (baza + A), bez dotkniecia zwolnionych tablic
+    const uint64_t VA_7 = VA_L + 0x6000;
+    st_ok_if(VmmMapujNowaStroneJadra(reinterpret_cast<void*>(VA_7), f5) && st_widoczne_wszedzie(pozostale, 2, VA_7, 0x6666), "T6 pozne mapowanie po zniszczeniu procesow");
+
+    // sprzatanie
+    (void)VmmOdmapujStroneJadraGlobalnie(reinterpret_cast<void*>(VA_7));
+    (void)VmmOdmapujStroneJadraGlobalnie(reinterpret_cast<void*>(VA_5));
+    (void)VmmOdmapujStroneJadraGlobalnie(reinterpret_cast<void*>(VA_L));
+    { BlokadaVMM blokada;                                  // strona gornej polowy: wspolne tabele, jeden wpis
+        uint64_t* pt = wskaznik_liscia_4k(baza, VA_H, nullptr); if (pt) { *pt = 0; uniewaznij_tlb(VA_H); } }
+    ZniszczPrzestrzenAdresowaProcesu(A);
+    void* ramki[5] = {f1, f2, f3, f4, f5}; for (void* r : ramki) if (r) ZwolnijRamke(r);
+    const uint64_t wolne_koniec = pmm_pobierz_wolne_ramki();
+    const uint64_t roznica = wolne0 > wolne_koniec ? wolne0 - wolne_koniec : wolne_koniec - wolne0;
+    { char b[48]; size_t n = 0; const char* pre = wolne0 >= wolne_koniec ? "ubylo ramek: " : "przybylo ramek: ";
+      for (const char* t = pre; *t; ++t) b[n++] = *t;
+      uint64_t v = roznica; char t[20]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) b[n++] = t[--k]; b[n] = 0; st_log("T7 ", b); }
+    // Przebieg 1: pozostaja trwale PDP/PD/PT okna testowego (baza + zywe procesy) - informacyjnie. Przebieg 2: zero.
+    st_ok_if(przebieg == 1 ? roznica <= 16 : roznica == 0, "T7 bilans ramek PMM (przebieg 2 = brak wyciekow)");
+    st_log(st_bledy == 0 ? "WYNIK: PASS (wszystkie sprawdzenia)" : "WYNIK: FAIL");
+}
+#endif

@@ -241,6 +241,18 @@ BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE ?=
 ifneq ($(strip $(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE=$(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)ULL
 endif
+BURSZTYN_DIAG_LATE_KMAP ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_LATE_KMAP)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_LATE_KMAP=1
+endif
+BURSZTYN_DIAG_VMM_SELFTEST ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_VMM_SELFTEST)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_VMM_SELFTEST=1
+endif
+BURSZTYN_DIAG_VMM_NO_SYNC ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_VMM_NO_SYNC)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_VMM_NO_SYNC=1
+endif
 BURSZTYN_DIAG_RESIZE_LATENCY ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_RESIZE_LATENCY)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_RESIZE_LATENCY=1
@@ -3123,6 +3135,12 @@ test-kernel-blobz-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
 
 # Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-vmm-synchronizacja-host
+test-vmm-synchronizacja-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_vmm_synchronizacja_host.cpp -o .bsf-test/vmm_synchronizacja_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/vmm_synchronizacja_host
+
 .PHONY: test-vmm-zakres-host
 test-vmm-zakres-host:
 	@mkdir -p .bsf-test

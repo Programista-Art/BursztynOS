@@ -701,6 +701,12 @@ bool WirtualnyDoFizycznego(
 // Mapowanie nowej strony jadra z wynikiem bledu (bez prawa USER).
 extern "C" bool VmmMapujNowaStroneJadra(void* va, void* pa);
 extern "C" bool VmmZakresWolnyWBazie(uint64_t start, uint64_t koniec);
+extern "C" void* VmmOdmapujStroneJadraGlobalnie(void* va);
+extern "C" uint64_t VmmDiagWpisLiscia(void* pml4, uint64_t va);
+extern "C" void* VmmDiagBazowePml4();
+extern "C" uint64_t VmmDiagWpisPml4(void* pml4, unsigned idx);
+extern "C" uint64_t VmmDiagLiczbaPrzestrzeni();
+extern "C" void VmmSamotestSynchronizacji();   // tylko BURSZTYN_DIAG_VMM_SELFTEST=1
 // Odmapowanie strony jadra; zwraca PA do zwolnienia przez PMM.
 extern "C" void* VmmOdmapujStroneJadra(void* va);
 // Tylko strony dedykowanej, wspoldzielonej puli grafiki; zwraca PA do PMM.

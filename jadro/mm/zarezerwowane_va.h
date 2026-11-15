@@ -31,6 +31,8 @@ inline constexpr uint64_t OHCI_MMIO_START   = 0x144000000ULL;    // ohci.cpp: MM
 inline constexpr uint64_t OHCI_MMIO_ROZMIAR = 4096ULL;
 inline constexpr uint64_t XHCI_MMIO_START   = 0x2000000000ULL;   // xhci.cpp: MMIO_VIRTUAL_BASE
 inline constexpr uint64_t XHCI_MMIO_ROZMIAR = 8ULL * 8ULL * 16ULL * MIB;   // 8 kontrolerow x 8 BAR x MAX_MMIO_SIZE
+inline constexpr uint64_t VMM_SAMOTEST_NISKIE_START   = 0x146000000ULL;   // vmm.cpp: samotest synchronizacji (tylko diag)
+inline constexpr uint64_t VMM_SAMOTEST_NISKIE_ROZMIAR = 4ULL * MIB;      // dwa regiony 2 MiB (osobne PT)
 inline constexpr uint64_t RAM_DYSK_PSF_START   = 0x200000000ULL; // kernel.cpp: ADRES_RAM_DYSKU_PSF
 inline constexpr uint64_t RAM_DYSK_PSF_ROZMIAR = 128ULL * MIB;
 inline constexpr uint64_t STERTA_JADRA_START   = 0x500000000ULL; // kernel.cpp: ADRES_STERTY_JADRA
@@ -43,6 +45,7 @@ inline constexpr Zakres ZAKRESY[] = {
     {HPET_VA_START, HPET_VA_ROZMIAR, "hpet"},
     {OHCI_MMIO_START, OHCI_MMIO_ROZMIAR, "ohci-mmio"},
     {XHCI_MMIO_START, XHCI_MMIO_ROZMIAR, "xhci-mmio"},
+    {VMM_SAMOTEST_NISKIE_START, VMM_SAMOTEST_NISKIE_ROZMIAR, "vmm-samotest"},
     {RAM_DYSK_PSF_START, RAM_DYSK_PSF_ROZMIAR, "ram-dysk-psf"},
     {STERTA_JADRA_START, STERTA_JADRA_ROZMIAR, "sterta-jadra"},
 };
@@ -57,5 +60,20 @@ inline bool koliduje_z_jadrem(uint64_t start, uint64_t koniec) {
     }
     return false;
 }
+
+// Gorna polowa (PML4[256..511], wspolna dla wszystkich procesow, nigdy uzytkownika): bazy znanych regionow. Kazdy region
+// zajmuje wlasny slot PML4 - slot tworzony po starcie procesow jest propagowany (vmm_synchronizacja.h), ale nowe stale
+// adresy nadal musza byc rezerwowane TUTAJ i miec osobny slot.
+inline constexpr uint64_t GRAFIKA_BUFORY_BAZA   = 0xFFFF900000000000ULL;   // bufory_grafiki.h
+inline constexpr uint64_t HDA_BAZA              = 0xFFFF920000000000ULL;   // hda_transport.cpp
+inline constexpr uint64_t STOSY_JADRA_BAZA      = 0xFFFF940000000000ULL;   // stos_jadra.h
+inline constexpr uint64_t VMM_SAMOTEST_WYSOKIE  = 0xFFFFA00000000000ULL;   // vmm.cpp: samotest (nowy slot PML4)
+constexpr unsigned slot_pml4(uint64_t va) { return static_cast<unsigned>((va >> 39) & 511ULL); }
+static_assert(slot_pml4(GRAFIKA_BUFORY_BAZA) != slot_pml4(HDA_BAZA) && slot_pml4(HDA_BAZA) != slot_pml4(STOSY_JADRA_BAZA) &&
+              slot_pml4(GRAFIKA_BUFORY_BAZA) != slot_pml4(STOSY_JADRA_BAZA) &&
+              slot_pml4(VMM_SAMOTEST_WYSOKIE) != slot_pml4(GRAFIKA_BUFORY_BAZA) &&
+              slot_pml4(VMM_SAMOTEST_WYSOKIE) != slot_pml4(HDA_BAZA) && slot_pml4(VMM_SAMOTEST_WYSOKIE) != slot_pml4(STOSY_JADRA_BAZA),
+              "regiony gornej polowy musza miec rozne sloty PML4");
+static_assert(slot_pml4(GRAFIKA_BUFORY_BAZA) >= 256 && slot_pml4(VMM_SAMOTEST_WYSOKIE) >= 256, "gorna polowa");
 
 } // namespace ZarezerwowaneVA

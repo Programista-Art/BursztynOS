@@ -1386,6 +1386,10 @@ uint64_t bws_potwierdz_pulpit_gotowy(const proces_t& proces) {
     if (proces.poziom_zaufania > PZB_USLUGI) return 0;
     if (!ma_prawo(proces, PRAWO_GUI | PRAWO_SYSTEM_CONFIG)) return 0;
     if (!czy_sciezka_menedzera_okien(proces.sciezka_pliku)) return 0;
+#if BURSZTYN_DIAG_VMM_SELFTEST
+    VmmSamotestSynchronizacji();   // diag: procesy juz dzialaja, CR3 = przestrzen menedzera okien
+    VmmSamotestSynchronizacji();   // drugi przebieg: bilans ramek musi byc dokladny
+#endif
     return system_potwierdz_gotowosc_pulpitu(static_cast<int>(proces.pid)) ? 1ULL : 0ULL;
 }
 

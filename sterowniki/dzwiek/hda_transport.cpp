@@ -1,3 +1,4 @@
+#include "jadro/mm/zarezerwowane_va.h"
 #include "hda_transport.h"
 #include "hda_quirks.h"
 // Called before a link reset invalidates a running playback stream.
@@ -448,7 +449,8 @@ void pci_write(void*,uint8_t b,uint8_t s,uint8_t f,uint8_t o,uint32_t v) { pci_z
 extern "C" bool VmmDiagnostykaWpisu(uint64_t,uint64_t*);
 bool map(void*,uint32_t k,uint64_t physical,uint32_t len,uint64_t* result) {
     // Dedicated supervisor mapping, also for >4GiB 64-bit BARs. Never use HHDM for MMIO.
-    const uint64_t base=0xffff920000000000ULL + uint64_t(k)*0x10000;
+    static_assert(ZarezerwowaneVA::HDA_BAZA==0xffff920000000000ULL,"baza HDA musi zgadzac sie z zarezerwowane_va.h");
+    const uint64_t base=ZarezerwowaneVA::HDA_BAZA + uint64_t(k)*0x10000;
     for(uint32_t o=0;o<len;o+=4096) {
         ZmapujStrone(reinterpret_cast<void*>(base+o),reinterpret_cast<void*>(physical+o),
             VMM_FLAGA_OBECNA|VMM_FLAGA_ZAPIS|VMM_FLAGA_PCD|VMM_FLAGA_PWT);
