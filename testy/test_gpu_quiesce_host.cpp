@@ -77,10 +77,10 @@ int main(int argc,char**){
         now=0;powitanie_inicjalizuj(true);
         auto present=[&](){powitanie_zrodlo(reinterpret_cast<uint8_t*>(scene.data()),320,240,1280,0,0,320,240,100);powitanie_publikacja();};
         advance(100000);present();advance(3100000);present();
-        // Po 3,1 s splash jest nadal aktywny (pulpit niegotowy). Pierwszy takt kompozytora
-        // po publikacji (3,1 s) dopiero uruchomil zegar etapow, wiec widac logo.
+        // Po 3,1 s splash jest nadal aktywny (pulpit niegotowy). Miedzy 0,1 s a 3,1 s
+        // nie bylo prezentacji, wiec zaczal sie tylko jeden zalegly etap (tytul).
         assert(powitanie_aktywne()&&live==1&&sekwencja.stan==Powitanie::Stan::Widoczny&&
-               sekwencja.etapy&&sekwencja.faza==Powitanie::Faza::Logo);
+               sekwencja.etap==Powitanie::ETAP_TYTUL&&sekwencja.faza==Powitanie::Faza::Tytul);
         drv={};drv.initialized=true;drv.controlq=&queue;drv.lock=mode==1;
         avail.idx=mode==2;mock_clock=mode==0?7500000000ULL:0;
         wycisz_start_przed_restartem();

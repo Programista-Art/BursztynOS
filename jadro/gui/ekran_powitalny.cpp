@@ -29,6 +29,11 @@ uint64_t poprzedni_krok=UINT64_MAX;
 uint64_t poprzednia_sygnatura=UINT64_MAX;
 // Najblizsza dozwolona prezentacja z watku startowego (punkty kontrolne startu).
 uint64_t nastepny_start=0;
+// Maski etapow ostatnio WYRENDEROWANEJ klatki. Etapy uznaje sie za pokazane
+// dopiero, gdy ta klatka zostanie opublikowana (powitanie_publikacja), nigdy
+// przy samym obliczeniu lub renderze, ktory nie trafil na ekran.
+unsigned wyrenderowane_widoczne=0, wyrenderowane_pelne=0;
+bool ramka_wyrenderowana=false;
 #if BURSZTYNDIAGSPLASHTIMING
 uint64_t prezentacje=0;
 void diag_czas(const char* event,uint64_t now) {
@@ -63,6 +68,7 @@ void zwolnij_powierzchnie() {
     pierwsza_klatka_gotowa=false;pierwsza_klatka_opublikowana=false;
     KlatkiStartuDiag::info().ready=false;
     powierzchnia=nullptr;bajty=0;szer=wys=stride=0;procent=0;
+    ramka_wyrenderowana=false;wyrenderowane_widoczne=wyrenderowane_pelne=0;
 }
 void zakoncz_powitanie() {
     animacja_rozpoczeta=false;
@@ -106,6 +112,16 @@ void powitanie_publikacja() {
         }
         SplashFirstDiag::event("first_visible_commit",czas_monotoniczny_us());
         pierwsza_klatka_opublikowana=true;
+    }
+    // Kazda udana publikacja klatki powitania potwierdza etapy, ktore byly w niej
+    // widoczne. Dopiero to pozwala zaczac kolejny etap (sekwencjonowanie zalezne
+    // od prezentacji: zalegle etapy nie wchodza naraz po przerwie w odswiezaniu).
+    if(powitanie_aktywne()&&animacja_rozpoczeta&&ramka_wyrenderowana){
+        bool nowe=false;
+        for(unsigned e=0;e<Powitanie::LICZBA_ETAPOW;++e)
+            if(((wyrenderowane_widoczne>>e)&1u)&&!sekwencja.pokazany[e])nowe=true;
+        sekwencja.potwierdz(czas_monotoniczny_us(),wyrenderowane_widoczne,wyrenderowane_pelne);
+        if(nowe)diag_czas("stage_presented",czas_monotoniczny_us());
     }
 }
 bool powitanie_aktywne(){return sekwencja.aktywny()||zakonczenie_oczekuje;}
@@ -152,15 +168,6 @@ static void powitanie_aktualizuj_stan(bool pacing){
         zakoncz_powitanie();
         skladacz_obrazu_oznacz_dirty();
         return;
-    }
-    // Pierwszy takt kompozytora po publikacji startuje zegar etapow (tytul,
-    // separator, podtytuly). Wczesniej jadro wykonuje synchroniczna
-    // inicjalizacje i nikt nie odswieza ekranu, wiec etapy liczone od pierwszej
-    // klatki pojawilyby sie wszystkie naraz po jej zakonczeniu.
-    if(pacing&&!sekwencja.etapy){
-        sekwencja.rozpocznij_etapy(now);
-        diag_czas("stages_start",now);
-        nastepny=0;
     }
     if(pacing&&now<nastepny)return;
     if(pacing)nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
@@ -210,6 +217,11 @@ static void powitanie_aktualizuj_stan(bool pacing){
         poprzednia_sygnatura=sekwencja.sygnatura();
         skladacz_obrazu_oznacz_dirty();
     }
+    else if(pacing&&sekwencja.oczekuje_potwierdzenia()){
+        // Nowy etap jest juz w stanie, ale zadna klatka z nim nie trafila jeszcze
+        // na ekran: ponawiamy pelna klatke (z pacingiem) do skutku.
+        skladacz_obrazu_oznacz_dirty();
+    }
     if(sekwencja.stan==Powitanie::Stan::Zakonczony&&!zakonczenie_oczekuje){
         // Pacing may defer the full composition. Cursor-only presentation must
         // keep the previous welcome frame until a complete scene is committed.
@@ -228,10 +240,12 @@ bool powitanie_obsluz_start(){
     const uint64_t now=czas_monotoniczny_us();
     if(now<nastepny_start)return false;
     nastepny_start=now>UINT64_MAX-POWITANIE_ODSTEP_STARTU_US?UINT64_MAX:now+POWITANIE_ODSTEP_STARTU_US;
-    if(!sekwencja.etapy){sekwencja.rozpocznij_etapy(now);diag_czas("stages_start",now);}
     const uint64_t przed=poprzednia_sygnatura;
     powitanie_aktualizuj_stan(false);
-    if(poprzednia_sygnatura==przed||!powitanie_aktywne())return false;
+    if(!powitanie_aktywne())return false;
+    // Prezentacja, gdy zmienil sie obraz albo etap czeka na potwierdzenie
+    // (poprzednia publikacja mogla sie nie udac).
+    if(poprzednia_sygnatura==przed&&!sekwencja.oczekuje_potwierdzenia())return false;
     PrzeniesNaEkran();
     return true;
 }
@@ -276,6 +290,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         // background and title too; the reusable allocation carries no history.
         const auto frame=sekwencja;
         Powitanie::rysuj(dst,w,h,pitch/4,skala,frame,true);
+        wyrenderowane_widoczne=frame.widoczne;wyrenderowane_pelne=frame.pelne;ramka_wyrenderowana=true;
         ++SplashFirstDiag::id().frame;
         poprzedni_krok=sekwencja.krok;poprzednia_sygnatura=sekwencja.sygnatura();pelne_rysowanie=false;
     }

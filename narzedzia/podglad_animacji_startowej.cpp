@@ -26,10 +26,8 @@ int main(int argc, char** argv) {
     for (const auto& t : tryby) {
         std::vector<uint32_t> obraz(size_t(t.w) * t.h, 0x00FF00FF); // magenta = niepomalowane
         for (uint64_t czas : czasy) {
-            Sekwencja s;
-            s.rozpocznij(true, 0);
-            s.rozpocznij_etapy(0); // kompozytor aktywny od pierwszej klatki
-            s.aktualizuj(czas);
+            // Idealny przebieg: kazda klatka trafia na ekran co KROK_US.
+            const Sekwencja s = sekwencja_idealna(czas);
             rysuj(obraz.data(), t.w, t.h, t.w, t.dpi, s, true);
             char nazwa[256];
             snprintf(nazwa, sizeof(nazwa), "%s/powitanie-%s-%04llums.ppm", katalog,

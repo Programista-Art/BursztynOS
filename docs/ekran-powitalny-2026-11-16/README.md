@@ -27,3 +27,15 @@ Etapy od startu zegara etapów: logo od pierwszej klatki, tytuł 1,0–1,5 s, se
   * **D**: z punktami kontrolnymi także w pętlach tapet. Przestoje całej maszyny 3,4 s, 8,8 s i 3,9 s, więc taktowanie jest niewiarygodne. Testy natywne przerwano zgodnie z zasadami środowiska.
 
 Niezweryfikowane natywnie: pełna, kolejna sekwencja z punktami kontrolnymi tapet bez przestojów hosta, BIOS/VESA, inne rozdzielczości natywne, sprzęt fizyczny.
+
+## Poprawka: podtytuły pojawiające się naraz (sekwencjonowanie zależne od prezentacji)
+
+**Przyczyna:** krycie każdego elementu było czystą funkcją upływu czasu (`przelicz(t)`), bez informacji zwrotnej o prezentacji. Każda przerwa w odświeżaniu dłuższa niż ok. 1 s przekraczała progi kilku etapów naraz. Taką przerwą jest np. ok. 6 s weryfikacji tapet albo przestój hosta. Oba podtytuły trafiały wtedy do jednej, pierwszej po przerwie klatki.
+
+**Rozwiązanie** (`Powitanie::Sekwencja` w `jadro/gui/ekran_powitalny.h`):
+* jawne etapy: `ETAP_LOGO`, `ETAP_TYTUL`, `ETAP_SEPARATOR`, `ETAP_LINIA1`, `ETAP_LINIA2`;
+* dla każdego etapu `pokazany_od` (pierwsza udana prezentacja) i `pelny_od` (pierwsza prezentacja w pełnym kryciu). Ustawia je wyłącznie `potwierdz()`, wołane z `powitanie_publikacja()` po udanej publikacji, z maskami etapów klatki faktycznie wyrenderowanej;
+* przejście `etap → etap+1` następuje, gdy poprzedni etap był pokazany co najmniej 1 s temu i był w pełni widoczny co najmniej przez 1 s minus czas jego wejścia (0,5 s dla tekstu, 0,6 s dla separatora). Przypada najwyżej jedno przejście na próbkę. Nie zachodzi w trakcie zanikania do pulpitu;
+* fade-in liczy się od pierwszej prezentacji etapu. Etap niepotwierdzony stoi na pierwszym kroku wejścia, a kompozytor i punkty kontrolne ponawiają klatkę do skutku.
+
+Dowody: `host/sekwencja-po-przestoju.png` (scenariusz: 8 s bez prezentacji po logo, potem etapy co 1 s) oraz `natywne/przebieg-e/`. Przebieg E to jeden przebieg QEMU UEFI 1280×720 z dwoma krótkimi przestojami hosta (2,7 s i 3,1 s). Logo 7,96 s, tytuł 8,96 s, separator 10,12 s, „Polski system operacyjny” pierwszy raz w klatce 16,51 s (pełny 17,20 s), „Niezależny system” pierwszy raz w klatce 17,85 s, potem zanikanie do pulpitu od 19,1 s.

@@ -88,55 +88,62 @@ int main(){
     assert(wygladz(500)>400&&wygladz(500)<600);
 
     // Etapy: odstepy ~1 s miedzy kolejnymi elementami, krotkie wejscia.
-    assert(TYTUL_IN_US>=900000&&TYTUL_IN_US<=1100000);
-    assert(SEPARATOR_IN_US-TYTUL_IN_US>=900000&&SEPARATOR_IN_US-TYTUL_IN_US<=1100000);
-    assert(LINIA1_IN_US-SEPARATOR_IN_US>=900000&&LINIA1_IN_US-SEPARATOR_IN_US<=1100000);
-    assert(LINIA2_IN_US-LINIA1_IN_US>=900000&&LINIA2_IN_US-LINIA1_IN_US<=1100000);
-    assert(TYTUL_PELNY_US-TYTUL_IN_US<=600000&&LINIA2_PELNA_US-LINIA2_IN_US<=600000);
+    assert(ODSTEP_ETAPOW_US==1000000&&WEJSCIE_TEKSTU_US<=600000&&WEJSCIE_SEPARATORA_US<=600000);
+    for(unsigned e=ETAP_TYTUL;e<LICZBA_ETAPOW;++e)
+        assert(nominalny_start(e)-nominalny_start(e-1)==ODSTEP_ETAPOW_US);
     // Gotowy pulpit nie czeka na cala sekwencje (minimum to tylko ochrona przed mignieciem).
-    assert(MINIMUM_US<=TYTUL_PELNY_US&&MINIMUM_US<SEKWENCJA_US);
+    assert(MINIMUM_US<=nominalnie_pelny(ETAP_TYTUL)+KROK_US&&MINIMUM_US<SEKWENCJA_US);
 
     Sekwencja s;s.rozpocznij(true,0);
     assert(s.alfa_logo==LOGO_ALFA&&LOGO_ALFA==255); // logo w pelni od pierwszej klatki
     assert(s.alfa_tytul==0&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0);
-    assert(s.rozwiniecie==0&&s.faza==Faza::Logo);
-    // Kolejnosc: w kazdym etapie widoczne sa tylko elementy wczesniejsze.
-    s.przelicz(TYTUL_IN_US-1);
-    assert(s.alfa_tytul==0&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0&&s.faza==Faza::Logo);
-    s.przelicz(TYTUL_IN_US+KROK_US*3);assert(s.alfa_tytul>0&&s.alfa_tytul<255&&s.faza==Faza::Tytul);
-    s.przelicz(TYTUL_PELNY_US);
-    assert(s.alfa_tytul==255&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0);
-    s.przelicz(SEPARATOR_IN_US-1);assert(s.alfa_separator==0&&s.rozwiniecie==0);
-    s.przelicz(SEPARATOR_IN_US+KROK_US*3);
-    assert(s.alfa_separator>0&&s.rozwiniecie>0&&s.rozwiniecie<1000&&s.faza==Faza::Separator);
-    s.przelicz(SEPARATOR_PELNY_US);
-    assert(s.alfa_separator==255&&s.rozwiniecie==1000&&s.alfa_linia1==0&&s.alfa_linia2==0);
-    s.przelicz(LINIA1_IN_US+KROK_US*3);assert(s.alfa_linia1>0&&s.alfa_linia2==0&&s.faza==Faza::Linia1);
-    s.przelicz(LINIA1_PELNA_US);assert(s.alfa_linia1==255&&s.alfa_linia2==0);
-    s.przelicz(LINIA2_IN_US+KROK_US*3);assert(s.alfa_linia2>0&&s.alfa_linia2<255&&s.faza==Faza::Linia2);
-    s.przelicz(LINIA2_PELNA_US);
-    assert(s.alfa_linia2==255&&s.faza==Faza::Komplet);
-    s.przelicz(UINT64_MAX/2);assert(s.alfa_linia2==255&&s.rozwiniecie==1000);
-    // Monotonicznosc i zakresy w calej sekwencji.
+    assert(s.rozwiniecie==0&&s.faza==Faza::Logo&&s.etap==ETAP_LOGO&&s.widoczne==1u);
+    // Bez potwierdzenia prezentacji logo nic sie nie zaczyna, nawet po wielu sekundach.
+    s.aktualizuj(10000000);assert(s.etap==ETAP_LOGO&&s.alfa_tytul==0);
+    // Idealny przebieg (prezentacja co KROK_US): kolejnosc i nominalne chwile.
     {
-        Sekwencja p;p.rozpocznij(true,0);Sekwencja q=p;
-        for(uint64_t t=0;t<=SEKWENCJA_US+KROK_US*4;t+=KROK_US/2) {
-            q.przelicz(t);
+        Sekwencja i=sekwencja_idealna(nominalny_start(ETAP_TYTUL)-KROK_US);
+        assert(i.etap==ETAP_LOGO&&i.alfa_tytul==0&&i.faza==Faza::Logo);
+        i=sekwencja_idealna(nominalny_start(ETAP_TYTUL)+KROK_US*3);
+        assert(i.alfa_tytul>0&&i.alfa_tytul<255&&i.faza==Faza::Tytul&&i.alfa_separator==0);
+        i=sekwencja_idealna(nominalnie_pelny(ETAP_TYTUL));
+        assert(i.alfa_tytul==255&&i.alfa_separator==0&&i.alfa_linia1==0&&i.alfa_linia2==0);
+        i=sekwencja_idealna(nominalny_start(ETAP_SEPARATOR)-KROK_US);assert(i.alfa_separator==0&&i.rozwiniecie==0);
+        i=sekwencja_idealna(nominalny_start(ETAP_SEPARATOR)+KROK_US*3);
+        assert(i.alfa_separator>0&&i.rozwiniecie>0&&i.rozwiniecie<1000&&i.faza==Faza::Separator);
+        i=sekwencja_idealna(nominalnie_pelny(ETAP_SEPARATOR));
+        assert(i.alfa_separator==255&&i.rozwiniecie==1000&&i.alfa_linia1==0&&i.alfa_linia2==0);
+        i=sekwencja_idealna(nominalny_start(ETAP_LINIA1)+KROK_US*3);
+        assert(i.alfa_linia1>0&&i.alfa_linia2==0&&i.faza==Faza::Linia1);
+        i=sekwencja_idealna(nominalnie_pelny(ETAP_LINIA1));assert(i.alfa_linia1==255&&i.alfa_linia2==0);
+        i=sekwencja_idealna(nominalny_start(ETAP_LINIA2)-KROK_US);assert(i.alfa_linia2==0);
+        i=sekwencja_idealna(nominalny_start(ETAP_LINIA2)+KROK_US*3);
+        assert(i.alfa_linia2>0&&i.alfa_linia2<255&&i.faza==Faza::Linia2);
+        i=sekwencja_idealna(SEKWENCJA_US);assert(i.alfa_linia2==255&&i.faza==Faza::Komplet);
+        i=sekwencja_idealna(UINT64_MAX/2);assert(i.alfa_linia2==255&&i.rozwiniecie==1000);
+    }
+    // Monotonicznosc i zakresy w calym idealnym przebiegu.
+    {
+        Sekwencja q;q.rozpocznij(true,0);q.potwierdz(0);Sekwencja p=q;
+        for(uint64_t t=KROK_US/2;t<=SEKWENCJA_US+KROK_US*4;t+=KROK_US/2) {
+            q.aktualizuj(t);q.potwierdz(t);
             assert(q.alfa_logo>=p.alfa_logo&&q.alfa_tytul>=p.alfa_tytul&&q.alfa_separator>=p.alfa_separator);
             assert(q.alfa_linia1>=p.alfa_linia1&&q.alfa_linia2>=p.alfa_linia2&&q.rozwiniecie>=p.rozwiniecie);
             assert(q.alfa_logo<=255&&q.alfa_tytul<=255&&q.alfa_linia2<=255&&q.rozwiniecie<=1000);
-            assert(int(q.faza)>=int(p.faza));
+            assert(int(q.faza)>=int(p.faza)&&q.etap<=p.etap+1);
             p=q;
         }
     }
 
     // Kwantyzacja: probki w jednym kroku daja te sama sygnature, w holdzie
     // sygnatura jest stala przez wiele krokow (zero klatek).
-    s.przelicz(TYTUL_IN_US+KROK_US*4);const uint64_t sygn=s.sygnatura();
-    s.przelicz(TYTUL_IN_US+KROK_US*5-1);assert(s.sygnatura()==sygn);
-    s.przelicz(TYTUL_IN_US+KROK_US*5);assert(s.sygnatura()!=sygn);
-    s.przelicz(SEKWENCJA_US+KROK_US);const uint64_t hold=s.sygnatura();
-    s.przelicz(SEKWENCJA_US+KROK_US*50);assert(s.sygnatura()==hold);
+    {
+        Sekwencja k=sekwencja_idealna(nominalny_start(ETAP_TYTUL)+KROK_US*4);const uint64_t sygn=k.sygnatura();
+        k.aktualizuj(nominalny_start(ETAP_TYTUL)+KROK_US*5-1);assert(k.sygnatura()==sygn);
+        k.aktualizuj(nominalny_start(ETAP_TYTUL)+KROK_US*5);assert(k.sygnatura()!=sygn);
+        Sekwencja h=sekwencja_idealna(SEKWENCJA_US+KROK_US);const uint64_t hold=h.sygnatura();
+        h.aktualizuj(SEKWENCJA_US+KROK_US*50);assert(h.sygnatura()==hold);
+    }
 
     // Interpolacja i brak kumulacji.
     for(unsigned weight=0;weight<=255;++weight){
@@ -152,37 +159,14 @@ int main(){
     s.aktualizuj(MINIMUM_US+FADE_US);assert(s.stan==Stan::Zakonczony);
     s.aktualizuj(0);assert(s.stan==Stan::Zakonczony); // zegar nie wskrzesza stanu
     // Gotowy pulpit: zanikanie startuje przed koncem sekwencji i ja zamraza -
-    // separator (od 2,0 s) nie zaczyna sie pojawiac w trakcie odchodzenia sceny.
-    s.rozpocznij(true,0);s.rozpocznij_etapy(0);s.gotowy=true;s.gotowy_od=200000;
-    s.aktualizuj(MINIMUM_US);assert(s.stan==Stan::Zanikanie&&s.fade==MINIMUM_US);
-    s.aktualizuj(MINIMUM_US+FADE_US-1);
-    assert(s.stan==Stan::Zanikanie&&s.alfa_separator==0&&s.alfa_tytul==255&&s.faza==Faza::Zanikanie);
-    assert(MINIMUM_US+FADE_US-1>SEPARATOR_IN_US);
+    // separator nie zaczyna sie pojawiac w trakcie odchodzenia sceny.
+    s.rozpocznij(true,0);s.potwierdz(0);s.gotowy=true;s.gotowy_od=200000;
+    for(uint64_t t=KROK_US;t<MINIMUM_US;t+=KROK_US){s.aktualizuj(t);s.potwierdz(t);}
+    s.aktualizuj(MINIMUM_US);s.potwierdz(MINIMUM_US);assert(s.stan==Stan::Zanikanie&&s.fade==MINIMUM_US);
+    for(uint64_t t=MINIMUM_US+KROK_US;t<MINIMUM_US+FADE_US;t+=KROK_US){s.aktualizuj(t);s.potwierdz(t);}
+    assert(s.stan==Stan::Zanikanie&&s.alfa_separator==0&&s.etap==ETAP_TYTUL&&s.alfa_tytul==255&&s.faza==Faza::Zanikanie);
+    assert(MINIMUM_US+FADE_US-1>nominalny_start(ETAP_SEPARATOR));
     s.aktualizuj(MINIMUM_US+FADE_US);assert(!s.aktywny());
-    // Zegar etapow: przed pierwszym taktem kompozytora widac wylacznie logo,
-    // nawet po dlugiej synchronicznej inicjalizacji; potem etapy ida kolejno od
-    // startu zegara (nie wszystkie naraz), a ponowny start go nie przesuwa.
-    {
-        Sekwencja e;e.rozpocznij(true,1000);
-        e.aktualizuj(1000+10000000);
-        assert(!e.etapy&&e.alfa_logo==LOGO_ALFA&&e.alfa_tytul==0&&e.alfa_linia2==0&&e.faza==Faza::Logo);
-        const uint64_t t0=1000+10000000;
-        e.rozpocznij_etapy(t0);assert(e.etapy&&e.etapy_od==t0);
-        e.aktualizuj(t0+TYTUL_IN_US-1);assert(e.alfa_tytul==0);
-        e.aktualizuj(t0+TYTUL_PELNY_US);assert(e.alfa_tytul==255&&e.alfa_separator==0);
-        e.rozpocznij_etapy(t0+5000000);assert(e.etapy_od==t0); // bez restartu
-        e.aktualizuj(t0+SEPARATOR_PELNY_US);assert(e.alfa_separator==255&&e.alfa_linia1==0);
-        e.aktualizuj(t0+LINIA1_PELNA_US);assert(e.alfa_linia1==255&&e.alfa_linia2==0);
-        e.aktualizuj(t0+LINIA2_PELNA_US);assert(e.alfa_linia2==255&&e.faza==Faza::Komplet);
-        // Zegar etapow nie startuje przed pierwsza klatka ani poza aktywnym stanem.
-        Sekwencja f;f.rozpocznij(true,500);f.rozpocznij_etapy(100);assert(f.etapy_od==500);
-        Sekwencja g0;g0.rozpocznij(false,0);g0.rozpocznij_etapy(5);assert(!g0.etapy);
-        // Gotowy pulpit nie czeka na zegar etapow: minimum liczy sie od publikacji.
-        Sekwencja d;d.rozpocznij(true,0);d.gotowy=true;d.gotowy_od=3000000;
-        d.rozpocznij_etapy(2900000);d.aktualizuj(3000000);
-        assert(d.stan==Stan::Zanikanie&&d.fade==3000000);
-        d.aktualizuj(3000000+FADE_US-1);assert(d.alfa_tytul==0); // etapy zamrozone w chwili zanikania
-    }
     // Bez znacznika gotowosci po dlugim czasie zanikanie domyka sie od razu.
     s.rozpocznij(true,100);s.gotowy=true;s.aktualizuj(10000100);
     assert(s.stan==Stan::Zakonczony&&s.odsloniecie==255);
@@ -268,14 +252,14 @@ int main(){
         const int w=e.w,h=e.h;
         std::vector<uint32_t> obraz(size_t(w)*h,0x00FF00FFu);
         const auto g=geometria(w,h,dpi);
-        struct Etap {uint64_t t;bool tytul,separator,l1,l2;};
-        for(Etap et:{Etap{0,false,false,false,false},Etap{TYTUL_IN_US,false,false,false,false},
-                     Etap{TYTUL_PELNY_US,true,false,false,false},
-                     Etap{SEPARATOR_PELNY_US,true,true,false,false},
-                     Etap{LINIA1_PELNA_US,true,true,true,false},
-                     Etap{LINIA2_PELNA_US,true,true,true,true}}){
+        struct Probka {uint64_t t;bool tytul,separator,l1,l2;};
+        for(Probka et:{Probka{0,false,false,false,false},Probka{nominalny_start(ETAP_TYTUL)-KROK_US,false,false,false,false},
+                     Probka{nominalnie_pelny(ETAP_TYTUL),true,false,false,false},
+                     Probka{nominalnie_pelny(ETAP_SEPARATOR),true,true,false,false},
+                     Probka{nominalnie_pelny(ETAP_LINIA1),true,true,true,false},
+                     Probka{nominalnie_pelny(ETAP_LINIA2),true,true,true,true}}){
             std::fill(obraz.begin(),obraz.end(),0x00FF00FFu);
-            Sekwencja draw;draw.rozpocznij(true,0);draw.przelicz(et.t);
+            const Sekwencja draw=sekwencja_idealna(et.t);
             rysuj(obraz.data(),w,h,w,dpi,draw,true);
             // Caly ekran zostal odtworzony z tla.
             assert(obraz[0]==TLO&&obraz.back()==TLO);
@@ -425,7 +409,7 @@ int main(){
     for(unsigned cycle=0;cycle<100;++cycle)for(auto stage:etapy)for(bool ready:{false,true}) {
         width=320;height=240;now=123;powitanie_inicjalizuj(true);
         assert(sekwencja.start==123&&sekwencja.fade==0);
-        assert(sekwencja.rozwiniecie==0&&sekwencja.alfa_tytul==0&&sekwencja.alfa_logo==LOGO_ALFA&&!sekwencja.etapy);
+        assert(sekwencja.rozwiniecie==0&&sekwencja.alfa_tytul==0&&sekwencja.alfa_logo==LOGO_ALFA&&sekwencja.etap==ETAP_LOGO);
         assert(!pulpit_gotowy&&!tlo_tapeta&&pulpit_pid==0&&nastepny==0);
         auto source=[&](){return powitanie_zrodlo(
             reinterpret_cast<uint8_t*>(cycle_scene.data()),320,240,1280,0,0,320,240,100);};
@@ -464,34 +448,33 @@ int main(){
             return powitanie_zrodlo(reinterpret_cast<uint8_t*>(sc.data()), 320, 240, 1280,
                                     0, 0, 320, 240, 100);
         };
-        src();
-        powitanie_publikacja();
-        powitanie_tick(); // kompozytor zyje od publikacji: start zegara etapow
-
-        // Najpierw: zmiana obrazu MUSI wymusic klatke (1,98 s: hold po tytule,
-        // 2,08 s: wejscie separatora).
-        now = 1980000;
-        powitanie_tick();
-        const unsigned po_zmianie = full + partial;
-        // Probka bez zmiany obrazu w tym samym kroku kwantyzacji: zero pracy.
-        now = 1999999;
-        powitanie_tick();
-        assert(full + partial == po_zmianie);
-        // Nastepny krok kwantyzacji zmienia postep -> dokladnie jedna klatka.
-        now = 2080000;
-        powitanie_tick();
-        assert(full + partial == po_zmianie + 1);
+        // Kompozytor: klatka trafia na ekran (render + udana publikacja).
+        auto pokaz = [&]() { src(); powitanie_publikacja(); };
+        pokaz();
+        // Regularny kompozytor (~60 Hz probek): pelna klatka tylko, gdy oznaczono brud.
+        unsigned klatki = 0;
+        for (uint64_t t = 16000; t <= SEKWENCJA_US + 500000; t += 16000) {
+            now = t;
+            const unsigned p = full + partial;
+            powitanie_tick();
+            if (full + partial != p) { pokaz(); ++klatki; }
+        }
+        assert(sekwencja.faza == Faza::Komplet && sekwencja.pelny[ETAP_LINIA2]);
+        // Klatki tylko podczas wejsc (najwyzej jedna na krok) i potwierdzen.
+        fprintf(stderr, "sekwencja: %u klatek na %llu ms\n", klatki,
+                (unsigned long long)((SEKWENCJA_US + 500000) / 1000));
+        assert(klatki >= 4 && klatki <= SEKWENCJA_US / KROK_US + 12);
 
         // Faza hold: po wejsciu drugiego podtytulu ekran jest staly.
-        now = LINIA2_PELNA_US;
+        now = SEKWENCJA_US + 600000;
         powitanie_tick();
-        src();
+        pokaz();
         const unsigned start_hold = full + partial;
         unsigned przed = start_hold;
-        for (uint64_t t = LINIA2_PELNA_US + KROK_US; t < LINIA2_PELNA_US + 2000000; t += 16000) {
+        for (uint64_t t = SEKWENCJA_US + 600000 + KROK_US; t < SEKWENCJA_US + 2600000; t += 16000) {
             now = t;
             powitanie_tick();
-            if (full + partial != przed) { przed = full + partial; src(); }
+            if (full + partial != przed) { przed = full + partial; pokaz(); }
         }
         const unsigned w_holdzie = (full + partial) - start_hold;
         fprintf(stderr, "hold: %u klatek na 2 s (oczekiwane 0)\n", w_holdzie);

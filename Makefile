@@ -2238,6 +2238,15 @@ test-powitanie:
 	$(PYTHON) testy/test_logo_maska.py
 	$(PYTHON) testy/test_napisy_powitania.py
 	$(PYTHON) testy/test_powitanie_policy.py
+	$(MAKE) --no-print-directory test-splash-sekwencja
+
+# Sekwencjonowanie etapow zalezne od prezentacji (przestoje, odrzucone klatki,
+# zawiniecie zegara). SPLASH_KLATKI=katalog zapisuje klatki PPM scenariusza z przestojem.
+.PHONY: test-splash-sekwencja
+test-splash-sekwencja:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_splash_sekwencja.cpp -o .wm-test/splash-sekwencja
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/splash-sekwencja $(SPLASH_KLATKI)
 
 BURSZTYNDIAGSTARTUPREBOOT ?= 0
 ifeq ($(BURSZTYNDIAGSTARTUPREBOOT),1)

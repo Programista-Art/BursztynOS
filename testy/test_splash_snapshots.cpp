@@ -80,7 +80,7 @@ int main() {
 
         // Brudna pamiec z poprzedniej geometrii jest zawsze odtwarzana w calosci.
         std::vector<uint32_t> reuse(scene.size(),0xBADA55),fresh(scene.size(),pad);
-        Sekwencja state;state.rozpocznij(true,0);state.przelicz(5000000);
+        const Sekwencja state=sekwencja_idealna(5000000);
         rysuj(reuse.data(),width,height,pitch,dpi,state,false);
         rysuj(fresh.data(),width,height,pitch,dpi,state,true);
         assert(frame_hash(reuse.data(),pitch)==frame_hash(fresh.data(),pitch));
@@ -88,13 +88,15 @@ int main() {
         for(int y=0;y<height;++y)for(int x=width;x<pitch;++x)padding&=fresh[y*pitch+x]==pad;
         assert(padding);
 
-        // Probka po przestoju renderuje tylko biezacy stan absolutny.
+        // Probka po przestoju: zalegle etapy nie wchodza naraz - pierwsza klatka
+        // po 4,4 s bez prezentacji pokazuje wylacznie poczatek wejscia tytulu.
         start(dpi);now=4400000;
         auto* out=reinterpret_cast<uint32_t*>(powitanie_zrodlo(
             reinterpret_cast<uint8_t*>(scene.data()),width,height,pitch*4,0,0,width,height,dpi));
-        assert(sekwencja.alfa_linia1==255&&sekwencja.alfa_linia2>0);
+        assert(sekwencja.etap==ETAP_TYTUL&&sekwencja.alfa_tytul>0&&sekwencja.alfa_tytul<255);
+        assert(sekwencja.alfa_separator==0&&sekwencja.alfa_linia1==0&&sekwencja.alfa_linia2==0);
         std::vector<uint32_t> bezposredni(scene.size(),0);
-        Sekwencja direct;direct.rozpocznij(true,0);direct.przelicz(4400000);
+        const Sekwencja direct=sekwencja;
         rysuj(bezposredni.data(),width,height,pitch,dpi,direct,true);
         assert(frame_hash(out,pitch)==frame_hash(bezposredni.data(),pitch));
         powitanie_wycisz();

@@ -32,48 +32,51 @@ constexpr uint32_t TEKST_PRZYGASZONY=0x8C949F;// "Niezalezny system"
 constexpr unsigned SEPARATOR_KRYCIE=220;      // separator nieco cichszy od logotypu
 
 // ---------------------------------------------------------------------------
-// Czasy etapow (mikrosekundy od startu zegara etapow)
+// Etapy i czasy (sekwencjonowanie zalezne od prezentacji)
 // ---------------------------------------------------------------------------
-// Logo jest widoczne w pelni od pierwszej klatki. Pierwsza klatka jest jednak
-// publikowana w trakcie synchronicznej inicjalizacji jadra (siec, instalacja
-// aplikacji i tapet), kiedy nikt nie odswieza ekranu - pod QEMU/TCG to ~10 s.
-// Gdyby etapy liczyly sie od pierwszej klatki, po tym czasie wszystkie bylyby
-// "zalegle" i pojawilyby sie naraz. Dlatego zegar etapow startuje przy pierwszym
-// takcie kompozytora po publikacji (powitanie_tick z petli PID 0), czyli wtedy,
-// gdy animacje da sie faktycznie pokazac. Potem liczy sie wylacznie czas
-// monotoniczny, wiec dlugi start nie restartuje ani nie spowalnia sekwencji.
-constexpr uint64_t TYTUL_IN_US=1000000;        // tytul "Bursztyn OS"
-constexpr uint64_t TYTUL_PELNY_US=1500000;
-constexpr uint64_t SEPARATOR_IN_US=2000000;    // separator (wejscie + rozwiniecie od srodka)
-constexpr uint64_t SEPARATOR_PELNY_US=2400000;
-constexpr uint64_t LINIA1_IN_US=3000000;       // "Polski system operacyjny"
-constexpr uint64_t LINIA1_PELNA_US=3500000;
-constexpr uint64_t LINIA2_IN_US=4000000;       // "Niezalezny system"
-constexpr uint64_t LINIA2_PELNA_US=4500000;
-constexpr uint64_t SEKWENCJA_US=LINIA2_PELNA_US;
+// Etapy: logo -> tytul -> separator -> "Polski system operacyjny" ->
+// "Niezalezny system". Kolejny etap moze sie zaczac dopiero, gdy poprzedni
+// zostal FAKTYCZNIE zaprezentowany na ekranie (potwierdz() po udanej publikacji
+// klatki) co najmniej ODSTEP_ETAPOW_US temu i byl widoczny w pelni przez
+// ODSTEP_ETAPOW_US-wejscie. Na jedna probke przypada najwyzej jeden nowy etap.
+//
+// Dawniej krycie kazdego elementu bylo czysta funkcja uplywu czasu. Kazda
+// przerwa w odswiezaniu dluzsza niz ~1 s (synchroniczny start jadra, przestoj
+// hosta) przekraczala progi kilku etapow naraz i oba podtytuly pojawialy sie
+// w tej samej klatce. Teraz zalegly etap czeka na najblizsza prezentacje,
+// a nastepny dopiero na potwierdzenie poprzedniego. Wejscie (fade-in) etapu
+// liczy sie od jego pierwszej prezentacji, wiec nie "przepada" w przerwie.
+enum Etap : unsigned { ETAP_LOGO=0, ETAP_TYTUL, ETAP_SEPARATOR, ETAP_LINIA1, ETAP_LINIA2, LICZBA_ETAPOW };
+constexpr uint64_t ODSTEP_ETAPOW_US=1000000;    // od pierwszej prezentacji poprzedniego etapu
+constexpr uint64_t WEJSCIE_TEKSTU_US=500000;     // fade-in tytulu i podtytulow
+constexpr uint64_t WEJSCIE_SEPARATORA_US=400000; // fade-in + rozwiniecie separatora
+constexpr uint64_t wejscie_etapu(unsigned e) {
+    return e==ETAP_LOGO?0:(e==ETAP_SEPARATOR?WEJSCIE_SEPARATORA_US:WEJSCIE_TEKSTU_US);
+}
+// Kwantyzacja probki czasu (20 Hz). W holdzie obraz jest staly, wiec nie ma
+// klatek; w trakcie wejsc 20 Hz (10 poziomow na 0,5 s) daje plynne przejscie.
+constexpr uint64_t KROK_US=50000;
+// Nominalna os czasu przy regularnych prezentacjach (co KROK_US): etap k
+// zaczyna sie po k*ODSTEP_ETAPOW_US i jest pelny po wejsciu minus jeden krok
+// (pierwsza prezentowana klatka pokazuje juz pierwszy krok wejscia).
+constexpr uint64_t nominalny_start(unsigned e) {return uint64_t(e)*ODSTEP_ETAPOW_US;}
+constexpr uint64_t nominalnie_pelny(unsigned e) {
+    return e==ETAP_LOGO?0:nominalny_start(e)+wejscie_etapu(e)-KROK_US;
+}
+constexpr uint64_t SEKWENCJA_US=nominalnie_pelny(ETAP_LINIA2);
 // Najkrotszy czas widocznosci ekranu (od pierwszej opublikowanej klatki) przed
 // zanikaniem do gotowego pulpitu - tylko ochrona przed mignieciem. Gotowy pulpit
-// NIE czeka na reszte sekwencji ani na zegar etapow: przestoj planisty po
-// publikacji nigdy nie opoznia pulpitu. Dluzszy start pokazuje kolejne etapy.
+// NIE czeka na reszte sekwencji: niedokonczone etapy sa pomijane.
 constexpr uint64_t MINIMUM_US=1500000, FADE_US=600000;
-
-// Kwantyzacja probki czasu (20 Hz). W holdzie obraz jest staly, wiec nie ma
-// klatek; w trakcie wejsc 20 Hz (10 poziomow na 0,5 s) daje plynne przejscie
-// bez pelnych klatek przy kazdej probce kompozytora.
-constexpr uint64_t KROK_US=50000;
 
 constexpr unsigned LOGO_ALFA=255;          // logo od pierwszej klatki (nigdy pusty ekran)
 constexpr unsigned POSWIATA_UDZIAL=88;     // udzial poswiaty w pokryciu rdzenia
 
-static_assert(TYTUL_IN_US<TYTUL_PELNY_US&&TYTUL_PELNY_US<=SEPARATOR_IN_US&&
-              SEPARATOR_PELNY_US<=LINIA1_IN_US&&LINIA1_PELNA_US<=LINIA2_IN_US,
-              "etapy odslaniaja sie kolejno i nie nachodza na siebie");
+static_assert(WEJSCIE_TEKSTU_US<ODSTEP_ETAPOW_US&&WEJSCIE_SEPARATORA_US<ODSTEP_ETAPOW_US,
+              "kazdy etap jest w pelni widoczny, zanim zacznie sie nastepny");
+static_assert(WEJSCIE_TEKSTU_US%KROK_US==0&&WEJSCIE_SEPARATORA_US%KROK_US==0&&ODSTEP_ETAPOW_US%KROK_US==0,
+              "granice wejsc wypadaja na probkach");
 static_assert(MINIMUM_US<SEKWENCJA_US,"gotowy pulpit nie czeka na pelna sekwencje");
-static_assert(TYTUL_IN_US%KROK_US==0&&TYTUL_PELNY_US%KROK_US==0&&
-              SEPARATOR_IN_US%KROK_US==0&&SEPARATOR_PELNY_US%KROK_US==0&&
-              LINIA1_IN_US%KROK_US==0&&LINIA1_PELNA_US%KROK_US==0&&
-              LINIA2_IN_US%KROK_US==0&&LINIA2_PELNA_US%KROK_US==0,
-              "granice etapow wypadaja na probkach, wiec kazdy etap domyka sie dokladnie");
 
 // ---------------------------------------------------------------------------
 // Pomocnicze operacje
@@ -323,12 +326,18 @@ inline Obszar centrum(int w,int h,uint32_t dpi) {
 struct Sekwencja {
     Stan stan=Stan::Nieaktywny;
     uint64_t start=0, fade=0, ostatni=0, gotowy_od=0;
-    uint64_t etapy_od=0;   // start zegara etapow (pierwszy takt kompozytora)
-    bool etapy=false;
     bool gotowy=false;
     Tlo tlo=Tlo::Zastepcze;
-    uint64_t krok=0;       // indeks probki czasu intro
+    uint64_t krok=0;       // indeks probki czasu od pierwszej klatki
     Faza faza=Faza::Logo;
+    // Jawny stan etapow: ostatni rozpoczety etap oraz chwile pierwszej
+    // potwierdzonej prezentacji (pokazany_od) i pierwszej prezentacji w pelni
+    // (pelny_od) kazdego etapu. Obliczenie klatki nie zmienia tych pol.
+    unsigned etap=ETAP_LOGO;
+    bool pokazany[LICZBA_ETAPOW]{}, pelny[LICZBA_ETAPOW]{};
+    uint64_t pokazany_od[LICZBA_ETAPOW]{}, pelny_od[LICZBA_ETAPOW]{};
+    unsigned widoczne=0;   // maska etapow z kryciem > 0 w biezacym stanie
+    unsigned pelne=0;      // maska etapow z pelnym kryciem w biezacym stanie
     unsigned alfa_logo=0, alfa_tytul=0, alfa_separator=0, alfa_linia1=0, alfa_linia2=0;
     unsigned rozwiniecie=0; // szerokosc separatora 0..1000
     unsigned odsloniecie=0;
@@ -337,7 +346,7 @@ struct Sekwencja {
     void rozpocznij(bool wlacz,uint64_t teraz) {
         *this={};stan=wlacz?Stan::Widoczny:Stan::Nieaktywny;
         start=ostatni=teraz;
-        przelicz(0);
+        oblicz(teraz);
     }
     // Sygnatura opisuje cala widoczna tresc; kompozytor dzieki niej pomija
     // ponowne skladanie, gdy obraz sie nie zmienil.
@@ -352,51 +361,92 @@ struct Sekwencja {
         s=s<<8|(alfa_linia2&255);
         return s;
     }
-    // Wszystkie etapy licza sie z jednej kwantowanej probki czasu absolutnego,
-    // wiec po przestoju klatka pokazuje stan docelowy, a nie odtwarza historii.
-    void przelicz(uint64_t t) {
-        krok=t/KROK_US;
-        const uint64_t tq=krok*KROK_US;
-        auto wejscie=[&](uint64_t od,uint64_t do_){
-            return unsigned(uint64_t(255)*wygladz(liniowo(tq,od,do_))/1000);
-        };
+    // Etap widoczny w stanie, ale jeszcze nie potwierdzony na ekranie.
+    bool oczekuje_potwierdzenia() const {
+        for(unsigned e=0;e<LICZBA_ETAPOW;++e)
+            if(((widoczne>>e)&1u)&&!pokazany[e])return true;
+            else if(((pelne>>e)&1u)&&!pelny[e])return true;
+        return false;
+    }
+    // Krycie etapu e (0..255) w chwili `chwila`. Etap niepotwierdzony stoi na
+    // pierwszym kroku wejscia: przerwa w prezentacji nie zjada fade-in.
+    unsigned krycie(unsigned e,uint64_t chwila) const {
+        if(e>etap)return 0;
+        const uint64_t wejscie=wejscie_etapu(e);
+        if(!wejscie)return 255;
+        uint64_t postep=KROK_US;
+        if(pokazany[e]&&chwila>pokazany_od[e]) {
+            const uint64_t dt=chwila-pokazany_od[e];
+            postep=dt>=wejscie?wejscie:(dt/KROK_US)*KROK_US+KROK_US;
+        }
+        if(postep>wejscie)postep=wejscie;
+        return unsigned(uint64_t(255)*wygladz(liniowo(postep,0,wejscie))/1000);
+    }
+    // Wylacznie obliczenie stanu klatki (bez przesuwania etapow).
+    void oblicz(uint64_t chwila) {
         alfa_logo=LOGO_ALFA;
-        alfa_tytul=wejscie(TYTUL_IN_US,TYTUL_PELNY_US);
-        alfa_separator=wejscie(SEPARATOR_IN_US,SEPARATOR_PELNY_US);
-        rozwiniecie=wygladz(liniowo(tq,SEPARATOR_IN_US,SEPARATOR_PELNY_US));
-        alfa_linia1=wejscie(LINIA1_IN_US,LINIA1_PELNA_US);
-        alfa_linia2=wejscie(LINIA2_IN_US,LINIA2_PELNA_US);
-        if(tq<TYTUL_IN_US)faza=Faza::Logo;
-        else if(tq<SEPARATOR_IN_US)faza=Faza::Tytul;
-        else if(tq<LINIA1_IN_US)faza=Faza::Separator;
-        else if(tq<LINIA2_IN_US)faza=Faza::Linia1;
-        else if(tq<SEKWENCJA_US)faza=Faza::Linia2;
-        else faza=Faza::Komplet;
+        alfa_tytul=krycie(ETAP_TYTUL,chwila);
+        alfa_separator=krycie(ETAP_SEPARATOR,chwila);
+        alfa_linia1=krycie(ETAP_LINIA1,chwila);
+        alfa_linia2=krycie(ETAP_LINIA2,chwila);
+        {
+            const uint64_t w=wejscie_etapu(ETAP_SEPARATOR);
+            uint64_t postep=0;
+            if(etap>=ETAP_SEPARATOR) {
+                postep=KROK_US;
+                if(pokazany[ETAP_SEPARATOR]&&chwila>pokazany_od[ETAP_SEPARATOR]) {
+                    const uint64_t dt=chwila-pokazany_od[ETAP_SEPARATOR];
+                    postep=dt>=w?w:(dt/KROK_US)*KROK_US+KROK_US;
+                }
+                if(postep>w)postep=w;
+            }
+            rozwiniecie=wygladz(liniowo(postep,0,w));
+        }
+        const unsigned a[LICZBA_ETAPOW]={alfa_logo,alfa_tytul,alfa_separator,alfa_linia1,alfa_linia2};
+        widoczne=pelne=0;
+        for(unsigned e=0;e<LICZBA_ETAPOW;++e){
+            if(a[e])widoczne|=1u<<e;
+            if(a[e]>=255)pelne|=1u<<e;
+        }
+        static constexpr Faza fazy[LICZBA_ETAPOW]={Faza::Logo,Faza::Tytul,Faza::Separator,Faza::Linia1,Faza::Linia2};
+        faza=(etap==ETAP_LINIA2&&alfa_linia2>=255)?Faza::Komplet:fazy[etap];
     }
-    // Start zegara etapow: jednorazowo w danej generacji (zmiana trybu ekranu
-    // go nie restartuje). Nigdy wczesniej niz pierwsza opublikowana klatka.
-    void rozpocznij_etapy(uint64_t teraz) {
-        if(etapy||!aktywny())return;
-        etapy=true;
-        etapy_od=teraz>start?teraz:start;
+    // Czy etap nastepny po biezacym moze sie zaczac w chwili `chwila`?
+    bool nastepny_dozwolony(uint64_t chwila) const {
+        if(etap+1>=LICZBA_ETAPOW||!pokazany[etap]||!pelny[etap])return false;
+        if(chwila<pokazany_od[etap]||chwila-pokazany_od[etap]<ODSTEP_ETAPOW_US)return false;
+        const uint64_t w_pelni=ODSTEP_ETAPOW_US-wejscie_etapu(etap);
+        return chwila>=pelny_od[etap]&&chwila-pelny_od[etap]>=w_pelni;
     }
+    // Potwierdzenie udanej prezentacji klatki wyrenderowanej ze stanu, ktorego
+    // maski widocznych/pelnych etapow podano. Tylko to przesuwa "pokazane".
+    void potwierdz(uint64_t teraz,unsigned maska_widocznych,unsigned maska_pelnych) {
+        if(!aktywny())return;
+        if(teraz<ostatni)teraz=ostatni;
+        for(unsigned e=0;e<LICZBA_ETAPOW&&e<=etap;++e){
+            if(((maska_widocznych>>e)&1u)&&!pokazany[e]){pokazany[e]=true;pokazany_od[e]=teraz;}
+            if(((maska_pelnych>>e)&1u)&&!pelny[e]){pelny[e]=true;pelny_od[e]=teraz;}
+        }
+    }
+    void potwierdz(uint64_t teraz){potwierdz(teraz,widoczne,pelne);}
     void aktualizuj(uint64_t teraz) {
         if(!aktywny())return;
         // Zegar jest monotoniczny; znosimy rowniez regresyjna probke.
         if(teraz<ostatni)teraz=ostatni;
         ostatni=teraz;
         const uint64_t t=teraz-start;
+        krok=t/KROK_US;
         if(stan==Stan::Widoczny&&gotowy&&t>=MINIMUM_US){
             stan=Stan::Zanikanie;
             const uint64_t minimum=start+MINIMUM_US; // bezpieczne: t >= MINIMUM_US
             fade=gotowy_od>minimum?gotowy_od:minimum;
             if(fade>teraz)fade=teraz;
         }
-        // Etapy licza sie od startu zegara etapow; przed nim widac tylko logo.
-        // W trakcie zanikania intro jest zamrozone w chwili jego poczatku: nowy
-        // element nie zaczyna sie pojawiac, gdy cala scena juz odchodzi.
-        const uint64_t koniec=stan==Stan::Zanikanie?fade:teraz;
-        przelicz(etapy&&koniec>etapy_od?koniec-etapy_od:0);
+        // Najwyzej jeden nowy etap na probke i tylko po potwierdzeniu poprzedniego.
+        // W trakcie zanikania nic nowego sie nie zaczyna, a krycie jest zamrozone
+        // w chwili jego poczatku.
+        if(stan==Stan::Widoczny&&nastepny_dozwolony(teraz))++etap;
+        oblicz(stan==Stan::Zanikanie?fade:teraz);
         if(stan==Stan::Zanikanie){
             faza=Faza::Zanikanie;
             const uint64_t dt=teraz-fade;
@@ -405,6 +455,19 @@ struct Sekwencja {
         }
     }
 };
+
+// Idealny przebieg (prezentacja co KROK_US od chwili 0) do testow i podgladu:
+// stan w chwili t, jakby kazda klatka trafila na ekran. Ograniczony liczba
+// krokow do konca sekwencji, wiec dowolnie duze t jest tanie.
+inline Sekwencja sekwencja_idealna(uint64_t t) {
+    Sekwencja s;s.rozpocznij(true,0);s.potwierdz(0);
+    for(uint64_t u=KROK_US;u<=t;u+=KROK_US){
+        s.aktualizuj(u);s.potwierdz(u);
+        if(s.faza==Faza::Komplet&&s.pelny[ETAP_LINIA2])break;
+    }
+    s.aktualizuj(t);
+    return s;
+}
 
 // ---------------------------------------------------------------------------
 // Rysowanie
