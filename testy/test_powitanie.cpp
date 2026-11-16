@@ -23,7 +23,8 @@ void* bufor_grafiki_alokuj(size_t n){if(fail_alloc)return nullptr;++allocations;
 void bufor_grafiki_zwolnij(void* p){assert(p&&live);--live;free(p);}
 static std::vector<std::string> logged_strings;
 void klog_serial(const char* msg){logged_strings.emplace_back(msg);}
-void PrzeniesNaEkran(){}
+static unsigned prezentacje_startu=0;
+void PrzeniesNaEkran(){++prezentacje_startu;}
 int grafika_pobierz_szerokosc(){return width;}
 int grafika_pobierz_wysokosc(){return height;}
 void skladacz_obrazu_oznacz_dirty(){++full;}
@@ -45,20 +46,39 @@ static Zakres atrament(const uint32_t* p,int w,int h,int pitch,int y0,int y1) {
 }
 static int srodek_x(const Zakres& z) {return (z.x0+z.x1)/2;}
 
+// Czy w obszarze nie ma zadnego atramentu (wylacznie tlo).
+static bool tylko_tlo(const uint32_t* p,int w,int h,int pitch,Powitanie::Obszar r) {
+    for(int y=r.y<0?0:r.y;y<r.y+r.h&&y<h;++y)
+        for(int x=r.x<0?0:r.x;x<r.x+r.w&&x<w;++x)
+            if(p[size_t(y)*pitch+x]!=Powitanie::TLO)return false;
+    return true;
+}
+static Zakres atrament_w(const uint32_t* p,int w,int h,int pitch,Powitanie::Obszar r) {
+    Zakres z{w,h,-1,-1};
+    for(int y=r.y<0?0:r.y;y<r.y+r.h&&y<h;++y)
+        for(int x=r.x<0?0:r.x;x<r.x+r.w&&x<w;++x)
+            if(p[size_t(y)*pitch+x]!=Powitanie::TLO) {
+                if(x<z.x0)z.x0=x;if(x>z.x1)z.x1=x;
+                if(y<z.y0)z.y0=y;if(y>z.y1)z.y1=y;
+            }
+    return z;
+}
+
 int main(){
     using namespace Powitanie;
-    // Dwa komunikaty wyswietlane po zapelnieniu paska.
+    // Napisy: tytul w zapisie mieszanym, dwa podtytuly z polskim znakiem (UTF-8).
     assert(!strcmp(tekst(0),"Polski system operacyjny"));
     assert(!strcmp(tekst(1),"Niezale\u017cny system"));
+    assert(strstr(tekst(1),"\xC5\xBC")!=nullptr); // U+017C jako dwa bajty UTF-8
     assert(LICZBA_KOMUNIKATOW==2);
-    assert(!strcmp(ZNAK_MARKI,"BURSZTYN OS"));
+    assert(!strcmp(ZNAK_MARKI,"Bursztyn OS"));
     // Czarne tlo i bursztynowy akcent.
     assert(TLO==0x000000&&AKCENT==0xFF8A00);
-    // Logotyp jest wkompilowana maska, nie dekoderem PNG.
+    // Logotyp i napisy sa wkompilowanymi maskami, nie dekoderem PNG/TTF.
     assert(BursztynLogo::SZEROKOSC>0&&BursztynLogo::WYSOKOSC>0);
-    assert(BursztynLogo::MASKA[0]!=0xFF||BursztynLogo::MASKA[BursztynLogo::SZEROKOSC]!=0xFF);
+    assert(NapisyPowitania::TYTUL.w>0&&NapisyPowitania::LINIA1.w>0&&NapisyPowitania::LINIA2.w>0);
 
-    // Fazy intro i wlasciwosci smoothstepu.
+    // Smoothstep bez FPU.
     assert(wygladz(0)==0&&wygladz(1000)==1000);
     for(unsigned u:{0U,125U,500U,875U,1000U}) {
         const unsigned g=wygladz(u);
@@ -67,61 +87,56 @@ int main(){
     }
     assert(wygladz(500)>400&&wygladz(500)<600);
 
-    Sekwencja s;s.rozpocznij(true,0);
-    assert(s.alfa_logo==LOGO_ALFA_START); // pierwsza klatka nigdy nie jest pusta
-    assert(s.alfa_znak==0&&s.alfa_pasek==0);
-    assert(s.alfa_linia1==0&&s.alfa_linia2==0);
-    assert(s.postep==0&&s.faza==Faza::Logo);
-    // Kwantyzacja: alfa logotypu osiaga pelna wartosc w pierwszej probce
-    // wypadajacej na lub po LOGO_IN_US, a nie w dowolnej chwili pomiedzy.
-    s.przelicz(LOGO_IN_US-1);
-    assert(s.alfa_logo<LOGO_ALFA_KONIEC);
-    s.przelicz((LOGO_IN_US/KROK_US+1)*KROK_US);
-    assert(s.alfa_logo==LOGO_ALFA_KONIEC);
-    // Wszystkie etapy intro licza sie z JEDNEJ kwantowanej probki czasu
-    // (tq = floor(t / KROK_US) * KROK_US). Zamiast zgadywac indeks granicznej
-    // probki, test sprawdza wlasnosci: monotonicznosc, zakresy i kolejnosc faz.
-    auto kwan=[](uint64_t t){return (t/KROK_US)*KROK_US;};
-    unsigned poprzednia=0;
-    for(uint64_t t=0;t<=MINIMUM_US;t+=KROK_US) {
-        s.przelicz(t);
-        assert(s.alfa_logo>=poprzednia||t<=KROK_US);
-        assert(s.alfa_logo>=LOGO_ALFA_START&&s.alfa_logo<=LOGO_ALFA_KONIEC);
-        assert(s.alfa_znak>=0&&s.alfa_znak<=255);
-        assert(s.alfa_pasek<=255&&s.alfa_linia1<=255&&s.alfa_linia2<=255);
-        assert(s.postep<=1000);
-        poprzednia=s.alfa_logo;
-    }
-    // Logotyp rozjasnia sie do pelna i nigdy nie gaśnie.
-    s.przelicz(0);assert(s.alfa_logo==LOGO_ALFA_START);
-    s.przelicz(kwan(LOGO_IN_US)+KROK_US);assert(s.alfa_logo==LOGO_ALFA_KONIEC);
-    // Napis, pasek i komunikaty pojawiaja sie w tej kolejnosci.
-    s.przelicz(0);assert(s.alfa_znak==0&&s.alfa_pasek==0&&s.alfa_linia1==0);
-    s.przelicz(ZNAK_PELNY_US+KROK_US);
-    assert(s.alfa_znak==255&&s.alfa_pasek==0&&s.alfa_linia1==0);
-    s.przelicz(PASEK_START_US+KROK_US);assert(s.alfa_pasek>0&&s.alfa_linia1==0);    s.przelicz(LINIA2_PELNA_US+KROK_US);
-    assert(s.alfa_linia1==255&&s.alfa_linia2==255&&s.postep==1000);
-    s.przelicz(LINIA1_IN_US+500000+KROK_US);assert(s.alfa_linia1==255);
-    s.przelicz(LINIA2_PELNA_US+KROK_US);assert(s.alfa_linia2==255);
-    s.przelicz(MINIMUM_US*4);assert(s.postep==1000); // pasek nigdy nie przekracza 100%
-    // Pasek postepu jest monotoniczny i domyka sie dokladnie na 100%.
-    unsigned poprzedni=0;
-    for(uint64_t t=PASEK_START_US;t<=PASEK_PELNY_US;t+=KROK_US) {
-        s.przelicz(t);
-        assert(s.postep>=poprzedni&&s.postep<=1000);
-        poprzedni=s.postep;
-    }
-    assert(s.postep==1000);
+    // Etapy: odstepy ~1 s miedzy kolejnymi elementami, krotkie wejscia.
+    assert(TYTUL_IN_US>=900000&&TYTUL_IN_US<=1100000);
+    assert(SEPARATOR_IN_US-TYTUL_IN_US>=900000&&SEPARATOR_IN_US-TYTUL_IN_US<=1100000);
+    assert(LINIA1_IN_US-SEPARATOR_IN_US>=900000&&LINIA1_IN_US-SEPARATOR_IN_US<=1100000);
+    assert(LINIA2_IN_US-LINIA1_IN_US>=900000&&LINIA2_IN_US-LINIA1_IN_US<=1100000);
+    assert(TYTUL_PELNY_US-TYTUL_IN_US<=600000&&LINIA2_PELNA_US-LINIA2_IN_US<=600000);
+    // Gotowy pulpit nie czeka na cala sekwencje (minimum to tylko ochrona przed mignieciem).
+    assert(MINIMUM_US<=TYTUL_PELNY_US&&MINIMUM_US<SEKWENCJA_US);
 
-    // Kwantyzacja intro: dwie probki w tym samym kroku kwantyzacji maja te
-    // sama sygnature, bo cala tresc intro liczy sie z tq = floor(t/KROK_US)*KROK_US.
-    // Probki wybrane sa w holdzie, gdzie pasek jest juz pelny (czas ciagly staly).
-    s.przelicz(4000000);const uint64_t sygn=s.sygnatura();
-    s.przelicz(4000000+KROK_US-1);assert(s.sygnatura()==sygn);
-    s.przelicz(4000000+KROK_US);assert(s.sygnatura()!=sygn);
-    // Pasek jest ciagly, wiec sygnatura zmienia sie takze w obrebie kroku.
-    s.przelicz(PASEK_START_US+KROK_US);const uint64_t p1=s.sygnatura();
-    s.przelicz(PASEK_START_US+KROK_US+KROK_US/2);assert(s.sygnatura()!=p1);
+    Sekwencja s;s.rozpocznij(true,0);
+    assert(s.alfa_logo==LOGO_ALFA&&LOGO_ALFA==255); // logo w pelni od pierwszej klatki
+    assert(s.alfa_tytul==0&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0);
+    assert(s.rozwiniecie==0&&s.faza==Faza::Logo);
+    // Kolejnosc: w kazdym etapie widoczne sa tylko elementy wczesniejsze.
+    s.przelicz(TYTUL_IN_US-1);
+    assert(s.alfa_tytul==0&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0&&s.faza==Faza::Logo);
+    s.przelicz(TYTUL_IN_US+KROK_US*3);assert(s.alfa_tytul>0&&s.alfa_tytul<255&&s.faza==Faza::Tytul);
+    s.przelicz(TYTUL_PELNY_US);
+    assert(s.alfa_tytul==255&&s.alfa_separator==0&&s.alfa_linia1==0&&s.alfa_linia2==0);
+    s.przelicz(SEPARATOR_IN_US-1);assert(s.alfa_separator==0&&s.rozwiniecie==0);
+    s.przelicz(SEPARATOR_IN_US+KROK_US*3);
+    assert(s.alfa_separator>0&&s.rozwiniecie>0&&s.rozwiniecie<1000&&s.faza==Faza::Separator);
+    s.przelicz(SEPARATOR_PELNY_US);
+    assert(s.alfa_separator==255&&s.rozwiniecie==1000&&s.alfa_linia1==0&&s.alfa_linia2==0);
+    s.przelicz(LINIA1_IN_US+KROK_US*3);assert(s.alfa_linia1>0&&s.alfa_linia2==0&&s.faza==Faza::Linia1);
+    s.przelicz(LINIA1_PELNA_US);assert(s.alfa_linia1==255&&s.alfa_linia2==0);
+    s.przelicz(LINIA2_IN_US+KROK_US*3);assert(s.alfa_linia2>0&&s.alfa_linia2<255&&s.faza==Faza::Linia2);
+    s.przelicz(LINIA2_PELNA_US);
+    assert(s.alfa_linia2==255&&s.faza==Faza::Komplet);
+    s.przelicz(UINT64_MAX/2);assert(s.alfa_linia2==255&&s.rozwiniecie==1000);
+    // Monotonicznosc i zakresy w calej sekwencji.
+    {
+        Sekwencja p;p.rozpocznij(true,0);Sekwencja q=p;
+        for(uint64_t t=0;t<=SEKWENCJA_US+KROK_US*4;t+=KROK_US/2) {
+            q.przelicz(t);
+            assert(q.alfa_logo>=p.alfa_logo&&q.alfa_tytul>=p.alfa_tytul&&q.alfa_separator>=p.alfa_separator);
+            assert(q.alfa_linia1>=p.alfa_linia1&&q.alfa_linia2>=p.alfa_linia2&&q.rozwiniecie>=p.rozwiniecie);
+            assert(q.alfa_logo<=255&&q.alfa_tytul<=255&&q.alfa_linia2<=255&&q.rozwiniecie<=1000);
+            assert(int(q.faza)>=int(p.faza));
+            p=q;
+        }
+    }
+
+    // Kwantyzacja: probki w jednym kroku daja te sama sygnature, w holdzie
+    // sygnatura jest stala przez wiele krokow (zero klatek).
+    s.przelicz(TYTUL_IN_US+KROK_US*4);const uint64_t sygn=s.sygnatura();
+    s.przelicz(TYTUL_IN_US+KROK_US*5-1);assert(s.sygnatura()==sygn);
+    s.przelicz(TYTUL_IN_US+KROK_US*5);assert(s.sygnatura()!=sygn);
+    s.przelicz(SEKWENCJA_US+KROK_US);const uint64_t hold=s.sygnatura();
+    s.przelicz(SEKWENCJA_US+KROK_US*50);assert(s.sygnatura()==hold);
 
     // Interpolacja i brak kumulacji.
     for(unsigned weight=0;weight<=255;++weight){
@@ -136,125 +151,179 @@ int main(){
     s.aktualizuj(MINIMUM_US+FADE_US/2);assert(s.odsloniecie==127);
     s.aktualizuj(MINIMUM_US+FADE_US);assert(s.stan==Stan::Zakonczony);
     s.aktualizuj(0);assert(s.stan==Stan::Zakonczony); // zegar nie wskrzesza stanu
-    // Start=100, t = 9,999,000 us, wiec prog MINIMUM_US jest przekroczony i bez
-    // zapisanego znacznika gotowosci zanikanie domyka sie od razu.
+    // Gotowy pulpit: zanikanie startuje przed koncem sekwencji i ja zamraza -
+    // separator (od 2,0 s) nie zaczyna sie pojawiac w trakcie odchodzenia sceny.
+    s.rozpocznij(true,0);s.rozpocznij_etapy(0);s.gotowy=true;s.gotowy_od=200000;
+    s.aktualizuj(MINIMUM_US);assert(s.stan==Stan::Zanikanie&&s.fade==MINIMUM_US);
+    s.aktualizuj(MINIMUM_US+FADE_US-1);
+    assert(s.stan==Stan::Zanikanie&&s.alfa_separator==0&&s.alfa_tytul==255&&s.faza==Faza::Zanikanie);
+    assert(MINIMUM_US+FADE_US-1>SEPARATOR_IN_US);
+    s.aktualizuj(MINIMUM_US+FADE_US);assert(!s.aktywny());
+    // Zegar etapow: przed pierwszym taktem kompozytora widac wylacznie logo,
+    // nawet po dlugiej synchronicznej inicjalizacji; potem etapy ida kolejno od
+    // startu zegara (nie wszystkie naraz), a ponowny start go nie przesuwa.
+    {
+        Sekwencja e;e.rozpocznij(true,1000);
+        e.aktualizuj(1000+10000000);
+        assert(!e.etapy&&e.alfa_logo==LOGO_ALFA&&e.alfa_tytul==0&&e.alfa_linia2==0&&e.faza==Faza::Logo);
+        const uint64_t t0=1000+10000000;
+        e.rozpocznij_etapy(t0);assert(e.etapy&&e.etapy_od==t0);
+        e.aktualizuj(t0+TYTUL_IN_US-1);assert(e.alfa_tytul==0);
+        e.aktualizuj(t0+TYTUL_PELNY_US);assert(e.alfa_tytul==255&&e.alfa_separator==0);
+        e.rozpocznij_etapy(t0+5000000);assert(e.etapy_od==t0); // bez restartu
+        e.aktualizuj(t0+SEPARATOR_PELNY_US);assert(e.alfa_separator==255&&e.alfa_linia1==0);
+        e.aktualizuj(t0+LINIA1_PELNA_US);assert(e.alfa_linia1==255&&e.alfa_linia2==0);
+        e.aktualizuj(t0+LINIA2_PELNA_US);assert(e.alfa_linia2==255&&e.faza==Faza::Komplet);
+        // Zegar etapow nie startuje przed pierwsza klatka ani poza aktywnym stanem.
+        Sekwencja f;f.rozpocznij(true,500);f.rozpocznij_etapy(100);assert(f.etapy_od==500);
+        Sekwencja g0;g0.rozpocznij(false,0);g0.rozpocznij_etapy(5);assert(!g0.etapy);
+        // Gotowy pulpit nie czeka na zegar etapow: minimum liczy sie od publikacji.
+        Sekwencja d;d.rozpocznij(true,0);d.gotowy=true;d.gotowy_od=3000000;
+        d.rozpocznij_etapy(2900000);d.aktualizuj(3000000);
+        assert(d.stan==Stan::Zanikanie&&d.fade==3000000);
+        d.aktualizuj(3000000+FADE_US-1);assert(d.alfa_tytul==0); // etapy zamrozone w chwili zanikania
+    }
+    // Bez znacznika gotowosci po dlugim czasie zanikanie domyka sie od razu.
     s.rozpocznij(true,100);s.gotowy=true;s.aktualizuj(10000100);
-    assert(s.postep==1000);                 // pasek i tak jest juz pelny
     assert(s.stan==Stan::Zakonczony&&s.odsloniecie==255);
     // Z odnotowanym znacznikiem gotowosci zanikanie trwa pelne FADE_US.
     s.rozpocznij(true,100);s.gotowy=true;s.gotowy_od=6500000;
     s.aktualizuj(6500000);assert(s.stan==Stan::Zanikanie&&s.fade==6500000);
     s.aktualizuj(6500000+FADE_US/2);assert(s.odsloniecie==127);
     s.aktualizuj(6500000+FADE_US);assert(!s.aktywny());
-    s.rozpocznij(true,UINT64_MAX-8000000);s.gotowy=true;s.aktualizuj(UINT64_MAX-1600000);
+    s.rozpocznij(true,UINT64_MAX-3000000);s.gotowy=true;s.aktualizuj(UINT64_MAX-3000000+MINIMUM_US);
     assert(s.stan==Stan::Zanikanie);
     s.aktualizuj(UINT64_MAX);assert(s.stan==Stan::Zakonczony);
 
-    // Wszystkie napisy sa czystymi literalami ASCII/UTF-8 i przechodza przez
-    // wspolny dekoder bez znaku zastepczego '?'.
-    for(const char* t:{tekst(0),tekst(1),ZNAK_MARKI}){
-        for(size_t i=0;t[i];){uint32_t cp=0;const size_t n=BursztynUI::CzcionkaUI::dekoduj_utf8(t,i,&cp);
-            assert(n>0&&cp!='?');i+=n;}
+    // Filtr obszarowy: pelna maska daje pelne pokrycie w kazdym rozmiarze,
+    // szachownica sredni sie do ~50%, zaden zapis nie wychodzi poza cel.
+    {
+        static uint8_t pelna[40*30],szach[40*30];
+        for(int i=0;i<40*30;++i){pelna[i]=255;szach[i]=((i%40+i/40)&1)?255:0;}
+        for(int dw:{1,7,13,20,39,40,57})for(int dh:{1,5,15,29,30,44}) {
+            int n=0;bool ok=true;
+            auto e=[&](int x,int y,unsigned a){++n;ok&=x>=0&&x<dw&&y>=0&&y<dh&&a==255;};
+            probkuj_obszarowo(pelna,40,30,dw,dh,255,e);
+            assert(ok&&n==dw*dh);
+        }
+        unsigned min=255,max=0;
+        auto e=[&](int,int,unsigned a){if(a<min)min=a;if(a>max)max=a;};
+        probkuj_obszarowo(szach,40,30,10,10,255,e);
+        assert(min>=120&&max<=136);
+        int zero=0;auto z=[&](int,int,unsigned){++zero;};
+        probkuj_obszarowo(pelna,40,30,10,10,0,z);probkuj_obszarowo(pelna,40,30,0,10,255,z);
+        probkuj_obszarowo(nullptr,40,30,10,10,255,z);assert(zero==0);
     }
-    // Drugi komunikat zawiera polski znak "ż", pierwszy jest czysto ASCII.
-    {bool polish=false;const char* t=tekst(1);
-     for(size_t i=0;t[i];){uint32_t cp;i+=BursztynUI::CzcionkaUI::dekoduj_utf8(t,i,&cp);
-        if(cp==0x17c)polish=true;}
-     assert(polish);} // "Niezależny" zawiera U+017C
-    // Napis marki jest zgodny z maska (same wersaliki i spacja).
-    for(const char* t=ZNAK_MARKI;*t;++t)assert(*t==' '||(*t>='A'&&*t<='Z'));
 
-    // Uklad: kazdy element wysrodkowany, grupa w granicach ekranu.
-    for(int w:{1280,1920})for(unsigned dpi:{100U,125U}){
-        const int h=w==1280?720:1080;
+    // Uklad: staly, wysrodkowany, proporcjonalny i w granicach ekranu.
+    struct Ekran {int w,h;};
+    for(Ekran e:{Ekran{1024,768},Ekran{1280,720},Ekran{1366,768},Ekran{1920,1080},Ekran{800,600},
+                 Ekran{640,480},Ekran{2560,1440},Ekran{3840,2160},Ekran{1280,1024},Ekran{720,1280}})
+    for(unsigned dpi:{100U,125U,150U,175U,200U,99U}) {
+        const int w=e.w,h=e.h;
         const auto g=geometria(w,h,dpi);
+        const auto& m=g.m;
+        assert(m.skala>=1&&m.skala<=SKALA_MAX);
+        // Logotyp: proporcje maski zachowane, maly wzgledem ekranu.
         assert(g.logo_rdzen.w>0&&g.logo_rdzen.h>0);
-        assert(g.znak.w>0&&g.pasek.w>0&&g.linia1.w>0&&g.linia2.w>0);
-        assert(g.pasek.w%2==0); // parzysta szerokosc = dokladny srodek
-        assert(g.pasek.h>=3);
-        assert(g.logo_rdzen.x*2+g.logo_rdzen.w>=w-1&&g.logo_rdzen.x*2+g.logo_rdzen.w<=w);
-        assert(g.pasek.x*2+g.pasek.w>=w-1&&g.pasek.x*2+g.pasek.w<=w);
-        assert(g.znak.y>g.logo_rdzen.y+g.logo_rdzen.h);
-        assert(g.pasek.y>g.znak.y+g.znak.h);
-        assert(g.linia1.y>g.pasek.y+g.pasek.h);
-        assert(g.linia2.y>g.linia1.y+g.linia1.h);
-        assert(g.linia2.y+g.linia2.h<=h);
-        assert(g.logo_rdzen.y>=0);
-        assert(g.dirty.x>=0&&g.dirty.y>=0);
-        assert(g.dirty.x+g.dirty.w<=w&&g.dirty.y+g.dirty.h<=h);
-        // Uklad jest staly: te same prostokaty dla kazdej fazy animacji.
-        const auto inna=geometria(w,h,dpi,1000);
-        assert(inna.logo_rdzen.x==g.logo_rdzen.x&&inna.logo_rdzen.y==g.logo_rdzen.y);
-        assert(inna.znak.y==g.znak.y&&inna.pasek.y==g.pasek.y);
-        assert(inna.linia1.y==g.linia1.y&&inna.linia2.y==g.linia2.y);
-        // Wypelnienie jest przyciete do toru i rosnie z postepem.
-        assert(geometria(w,h,dpi,0).wypelnienie==0);
-        assert(geometria(w,h,dpi,1000).wypelnienie==g.pasek.w);
-        assert(geometria(w,h,dpi,2000).wypelnienie==g.pasek.w);
-        assert(geometria(w,h,dpi,500).wypelnienie<=g.pasek.w);
-        // Mala rozdzielczosc nadal daje poprawny, nieujemny uklad.
-        const auto maly=geometria(640,480,100);
-        assert(maly.logo_rdzen.w>0&&maly.logo_rdzen.h>0);
-        assert(maly.linia2.y+maly.linia2.h<=480);
-        assert(maly.dirty.x>=0&&maly.dirty.y>=0);
+        const int64_t prop=int64_t(g.logo_rdzen.w)*BursztynLogo::WYSOKOSC-int64_t(g.logo_rdzen.h)*BursztynLogo::SZEROKOSC;
+        assert(prop<=BursztynLogo::WYSOKOSC&&prop>=-BursztynLogo::WYSOKOSC);
+        assert(g.logo_rdzen.h*100<=h*(dpi==100?17:30)); // wieksza skala UI to swiadomy wybor
+        // Kazdy element wysrodkowany w poziomie (+-1 px).
+        for(const Obszar* r:{&g.logo_rdzen,&g.tytul.r,&g.separator,&g.linia1.r,&g.linia2.r}) {
+            assert(r->w>0&&r->h>0);
+            assert(r->x*2+r->w>=w-1&&r->x*2+r->w<=w+1);
+            assert(r->x>=0&&r->x+r->w<=w);
+        }
+        // Kolejnosc pionowa bez nachodzenia atramentu.
+        assert(g.logo.y>=0);
+        assert(g.logo_rdzen.y+g.logo_rdzen.h<g.tytul.r.y);
+        assert(g.tytul.r.y+g.tytul.r.h<=g.separator.y);
+        assert(g.separator.y+g.separator.h<g.linia1.r.y);
+        assert(g.linia1.r.y+g.linia1.r.h<=g.linia2.r.y);
+        assert(g.linia2.r.y+g.linia2.r.h<=h);
+        assert(g.tytul.baza>g.tytul.r.y&&g.tytul.baza<=g.tytul.r.y+g.tytul.r.h);
+        // Hierarchia: tytul > podtytul > drugi podtytul; separator cienki i krotki.
+        assert(m.tytul_wersalik>m.linia1_wersalik&&m.linia1_wersalik>m.linia2_wersalik);
+        assert(g.separator.w*2<g.tytul.r.w&&g.separator.h<=4);
+        assert(g.tytul.r.w*100<=w*86+100);
+        // Dirty obejmuje wszystko i lezy w ekranie.
+        assert(g.dirty.x>=0&&g.dirty.y>=0&&g.dirty.x+g.dirty.w<=w&&g.dirty.y+g.dirty.h<=h);
+        assert(g.dirty.y<=g.logo_rdzen.y&&g.dirty.y+g.dirty.h>=g.linia2.r.y+g.linia2.r.h);
     }
+    // Typowe rozdzielczosci: logo wyraznie mniejsze niz dawne 190 px przy 720p,
+    // tytul czytelny, ale nie przesadzony (wersaliki 3.5..5.5% wysokosci).
+    for(Ekran e:{Ekran{1024,768},Ekran{1280,720},Ekran{1366,768},Ekran{1920,1080}}) {
+        const auto g=geometria(e.w,e.h,100);
+        assert(g.logo_rdzen.h*1000<=e.h*140);
+        assert(g.m.tytul_wersalik*1000>=e.h*35&&g.m.tytul_wersalik*1000<=e.h*55);
+        // Kompozycja wysrodkowana w pionie (z lekkim uniesieniem optycznym).
+        const int srodek=(g.logo_rdzen.y+g.linia2.r.y+g.linia2.r.h)/2;
+        assert(srodek<e.h/2&&srodek>e.h/2-e.h/20);
+    }
+    assert(geometria(1280,720,100).logo_rdzen.h<=100);
 
-    // Render: kazda klatka jest kompletna, tlo jest czarne, atrament istnieje.
-    for(int w:{1280,1920})for(unsigned dpi:{100U,125U}){
-        const int h=w==1280?720:1080;
+    // Render: kazdy etap pokazuje tylko swoje elementy, wszystko wysrodkowane.
+    for(Ekran e:{Ekran{1280,720},Ekran{1920,1080},Ekran{1024,768},Ekran{1366,768}})for(unsigned dpi:{100U,125U}){
+        const int w=e.w,h=e.h;
         std::vector<uint32_t> obraz(size_t(w)*h,0x00FF00FFu);
-        for(uint64_t t:{uint64_t(0),LOGO_IN_US,ZNAK_PELNY_US,PASEK_PELNY_US,LINIA2_PELNA_US,MINIMUM_US}){
+        const auto g=geometria(w,h,dpi);
+        struct Etap {uint64_t t;bool tytul,separator,l1,l2;};
+        for(Etap et:{Etap{0,false,false,false,false},Etap{TYTUL_IN_US,false,false,false,false},
+                     Etap{TYTUL_PELNY_US,true,false,false,false},
+                     Etap{SEPARATOR_PELNY_US,true,true,false,false},
+                     Etap{LINIA1_PELNA_US,true,true,true,false},
+                     Etap{LINIA2_PELNA_US,true,true,true,true}}){
             std::fill(obraz.begin(),obraz.end(),0x00FF00FFu);
-            Sekwencja draw;draw.rozpocznij(true,0);draw.przelicz(t);
+            Sekwencja draw;draw.rozpocznij(true,0);draw.przelicz(et.t);
             rysuj(obraz.data(),w,h,w,dpi,draw,true);
-            const auto g=geometria(w,h,dpi);
             // Caly ekran zostal odtworzony z tla.
             assert(obraz[0]==TLO&&obraz.back()==TLO);
-            assert(obraz[size_t(h/2)*w+0]==TLO);
-            // Logotyp ma atrament od pierwszej klatki.
-            const auto logo=atrament(obraz.data(),w,h,w,0,g.pasek.y);
+            for(uint32_t px:obraz)assert(px!=0x00FF00FFu);
+            // Logotyp ma atrament od pierwszej klatki i jest wysrodkowany.
+            const auto logo=atrament_w(obraz.data(),w,h,w,g.logo);
             assert(logo.ok());
-            assert(srodek_x(logo)==w/2||srodek_x(logo)==w/2-1);
-            // Elementy z alfa 0 nie zostawiaja swojego atramentu: przy t=0 pod
-            // logotypem widoczna jest tylko jego bursztynowa poswiata, ale ani
-            // napisu, ani paska, ani komunikatow (brak pikseli jasnych).
-            if(t==uint64_t(0)) {
-                int jasne=0;
-                for(int y=g.znak.y;y<h;++y)
-                    for(int x=0;x<w;++x) {
-                        const uint32_t c=obraz[size_t(y)*w+x];
-                        const unsigned r=(c>>16)&255,gg=(c>>8)&255,b=c&255;
-                        if(r>200&&gg>200&&b>200)++jasne;
-                    }
-                assert(jasne==0);
-            }
+            assert(srodek_x(logo)>=w/2-1&&srodek_x(logo)<=w/2);
+            assert(tylko_tlo(obraz.data(),w,h,w,g.tytul.r)==!et.tytul);
+            assert(tylko_tlo(obraz.data(),w,h,w,g.separator)==!et.separator);
+            assert(tylko_tlo(obraz.data(),w,h,w,g.linia1.r)==!et.l1);
+            assert(tylko_tlo(obraz.data(),w,h,w,g.linia2.r)==!et.l2);
+            // Poza prostokatem ukladu nic nie jest rysowane.
+            for(int y=0;y<h;y+=7)for(int x=0;x<w;x+=5)
+                if(x<g.dirty.x||x>=g.dirty.x+g.dirty.w||y<g.dirty.y||y>=g.dirty.y+g.dirty.h)
+                    assert(obraz[size_t(y)*w+x]==TLO);
         }
-        // Klatka koncowa: wszystkie elementy widoczne i wysrodkowane.
-        std::fill(obraz.begin(),obraz.end(),TLO);
-        Sekwencja draw;draw.rozpocznij(true,0);draw.przelicz(MINIMUM_US);
-        rysuj(obraz.data(),w,h,w,dpi,draw,true);
-        const auto g=geometria(w,h,dpi);
-        const auto logo=atrament(obraz.data(),w,h,w,0,g.znak.y);
-        const auto znak=atrament(obraz.data(),w,h,w,g.znak.y,g.pasek.y);
-        const auto pasek=atrament(obraz.data(),w,h,w,g.pasek.y,g.pasek.y+g.pasek.h);
-        const auto l1=atrament(obraz.data(),w,h,w,g.linia1.y,g.linia1.y+g.linia1.h);
-        const auto l2=atrament(obraz.data(),w,h,w,g.linia2.y,g.linia2.y+g.linia2.h);
-        for(const auto* z:{&logo,&znak,&pasek,&l1,&l2}){
+        // Klatka koncowa: atrament kazdego elementu wysrodkowany na ekranie.
+        const auto t=atrament_w(obraz.data(),w,h,w,g.tytul.r);
+        const auto sep=atrament_w(obraz.data(),w,h,w,g.separator);
+        const auto l1=atrament_w(obraz.data(),w,h,w,g.linia1.r);
+        const auto l2=atrament_w(obraz.data(),w,h,w,g.linia2.r);
+        for(const auto* z:{&t,&sep,&l1,&l2}){
             assert(z->ok());
-            const int d=srodek_x(*z)-w/2;
-            assert(d>=-1&&d<=1);
+            const int d=(z->x0+z->x1+1)-w; // podwojona odchylka srodka atramentu
+            assert(d>=-3&&d<=3);
         }
-        // Pasek jest pelny i ma kolor akcentu w srodku.
-        const auto srodek=obraz[size_t(g.pasek.y+g.pasek.h/2)*w+w/2];
-        assert(((srodek>>16)&255)>200&&(srodek&255)<120);
-        // Pelny pasek rozciaga sie na cala szerokosc toru.
-        assert(pasek.x1-pasek.x0>=g.pasek.w-g.pasek.h);
-        // Napisy maja atrament i nie nachodza na pasek.
-        assert(l1.y0>g.pasek.y+g.pasek.h);
-        assert(l2.y0>l1.y1);
+        // Wygladzanie: tytul ma wiele posrednich odcieni, nie tylko 0/kolor.
+        unsigned posrednie=0,pelne=0;
+        for(int y=g.tytul.r.y;y<g.tytul.r.y+g.tytul.r.h;++y)
+            for(int x=g.tytul.r.x;x<g.tytul.r.x+g.tytul.r.w;++x) {
+                const uint32_t c=obraz[size_t(y)*w+x];
+                if(c==TEKST)++pelne;else if(c!=TLO)++posrednie;
+            }
+        assert(pelne>0&&posrednie>unsigned(g.tytul.r.w));
+        // Separator: bursztyn w srodku, wygaszone konce.
+        const uint32_t sc=obraz[size_t(g.separator.y)*w+w/2];
+        assert(((sc>>16)&255)>180&&((sc>>8)&255)>90&&(sc&255)<40);
+        const uint32_t sk=obraz[size_t(g.separator.y)*w+g.separator.x];
+        assert(((sk>>16)&255)<((sc>>16)&255)/2);
+        // Kolory: tytul jasny, drugi podtytul przygaszony.
+        unsigned max_l2=0;
+        for(int y=l2.y0;y<=l2.y1;++y)for(int x=l2.x0;x<=l2.x1;++x){
+            const unsigned v=(obraz[size_t(y)*w+x]>>8)&255;if(v>max_l2)max_l2=v;}
+        assert(max_l2<=((TEKST_PRZYGASZONY>>8)&255)&&max_l2>=0x60);
     }
 
-    // Wlasciwosci maski: pokrycie, proporcje i spojnosc z atramentem.
+    // Wlasciwosci maski logotypu.
     {
         uint64_t suma=0;int niezerowe=0;
         for(int i=0;i<BursztynLogo::SZEROKOSC*BursztynLogo::WYSOKOSC;++i){
@@ -262,25 +331,11 @@ int main(){
             if(BursztynLogo::MASKA[i])++niezerowe;
         }
         assert(suma>0&&niezerowe>BursztynLogo::SZEROKOSC);
-        // Poswiata jest rozmyciem rdzenia, wiec nigdy nie jest od niego jasniejsza.
         assert(BursztynLogo::POSWIATA_SZEROKOSC>0&&BursztynLogo::POSWIATA_WYSOKOSC>0);
-        // Pole widzenia poswiaty jest wieksze od rdzenia po obu stronach.
         assert(BursztynLogo::POSWIATA_OD_X<0&&BursztynLogo::POSWIATA_OD_Y<0);
         assert(BursztynLogo::POSWIATA_DO_X>1000&&BursztynLogo::POSWIATA_DO_Y>1000);
-        // Atrament rdzenia obejmuje jego pelna wysokosc (brak pustych wierszy).
         assert(BursztynLogo::MASKA_ATRAMENT_OD==0);
         assert(BursztynLogo::MASKA_ATRAMENT_DO==BursztynLogo::WYSOKOSC);
-    }
-
-    // Uklad na innych rozdzielczosciach i skalach.
-    for(int w:{800,1024,1366,1600})for(unsigned dpi:{100U,125U,150U,200U}){
-        const int h=w==800?600:(w==1024?768:768);
-        const auto g=geometria(w,h,dpi);
-        assert(g.logo_rdzen.w>0&&g.logo_rdzen.h>0&&g.pasek.w>0);
-        assert(g.logo_rdzen.x>=0&&g.logo_rdzen.x+g.logo_rdzen.w<=w);
-        assert(g.linia2.y+g.linia2.h<=h);
-        assert(g.pasek.h>=3&&g.pasek.h<=24);
-        assert(g.pasek.w%2==0);
     }
 
     // Cykl powitalny: powierzchnia wielokrotnego uzytku, bez wyciekow.
@@ -370,7 +425,7 @@ int main(){
     for(unsigned cycle=0;cycle<100;++cycle)for(auto stage:etapy)for(bool ready:{false,true}) {
         width=320;height=240;now=123;powitanie_inicjalizuj(true);
         assert(sekwencja.start==123&&sekwencja.fade==0);
-        assert(sekwencja.postep==0&&sekwencja.alfa_logo==LOGO_ALFA_START);
+        assert(sekwencja.rozwiniecie==0&&sekwencja.alfa_tytul==0&&sekwencja.alfa_logo==LOGO_ALFA&&!sekwencja.etapy);
         assert(!pulpit_gotowy&&!tlo_tapeta&&pulpit_pid==0&&nastepny==0);
         auto source=[&](){return powitanie_zrodlo(
             reinterpret_cast<uint8_t*>(cycle_scene.data()),320,240,1280,0,0,320,240,100);};
@@ -411,10 +466,10 @@ int main(){
         };
         src();
         powitanie_publikacja();
+        powitanie_tick(); // kompozytor zyje od publikacji: start zegara etapow
 
-        // Najpierw: zmiana obrazu MUSI wymusic klatke. Probki w trakcie
-        // wypelniania paska roznia sie wartoscia postepu (1900000 -> 50,
-        // 1980000 -> 100).
+        // Najpierw: zmiana obrazu MUSI wymusic klatke (1,98 s: hold po tytule,
+        // 2,08 s: wejscie separatora).
         now = 1980000;
         powitanie_tick();
         const unsigned po_zmianie = full + partial;
@@ -427,13 +482,13 @@ int main(){
         powitanie_tick();
         assert(full + partial == po_zmianie + 1);
 
-        // Faza hold: ekran jest identyczny od 4,3 s do 6,3 s.
-        now = 4300000;
+        // Faza hold: po wejsciu drugiego podtytulu ekran jest staly.
+        now = LINIA2_PELNA_US;
         powitanie_tick();
         src();
         const unsigned start_hold = full + partial;
         unsigned przed = start_hold;
-        for (uint64_t t = 4300000 + KROK_US; t < 6300000; t += 16000) {
+        for (uint64_t t = LINIA2_PELNA_US + KROK_US; t < LINIA2_PELNA_US + 2000000; t += 16000) {
             now = t;
             powitanie_tick();
             if (full + partial != przed) { przed = full + partial; src(); }

@@ -36,29 +36,45 @@ for signature in ('uint64_t reset_ps2()', 'void wylacz_qemu()'):
     p=body(power,signature)
     check(p.index('wycisz_start_przed_restartem();')<p.index('virtio_gpu_stop_submissions();')<p.index('virtio_gpu_quiesce_for_reboot();')<p.index('psf_flush_cache();')<(p.index('diag_start_reboot("[STARTUP] reboot handoff")') if signature.startswith('uint64_t') else p.index('asm volatile("cli"')),'power stops splash before GPU, filesystem and handoff')
 
-# Typografia i rendering: wylacznie wspolny renderer grayscale Unicode.
-check('CzcionkaUI::rysuj_tekst_wygladzony' in welcome_h,'shared Unicode grayscale text renderer')
-check('static_cast<uint32_t' not in welcome_h and 'new uint8_t' not in welcome_h,'no private rasterizer or heap allocation in the renderer')
-check('CzcionkaUI::bitmapa_znaku' in welcome_h,'glyph metrics come from the shared font table, not a copy')
+# Typografia: prawdziwe kontury OpenType (Noto Sans) zrasteryzowane podczas
+# budowania rasteryzatorem BSF; jadro tylko zmniejsza maski filtrem obszarowym.
+napisy=(root/'jadro/gui/napisy_powitania_dane.h').read_text()
+check('napisy_powitania_dane.h' in welcome_h and 'NapisyPowitania::TYTUL' in welcome_h,'title glyphs come from the generated TTF/OTF masks')
+check('CzcionkaUI' not in welcome_h and 'bitmapa_znaku' not in welcome_h,'no fixed 16 px bitmap font upscaling for splash text')
+check('postep_rozstrzelony' not in welcome_h and 'odstep' not in welcome_h,'no artificial letter spacing (tracking)')
+check('stbtt_' not in welcome_h and 'stbtt_' not in welcome,'no TTF parser in Ring 0 (policy of bsf/config_kernel.inc)')
+check('czytaj_z_pliku' not in welcome_h and 'czytaj_z_pliku' not in welcome,'splash does not depend on the filesystem')
+check('probkuj_obszarowo(' in welcome_h,'area-filter downsampling for logo and text (high-quality, no FPU)')
+check('PLIK GENEROWANY' in napisy and 'czcionki/otf/NotoSans-Regular.otf' in napisy,'text masks are generated from an audited release font')
+check('static_cast<uint32_t' not in welcome_h and 'new uint8_t' not in welcome_h,'no heap allocation in the renderer')
 
-# Nowa animacja: czarne tlo, logotyp, napis, pasek i dwa komunikaty.
+# Animacja: czarne tlo, logotyp, tytul, separator i dwa podtytuly kolejno.
 check('constexpr uint32_t TLO=0x000000' in welcome_h,'brand background is black')
 check('BursztynLogo::MASKA' in welcome_h and 'BursztynLogo::POSWIATA' in welcome_h,'logo is a compiled coverage mask with soft glow')
 check('logo_maska_dane.h' in welcome_h,'mask header included by the renderer')
 check('png_dekoder' not in welcome_h and 'png_dekoder' not in welcome,'no PNG decoder on the boot path')
 check('stbi_load' not in welcome_h and 'tinf_uncompress' not in welcome,'no DEFLATE/inflate on the boot path')
 check('Sekwencja' in welcome_h and 'void przelicz(uint64_t t)' in welcome_h,'single absolute-time sample drives all visible content')
-check('constexpr uint64_t KROK_US=80000' in welcome_h,'intro is quantized so idle frames do not re-render')
-check('postep' in welcome_h and 'PASEK_PELNY_US' in welcome_h,'loading bar progress is time-driven and bounded')
-check('constexpr uint64_t MINIMUM_US=6400000, FADE_US=600000' in welcome_h,'minimum sequence time and fade are unchanged')
-check('"Polski system operacyjny"' in welcome_h and '"Niezale\\u017cny system"' in welcome_h,'both existing messages are preserved')
-check('"BURSZTYN OS"' in welcome_h,'brand wordmark under the logo')
+check('constexpr uint64_t KROK_US=50000' in welcome_h,'intro is quantized so idle frames do not re-render')
+for stala in ('TYTUL_IN_US=1000000','SEPARATOR_IN_US=2000000','LINIA1_IN_US=3000000','LINIA2_IN_US=4000000'):
+    check('constexpr uint64_t '+stala in welcome_h,'staged reveal ~1 s apart: '+stala)
+check('constexpr uint64_t MINIMUM_US=1500000, FADE_US=600000' in welcome_h,'ready desktop is not held for the full sequence (anti-flash minimum only)')
+check('"Polski system operacyjny"' in welcome_h and '"Niezale\\u017cny system"' in welcome_h,'both subtitles are preserved')
+check('"Bursztyn OS"' in welcome_h,'brand title under the logo')
 check('wygladz(' in welcome_h and 'liniowo(' in welcome_h,'smoothstep timing without FPU')
 check('float' not in welcome_h and 'double' not in welcome_h,'no FPU in the renderer')
 check('malloc' not in welcome_h and 'new ' not in welcome_h,'no per-frame allocation in the renderer')
-check('wysrodkuj(' in welcome_h and 'x_dla_atramentu(' in welcome_h,'every element is centered on visible ink')
-check('granice_atramentu(' in welcome_h,'ink bounds, not advance widths, drive horizontal centering')
-check('obszar_w_ekranie(' in welcome_h,'all draws are clipped to the screen')
+check('wysrodkuj(' in welcome_h,'every element is horizontally centered')
+pump=body(kernel,'void powitanie_punkt_startu(')
+check('wielozadaniowosc_aktywna || !powitanie_aktywne()' in pump and pump.index('return')<pump.index('zablokuj_ekran();'),
+      'boot checkpoints only before PID 0 loop and never take the screen lock after the splash')
+check('powitanie_obsluz_start();' in pump and 'odblokuj_ekran();' in pump,'boot checkpoint presents under the existing screen lock')
+check('powitanie_punkt_startu();' in body(kernel,'bool instaluj_paczke('),'package installation is a non-blocking splash checkpoint')
+check('POWITANIE_ODSTEP_STARTU_US' in body(welcome,'bool powitanie_obsluz_start('),'boot checkpoint presentation is rate limited')
+check('rozpocznij_etapy(now)' in welcome,'stage clock starts when the splash can actually animate')
+tapety_src=(root/'jadro/gui/tapety.cpp').read_text()
+check(tapety_src.count('powitanie_punkt_startu();')>=3,'wallpaper package verification/installation (~10 MB) has splash checkpoints')
+check('obszar_w_ekranie(' in welcome_h and 'Przyciecie' in welcome_h,'all draws are clipped to the screen')
 
 # Generowana maska jest wersjonowana razem ze zrodlem.
 check('PLIK GENEROWANY' in logo and 'namespace BursztynLogo' in logo,'mask header is generated, not hand-edited')

@@ -34,7 +34,7 @@ static void validate(const Published& p,unsigned dpi,uint64_t czas) {
     assert(atrament(p.pixels,p.w,p.h,g.logo));
     // Komunikaty sa niewidoczne na starcie animacji.
     if(czas< Powitanie::LINIA1_IN_US) {
-        for(int y=g.linia1.y;y<p.h;++y)
+        for(int y=g.linia1.r.y;y<p.h;++y)
             for(int x=0;x<p.w;++x)
                 assert(p.pixels[size_t(y)*p.w+x]==Powitanie::TLO);
     }

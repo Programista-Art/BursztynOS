@@ -1,9 +1,11 @@
 // Podglad klatek ekranu powitalnego: czysty host, ten sam produkcyjny renderer.
-// Zapisuje PPM (P6) w wybranych chwilach animacji dla dwoch rozdzielczosci.
+// Zapisuje PPM (P6) w kluczowych chwilach animacji dla typowych rozdzielczosci
+// i wypisuje geometrie ukladu. Bez emulatora i bez prawdziwego czekania.
+//   g++ -std=c++17 -O2 -Ijadro/gui -I. narzedzia/podglad_animacji_startowej.cpp -o podglad
+//   ./podglad KATALOG
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 #include <vector>
 #include "ekran_powitalny.h"
 
@@ -12,20 +14,25 @@ static unsigned checks = 0;
 #define assert(c) do { ++checks; if(!(c)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c); std::abort(); } } while(0)
 
 int main(int argc, char** argv) {
+    using namespace Powitanie;
     const char* katalog = argc > 1 ? argv[1] : ".";
     struct Tryb { int w, h; unsigned dpi; const char* nazwa; };
-    const Tryb tryby[] = { {1280,720,100,"720p"}, {1920,1080,100,"1080p"}, {1920,1080,125,"1080p125"} };
-    const uint64_t czasy[] = {0, 400000, 800000, 1200000, 1600000, 2000000, 2400000,
-                              2800000, 3400000, 3700000, 4200000, 5000000};
+    const Tryb tryby[] = { {1024,768,100,"1024x768"}, {1280,720,100,"1280x720"},
+                           {1366,768,100,"1366x768"}, {1920,1080,100,"1920x1080"},
+                           {1920,1080,125,"1920x1080-125"}, {800,600,100,"800x600"} };
+    // Probki: logo, wejscie tytulu, tytul, separator, podtytul, drugi podtytul, komplet.
+    const uint64_t czasy[] = {0, 300000, 1200000, 1600000, 2200000, 2600000,
+                              3250000, 3600000, 4250000, 4600000};
     for (const auto& t : tryby) {
         std::vector<uint32_t> obraz(size_t(t.w) * t.h, 0x00FF00FF); // magenta = niepomalowane
         for (uint64_t czas : czasy) {
-            Powitanie::Sekwencja s;
+            Sekwencja s;
             s.rozpocznij(true, 0);
+            s.rozpocznij_etapy(0); // kompozytor aktywny od pierwszej klatki
             s.aktualizuj(czas);
-            Powitanie::rysuj(obraz.data(), t.w, t.h, t.w, t.dpi, s, true);
+            rysuj(obraz.data(), t.w, t.h, t.w, t.dpi, s, true);
             char nazwa[256];
-            snprintf(nazwa, sizeof(nazwa), "%s/powitanie-%s-%03llums.ppm", katalog,
+            snprintf(nazwa, sizeof(nazwa), "%s/powitanie-%s-%04llums.ppm", katalog,
                      t.nazwa, (unsigned long long)(czas / 1000));
             FILE* f = fopen(nazwa, "wb");
             assert(f != nullptr);
@@ -39,18 +46,20 @@ int main(int argc, char** argv) {
                     fwrite(rgb, 1, 3, f);
                 }
             fclose(f);
-            // Sanity: tlo jest czarne, nie magenta, i sa piksele logotypu.
-            assert(obraz[0] == Powitanie::TLO);
+            assert(obraz[0] == TLO);
         }
-        // Kontrola ukladu: blok miesci sie w ekranie i nie nachodzi na krawedzie.
-        const auto m = Powitanie::miary(t.w, t.h, t.dpi);
-        const auto g = Powitanie::geometria(t.w, t.h, t.dpi);
-        printf("%s: maska %dx%d, logo %dx%d, znak %dx%d@%u, pasek %dx%d, blok %dx%d (y=%d..%d), dirty %d,%d %dx%d\n",
-               t.nazwa, BursztynLogo::SZEROKOSC, BursztynLogo::WYSOKOSC,
-               m.logo_w, m.logo_h, m.znak_w, m.znak_h, m.p_znak, m.pasek_w, m.pasek_h,
-               m.blok_w, m.blok_h, g.logo.y, g.linia2.y + g.linia2.h, g.dirty.x, g.dirty.y, g.dirty.w, g.dirty.h);
+        const auto g = geometria(t.w, t.h, t.dpi);
+        const auto& m = g.m;
+        printf("%s@%u%%: skala %d, logo %d,%d %dx%d | tytul %d,%d %dx%d (baza %d) | separator %d,%d %dx%d | "
+               "l1 %d,%d %dx%d | l2 %d,%d %dx%d | blok %d (y=%d..%d)\n",
+               t.nazwa, t.dpi, m.skala, g.logo_rdzen.x, g.logo_rdzen.y, g.logo_rdzen.w, g.logo_rdzen.h,
+               g.tytul.r.x, g.tytul.r.y, g.tytul.r.w, g.tytul.r.h, g.tytul.baza,
+               g.separator.x, g.separator.y, g.separator.w, g.separator.h,
+               g.linia1.r.x, g.linia1.r.y, g.linia1.r.w, g.linia1.r.h,
+               g.linia2.r.x, g.linia2.r.y, g.linia2.r.w, g.linia2.r.h,
+               m.blok_h, g.logo_rdzen.y, g.linia2.r.y + g.linia2.r.h);
         assert(g.logo.y >= 0);
-        assert(g.linia2.y + g.linia2.h <= t.h);
+        assert(g.linia2.r.y + g.linia2.r.h <= t.h);
         assert(g.dirty.x >= 0 && g.dirty.x + g.dirty.w <= t.w);
     }
     printf("Podglad klatek: %u/%u PASS\n", checks, checks);

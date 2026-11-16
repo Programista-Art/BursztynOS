@@ -27,6 +27,8 @@ uint64_t poprzedni_krok=UINT64_MAX;
 // a nie z uplywu czasu: w holdzie ekran jest identyczny przez sekundy i nie
 // wolno wtedy skladac pelnej klatki ani transferowac jej do GPU.
 uint64_t poprzednia_sygnatura=UINT64_MAX;
+// Najblizsza dozwolona prezentacja z watku startowego (punkty kontrolne startu).
+uint64_t nastepny_start=0;
 #if BURSZTYNDIAGSPLASHTIMING
 uint64_t prezentacje=0;
 void diag_czas(const char* event,uint64_t now) {
@@ -68,7 +70,7 @@ void zakoncz_powitanie() {
     zwolnij_powierzchnie();
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zakonczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
+    nastepny=0;nastepny_start=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 }
 void powitanie_wycisz() {
@@ -79,7 +81,7 @@ void powitanie_wycisz() {
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     zwolnij_powierzchnie();
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zniszczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
+    nastepny=0;nastepny_start=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 void powitanie_reset_ekranu() {
     PrezentacjaStartu::uniewaznij();
@@ -151,6 +153,15 @@ static void powitanie_aktualizuj_stan(bool pacing){
         skladacz_obrazu_oznacz_dirty();
         return;
     }
+    // Pierwszy takt kompozytora po publikacji startuje zegar etapow (tytul,
+    // separator, podtytuly). Wczesniej jadro wykonuje synchroniczna
+    // inicjalizacje i nikt nie odswieza ekranu, wiec etapy liczone od pierwszej
+    // klatki pojawilyby sie wszystkie naraz po jej zakonczeniu.
+    if(pacing&&!sekwencja.etapy){
+        sekwencja.rozpocznij_etapy(now);
+        diag_czas("stages_start",now);
+        nastepny=0;
+    }
     if(pacing&&now<nastepny)return;
     if(pacing)nastepny=now>UINT64_MAX-33333?UINT64_MAX:now+33333;
     const auto stan=sekwencja.stan;
@@ -207,6 +218,23 @@ static void powitanie_aktualizuj_stan(bool pacing){
     }
 }
 void powitanie_tick(){powitanie_aktualizuj_stan(true);}
+// Synchroniczna inicjalizacja jadra (siec, system plikow, instalacja aplikacji
+// i tapet) trwa po pierwszej klatce nawet kilka sekund, zanim petla PID 0 zacznie
+// obslugiwac kompozytor. Punkty kontrolne startu pozwalaja pokazac w tym czasie
+// kolejne etapy. Nic tu nie czeka: brak zmiany obrazu albo zbyt bliski poprzedni
+// punkt konczy sie natychmiast, a zmiana kosztuje jedna pelna prezentacje.
+bool powitanie_obsluz_start(){
+    if(!powitanie_aktywne()||!animacja_rozpoczeta||zakonczenie_oczekuje)return false;
+    const uint64_t now=czas_monotoniczny_us();
+    if(now<nastepny_start)return false;
+    nastepny_start=now>UINT64_MAX-POWITANIE_ODSTEP_STARTU_US?UINT64_MAX:now+POWITANIE_ODSTEP_STARTU_US;
+    if(!sekwencja.etapy){sekwencja.rozpocznij_etapy(now);diag_czas("stages_start",now);}
+    const uint64_t przed=poprzednia_sygnatura;
+    powitanie_aktualizuj_stan(false);
+    if(poprzednia_sygnatura==przed||!powitanie_aktywne())return false;
+    PrzeniesNaEkran();
+    return true;
+}
 uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int rw,int rh,uint32_t skala){
     if(!powitanie_aktywne()||w<=0||h<=0||int64_t(pitch)<int64_t(w)*4)return scena;
     // Pacing limits scheduled work, never the state of an actual presentation.
@@ -266,7 +294,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         };
         const auto znak=Powitanie::obszar_znaku(w,h,skala);
         SplashFirstDiag::id().title=ink(znak);
-        // Komunikaty pojawiaja sie dopiero po zapelnieniu paska, wiec pierwsza
+        // Podtytuly pojawiaja sie dopiero w pozniejszych etapach, wiec pierwsza
         // klatka sprawdza gotowosc ich obszaru, a nie atrament (go jeszcze nie ma).
         SplashFirstDiag::id().message=1;
 #endif

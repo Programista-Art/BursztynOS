@@ -1097,6 +1097,16 @@ LOGO_MASKA_H := jadro/gui/logo_maska_dane.h
 $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 	$(PYTHON) narzedzia/generuj_maske_logo.py --zrodlo obrazy/logo.png --wyjscie $@
 
+# Maski napisow ekranu powitalnego. Jadro nie parsuje TTF/OTF w Ring 0, a ekran
+# startuje przed systemem plikow: kontury Noto Sans sa rasteryzowane podczas
+# budowania rasteryzatorem BSF (stb_truetype); naglowek jest wersjonowany.
+NAPISY_POWITANIA_H := jadro/gui/napisy_powitania_dane.h
+NAPISY_POWITANIA_CZCIONKA := czcionki/otf/NotoSans-Regular.otf
+$(NAPISY_POWITANIA_H): $(NAPISY_POWITANIA_CZCIONKA) narzedzia/generuj_napisy_powitania.cpp bsf/vendor/stb_truetype.h
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O2 -I. -Wno-unused-function narzedzia/generuj_napisy_powitania.cpp -o .wm-test/generuj-napisy-powitania
+	.wm-test/generuj-napisy-powitania --czcionka $(NAPISY_POWITANIA_CZCIONKA) --wyjscie $@
+
 
 
 
@@ -2212,7 +2222,7 @@ test-startup-visibility:
 	$(PYTHON) testy/test_startup_policy.py
 
 # Welcome layer dependencies and deterministic host regression suite.
-ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h $(LOGO_MASKA_H)
+ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h jadro/gui/ui_skala.h $(LOGO_MASKA_H) $(NAPISY_POWITANIA_H)
 grafika.o skladacz_obrazu.o kernel.o: jadro/gui/ekran_powitalny_api.h
 kernel.o: jadro/rdzen/opcje_startowe.h
 
@@ -2226,6 +2236,7 @@ test-powitanie:
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
 	$(PYTHON) testy/test_logo_maska.py
+	$(PYTHON) testy/test_napisy_powitania.py
 	$(PYTHON) testy/test_powitanie_policy.py
 
 BURSZTYNDIAGSTARTUPREBOOT ?= 0

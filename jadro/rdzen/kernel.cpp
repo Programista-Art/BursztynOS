@@ -805,6 +805,7 @@ bool instaluj_paczke(
     const char* sciezka_programu,
     const uint8_t* blob_start,
     const uint8_t* blob_end) {
+    powitanie_punkt_startu();
 
     if (!zapisz_manifest(
             sciezka_manifestu,
@@ -2322,6 +2323,18 @@ void wypisz_ilosc_ram() {
 
 } // namespace
 
+// Punkt kontrolny synchronicznego startu: ekran powitalny moze pokazac kolejny
+// etap, zanim petla PID 0 przejmie kompozytor. Nieblokujace (powitanie_obsluz_start
+// konczy sie natychmiast bez zmiany obrazu); po wlaczeniu wielozadaniowosci
+// i po zakonczeniu ekranu powitalnego nie robi nic i nie bierze blokady.
+void powitanie_punkt_startu() {
+    if (wielozadaniowosc_aktywna || !powitanie_aktywne())
+        return;
+    zablokuj_ekran();
+    (void)powitanie_obsluz_start();
+    odblokuj_ekran();
+}
+
 // Interfejs dla instalatora (jadro/gui/instalator.cpp): kroki opcjonalnej kopii zdjec na dysk docelowy.
 extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem) { return galeria_inst_start(mbi, razem); }
 extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe) { galeria_inst_step(wykonane, gotowe); }
@@ -2958,6 +2971,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     wypisz_log(
         "[SIEC] Inicjalizacja stosu sieciowego zakonczona.");
+    powitanie_punkt_startu();
 
     /* ---------------------------------------------------------------------
      * Dzwiek
@@ -2975,6 +2989,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log(
             "[HDA] Brak dostepnego urzadzenia HDA.");
     }
+    powitanie_punkt_startu();
 
     /* ---------------------------------------------------------------------
      * PSF - osobny, niekolidujacy obszar wirtualny
@@ -3055,6 +3070,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     /* Pierwszy skan wykrywa urzadzenia przed istnieniem PSF. Ten przebieg
        zapisuje raport dopiero po utworzeniu /logi. */
     skanuj_magistrale_pci();
+    powitanie_punkt_startu();
 
     wypisz_log(
         "[BSP] Drzewiasty system plikow PSF gotowy.");
@@ -3072,9 +3088,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
     // Restoring the display mode can compose immediately, before WM exists.
     // Resolve the current palette before that first composition.
+    powitanie_punkt_startu();
     motyw_inicjalizuj();
     tapety_inicjalizuj(g_multiboot_info_ptr);
+    powitanie_punkt_startu();
     ekran_inicjalizuj();
+    powitanie_punkt_startu();
     PrezentacjaStartu::zakoncz_inicjalizacje();
     input_set_pointer_ready(true);
     input_pointer_boot_diagnostic();

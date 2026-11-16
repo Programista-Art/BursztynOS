@@ -19,13 +19,13 @@ int main(){
     const Sample cases[]={
         {0,"start"},
         {300000,"logo fade-in"},
-        {LOGO_IN_US+KROK_US,"logo pelny"},
-        {ZNAK_PELNY_US+KROK_US,"napis pelny"},
-        {PASEK_IN_US+KROK_US,"tor paska"},
-        {PASEK_PELNY_US,"pasek 100%"},
-        {LINIA1_IN_US+500000,"pierwszy komunikat"},
-        {LINIA2_PELNA_US+KROK_US,"drugi komunikat"},
-        {MINIMUM_US,"hold koncowy"}
+        {TYTUL_IN_US+KROK_US*4,"wejscie tytulu"},
+        {TYTUL_PELNY_US+KROK_US,"tytul pelny"},
+        {SEPARATOR_IN_US+KROK_US*4,"rozwijanie separatora"},
+        {SEPARATOR_PELNY_US,"separator pelny"},
+        {LINIA1_PELNA_US,"pierwszy podtytul"},
+        {LINIA2_PELNA_US+KROK_US,"drugi podtytul"},
+        {SEKWENCJA_US*3,"hold koncowy"}
     };
     for(unsigned dpi:{100U,125U}) {
         std::vector<uint32_t> piksele(1280*720);
@@ -35,32 +35,36 @@ int main(){
             // Kazda klatka ma atrament logotypu - nigdy pusty ekran.
             const auto g=geometria(1280,720,dpi);
             assert(atrament_w(piksele,1280,720,g.logo));
-            // Logotyp jest zawsze w pelni nasycony po fazie wejscia.
-            if(c.us>=LOGO_IN_US)assert(s.alfa_logo==LOGO_ALFA_KONIEC);
-            if(c.us>=ZNAK_PELNY_US)assert(s.alfa_znak==255);
-            if(c.us>=PASEK_PELNY_US)assert(s.postep==1000);
+            assert(s.alfa_logo==LOGO_ALFA);
+            if(c.us>=TYTUL_PELNY_US)assert(s.alfa_tytul==255);
+            if(c.us>=SEPARATOR_PELNY_US)assert(s.rozwiniecie==1000);
+            // Element widoczny dokladnie wtedy, gdy jego krycie > 0.
+            assert(atrament_w(piksele,1280,720,g.tytul.r)==(s.alfa_tytul>0));
+            assert(atrament_w(piksele,1280,720,g.separator)==(s.alfa_separator>0));
+            assert(atrament_w(piksele,1280,720,g.linia1.r)==(s.alfa_linia1>0));
+            assert(atrament_w(piksele,1280,720,g.linia2.r)==(s.alfa_linia2>0));
         }
-        // Kazdy krok interpolacji paska ma niepuste, spojne wypelnienie.
-        for(unsigned step=0;step<=40;++step) {
-            const uint64_t t=PASEK_START_US+(PASEK_PELNY_US-PASEK_START_US)*step/40;
+        // Separator rozwija sie symetrycznie od srodka i nigdy nie wychodzi poza swoj prostokat.
+        int poprzednia=0;
+        for(unsigned step=0;step<=20;++step) {
+            const uint64_t t=SEPARATOR_IN_US+(SEPARATOR_PELNY_US-SEPARATOR_IN_US)*step/20;
             Sekwencja s;s.rozpocznij(true,0);s.przelicz(t);
+            std::fill(piksele.begin(),piksele.end(),0u);
             rysuj(piksele.data(),1280,720,1280,dpi,s,true);
-            const auto g=geometria(1280,720,dpi,s.postep);
-            assert(atrament_w(piksele,1280,720,g.pasek));
-            // Wartosc postepu jest kwantyzowana do poziomow KROK_US, wiec pasek
-            // moze osiagnac 100% najwyzej o jeden poziom przed koncem przedzialu
-            // (nigdy wczesniej i nigdy powyzej 100%).
-            assert(s.postep<=1000);
-            if(step<39)assert(s.postep<1000||t+KROK_US>=PASEK_PELNY_US);
-        }
-        // Pasek domyka sie dokladnie na koncu przedzialu.
-        {
-            Sekwencja s;s.rozpocznij(true,0);s.przelicz(PASEK_PELNY_US);
-            assert(s.postep==1000);
-            s.przelicz(PASEK_PELNY_US+KROK_US*100);assert(s.postep==1000);
+            const auto g=geometria(1280,720,dpi);
+            int x0=1280,x1=-1;
+            for(int y=g.separator.y-2;y<g.separator.y+g.separator.h+2;++y)
+                for(int x=0;x<1280;++x)if(piksele[size_t(y)*1280+x]!=TLO){
+                    assert(y>=g.separator.y&&y<g.separator.y+g.separator.h);
+                    assert(x>=g.separator.x&&x<g.separator.x+g.separator.w);
+                    if(x<x0)x0=x;if(x>x1)x1=x;}
+            if(x1>=0) {
+                assert(x0+x1+1>=1280-3&&x0+x1+1<=1280+3);
+                assert(x1-x0+1>=poprzednia);poprzednia=x1-x0+1;
+            }
         }
         // Pelny render jest idempotentny wzgledem tego samego stanu.
-        Sekwencja s;s.rozpocznij(true,0);s.przelicz(2600000);
+        Sekwencja s;s.rozpocznij(true,0);s.przelicz(SEKWENCJA_US);
         std::vector<uint32_t> a,b;
         a.assign(1280*720,0xDEADBEEFu);b.assign(1280*720,0xC0FFEEu);
         rysuj(a.data(),1280,720,1280,dpi,s,true);
@@ -98,13 +102,13 @@ int main(){
             whole?width:1,whole?height:1,100));
         powitanie_publikacja();return p;};
     for(uint64_t stall:{500000ULL,1500000ULL,3000000ULL}) {
-        now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();
+        now=0;powitanie_inicjalizuj(true);source();powitanie_tick();
         advance(1900000);
         unsigned przed=full+partial;
         advance(1900000+stall);
         assert(full+partial-przed<=1);
-        Sekwencja expected;expected.rozpocznij(true,0);expected.aktualizuj(now);
-        assert(sekwencja.postep==expected.postep);
+        Sekwencja expected;expected.rozpocznij(true,0);expected.rozpocznij_etapy(0);expected.aktualizuj(now);
+        assert(sekwencja.sygnatura()==expected.sygnatura());
         assert(source()!=scene.data());
         przed=full+partial;powitanie_tick();
         assert(full+partial-przed<=1);
@@ -112,7 +116,7 @@ int main(){
     }
     // Zakonczenie nadal wymaga pelnej, spojnej transakcji pulpitu.
     now=0;powitanie_inicjalizuj(true);source();powitanie_pulpit_gotowy();
-    for(uint64_t t:{100000ULL,2500000ULL,5200000ULL}){advance(t);source();}
+    for(uint64_t t:{100000ULL,700000ULL,1400000ULL}){advance(t);source();assert(powitanie_aktywne());}
     advance(7500000);assert(zakonczenie_oczekuje&&powitanie_aktywne());
     assert(source(false)!=scene.data());
     assert(source()==scene.data());
@@ -129,6 +133,66 @@ int main(){
     powitanie_pulpit_gotowy();advance(8100000);
     assert(sekwencja.fade==8000000&&sekwencja.odsloniecie==42);
     advance(8600000);assert(source()==scene.data()&&live==0);
+    // Dluga synchroniczna inicjalizacja po pierwszej klatce (bez taktow
+    // kompozytora): etapy nie sa zalegle - pojawiaja sie kolejno od pierwszego
+    // taktu, a nie wszystkie naraz (przyczyna problemu z ekranu referencyjnego).
+    now=0;powitanie_inicjalizuj(true);source();
+    now=10000000;assert(source()!=scene.data());
+    assert(sekwencja.alfa_logo==LOGO_ALFA&&sekwencja.alfa_tytul==0&&sekwencja.alfa_linia2==0);
+    advance(10000000);assert(sekwencja.etapy&&sekwencja.etapy_od==10000000);
+    {
+        unsigned widoczne_przy_pierwszym=0;source();
+        widoczne_przy_pierwszym=(sekwencja.alfa_tytul>0)+(sekwencja.alfa_separator>0)+
+                                (sekwencja.alfa_linia1>0)+(sekwencja.alfa_linia2>0);
+        assert(widoczne_przy_pierwszym==0);
+        unsigned poprzednie=0;
+        for(uint64_t t=10000000;t<=10000000+SEKWENCJA_US;t+=KROK_US){
+            advance(t);source();
+            const unsigned teraz=(sekwencja.alfa_tytul==255)+(sekwencja.alfa_separator==255)+
+                                 (sekwencja.alfa_linia1==255)+(sekwencja.alfa_linia2==255);
+            assert(teraz>=poprzednie&&teraz<=poprzednie+1); // najwyzej jeden nowy element na probke
+            poprzednie=teraz;
+        }
+        assert(poprzednie==4);
+    }
+    powitanie_wycisz();assert(live==0);
+    // Punkty kontrolne synchronicznego startu (bez taktow kompozytora): etapy
+    // pojawiaja sie kolejno, kazda zmiana to jedna prezentacja, nie czesciej niz
+    // co POWITANIE_ODSTEP_STARTU_US, a w holdzie punkt nie robi nic.
+    now=0;powitanie_inicjalizuj(true);
+    assert(!powitanie_obsluz_start()); // przed pierwsza publikacja: nic
+    source();
+    {
+        const unsigned p0=prezentacje_startu;
+        unsigned zaprezentowane=0,poprzednie=0,etapy_widziane=0;
+        for(uint64_t t=50000;t<=6000000;t+=50000){
+            now=t;
+            const bool p=powitanie_obsluz_start();
+            if(p)++zaprezentowane;
+            if(t==50000)assert(sekwencja.etapy&&sekwencja.etapy_od==50000);
+            const unsigned pelne=(sekwencja.alfa_tytul==255)+(sekwencja.alfa_separator==255)+
+                                 (sekwencja.alfa_linia1==255)+(sekwencja.alfa_linia2==255);
+            assert(pelne>=poprzednie&&pelne<=poprzednie+1);
+            if(pelne>poprzednie)++etapy_widziane;
+            poprzednie=pelne;
+        }
+        assert(etapy_widziane==4&&poprzednie==4);
+        assert(zaprezentowane==prezentacje_startu-p0);
+        assert(zaprezentowane>=8&&zaprezentowane<=6000000/POWITANIE_ODSTEP_STARTU_US);
+        // Limit czestotliwosci i brak pracy w holdzie.
+        now=6000000+POWITANIE_ODSTEP_STARTU_US;assert(!powitanie_obsluz_start());
+        now=6000000+POWITANIE_ODSTEP_STARTU_US*3;assert(!powitanie_obsluz_start());
+        assert(prezentacje_startu-p0==zaprezentowane);
+        printf("Punkty kontrolne startu: %u prezentacji na 6 s sekwencji\n",zaprezentowane);
+    }
+    powitanie_wycisz();assert(!powitanie_obsluz_start()&&live==0);
+    // Pulpit gotowy wczesnie: zanikanie od MINIMUM_US, splash znika przed koncem
+    // sekwencji (pulpit nie czeka na wszystkie etapy).
+    now=0;powitanie_inicjalizuj(true);source();now=300000;powitanie_pulpit_gotowy();
+    for(uint64_t t=KROK_US;t<MINIMUM_US+FADE_US;t+=KROK_US){advance(t);assert(source()!=scene.data());}
+    advance(MINIMUM_US+FADE_US);
+    assert(zakonczenie_oczekuje);assert(source()==scene.data()&&live==0);
+    assert(MINIMUM_US+FADE_US<SEKWENCJA_US);
     // Jawne wylaczenie jest natychmiastowe.
     powitanie_inicjalizuj(false);advance(10000000);
     assert(source()==scene.data());

@@ -219,7 +219,7 @@ int main() {
         // A cursor-sized first dirty rect still publishes a complete frame once.
         PrzeniesFragmentNaEkran(0,0,1,1);
         assert(presents==before+1&&powitanie_pierwsza_klatka_gotowa());
-        const auto g=Powitanie::geometria(1280,720,100,sekwencja.postep,sekwencja.wagi());
+        const auto g=Powitanie::geometria(1280,720,100);
         auto ink=[&](Powitanie::Obszar r){
             for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)
                 if(display.scanout[y*1280+x]!=Powitanie::TLO)return true;
