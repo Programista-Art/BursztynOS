@@ -23,6 +23,8 @@
  */
 
 #include "scheduler.h"
+#include "idt.h"
+#include "punkt_zwrotu_syscalla.h"
 #include "zakonczenie_procesu.h"
 #include "fpu.h"
 #include "gui_runtime_diag.h"
@@ -33,6 +35,7 @@
 #include "grafika.h"
 
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
+#include "hpet.h"
 extern void klog_serial(const char*);
 extern "C" uint64_t pmm_pobierz_wolne_ramki();
 #endif
@@ -82,6 +85,7 @@ uint64_t ostatnie_zdarzenie_myszy_procesu[
  */
 static uint64_t licznik_tykniec_zegara = 0;
 static uint64_t licznik_irq_timera = 0;
+static uint64_t g_liczba_ticktow_odroczonych = 0;   // tiki, ktore trafily w Ring 0 (bez PrzelaczKontekst)
 static uint64_t licznik_przelaczen_kontekstu = 0;
 static uint64_t licznik_wybudzen_event = 0;
 static bool jawne_czekanie_sieci[MAKS_PROCESOW]{};
@@ -506,6 +510,20 @@ static ZasobyDoZwolnienia zasoby_do_zwolnienia[
     MAKS_PROCESOW
 ] = {};
 
+#ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
+/* Linia "[tag] k1=v1 k2=v2 ..." na porcie szeregowym (wylacznie diagnostyka cyklu zycia procesow). */
+static void diag_proc_log(const char* tag, const char* const* klucze, const uint64_t* wartosci, int n) {
+    char buf[200]; size_t k = 0;
+    auto txt = [&](const char* t) { while (*t && k + 2 < sizeof(buf)) buf[k++] = *t++; };
+    auto num = [&](uint64_t v) { char t[24]; int m = 0; do { t[m++] = char('0' + v % 10); v /= 10; } while (v); while (m && k + 2 < sizeof(buf)) buf[k++] = t[--m]; };
+    buf[k++] = '['; txt(tag); buf[k++] = ']';
+    for (int i = 0; i < n; ++i) { buf[k++] = ' '; txt(klucze[i]); buf[k++] = '='; num(wartosci[i]); }
+    buf[k] = 0; klog_serial(buf);
+}
+static uint64_t diag_proc_czas() { return hpet_dostepny() ? czas_monotoniczny_ns() : 0; }
+static int diag_proc_aktywne() { int a = 0; for (int i = 1; i < MAKS_PROCESOW; ++i) if (tablica_procesow[i].stan != PROCES_PUSTY) ++a; return a; }
+#endif
+
 static void posprzataj_zakonczone_procesy(
     int pid_biezacy
 ) {
@@ -585,15 +603,11 @@ static void posprzataj_zakonczone_procesy(
         ustaw_stan_procesu(proces,PROCES_PUSTY);
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
         {
-            char buf[64] = "[PROC-CLEANUP] pid=";
-            size_t n = 19;
-            auto num = [&](uint64_t v) { char t[24]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v);
-                while (k) buf[n++] = t[--k]; };
-            num(static_cast<uint64_t>(pid));
-            const char* r = " wolne_ramki="; while (*r) buf[n++] = *r++;
-            num(static_cast<uint64_t>(pmm_pobierz_wolne_ramki()));
-            buf[n] = 0;
-            klog_serial(buf);
+            static const char* const K[] = {"pid", "t_ns", "wolne_ramki", "aktywne", "cr3_biezacy", "pid_biezacy", "sprzatanie_tick", "irq", "przelaczen", "odroczonych"};
+            const uint64_t V[] = {static_cast<uint64_t>(pid), diag_proc_czas(), pmm_pobierz_wolne_ramki(),
+                                  static_cast<uint64_t>(diag_proc_aktywne()), biezacy_cr3, static_cast<uint64_t>(pid_biezacy), licznik_tykniec_zegara,
+                                  licznik_irq_timera, licznik_przelaczen_kontekstu, g_liczba_ticktow_odroczonych};
+            diag_proc_log("PROC-CLEANUP", K, V, 10);
         }
 #endif
     }
@@ -684,8 +698,71 @@ bool scheduler_czy_inny_gotowy() {
 }
 
 extern "C" uint64_t g_ostatni_bws;
+/*
+ * Tick, ktory trafil w Ring 0 (np. w trakcie syscallu) i NIE wykonal PrzelaczKontekst. Bez tej ksiegowosci proces w ciaglej serii
+ * krotkich syscalli (tick prawie zawsze trafia w Ring 0) glodzi cala reszte: nie liczyly sie timeouty oczekiwania
+ * (licznik_tykniec_zegara rosl tylko w PrzelaczKontekst), nie dzialalo sprzatanie zakonczonych procesow ani eskalacja okien.
+ * Zob. docs/zakonczenie-procesow.md. Wolane z kontekstu IRQ timera (IF=0, jeden rdzen).
+ */
+static volatile bool g_tick_odroczony = false;
+extern "C" bool okna_podrzedne_oczekuja() __attribute__((weak));
+
 void scheduler_zarejestruj_odroczony_tick() {
+#if !defined(BURSZTYN_DIAG_BASELINE_SCHED)         // BASELINE: zachowanie sprzed poprawki (tylko pomiary A/B)
+    ++licznik_tykniec_zegara;                       // czas tickowy plynie takze podczas syscallu
+    ++g_liczba_ticktow_odroczonych;
+    __atomic_store_n(&g_tick_odroczony, true, __ATOMIC_RELEASE);
+#endif
     gui_perf_deferred_tick(scheduler_czy_inny_gotowy(), g_ostatni_bws);
+}
+
+static_assert(PunktZwrotuSyscalla::STAN_ZABLOKOWANY_MYSZ == PROCES_ZABLOKOWANY_MYSZ &&
+              PunktZwrotuSyscalla::STAN_ZABLOKOWANY_ZDARZENIE == PROCES_ZABLOKOWANY_ZDARZENIE,
+              "punkt_zwrotu_syscalla.h: stany niezgodne ze scheduler.h");
+
+/*
+ * Czy jakis INNY proces czeka na obsluge, ktora wykonuje tylko PrzelaczKontekst (przelaczenie, timeout, sprzatanie,
+ * eskalacja)? Decyzja: punkt_zwrotu_syscalla.h. PID 0 liczy sie jako konkurent celowo (obsluga wejscia, USB i
+ * kompozytora w jego petli) - zob. komentarz w naglowku.
+ */
+static bool praca_oczekuje_na_tick() {
+    return PunktZwrotuSyscalla::praca_oczekuje(
+        aktualny_pid, MAKS_PROCESOW, licznik_tykniec_zegara,
+        [](int pid) {
+            PunktZwrotuSyscalla::Kandydat k;
+            k.sprzatanie_oczekuje = pid > 0 && zasoby_do_zwolnienia[pid].oczekuje;
+            k.moze_byc_uruchomiony = proces_moze_byc_uruchomiony(pid);
+            k.stan = odczytaj_stan_procesu(tablica_procesow[pid]);
+            k.termin_myszy = __atomic_load_n(&termin_wybudzenia_myszy[pid], __ATOMIC_RELAXED);
+            k.termin_zdarzenia = __atomic_load_n(&termin_wybudzenia_zdarzenia[pid], __ATOMIC_RELAXED);
+            return k;
+        },
+        [] { return okna_podrzedne_oczekuja && okna_podrzedne_oczekuja(); });   // termin zamkniecia dziecka
+}
+
+/*
+ * Bezpieczny punkt na WEJSCIU syscallu (brak zamkow jadra, IF=1, poza oknem dostepu do pamieci uzytkownika; to ta sama
+ * granica, na ktorej tick w Ring 3 przelacza kontekst): jesli od poprzedniego sprawdzenia tick zostal odroczony, a ktos
+ * czeka na obsluge, proces oddaje CPU PROGRAMOWO (int $IDT_WEKTOR_ODDANIA_CPU): ISR zapisuje kompletna rame, wola
+ * PrzelaczKontekstProgramowy (sprzatanie, timeouty, wybor nastepnego procesu) i IRETQ wznawia ten syscall, gdy proces
+ * znowu dostanie CPU. NIE czeka na przyszle przerwanie. Brak wywlaszczania Ring 0. Oddanie nastepuje najwyzej raz na
+ * odroczony tick i tylko, gdy ktos inny czeka (w praktyce zwykle PID 0 - obsluga wejscia/kompozytora - wiec proces w
+ * serii syscalli dzieli CPU tak samo, jak proces liczacy w Ring 3).
+ */
+void scheduler_punkt_zwrotu_syscalla() {
+#if defined(BURSZTYN_DIAG_BASELINE_SCHED)
+    return;
+#endif
+    if (!__atomic_load_n(&g_tick_odroczony, __ATOMIC_ACQUIRE)) return;    // szybka sciezka bez pushfq
+    __atomic_store_n(&g_tick_odroczony, false, __ATOMIC_RELEASE);         // tick zuzyty: najwyzej jedno oddanie na tick
+    const int pid = aktualny_pid;
+    uint64_t rflags = 0;
+    asm volatile("pushfq\n\tpopq %0" : "=r"(rflags) :: "memory");
+    if (PunktZwrotuSyscalla::ocen(true, pid, MAKS_PROCESOW, wielozadaniowosc_aktywna, (rflags & (1ULL << 9)) != 0,
+                                  praca_oczekuje_na_tick) != PunktZwrotuSyscalla::Decyzja::Oddaj) return;
+    __atomic_store_n(&jawne_czekanie_sieci[pid], true, __ATOMIC_RELEASE);   // zezwolenie dla IDT na przelaczenie z Ring 0
+    asm volatile("int %0" :: "i"(IDT_WEKTOR_ODDANIA_CPU) : "memory", "cc");
+    __atomic_store_n(&jawne_czekanie_sieci[pid], false, __ATOMIC_RELEASE);
 }
 
 /*
@@ -1176,9 +1253,7 @@ void InicjalizujPlaniste(
  * PRZELACZENIE KONTEKSTU
  * ========================================================================= */
 
-extern "C" uint64_t PrzelaczKontekst(
-    uint64_t stary_rsp
-) {
+static uint64_t przelacz_kontekst_impl(uint64_t stary_rsp, bool tick_zegara) {
     /*
      * Funkcja jest wywolywana z interrupt gate - IF jest juz wyzerowane.
      * Nie wykonujemy tutaj STI.
@@ -1235,7 +1310,7 @@ extern "C" uint64_t PrzelaczKontekst(
         stary_pid
     );
 
-    ++licznik_tykniec_zegara;
+    if (tick_zegara) ++licznik_tykniec_zegara;    // tylko prawdziwy tick timera (programowe oddanie CPU nie liczy czasu)
 
     if (okna_podrzedne_tick) okna_podrzedne_tick();   // eskalacja: wymuszone zakonczenie niezamknietych okien podrzednych
 
@@ -1376,6 +1451,11 @@ extern "C" uint64_t PrzelaczKontekst(
     return nowy_rsp;
 }
 
+extern "C" uint64_t PrzelaczKontekst(uint64_t stary_rsp) { return przelacz_kontekst_impl(stary_rsp, true); }
+
+/* Programowe oddanie CPU (wektor IDT_WEKTOR_ODDANIA_CPU): ta sama sciezka co tick, ale bez liczenia czasu. */
+extern "C" uint64_t PrzelaczKontekstProgramowy(uint64_t stary_rsp) { return przelacz_kontekst_impl(stary_rsp, false); }
+
 /* =========================================================================
  * ZAKONCZENIE PROCESU
  * ========================================================================= */
@@ -1506,6 +1586,16 @@ static int zazadaj_zakonczenia_impl(int pid, bool z_timera) {
             } else wynik = 2;
         }
     }
+#ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
+    {
+        static const char* const K[] = {"pid", "t_ns", "wynik", "z_timera", "stan", "pid_biezacy", "tick", "irq", "przelaczen", "odroczonych"};
+        const uint64_t V[] = {static_cast<uint64_t>(pid < 0 ? 0 : pid), diag_proc_czas(), static_cast<uint64_t>(wynik), z_timera ? 1u : 0u,
+                              static_cast<uint64_t>(pid >= 0 && pid < MAKS_PROCESOW ? odczytaj_stan_procesu(tablica_procesow[pid]) : 99),
+                              static_cast<uint64_t>(aktualny_pid), licznik_tykniec_zegara,
+                              licznik_irq_timera, licznik_przelaczen_kontekstu, g_liczba_ticktow_odroczonych};
+        diag_proc_log("PROC-REQ", K, V, 10);
+    }
+#endif
     przywroc_przerwania(stan_irq);
     return wynik;
 }

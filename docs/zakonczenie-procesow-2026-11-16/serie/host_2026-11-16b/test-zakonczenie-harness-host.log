@@ -1,0 +1,2 @@
+python3 testy/test_zakonczenie_klasyfikacja.py
+PASS klasyfikacja harnessu BWS 97: 30 sprawdzen (bez QEMU)

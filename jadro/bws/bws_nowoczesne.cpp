@@ -1266,6 +1266,14 @@ extern "C" void okna_podrzedne_przed_sprzataniem(int pid) {
 
 /* Wolane co tick schedulera (kontekst timera): wymusza zakonczenie osieroconych okien, ktore nie zamknely sie w terminie
  * (np. zawieszone). Zasoby zwalnia standardowa sciezka odroczonego sprzatania. */
+/* Czy istnieje osierocone dziecko z terminem zamkniecia (potrzebny tick, by go wyegzekwowac)? */
+extern "C" bool okna_podrzedne_oczekuja() {
+    BlokadaIrqOkien irq;
+    for (size_t i = 0; i < OknaPodrzedne::MAKS_OKIEN; ++i)
+        if (g_okna_podrzedne.w[i].aktywny && g_okna_podrzedne.w[i].termin_ns) return true;
+    return false;
+}
+
 extern "C" void okna_podrzedne_tick() {
     int pids[OknaPodrzedne::MAKS_OKIEN] = {};
     size_t n = 0;

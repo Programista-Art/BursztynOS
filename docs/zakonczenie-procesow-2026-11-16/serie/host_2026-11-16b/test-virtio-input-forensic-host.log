@@ -1,0 +1,11 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST -DBURSZTYNDIAGVIRTIOINPUTFORENSIC=0 -fsanitize=address,undefined -pthread sterowniki/pci/pci.cpp jadro/mm/pmm.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp testy/test_virtio_input_forensic.cpp -o .virtiotest/forensic-validation/queue-0
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .virtiotest/forensic-validation/queue-0
+FORENSIC valid-small-stream reports=4857 first=(-3,-2) last=(-2,2) cursor=635,360
+FORENSIC keyboard-isolation keyboard_pending=0,0 mouse_report=3,-2
+FORENSIC exact-observed-wire decoded/report=-27496,44561 legacy-adapter=-27496,-44561 cursor=0,719
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=0 dropped=0
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=1 dropped=0
+FORENSIC boot reports actual=0 reference=0 pending=0,0 cursor=640,360 missingSYN=1 dropped=1
+FORENSIC SYN_DROPPED actual=0 reference=0 first_dx=0
+FORENSIC DIAGNOSTIC emitted=0 summaries=0 stored=160 anomalies=32
+FORENSIC RESULT cases=39 checks=124723 failures=0 digest=352634e5dbf1178b

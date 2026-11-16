@@ -109,3 +109,14 @@ jadro/gui/kursor_rozciagania.generated.h
 jadro/siec/tls_test_ca.generated.h
 
 .galeria.stamp
+
+# --- Wyjscie harnessow testowych (odtwarzane przy kazdym przebiegu; 2026-11-16) ---
+# Harness BWS 97 (testy/test_zakonczenie_qemu.py): bloby, kernel.elf, staging ISO, kopia jadro/fs, logi przebiegow.
+# Oryginalne logi serii 2026-11-15/16 zachowane w docs/zakonczenie-procesow-2026-11-16/.
+/.zakonczenie-test/
+# Staging ISO wariantow diagnostycznych (make ISO_DIR=isodir_<nazwa>); isodir_virtio_forensic/ pozostaje sledzony jako dowod audytu.
+/isodir_*/
+# Binarki bazowe pomiarow wydajnosci; .graphics-perf/baseline-kernel.bin pozostaje sledzony (SHA-256 cytowane w docs).
+/.graphics-perf/
+# Dowody w docs/ sa wersjonowane mimo globalnych regul *.log
+!/docs/zakonczenie-procesow-2026-11-16/**

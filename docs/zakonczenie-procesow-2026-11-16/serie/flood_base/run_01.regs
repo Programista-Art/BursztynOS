@@ -1,0 +1,2 @@
+8.0 rip=0x204dbc rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=0.0
+35.4 rip=0x11b352 rfl=0x202 if=1 cpl=0 cr3=0xcfae000 guest_t=0.0

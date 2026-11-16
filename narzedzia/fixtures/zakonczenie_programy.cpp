@@ -2,6 +2,17 @@
 // Jedno zrodlo, rola wybierana -DZK_ROLA=1..4: 1 launcher (zastepuje menedzera okien), 2 ofiara (zastepuje "test"),
 // 3 wlasciciel okien (zastepuje snake), 4 zawieszone dziecko (zastepuje okno informacyjne).
 #include "narzedzia/fixtures/bur_v1_launcher_prefix.inc"
+#ifndef ZK_TYLKO_FLOOD
+#define ZK_TYLKO_FLOOD 0   /* 1: tylko s13 (zalew krotkich syscalli) - pomiar A/B planisty */
+#endif
+#ifndef ZK_PAUZA
+#define ZK_PAUZA 1       /* 1: petle oczekiwania uzywaja instrukcji PAUSE; 0: zwykla petla (eksperyment: wplyw PAUSE w TCG na dostarczanie tickow) */
+#endif
+#if ZK_PAUZA
+#define ZK_SPIN() asm volatile("pause")
+#else
+#define ZK_SPIN() asm volatile("" ::: "memory")
+#endif
 #include "jadro/bws/bws_procesy.h"
 #include "jadro/bws/bws_api.h"
 
@@ -50,6 +61,8 @@ static bool uruchom(const char* sc, const char* arg) { return bws_wywolaj(BWS_UR
 extern "C" __attribute__((noreturn)) void _start() {
     pauza_ms(1500);                                    // pulpit/loader ustabilizowany
     say("[ZK] start\n");
+#if !ZK_TYLKO_FLOOD
+  {
     const char* tryby[] = {"s", "w", "h", "g"};
     const char* opisy[] = {"s1 kill spin", "s2 kill event-wait", "s3 kill heap", "s4 kill rendering"};
     for (int t = 0; t < 4; ++t) {
@@ -131,7 +144,13 @@ extern "C" __attribute__((noreturn)) void _start() {
         bool petla = true;
         for (int i = 0; i < 12 && petla; ++i) {
             int o = 0, d = 0;
-            if (!(uruchom(SC_SNAKE, "o") && czekaj_az_pojawi("okno-informacyjne.bur", 4000, &d))) { petla = false; break; }
+            const bool u = uruchom(SC_SNAKE, "o");
+            const bool pj = u && czekaj_az_pojawi("okno-informacyjne.bur", 4000, &d);
+            if (!pj) {
+                say("[ZK] s12 etap=start iter="); num(i); say(" uruchom="); num(u); say(" dziecko="); num(d);
+                say(" snake_pid="); num(znajdz("snake.bur")); say(" t_ms="); num((long)(teraz() / 1000000ULL)); say("\n");
+                petla = false; break;
+            }
             o = znajdz("snake.bur");
             const uint64_t rk = bws_wywolaj(BWS_PROCES_ZABIJ, o, 0, 0, 0);
             if (rk != 1) petla = false;
@@ -141,6 +160,29 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
         wynik("s12 12 cykli wlasciciel+dziecko", petla);
     }
+  }
+#endif
+    // s13: opoznienie sprzatania, gdy inny proces wykonuje ciagla serie krotkich syscalli (tick trafia w Ring 0)
+    {
+        int spam = 0;
+        bool ok = uruchom(SC_TEST, "y") && czekaj_az_pojawi("test.bur", 3000, &spam);
+        bool wszystkie = ok; uint64_t maks_ms = 0;
+        for (int i = 0; i < 8 && wszystkie; ++i) {
+            int pid = 0;
+            if (!(uruchom(SC_SNAKE, "z") && czekaj_az_pojawi("snake.bur", 3000, &pid))) { wszystkie = false; break; }
+            pauza_ms(100);
+            const uint64_t t0 = teraz();
+            if (bws_wywolaj(BWS_PROCES_ZABIJ, pid, 0, 0, 0) != BWS_ZABIJ_OK) { wszystkie = false; break; }
+            const bool zn = czekaj_az_zniknie("snake.bur", 60000);
+            const uint64_t ms = (teraz() - t0) / 1000000ULL; if (ms > maks_ms) maks_ms = ms;
+            say("[ZK] s13 iter="); num(i); say(" pid="); num(pid); say(" latencja_ms="); num((long)ms); say(zn ? "\n" : " NIE-SPRZATNIETY\n");
+            if (!zn) wszystkie = false;
+        }
+        say("[ZK] s13 maks_ms="); num((long)maks_ms); say("\n");
+        if (spam) bws_wywolaj(BWS_PROCES_ZABIJ, spam, 0, 0, 0);
+        czekaj_az_zniknie("test.bur", 60000);
+        wynik("s13 sprzatanie przy ciaglych syscallach innego procesu", wszystkie);
+    }
     say("[ZK] KONIEC pass="); num(g_wyniki); say(" fail="); num(g_porazki); say("\n");
     for (;;) pauza_ms(1000);
 }
@@ -148,14 +190,15 @@ extern "C" __attribute__((noreturn)) void _start() {
 extern "C" __attribute__((noreturn)) void _start() {
     char tryb[16]{}; bws_wywolaj(BWS_ARGUMENT_STARTOWY, (uint64_t)tryb, sizeof(tryb), 0, 0);
     if (tryb[0] == 'w') { bws_zdarzenie ev{}; for (;;) gui_czekaj_na_zdarzenie(&ev); }
+    if (tryb[0] == 'y') { for (;;) (void)bws_wywolaj(BWS_CZAS_MONOTONICZNY_NS, 0, 0, 0, 0); }   // ciagla seria krotkich syscalli
     if (tryb[0] == 'h') {
         auto p = (volatile char*)bws_wywolaj(BWS_ALOKUJ_STERTE, 4 * 1024 * 1024, 0, 0, 0);
         if (p) for (unsigned long i = 0; i < 4UL * 1024 * 1024; i += 4096) p[i] = 1;
     }
     if (tryb[0] == 'g') {
-        for (unsigned long i = 0;; ++i) { gui_rysuj_okno(40, 40, 300, 200, "ofiara"); gui_wypisz_tekst(50, 80, "render"); gui_odswiez(); if ((i & 63) == 0) asm volatile("pause"); }
+        for (unsigned long i = 0;; ++i) { gui_rysuj_okno(40, 40, 300, 200, "ofiara"); gui_wypisz_tekst(50, 80, "render"); gui_odswiez(); if ((i & 63) == 0) ZK_SPIN(); }
     }
-    for (;;) asm volatile("pause");
+    for (;;) ZK_SPIN();
 }
 #elif ZK_ROLA == 3
 extern "C" __attribute__((noreturn)) void _start() {
@@ -166,6 +209,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         say("[ZK] unpriv kill r="); num((long)r); say("\n");
         for (;;) pauza_ms(500);
     }
+    if (tryb[0] == 'z') { bws_zdarzenie ev{}; for (;;) gui_czekaj_na_zdarzenie(&ev); }
     static const char T[] = "Test dziecka";
     static const char C[] = "Tresc okna podrzednego do testu zakonczenia procesow.";
     for (;;) {
@@ -175,5 +219,5 @@ extern "C" __attribute__((noreturn)) void _start() {
     }
 }
 #else
-extern "C" __attribute__((noreturn)) void _start() { for (;;) asm volatile("pause"); }   // zawieszone dziecko: ignoruje ZAMKNIJ
+extern "C" __attribute__((noreturn)) void _start() { for (;;) ZK_SPIN(); }   // zawieszone dziecko: ignoruje ZAMKNIJ
 #endif

@@ -1,0 +1,11 @@
+[run 1/4] PASS stalle_hosta=[] powod=koniec czas=11s przerw>1s=0 maks_przerwa=0.0s min_tick_hz=None pass=1 fail=0 zwolnien=9 maks_latencja_ms=17.9 maks_latencja_irq=1 aktywne_koniec=1 ramki=469585->469891
+   REJESTRY: probek=1 cpl0=1 cpl0_if0=0
+[run 2/4] PASS stalle_hosta=[] powod=koniec czas=11s przerw>1s=0 maks_przerwa=0.0s min_tick_hz=None pass=1 fail=0 zwolnien=9 maks_latencja_ms=6.4 maks_latencja_irq=1 aktywne_koniec=1 ramki=469585->469891
+   REJESTRY: probek=1 cpl0=1 cpl0_if0=0
+[run 3/4] PASS stalle_hosta=[] powod=koniec czas=11s przerw>1s=0 maks_przerwa=0.0s min_tick_hz=None pass=1 fail=0 zwolnien=9 maks_latencja_ms=6.8 maks_latencja_irq=1 aktywne_koniec=1 ramki=469584->469891
+   REJESTRY: probek=1 cpl0=1 cpl0_if0=0
+[run 4/4] PASS stalle_hosta=[] powod=koniec czas=11s przerw>1s=0 maks_przerwa=0.0s min_tick_hz=None pass=1 fail=0 zwolnien=9 maks_latencja_ms=6.1 maks_latencja_irq=1 aktywne_koniec=1 ramki=469584->469891
+   REJESTRY: probek=1 cpl0=1 cpl0_if0=0
+[PODSUMOWANIE] uruchomien=4 PASS=4 FAIL/TIMEOUT=0 STALL-HOSTA(niewiazace)=0 maks_latencja_sprzatania_ms=17.9
+ZAKONCZENIE PROCESOW natywnie: PASS
+done

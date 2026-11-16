@@ -4227,6 +4227,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
     uint64_t arg4
 ) {
     hda_wykonaj_zaplanowana_prace_odroczona();
+    scheduler_punkt_zwrotu_syscalla();
     uint64_t rsp_in = 0;
     asm volatile("mov %%rsp, %0" : "=r"(rsp_in));
 

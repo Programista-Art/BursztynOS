@@ -1345,6 +1345,7 @@ test-virtio-pci:
 	$(PYTHON) testy/test_input_boot_order.py
 	@mkdir -p .virtiotest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) $(if $(filter 1,$(BURSZTYNDIAGVIRTIOINPUTQEMU)),-DBURSZTYNDIAGVIRTIOINPUTQEMU=1) -fsanitize=address,undefined -pthread sterowniki/pci/pci.cpp jadro/mm/pmm.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp testy/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	$(PYTHON) narzedzia/skan_instrukcji_uprzywilejowanych.py .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-pci
 
 .PHONY: test-input-init-locks
@@ -3165,6 +3166,16 @@ test-zakonczenie-procesu-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_zakonczenie_procesu_host.cpp -o .bsf-test/zakonczenie_procesu_host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/zakonczenie_procesu_host
+
+.PHONY: test-punkt-zwrotu-syscalla-host
+test-punkt-zwrotu-syscalla-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_punkt_zwrotu_syscalla_host.cpp -o .bsf-test/punkt_zwrotu_syscalla_host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/punkt_zwrotu_syscalla_host
+
+.PHONY: test-zakonczenie-harness-host
+test-zakonczenie-harness-host:
+	$(PYTHON) testy/test_zakonczenie_klasyfikacja.py
 
 .PHONY: test-tresc-uklad-host
 test-tresc-uklad-host:

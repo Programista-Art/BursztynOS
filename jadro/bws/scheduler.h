@@ -434,6 +434,7 @@ extern "C" {
  *
  * Funkcja nie moze zwrocic 0 przy poprawnym dzialaniu.
  */
+uint64_t PrzelaczKontekstProgramowy(uint64_t stary_rsp);
 uint64_t PrzelaczKontekst(
     uint64_t stary_rsp
 );
@@ -513,6 +514,8 @@ bool scheduler_czy_inny_gotowy();
 void scheduler_oddaj_cpu_w_syscallu();
 // Timer tick that left the current Ring 0 syscall running (diagnostics only).
 void scheduler_zarejestruj_odroczony_tick();
+// Punkt zwrotu na wejsciu syscallu: oddaje CPU, gdy odroczony tick zostawil prace dla PrzelaczKontekst (zob. scheduler.cpp).
+void scheduler_punkt_zwrotu_syscalla();
 bool scheduler_zuzyj_wygasly_timeout_zdarzenia(int pid);
 void scheduler_usun_zdarzenia_procesu(int pid);
 void scheduler_czekaj_na_klawiature(int pid);

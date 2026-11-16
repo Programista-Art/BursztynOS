@@ -1,0 +1,14 @@
+[run 1/3] FAIL powod=koniec czas=112s przerw>1s=11 maks_przerwa=62.9s min_tick_hz=0.4 pass=15 fail=1 zwolnien=70 maks_latencja_ms=51.4 aktywne_koniec=1 ramki=469891->469891
+   REJESTRY: probek=13 cpl0=9 cpl0_if0=1
+   HARNESS: scenariusze: [ZK] s12 12 cykli wlasciciel+dziecko FAIL
+   scenariusz: [ZK] s12 12 cykli wlasciciel+dziecko FAIL
+[run 2/3] PASS powod=koniec czas=281s przerw>1s=20 maks_przerwa=176.5s min_tick_hz=0.2 pass=16 fail=0 zwolnien=85 maks_latencja_ms=78.2 aktywne_koniec=1 ramki=469890->469890
+   REJESTRY: probek=19 cpl0=14 cpl0_if0=4
+[run 3/3] FAIL powod=timeout czas=573s przerw>1s=16 maks_przerwa=187.0s min_tick_hz=0.0 pass=0 fail=0 zwolnien=75 maks_latencja_ms=90.7 aktywne_koniec=2 ramki=469891->469584
+   OKNO-BEZ-POSTEPU: brak postepu logu 67s od t=100s: CPU QEMU=98% steal=0 loadavg=0.04
+   REJESTRY: probek=17 cpl0=13 cpl0_if0=4
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+   HARNESS: scenariusze: [ZK] s12 12 cykli wlasciciel+dziecko FAIL
+   scenariusz: [ZK] s12 12 cykli wlasciciel+dziecko FAIL
+[PODSUMOWANIE] uruchomien=3 PASS=1 FAIL=2 maks_latencja_sprzatania_ms=90.7
+done
