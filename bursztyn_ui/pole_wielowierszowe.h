@@ -10,6 +10,9 @@ namespace BursztynUI {
 class PoleWielowierszowe : public Kontrolka {
 public:
     static constexpr size_t DOMYSLNA_POJEMNOSC = 8192;
+    // Poczatkowa pojemnosc tablicy linii wizualnych. Tablica rosnie do
+    // pojemnosc_+1 (kazda linia poza ostatnia zajmuje co najmniej bajt), wiec
+    // dlugi dokument nigdy nie jest ucinany w ukladzie ani w nawigacji.
     static constexpr size_t MAKS_LINII_WIZUALNYCH = 2048;
     static constexpr size_t MAKS_HISTORIA = 8;
     using FunkcjaTekstu = void (*)(PoleWielowierszowe*, const char*, void*);
@@ -24,6 +27,8 @@ public:
         roboczy_ = new char[pojemnosc_];
         schowek_ = new char[pojemnosc_];
         for (size_t i = 0; i < MAKS_HISTORIA; ++i) historia_[i] = new Migawka(pojemnosc_);
+        linie_ = new Linia[MAKS_LINII_WIZUALNYCH];
+        pojemnosc_linii_ = linie_ ? MAKS_LINII_WIZUALNYCH : 0;
         bufor_[0] = roboczy_[0] = schowek_[0] = '\0';
         pionowy_ = new PasekPrzewijania();
         poziomy_ = new PasekPrzewijania();
@@ -55,6 +60,7 @@ public:
 
     ~PoleWielowierszowe() override {
         for (size_t i = 0; i < MAKS_HISTORIA; ++i) delete historia_[i];
+        delete[] linie_;
         delete[] bufor_;
         delete[] roboczy_;
         delete[] schowek_;
@@ -250,6 +256,11 @@ public:
         przywroc_migawke(*historia_[hist_pozycja_]);
         return true;
     }
+    bool czy_mozna_cofnac() const { return !czy_tylko_do_odczytu_ && hist_pozycja_ > 0; }
+    bool czy_mozna_ponowic() const { return !czy_tylko_do_odczytu_ && hist_pozycja_ < hist_liczba_; }
+    // Nowy dokument (np. wczytany plik) nie moze cofnac sie do tresci
+    // poprzedniego dokumentu.
+    void wyczysc_historie() { hist_pozycja_ = hist_liczba_ = 0; }
     bool ponow() {
         if (hist_pozycja_ >= hist_liczba_) return false;
         ++hist_pozycja_;
@@ -604,7 +615,7 @@ private:
         size_t start = 0, logiczna = 0;
         if (limit < 1) limit = 1;
         limit_ukladu_ = limit;
-        while (start <= dlugosc_ && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
+        while (start <= dlugosc_ && liczba_wizualnych_ < maks_linii()) {
             size_t koniec_log = start;
             while (koniec_log < dlugosc_ && bufor_[koniec_log] != '\n') ++koniec_log;
             size_t nastepna_log=koniec_log;
@@ -621,7 +632,7 @@ private:
                 (kierunek_ == KierunekTekstu::OdPrawej || BSF::needs_complex_layout(bufor_+start,koniec_log-start))) {
                 const auto* L=uklad_akapitu(start,koniec_log-start);
                 if (L) {
-                    for(size_t k=0;k<L->line_count()&&liczba_wizualnych_<MAKS_LINII_WIZUALNYCH;++k){
+                    for(size_t k=0;k<L->line_count()&&liczba_wizualnych_<maks_linii();++k){
                         const auto& vl=L->lines()[k];
                         dodaj_linie(start+vl.byte_begin,start+vl.byte_end,logiczna,int((vl.width+BSF::Fixed/2)/BSF::Fixed),
                                     true,start,koniec_log-start,uint32_t(k),vl.paragraph_level);
@@ -630,7 +641,7 @@ private:
                 }
             }
 #endif
-            while (p < koniec_log && liczba_wizualnych_ < MAKS_LINII_WIZUALNYCH) {
+            while (p < koniec_log && liczba_wizualnych_ < maks_linii()) {
                 size_t q = p; int szer = 0, ostatnia_spacja = -1, szer_spacji = 0;
 #if defined(BSF_NATIVE)
                 BSF::TextMetrics pen;
@@ -667,7 +678,8 @@ private:
         }
     }
     void dodaj_linie(size_t a,size_t b,size_t log,int szer,bool zlozona=false,size_t akapit=0,size_t akapit_dl=0,uint32_t linia_ukladu=0,uint8_t poziom=0) {
-        if (liczba_wizualnych_>=MAKS_LINII_WIZUALNYCH) return;
+        if (liczba_wizualnych_>=maks_linii()) return;
+        if (liczba_wizualnych_>=pojemnosc_linii_ && !powieksz_linie()) return;
         Linia ln; ln.start=a; ln.koniec=b; ln.logiczna=log; ln.szerokosc=szer; ln.zlozona=zlozona;
         ln.akapit=akapit; ln.akapit_dl=akapit_dl; ln.linia_ukladu=linia_ukladu; ln.poziom=poziom;
         linie_[liczba_wizualnych_++]=ln; if(szer>maks_szerokosc_) maks_szerokosc_=szer;
@@ -961,7 +973,18 @@ private:
 #endif
     char* bufor_{nullptr}; char* roboczy_{nullptr}; char* schowek_{nullptr}; size_t pojemnosc_{0},dlugosc_{0},kursor_{0},kotwica_{0};
     char placeholder_[128]{}; size_t maks_znakow_{0}; bool zawijanie_{true},pozwol_poziomy_{true},pozwol_pionowy_{true},zaznaczanie_{false}; int odstep_linii_{2},preferowane_x_{0},maks_szerokosc_{0};
-    Linia linie_[MAKS_LINII_WIZUALNYCH]; size_t liczba_wizualnych_{0},liczba_logicznych_{1}; mutable size_t ostatnio_narysowane_{0};
+    size_t maks_linii() const { return pojemnosc_ + 1; }
+    bool powieksz_linie() {
+        size_t n = pojemnosc_linii_ ? pojemnosc_linii_ * 2 : MAKS_LINII_WIZUALNYCH;
+        if (n > maks_linii()) n = maks_linii();
+        if (n <= pojemnosc_linii_) return false;
+        Linia* nowe = new Linia[n];
+        if (!nowe) return false;
+        for (size_t i = 0; i < liczba_wizualnych_; ++i) nowe[i] = linie_[i];
+        delete[] linie_; linie_ = nowe; pojemnosc_linii_ = n;
+        return true;
+    }
+    Linia* linie_{nullptr}; size_t pojemnosc_linii_{0}; size_t liczba_wizualnych_{0},liczba_logicznych_{1}; mutable size_t ostatnio_narysowane_{0};
     Migawka* historia_[MAKS_HISTORIA]{}; size_t hist_liczba_{0},hist_pozycja_{0};
     PasekPrzewijania* pionowy_{nullptr}; PasekPrzewijania* poziomy_{nullptr};
     FunkcjaMenuKontekstowego cb_menu_kontekstowe_{nullptr};

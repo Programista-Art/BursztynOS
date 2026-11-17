@@ -97,6 +97,8 @@ public:
     }
     bool pasuje_do(uint32_t kod, uint32_t modyfikatory) const {
         constexpr uint32_t MASKA = BWS_MOD_SHIFT | BWS_MOD_CTRL | BWS_MOD_ALT | BWS_MOD_SUPER;
+        // AltGr+litera wpisuje znak (np. AltGr+S = ś), nigdy nie jest skrotem.
+        if (modyfikatory & BWS_MOD_ALTGR) return false;
         return !skrot_.czy_pusty() && skrot_.kod == kod &&
                (skrot_.modyfikatory & MASKA) == (modyfikatory & MASKA);
     }

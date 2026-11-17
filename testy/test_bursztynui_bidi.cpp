@@ -29,6 +29,8 @@ static uint64_t io(uint64_t nr,uint64_t path,uint64_t dest,uint64_t,uint64_t){
 bool czytaj_plik(const char* path,char* out,uint32_t capacity){auto f=files.find(path);if(f==files.end()||f->second.size()>capacity)return false;memcpy(out,f->second.data(),f->second.size());return true;}
 bool utworz(const char* path){return files.emplace(path,std::string()).second;}
 bool zapisz_plik(const char* path,const char* text,uint32_t n){if(!files.count(path))return false;files[path]=std::string(text,n);return true;}
+bool usun_twor_uzytkownika(const char* path){return files.erase(path)==1;}
+uint32_t gui_okno_podrzedne_otworz(uint32_t,const char*,const char*,uint32_t){return 1;}
 void wypisz(const char*){}
 
 static void key(PoleTekstowe& f,unsigned code,uint32_t mods=0){ZdarzenieKlawiatury e{};e.kod_klawisza=code;e.modyfikatory=mods;f.obsluz_wcisniecie_klawisza(e);CHECK(e.obsluzone);}

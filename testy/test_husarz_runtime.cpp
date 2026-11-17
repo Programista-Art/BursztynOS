@@ -397,6 +397,39 @@ int main() {
             d.focused_control=id("note"); physical(230,BWS_MOD_ALT); CHECK(w.fokus()==viewport);
             text.kod=0x142;text.przyciski=BWS_MOD_ALT;w.obsluz_zdarzenie(text);
             CHECK(Husarz::equal(Husarz::control(d,id("note"))->value,"ł"));
+            {
+                // PS/2 AltGr (E0 38) z bitem ALTGR: pole strony zachowuje fokus.
+                bws_zdarzenie ralt{};ralt.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;ralt.x=1;
+                ralt.kod=BWS_KEY_SOURCE_E0|0x38;ralt.przyciski=BWS_MOD_ALT|BWS_MOD_ALTGR;
+                w.obsluz_zdarzenie(ralt);CHECK(w.fokus()==viewport);
+                text.kod=0x15b;text.przyciski=BWS_MOD_ALT|BWS_MOD_ALTGR;w.obsluz_zdarzenie(text);
+                CHECK(Husarz::equal(Husarz::control(d,id("note"))->value,"łś"));
+                // Ctrl+AltGr+A (host wysylajacy LCtrl+RAlt) to "ą", nie Ctrl+A.
+                physical(4,BWS_MOD_CTRL|BWS_MOD_ALT|BWS_MOD_ALTGR);
+                text.kod=0x105;text.przyciski=BWS_MOD_CTRL|BWS_MOD_ALT|BWS_MOD_ALTGR;w.obsluz_zdarzenie(text);
+                CHECK(Husarz::equal(Husarz::control(d,id("note"))->value,"łśą"));
+                // Pasek adresu (natywne PoleTekstowe w Okno): AltGr nie aktywuje
+                // menu glownego, wiec polskie znaki trafiaja do pola.
+                auto* adres=g_husarz.txt_adres;CHECK(adres!=nullptr);
+                w.ustaw_fokus(adres);adres->ustaw_tekst("szukaj ");
+                adres->ustaw_zaznaczenie(7,7);
+                const uint32_t pl[]={0x105,0x107,0x119,0x142,0x144,0xf3,0x15b,0x17a,0x17c,
+                                     0x104,0x106,0x118,0x141,0x143,0xd3,0x15a,0x179,0x17b};
+                for(auto cp:pl){
+                    for(uint32_t kod:{uint32_t(BWS_KEY_SOURCE_E0|0x38),uint32_t(BWS_KEY_SOURCE_USB|230)}){
+                        ralt.kod=kod;ralt.x=1;w.obsluz_zdarzenie(ralt);CHECK(w.fokus()==adres);
+                        ralt.x=0;w.obsluz_zdarzenie(ralt);CHECK(w.fokus()==adres);
+                    }
+                    ralt.kod=BWS_KEY_SOURCE_E0|0x38;ralt.x=1;w.obsluz_zdarzenie(ralt);
+                    text.kod=cp;text.przyciski=BWS_MOD_ALT|BWS_MOD_ALTGR;w.obsluz_zdarzenie(text);
+                    ralt.x=0;w.obsluz_zdarzenie(ralt);
+                }
+                CHECK(!std::strcmp(adres->tekst(),"szukaj ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"));
+                // Lewy Alt nadal aktywuje menu (konwencja pulpitu zachowana).
+                bws_zdarzenie lalt{};lalt.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;lalt.x=1;lalt.kod=0x38;lalt.przyciski=BWS_MOD_ALT;
+                w.obsluz_zdarzenie(lalt);CHECK(w.fokus()==g_husarz.menu);
+                w.ustaw_fokus(viewport);d.focused_control=id("note");
+            }
             // Physical USB shortcuts use the same command decoder as release.
             d.focused_control=id("q");physical(4,BWS_MOD_CTRL);
             const uint32_t polish[]={0x105,0x107,0x119,0x142,0x144,0xf3,0x15b,0x17a,0x17c};

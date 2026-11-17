@@ -1,0 +1,10 @@
+   20.00 s  puls hosta 20 s bez przestojow, start QEMU
+   41.93 s  pulpit gotowy po 21.9 s
+   52.61 s  Notatnik uruchomiony z menu Start
+   67.98 s  wpisano: Zażółć gęślą jaźń / ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż / abc 123
+   71.48 s  menu kontekstowe otwarte prawym przyciskiem
+   76.27 s  Ctrl+S otworzyl dialog Zapisz jako
+   85.51 s  zatwierdzono nazwe "Notatka żródlo" (rozszerzenie z filtra)
+   91.28 s  Ctrl+O otworzyl dialog Otworz
+  100.20 s  plik otwarty ponownie przez dialog Otworz
+  100.22 s  przestoje hosta (start s, dlugosc s): []

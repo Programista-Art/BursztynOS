@@ -1,6 +1,18 @@
 # Bursztyn OS - Windows PowerShell Launcher
 # Profil VirtIO zgodny sprzetowo z dzialajacym launcherem Linux/macOS.
 # Windows zachowuje GTK jako domyslny frontend i lokalny sposob obslugi UEFI.
+#
+# Uzycie (Windows PowerShell 5.1 lub PowerShell 7):
+#   .\runwindows.ps1                      menu interaktywne
+#   .\runwindows.ps1 -Mode 2              bez menu: tryb 2 (UEFI + VirtIO Full); kod wyjscia = kod QEMU
+#   .\runwindows.ps1 -PrintArgv -Mode 16  tylko raport JSON z argv QEMU (nic nie tworzy, nic nie uruchamia)
+#
+# wirtualny_dysk.img jest TRWALYM dyskiem uzytkownika: launcher tworzy pusty plik tylko, gdy nie istnieje,
+# nigdy go nie nadpisuje, nie formatuje ani nie usuwa.
+#
+# Klawiatura: Windows zglasza AltGr jako LCtrl + prawy Alt. Bursztyn OS rozpoznaje Ctrl+AltGr jako AltGr
+# (BWS_MOD_ALTGR) i nie wykonuje wtedy skrotow Ctrl+A/S/Z/X/N/O - polskie znaki nie uruchamiaja polecen.
+# Launcher nie zmienia ustawien klawiatury ani metod wprowadzania Windows.
 
 param(
     [string]$QemuPath = "",
@@ -18,25 +30,77 @@ param(
     [string]$PointerDevice = "relative",
     [ValidateRange(0,65535)][int]$QmpPort = 0,
     [switch]$PointerDiagnostics,
-    [string]$FirmwarePath = ""
+    [string]$FirmwarePath = "",
+    [ValidatePattern('^$|^([0-9]|1[0-8])$')]
+    [string]$Mode = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2026-11-09-GRAPHICS-PARITY"
+$LauncherVersion = "2026-11-17-AUDYT-LAUNCHEROW"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-Set-Location $ScriptDir
+# Wzgledna sciezka -Iso odnosi sie do katalogu, z ktorego uruchomiono skrypt.
+$InvocationDir = (Get-Location).ProviderPath
+Set-Location -LiteralPath $ScriptDir
+# Set-Location zmienia tylko lokalizacje PowerShell; QEMU i metody .NET uzywaja katalogu procesu.
+[System.Environment]::CurrentDirectory = $ScriptDir
+$script:LastQemuExitCode = 0
 
 $IsoNormal = if ([string]::IsNullOrWhiteSpace($Iso)) {
     Join-Path $ScriptDir "BursztynOS.iso"
-} else {
+} elseif ([System.IO.Path]::IsPathRooted($Iso)) {
     [System.IO.Path]::GetFullPath($Iso)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $InvocationDir $Iso))
 }
 
 $IsoCiTest = Join-Path $ScriptDir ".bursztyn_ci_test.iso"
 $Disk = Join-Path $ScriptDir "wirtualny_dysk.img"
 $LogDir = Join-Path $ScriptDir "logi_qemu"
+
+# Natywne polecenie z przechwyceniem stdout/stderr. W Windows PowerShell 5.1 linia stderr przy
+# $ErrorActionPreference = "Stop" i przekierowaniu 2>&1 staje sie bledem konczacym skrypt.
+function Invoke-NativeCapture {
+    param([Parameter(Mandatory = $true)][string]$Exe, [string[]]$Arguments = @())
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = @(& $Exe @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+        return [pscustomobject]@{ Lines = $lines; ExitCode = $LASTEXITCODE }
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+# Pliki z katalogu launchera sa przekazywane QEMU wzglednie (katalog procesu = $ScriptDir), wiec
+# polskie/Unicode znaki w katalogach nadrzednych nie trafiaja do argv QEMU.
+function ConvertTo-QemuPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $base = $ScriptDir.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    if ($full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return ".\" + $full.Substring($base.Length)
+    }
+    return $full
+}
+
+# Wartosc file=... w opcjach QEMU: przecinek w sciezce musi byc podwojony.
+function ConvertTo-QemuOptionPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return (ConvertTo-QemuPath -Path $Path).Replace(",", ",,")
+}
+
+function Test-IsoFreshness {
+    param([string]$IsoPath)
+    $kernel = Join-Path $ScriptDir "system_operacyjny.bin"
+    if ((Test-Path -LiteralPath $kernel -PathType Leaf) -and (Test-Path -LiteralPath $IsoPath -PathType Leaf)) {
+        if ((Get-Item -LiteralPath $kernel).LastWriteTimeUtc -gt (Get-Item -LiteralPath $IsoPath).LastWriteTimeUtc) {
+            Write-Host "UWAGA: $(Split-Path -Leaf $IsoPath) jest starszy niz system_operacyjny.bin - obraz moze byc nieaktualny (make -j1 iso)." -ForegroundColor Yellow
+        }
+    }
+}
 
 function Find-Qemu {
     if (-not [string]::IsNullOrWhiteSpace($QemuPath)) {
@@ -232,15 +296,19 @@ function Prepare-Disk {
     if (Test-Path -LiteralPath $Disk -PathType Leaf) {
         return
     }
+    if (Test-Path -LiteralPath $Disk) {
+        throw "wirtualny_dysk.img istnieje, ale nie jest plikiem (katalog?) - odmowa: $Disk"
+    }
 
     Write-Host ""
     Write-Host "Tworzenie pustego dysku wirtualnego: $DiskSize"
 
     $qemuImg = Find-QemuImg
     if ($qemuImg) {
-        & $qemuImg create -f raw $Disk $DiskSize
-        if ($LASTEXITCODE -ne 0) {
-            throw "qemu-img nie utworzyl dysku. Kod: $LASTEXITCODE"
+        $created = Invoke-NativeCapture -Exe $qemuImg -Arguments @("create", "-f", "raw", (ConvertTo-QemuPath -Path $Disk), $DiskSize)
+        $created.Lines | ForEach-Object { Write-Host $_ }
+        if ($created.ExitCode -ne 0) {
+            throw "qemu-img nie utworzyl dysku. Kod: $($created.ExitCode)"
         }
         return
     }
@@ -269,8 +337,9 @@ function Assert-QemuDisplay {
         [Parameter(Mandatory = $true)][string]$Backend
     )
 
-    $available = @(& $Qemu -display help 2>&1 | ForEach-Object { $_.ToString() })
-    $exitCode = $LASTEXITCODE
+    $probe = Invoke-NativeCapture -Exe $Qemu -Arguments @("-display", "help")
+    $available = $probe.Lines
+    $exitCode = $probe.ExitCode
     $escapedBackend = [Regex]::Escape($Backend)
     $found = $false
 
@@ -290,8 +359,9 @@ function Assert-QemuDisplay {
 function Assert-QemuVirtioDevices {
     param([Parameter(Mandatory = $true)][string]$Qemu)
 
-    $deviceHelp = @(& $Qemu -device help 2>&1 | ForEach-Object { $_.ToString() }) -join "`n"
-    if ($LASTEXITCODE -ne 0) {
+    $probe = Invoke-NativeCapture -Exe $Qemu -Arguments @("-device", "help")
+    $deviceHelp = $probe.Lines -join "`n"
+    if ($probe.ExitCode -ne 0) {
         throw "Nie mozna pobrac listy urzadzen QEMU."
     }
 
@@ -396,8 +466,12 @@ function Start-BursztynQemu {
         if (-not ($PrintArgv -or $Audit) -and -not (Test-Path -LiteralPath $IsoPath -PathType Leaf)) {
             throw "Nie znaleziono obrazu ISO: $IsoPath"
         }
-        if (-not ($PrintArgv -or $Audit)) { $IsoPath = (Resolve-Path -LiteralPath $IsoPath).Path }
+        if (-not ($PrintArgv -or $Audit)) {
+            $IsoPath = (Resolve-Path -LiteralPath $IsoPath).ProviderPath
+            Test-IsoFreshness -IsoPath $IsoPath
+        }
     }
+    $diskOpt = ConvertTo-QemuOptionPath -Path $Disk
 
     # Zgodnosc z Linux/macOS:
     # pc+hpet, cpu=max, TCG single-thread, 1 vCPU, 2 GiB RAM.
@@ -429,7 +503,7 @@ function Start-BursztynQemu {
         # HDA -> BLK -> NET -> RNG -> GPU -> keyboard -> mouse.
         # Input celowo BEZ disable-legacy=on, tak jak na Linuxie.
         $argsList += @(
-            "-drive", "id=disk,file=$Disk,format=raw,if=none",
+            "-drive", "id=disk,file=$diskOpt,format=raw,if=none",
             "-device", $blkSpec,
 
             "-netdev", "user,id=n1",
@@ -452,7 +526,7 @@ function Start-BursztynQemu {
         }
 
         $argsList += @(
-            "-drive", "id=disk,file=$Disk,format=raw,if=none",
+            "-drive", "id=disk,file=$diskOpt,format=raw,if=none",
             "-device", "ich9-ahci,id=ahci",
             "-device", $ahciDisk,
 
@@ -471,14 +545,14 @@ function Start-BursztynQemu {
     $ovmf = $null
     if ($Firmware -eq "UEFI") {
         $ovmf = if ($FirmwarePath) { $FirmwarePath } elseif ($PrintArgv -or $Audit) { Get-UefiFirmware -ReadOnly } else { Get-UefiFirmware }
-        $argsList = @("-bios", $ovmf) + $argsList
+        $argsList = @("-bios", (ConvertTo-QemuPath -Path $ovmf)) + $argsList
     }
 
     if ($hasIso) {
         # Zachowujemy windowsowy wymuszony start z ISO, aby istniejacy dysk nie przejal bootu.
         $argsList += @(
             "-boot", "order=d,menu=on",
-            "-cdrom", $IsoPath
+            "-cdrom", (ConvertTo-QemuPath -Path $IsoPath)
         )
     }
     else {
@@ -533,9 +607,9 @@ function Start-BursztynQemu {
     $report.pointer_selection = $PointerDevice
     $report.display_backend = $effectiveDisplay
     if ($Audit) {
-        $report.version = @(& $qemu --version 2>&1 | ForEach-Object { $_.ToString() })
-        $report.machines = @(& $qemu -machine help 2>&1 | ForEach-Object { $_.ToString() })
-        $report.virtio_mouse_properties = @(& $qemu -device virtio-mouse-pci,help 2>&1 | ForEach-Object { $_.ToString() })
+        $report.version = (Invoke-NativeCapture -Exe $qemu -Arguments @("--version")).Lines
+        $report.machines = (Invoke-NativeCapture -Exe $qemu -Arguments @("-machine", "help")).Lines
+        $report.virtio_mouse_properties = (Invoke-NativeCapture -Exe $qemu -Arguments @("-device", "virtio-mouse-pci,help")).Lines
     }
     if ($PrintArgv -or $Audit) { $report | ConvertTo-Json -Depth 8; return }
     Write-Host "PCI topology: $($topology | ConvertTo-Json -Compress)"
@@ -567,7 +641,7 @@ function Start-BursztynQemu {
     }
     Write-Host "Audio guest:  Intel HDA obecne, host audio = none"
     Write-Host "ISO:          $(if ($hasIso) { $IsoPath } else { '(brak - start z dysku)' })"
-    Write-Host "Dysk:         $Disk"
+    Write-Host "Dysk:         $Disk (trwaly, zapis wlaczony)"
     Write-Host "Boot:         $(if ($hasIso) { 'ISO najpierw' } else { 'dysk' })"
     Write-Host "============================================================"
     Write-Host ""
@@ -582,40 +656,125 @@ function Start-BursztynQemu {
     $windowLimiter = Start-QemuWindowLimiter `
         -TitleFragment "Bursztyn OS - $ModeName" `
         -MaxWidth $WindowWidth -MaxHeight $WindowHeight
+    # Port szeregowy goscia nadaje UTF-8 (polskie znaki); stderr QEMU nie moze przerwac skryptu.
+    $previousPreference = $ErrorActionPreference
+    $previousOutputEncoding = [Console]::OutputEncoding
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $exitCode = 0
     try {
-    if ($SaveLog) {
-        if (-not (Test-Path -LiteralPath $LogDir)) {
-            New-Item -ItemType Directory -Path $LogDir | Out-Null
+        $ErrorActionPreference = "Continue"
+        try { [Console]::OutputEncoding = $utf8 } catch { }
+        if ($SaveLog) {
+            if (-not (Test-Path -LiteralPath $LogDir)) {
+                New-Item -ItemType Directory -Path $LogDir | Out-Null
+            }
+
+            $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+            $safeName = ($ModeName -replace '[^A-Za-z0-9_-]', '_')
+            $logFile = Join-Path $LogDir "${stamp}_${safeName}.log"
+
+            Write-Host "Log COM1: $logFile"
+            $writer = New-Object System.IO.StreamWriter($logFile, $false, $utf8)
+            try {
+                & $qemu @argsList 2>&1 | ForEach-Object {
+                    $line = $_.ToString()
+                    Write-Host $line
+                    $writer.WriteLine($line)
+                    $writer.Flush()
+                }
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                $writer.Dispose()
+            }
         }
-
-        $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-        $safeName = ($ModeName -replace '[^A-Za-z0-9_-]', '_')
-        $logFile = Join-Path $LogDir "${stamp}_${safeName}.log"
-
-        Write-Host "Log COM1: $logFile"
-        & $qemu @argsList 2>&1 | Tee-Object -FilePath $logFile
-        $exitCode = $LASTEXITCODE
+        else {
+            & $qemu @argsList
+            $exitCode = $LASTEXITCODE
+        }
     }
-    else {
-        & $qemu @argsList
-        $exitCode = $LASTEXITCODE
-    }
-    } finally {
+    finally {
+        $ErrorActionPreference = $previousPreference
+        try { [Console]::OutputEncoding = $previousOutputEncoding } catch { }
         if ($windowLimiter) {
             Stop-Job -Job $windowLimiter -ErrorAction SilentlyContinue | Out-Null
             Remove-Job -Job $windowLimiter -Force -ErrorAction SilentlyContinue
         }
     }
 
+    $script:LastQemuExitCode = $exitCode
     if ($exitCode -ne 0) {
         Write-Host ""
         Write-Host "QEMU zakonczyl sie kodem $exitCode." -ForegroundColor Red
     }
 }
 
+function Invoke-LauncherMode {
+    param([Parameter(Mandatory = $true)][string]$Choice)
+    switch ($Choice) {
+        "1"  { Start-BursztynQemu -ModeName "Normalny BIOS VirtIO Full" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $false }
+        "2"  { Start-BursztynQemu -ModeName "Normalny UEFI VirtIO Full" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $false }
+
+        "3"  { Start-BursztynQemu -ModeName "Testy GRUB BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+        "4"  { Start-BursztynQemu -ModeName "Testy GRUB UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+
+        "5"  {
+            if (-not ($PrintArgv -or $Audit) -and -not (Test-Path -LiteralPath $IsoCiTest -PathType Leaf)) { throw "Nie znaleziono: $IsoCiTest" }
+            Start-BursztynQemu -ModeName "CI BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoCiTest -VirtIoFull $true -SaveLog $true
+        }
+        "6"  {
+            if (-not ($PrintArgv -or $Audit) -and -not (Test-Path -LiteralPath $IsoCiTest -PathType Leaf)) { throw "Nie znaleziono: $IsoCiTest" }
+            Start-BursztynQemu -ModeName "CI UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoCiTest -VirtIoFull $true -SaveLog $true
+        }
+
+        "7"  { Start-BursztynQemu -ModeName "Interaktywne BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+        "8"  { Start-BursztynQemu -ModeName "Interaktywne UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+
+        "9"  { Start-BursztynQemu -ModeName "Ekran BIOS VirtIO-GPU" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+        "10" { Start-BursztynQemu -ModeName "Ekran UEFI VirtIO-GPU" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+
+        "11" {
+            $script:DisplayBackend = "gtk"
+            Write-Host "Backend ustawiony na GTK." -ForegroundColor Green
+        }
+        "12" {
+            $script:DisplayBackend = "sdl"
+            Write-Host "Backend ustawiony na SDL." -ForegroundColor Yellow
+        }
+        "13" { Write-Host "Tryb 13 nie istnieje w launcherze Windows (usuwanie dysku jest tylko w launcherze Linux, z potwierdzeniem)." -ForegroundColor Yellow }
+
+        "14" { Start-BursztynQemu -ModeName "Zainstalowany UEFI VirtIO Full" -Firmware "UEFI" -IsoPath "" -VirtIoFull $true -SaveLog $false }
+        "15" { Start-BursztynQemu -ModeName "Instalator UEFI VirtIO Full" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
+
+        "16" { Start-BursztynQemu -ModeName "BIOS Legacy" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
+        "17" { Start-BursztynQemu -ModeName "UEFI Legacy" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
+        "18" { Start-BursztynQemu -ModeName "Zainstalowany UEFI Legacy" -Firmware "UEFI" -IsoPath "" -VirtIoFull $false -SaveLog $false }
+
+        "0" { exit 0 }
+
+        default {
+            Write-Host "Nieprawidlowy wybor." -ForegroundColor Red
+        }
+    }
+}
+
 if ($PrintArgv -or $Audit) {
-    Start-BursztynQemu -ModeName "UEFI VirtIO Full" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $false
+    # Bez -Mode: dotychczasowy raport dla trybu 2 (UEFI + VirtIO Full).
+    $reportMode = if ([string]::IsNullOrWhiteSpace($Mode)) { "2" } else { $Mode }
+    if (@("0", "11", "12", "13") -contains $reportMode) { throw "Tryb $reportMode nie uruchamia QEMU - brak argv do wypisania." }
+    Invoke-LauncherMode -Choice $reportMode
     exit 0
+}
+if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+    try {
+        Invoke-LauncherMode -Choice $Mode
+    }
+    catch {
+        Write-Host ""
+        Write-Host "BLAD: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    exit $script:LastQemuExitCode
 }
 while ($true) {
     Write-Host @"
@@ -668,50 +827,7 @@ while ($true) {
     $choice = Read-Host "Wybierz tryb [0-18]"
 
     try {
-        switch ($choice) {
-            "1"  { Start-BursztynQemu -ModeName "Normalny BIOS VirtIO Full" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $false }
-            "2"  { Start-BursztynQemu -ModeName "Normalny UEFI VirtIO Full" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $false }
-
-            "3"  { Start-BursztynQemu -ModeName "Testy GRUB BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-            "4"  { Start-BursztynQemu -ModeName "Testy GRUB UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-
-            "5"  {
-                if (-not (Test-Path -LiteralPath $IsoCiTest -PathType Leaf)) { throw "Nie znaleziono: $IsoCiTest" }
-                Start-BursztynQemu -ModeName "CI BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoCiTest -VirtIoFull $true -SaveLog $true
-            }
-            "6"  {
-                if (-not (Test-Path -LiteralPath $IsoCiTest -PathType Leaf)) { throw "Nie znaleziono: $IsoCiTest" }
-                Start-BursztynQemu -ModeName "CI UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoCiTest -VirtIoFull $true -SaveLog $true
-            }
-
-            "7"  { Start-BursztynQemu -ModeName "Interaktywne BIOS VirtIO" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-            "8"  { Start-BursztynQemu -ModeName "Interaktywne UEFI VirtIO" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-
-            "9"  { Start-BursztynQemu -ModeName "Ekran BIOS VirtIO-GPU" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-            "10" { Start-BursztynQemu -ModeName "Ekran UEFI VirtIO-GPU" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-
-            "11" {
-                $DisplayBackend = "gtk"
-                Write-Host "Backend ustawiony na GTK." -ForegroundColor Green
-            }
-            "12" {
-                $DisplayBackend = "sdl"
-                Write-Host "Backend ustawiony na SDL." -ForegroundColor Yellow
-            }
-
-            "14" { Start-BursztynQemu -ModeName "Zainstalowany UEFI VirtIO Full" -Firmware "UEFI" -IsoPath "" -VirtIoFull $true -SaveLog $false }
-            "15" { Start-BursztynQemu -ModeName "Instalator UEFI VirtIO Full" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $true -SaveLog $true }
-
-            "16" { Start-BursztynQemu -ModeName "BIOS Legacy" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
-            "17" { Start-BursztynQemu -ModeName "UEFI Legacy" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
-            "18" { Start-BursztynQemu -ModeName "Zainstalowany UEFI Legacy" -Firmware "UEFI" -IsoPath "" -VirtIoFull $false -SaveLog $false }
-
-            "0" { exit 0 }
-
-            default {
-                Write-Host "Nieprawidlowy wybor." -ForegroundColor Red
-            }
-        }
+        Invoke-LauncherMode -Choice $choice
     }
     catch {
         Write-Host ""

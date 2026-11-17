@@ -28,7 +28,7 @@ else:
         "-audiodev", "none,id=snd",
         "-device", "intel-hda",
         "-device", "hda-output,audiodev=snd",
-        "-drive", f"id=disk,file={ROOT}\\wirtualny_dysk.img,format=raw,if=none",
+        "-drive", "id=disk,file=.\\wirtualny_dysk.img,format=raw,if=none",
         "-device", "virtio-blk-pci,drive=disk,disable-legacy=on",
         "-netdev", "user,id=n1",
         "-device", "virtio-net-pci,netdev=n1,disable-legacy=on",
@@ -39,7 +39,7 @@ else:
         "-device", "virtio-keyboard-pci",
         "-device", "virtio-mouse-pci",
         "-boot", "order=d,menu=on",
-        "-cdrom", f"{ROOT}\\BursztynOS.iso",
+        "-cdrom", ".\\BursztynOS.iso",
         "-name", "Bursztyn OS - VirtIO UEFI (ISO)"
     ]
     windows = {

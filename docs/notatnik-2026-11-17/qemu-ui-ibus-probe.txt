@@ -1,0 +1,6 @@
+WYNIK NIEWAZNY (2026-11-17): pierwszy przebieg narzedzia/qemu_ui_ime_probe.py uruchamial QEMU z -S.
+Zatrzymana maszyna odrzuca zdarzenia wejscia przed trace input_event_key_qcode, wiec slad byl pusty
+we wszystkich wariantach (takze SDL bez IBus, gdzie klawisze na pewno dochodza - por. sdl-ibus-probe.txt).
+Skrypt poprawiono (bez -S); poprawionego wariantu nie uruchomiono (automatyczne wysylanie klawiszy
+zostalo zablokowane przez zabezpieczenia sesji). Zachowanie QEMU -display gtk z aktywnym IBus pozostaje
+niezweryfikowane pomiarem. Uruchomienie reczne: python3 narzedzia/qemu_ui_ime_probe.py gtk sdl

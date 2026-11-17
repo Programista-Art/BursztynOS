@@ -1,0 +1,12 @@
+   20.01 s  puls hosta 20 s bez przestojow, start QEMU (konfiguracja runuefi, dysk snapshot=on, SDL)
+   75.88 s  pulpit po 55.8 s
+   79.89 s  instalacja Notatnika: OK
+   79.93 s  okno X aktywne: WM_NAME(STRING) = "QEMU (bursztyn-xtest-8309-0)"
+   94.86 s  Notatnik uruchomiony z menu Start (tekst wyszukiwania wpisany przez XTest)
+  104.09 s  Pomoc > Sterowanie: utworzono okien=0 (log: -)
+  110.28 s  ponowne Sterowanie: aktywowano=0, utworzono=0
+  157.59 s  wpisano przez XTest: Zażółć gęślą jaźń / ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż / (LCtrl+AltGr) ąćęłńóśźż ĄĆĘŁŃÓŚŹŻ / abc 123
+  166.07 s  Backspace x3 + "456", Home, Shift+End, Ctrl+C, End, Enter, Ctrl+V, Lewo x2, Backspace
+  176.16 s  Pomoc > O Notatniku: utworzono=0 (-)
+  218.13 s  zamknieto Notatnik z otwartym oknem Sterowanie
+  218.20 s  przestoje hosta (start s, dlugosc s): []

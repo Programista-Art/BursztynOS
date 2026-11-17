@@ -105,6 +105,29 @@ int main() {
           CHECK(akt <= MAKS_OKIEN);
       }
       delete r; }
+    // Notatnik (rodzaje 7 i 8): wlasne numery, bez kolizji z Snake/Przegladarka obrazow; duplikat jest odrzucany
+    // (BWS 101 aktywuje wtedy istniejace okno); zakonczenie wlasciciela zwraca jego dzieci do zamkniecia.
+    { Rejestr* r = new Rejestr(); int a = -1, b = -1, c = -1;
+      CHECK(RODZAJ_O_NOTATNIKU == 7 && RODZAJ_STEROWANIE_NOTATNIK == 8 && RODZAJ_MAKS == 8);
+      CHECK(RODZAJ_O_NOTATNIKU != RODZAJ_O_GRZE_SNAKE && RODZAJ_STEROWANIE_NOTATNIK != RODZAJ_STEROWANIE_SNAKE &&
+            RODZAJ_STEROWANIE_NOTATNIK != RODZAJ_STEROWANIE_OBRAZY);
+      CHECK(rez(*r, 30, RODZAJ_STEROWANIE_NOTATNIK, "Sterowanie", "# Plik\nCtrl+N\tnowy dokument", &a) == Wynik::OK);
+      CHECK(rez(*r, 30, RODZAJ_O_NOTATNIKU, "O Notatniku", "# Notatnik dla Bursztyn OS\nŻółw ąę", &b) == Wynik::OK);
+      CHECK(rez(*r, 30, RODZAJ_STEROWANIE_NOTATNIK, "Sterowanie", "x") == Wynik::Duplikat);
+      CHECK(rez(*r, 31, RODZAJ_STEROWANIE_NOTATNIK, "Sterowanie", "x", &c) == Wynik::OK);   // inny Notatnik: osobne okno
+      CHECK(rez(*r, 30, RODZAJ_MAKS + 1, "X", "x") == Wynik::ZlyRodzaj);
+      CHECK(r->ustaw_pid(a, 40) && r->ustaw_pid(b, 41) && r->ustaw_pid(c, 42));
+      CHECK(rez(*r, 40, RODZAJ_O_NOTATNIKU, "X", "x") == Wynik::WlascicielToDziecko);      // dziecko nie otwiera okien
+      char t[256]; size_t n = r->kopiuj_dla_dziecka(41, t, sizeof(t));
+      CHECK(n > 0 && std::string(t).find("O Notatniku\n\n# Notatnik dla Bursztyn OS") == 0);
+      CHECK(r->usun_dziecko(40) == 30 && r->liczba_wlasciciela(30) == 1);                  // zamkniecie: fokus do wlasciciela 30
+      CHECK(rez(*r, 30, RODZAJ_STEROWANIE_NOTATNIK, "Sterowanie", "y", &a) == Wynik::OK);   // ponowne otwarcie po zamknieciu
+      CHECK(r->ustaw_pid(a, 43));
+      int d[8]; const size_t m = r->dzieci(30, d, 8);
+      CHECK(m == 2);
+      for (size_t q = 0; q < m; ++q) CHECK(r->usun_dziecko(d[q]) == 30);
+      CHECK(r->liczba_wlasciciela(30) == 0 && r->liczba_wlasciciela(31) == 1 && r->jest_dzieckiem(42));
+      delete r; }
     printf("%s: %d sprawdzen, %d bledow\n", bledy ? "FAIL" : "PASS", proby, bledy);
     return bledy ? 1 : 0;
 }

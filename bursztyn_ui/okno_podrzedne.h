@@ -18,7 +18,8 @@ namespace OknoPodrzedne {
 
 // Numery zgodne z jadrem (jadro/bws/okna_podrzedne.h).
 enum class Rodzaj : uint32_t {
-    OProgramieObrazy = 1, InfoObrazu = 2, SterowanieObrazy = 3, SterowanieSnake = 4, ZasadySnake = 5, OGrzeSnake = 6
+    OProgramieObrazy = 1, InfoObrazu = 2, SterowanieObrazy = 3, SterowanieSnake = 4, ZasadySnake = 5, OGrzeSnake = 6,
+    ONotatniku = 7, SterowanieNotatnik = 8
 };
 enum class Otwarcie : uint8_t { Odmowa = 0, Utworzono = 1, Aktywowano = 2 };
 enum class Wynik : uint8_t { Brak = 0, OK = 1, Anuluj = 2 };

@@ -19,7 +19,9 @@ inline constexpr uint32_t RODZAJ_STEROWANIE_OBRAZY  = 3;
 inline constexpr uint32_t RODZAJ_STEROWANIE_SNAKE   = 4;
 inline constexpr uint32_t RODZAJ_ZASADY_SNAKE       = 5;
 inline constexpr uint32_t RODZAJ_O_GRZE_SNAKE       = 6;
-inline constexpr uint32_t RODZAJ_MAKS               = 6;
+inline constexpr uint32_t RODZAJ_O_NOTATNIKU        = 7;
+inline constexpr uint32_t RODZAJ_STEROWANIE_NOTATNIK = 8;
+inline constexpr uint32_t RODZAJ_MAKS               = 8;
 
 inline constexpr size_t MAKS_TRESC = 4096;      // bajty UTF-8 (bez NUL)
 inline constexpr size_t MAKS_TYTUL = 64;

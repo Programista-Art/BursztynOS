@@ -180,7 +180,13 @@ public:
 
     bool pokaz(ZarzadcaPopupow& z,Kontrolka* owner=nullptr) {
         wynik_pliku_=WynikDialoguPliku::Brak;wybrana_sciezka_[0]=0;
-        return OknoDialogowe::pokaz(z,owner);
+        if(!OknoDialogowe::pokaz(z,owner))return false;
+        // Klawiatura od razu w polu nazwy (z zaznaczona nazwa domyslna), tak
+        // aby wpisanie nazwy i Enter dzialaly bez klikania.
+        if(pole_nazwy_ && tryb_!=TrybDialoguPliku::WybierzKatalog){
+            z.ustaw_fokus_popupu(pole_nazwy_);pole_nazwy_->zaznacz_wszystko();indeks_fokusu_=2;
+        }
+        return true;
     }
 
     static const char* domyslny_tytul(TrybDialoguPliku t) {
@@ -784,7 +790,10 @@ public:
             const char* ext = pobierz_domyslne_rozszerzenie_filtru();
             if (ext && ext[0]) {
                 size_t l = dlugosc_str(pelna_nazwa);
-                size_t el = dlugosc_str(ext);
+                size_t el = 0;
+                // Filtr "*.txt;*.md" daje domyslne rozszerzenie ".txt", nie
+                // caly ciag z separatorami.
+                while (ext[el] && ext[el] != ';' && ext[el] != ' ') ++el;
                 if (l + el + 1 < sizeof(pelna_nazwa)) {
                     for (size_t i = 0; i < el; ++i) pelna_nazwa[l + i] = ext[i];
                     pelna_nazwa[l + el] = '\0';
@@ -936,12 +945,7 @@ public:
     }
 
     void anuluj() {
-        wybrana_sciezka_[0] = '\0';
-        wybrana_nazwa_[0] = '\0';
-        wynik_pliku_ = WynikDialoguPliku::Anulowano;
-        if (cb_wynik_pliku_) {
-            cb_wynik_pliku_(this, WynikDialoguPliku::Anulowano, "", dane_wyniku_pliku_);
-        }
+        // zamknij_z_wynikiem(Anuluj) zeruje wybor i wola callback dokladnie raz.
         zamknij_z_wynikiem(WynikDialogu::Anuluj);
     }
 

@@ -368,6 +368,17 @@ public:
     ZarzadcaPopupow& zarzadca_popupow() { return popupy_; }
     const ZarzadcaPopupow& zarzadca_popupow() const { return popupy_; }
     void ustaw_fokus(Kontrolka* k) {
+        // Wejscie na pasek menu zapamietuje kontrolke, do ktorej fokus wroci po
+        // zakonczeniu pracy z menu; zwykla kontrolka konczy ten tryb.
+        if (k && k != kontrolka_z_fokusem_) {
+            if (k->czy_pasek_menu()) {
+                if (kontrolka_z_fokusem_ && !kontrolka_z_fokusem_->czy_pasek_menu())
+                    fokus_przed_menu_ = kontrolka_z_fokusem_;
+            } else {
+                fokus_przed_menu_ = nullptr;
+            }
+            menu_bylo_otwarte_ = false;
+        }
         if (kontrolka_z_fokusem_ != k) {
             if (kontrolka_z_fokusem_) {
                 kontrolka_z_fokusem_->przy_utracie_fokusu();
@@ -623,6 +634,60 @@ public:
     }
 
     virtual void obsluz_zdarzenie(const bws_zdarzenie& surowe_zdarzenie) {
+        if (przed_zdarzeniem_menu(surowe_zdarzenie)) return;
+        obsluz_zdarzenie_okna(surowe_zdarzenie);
+        po_zdarzeniu_menu();
+    }
+
+    Kontrolka* fokus_przed_menu() const { return fokus_przed_menu_; }
+
+private:
+    // Lewy Alt (fizyczny): PS/2 38 bez E0 albo USB 226; nigdy AltGr.
+    static bool czy_lewy_alt(const bws_zdarzenie& e) {
+        const uint32_t kod = e.kod;
+        return !(e.przyciski & BWS_MOD_ALTGR) &&
+               (((kod & BWS_KEY_SOURCE_USB) && (kod & 0xFFU) == 226U) ||
+                (!(kod & BWS_KEY_SOURCE_USB) && !(kod & BWS_KEY_SOURCE_E0) && (kod & 0x7FU) == 0x38U));
+    }
+
+    bool przywroc_fokus_po_menu() {
+        Kontrolka* cel = fokus_przed_menu_;
+        menu_bylo_otwarte_ = false;
+        if (cel && czy_w_drzewie(kontrolka_glowna_, cel) && cel->czy_efektywnie_widoczna() &&
+            cel->czy_moze_miec_fokus()) {
+            ustaw_fokus(cel);
+            return true;
+        }
+        return false;
+    }
+
+    // Pasek menu z fokusem, bez otwartego menu (np. po lewym Alt): tekst i klawisze,
+    // ktore nie steruja menu, wracaja do poprzedniej kontrolki (edytora), zamiast
+    // ginac w pasku menu. Esc i ponowny lewy Alt konczą tryb menu. true = pochloniete.
+    bool przed_zdarzeniem_menu(const bws_zdarzenie& e) {
+        if (!kontrolka_z_fokusem_ || !kontrolka_z_fokusem_->czy_pasek_menu() || popupy_.czy_otwarty()) return false;
+        if (e.typ == BWS_ZDARZENIE_TEXT_INPUT) { (void)przywroc_fokus_po_menu(); return false; }
+        if (e.typ != BWS_ZDARZENIE_KLAWISZ_FIZYCZNY || e.x == 0) return false;
+        if (czy_lewy_alt(e)) return przywroc_fokus_po_menu();
+        const uint32_t polecenie = klawisz_polecenia(e);
+        if (polecenie == 0) return false;                         // modyfikatory (Shift, Ctrl, AltGr, Caps)
+        if (polecenie == 27U) return przywroc_fokus_po_menu();    // Esc
+        if (polecenie == 0x4BU || polecenie == 0x4DU || polecenie == 0x50U || polecenie == 0x48U ||
+            polecenie == 13U || polecenie == 9U) return false;    // nawigacja paska menu i Tab
+        (void)przywroc_fokus_po_menu();
+        return false;
+    }
+
+    // Menu zamkniete (polecenie wykonane, Esc, klik obok, zamkniety dialog
+    // otwarty z menu): fokus wraca do kontrolki sprzed wejscia na pasek menu.
+    void po_zdarzeniu_menu() {
+        if (!kontrolka_z_fokusem_ || !kontrolka_z_fokusem_->czy_pasek_menu()) return;
+        if (popupy_.czy_otwarty()) menu_bylo_otwarte_ = true;
+        else if (menu_bylo_otwarte_) (void)przywroc_fokus_po_menu();
+    }
+
+public:
+    void obsluz_zdarzenie_okna(const bws_zdarzenie& surowe_zdarzenie) {
         int belka_h = WYSOKOSC_BELKI_TYTULOWEJ * skala_dpi_;
         int mx = surowe_zdarzenie.x;
         int my = surowe_zdarzenie.y;
@@ -910,7 +975,7 @@ public:
                 // z Ctrl. Skrot zostal juz obsluzony przez zdarzenie fizyczne;
                 // nie wolno potem wstawic literalnego C/X/V/A/Z/Y. Ctrl+Alt
                 // pozostaje dozwolone dla ukladow uzywajacych AltGr.
-                if ((surowe_zdarzenie.przyciski & BWS_MOD_CTRL) != 0 &&
+                if (bws_mod_ctrl_skrotu(surowe_zdarzenie.przyciski) &&
                     (surowe_zdarzenie.przyciski & BWS_MOD_ALT) == 0) break;
                 if (popupy_.czy_otwarty()) {
                     ZdarzenieWprowadzaniaTekstu pe;
@@ -938,10 +1003,15 @@ public:
                 if(!polecenie)break;
                 bool wcisniety = !fizyczny || surowe_zdarzenie.x != 0;
                 uint32_t kod_bazowy = surowe_zdarzenie.kod & 0xFFU;
-                bool klawisz_alt = ((surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
-                                    (kod_bazowy == 226U || kod_bazowy == 230U)) ||
-                                   (!(surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
-                                    ((surowe_zdarzenie.kod & 0x7FU) == 0x38U));
+                // Tylko LEWY Alt aktywuje pasek menu. Prawy Alt (E0 38 / USB
+                // 230) to AltGr ukladu Polski Programisty: przeniesienie fokusu
+                // do MenuGlowne gubilo nastepujacy TEXT_INPUT (ą, ć, ę, ...).
+                bool klawisz_alt = !(surowe_zdarzenie.przyciski & BWS_MOD_ALTGR) &&
+                                   (((surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
+                                     kod_bazowy == 226U) ||
+                                    (!(surowe_zdarzenie.kod & BWS_KEY_SOURCE_USB) &&
+                                     !(surowe_zdarzenie.kod & BWS_KEY_SOURCE_E0) &&
+                                     ((surowe_zdarzenie.kod & 0x7FU) == 0x38U)));
                 if (fizyczny && wcisniety && klawisz_alt && kontrolka_glowna_) {
                     Kontrolka* cel_alt = kontrolka_glowna_->kontrolka_aktywacji_alt();
                     if (cel_alt) { ustaw_fokus(cel_alt); break; }
@@ -995,6 +1065,17 @@ public:
                     czy_zminimalizowane_ = false;
                     przelicz_uklad();
                 }
+                // Powrot fokusu okna (np. po zamknieciu okna podrzednego albo
+                // aktywacji z paska zadan) przywraca fokus kontrolki sprzed
+                // BLUR; inaczej klawiatura nie trafia do edytora az do klikniecia.
+                // Wskaznik jest uzywany tylko, gdy nadal jest w drzewie okna.
+                if (!kontrolka_z_fokusem_ && fokus_przed_blur_ &&
+                    czy_w_drzewie(kontrolka_glowna_, fokus_przed_blur_) &&
+                    fokus_przed_blur_->czy_efektywnie_widoczna() &&
+                    fokus_przed_blur_->czy_moze_miec_fokus()) {
+                    ustaw_fokus(fokus_przed_blur_);
+                }
+                fokus_przed_blur_ = nullptr;
                 czy_brudne_ = true;
                 break;
             }
@@ -1003,6 +1084,9 @@ public:
                 popupy_.zamknij(PowodZamknieciaPopup::KlikPoza);
                 czy_aktywne_ = false;
                 zwolnij_przechwycenie_myszy();
+                if (kontrolka_z_fokusem_)
+                    fokus_przed_blur_ = (kontrolka_z_fokusem_->czy_pasek_menu() && fokus_przed_menu_)
+                        ? fokus_przed_menu_ : kontrolka_z_fokusem_;
                 ustaw_fokus(nullptr);
                 czy_brudne_ = true;
                 break;
@@ -1057,6 +1141,15 @@ private:
                     (!usb && (e.kod_klawisza & BWS_KEY_SOURCE_E0) != 0 && baza == 0x5DU);
         bool f10 = (usb && baza == 67U) || (!usb && baza == 0x44U);
         return menu || (f10 && e.czy_shift());
+    }
+
+    // Porownanie adresow bez dereferencji szukanego wskaznika.
+    static bool czy_w_drzewie(Kontrolka* k, const Kontrolka* szukana) {
+        if (!k || !szukana) return false;
+        if (k == szukana) return true;
+        for (size_t i = 0; i < k->liczba_dzieci(); ++i)
+            if (czy_w_drzewie(k->dziecko(i), szukana)) return true;
+        return false;
     }
 
     static void zbierz_kontrolki_z_fokusem(Kontrolka* k, Kontrolka** out_lista, size_t& liczba) {
@@ -1116,6 +1209,9 @@ protected:
     Kontrolka* kontrolka_glowna_{nullptr};
     Panel* domyslny_korzen_{nullptr};
     Kontrolka* kontrolka_z_fokusem_{nullptr};
+    Kontrolka* fokus_przed_blur_{nullptr};   // tylko do przywrocenia przy FOCUS
+    Kontrolka* fokus_przed_menu_{nullptr};   // kontrolka sprzed wejscia na pasek menu
+    bool menu_bylo_otwarte_{false};
     Kontrolka* kontrolka_najechana_{nullptr};
     Kontrolka* kontrolka_przechwytujaca_{nullptr};
     ListaPolecen* lista_polecen_{nullptr};

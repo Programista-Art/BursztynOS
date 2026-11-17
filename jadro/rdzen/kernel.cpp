@@ -1346,7 +1346,8 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
-        "    \"pliki_zapisz\"\n"
+        "    \"pliki_zapisz\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";
 
     static const char MANIFEST_EKSPLORATORA[] =

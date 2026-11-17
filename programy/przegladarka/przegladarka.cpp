@@ -3172,8 +3172,9 @@ public:
                 uint32_t kod = ev.kod;
                 bool usb = (kod & BWS_KEY_SOURCE_USB) != 0;
                 uint32_t baza = usb ? (kod & 0xFFU) : (kod & 0x7FU);
-                bool ctrl = (ev.przyciski & BWS_MOD_CTRL) != 0;
-                bool alt = (ev.przyciski & BWS_MOD_ALT) != 0;
+                // AltGr (takze Ctrl+AltGr) wpisuje polskie znaki: nie jest skrotem.
+                bool ctrl = bws_mod_ctrl_skrotu(ev.przyciski);
+                bool alt = bws_mod_alt_skrotu(ev.przyciski);
 
                 // F5 - Odswiez
                 bool is_f5 = (kod == 0x3F || (usb && baza == 0x3E) || (!usb && baza == 0x3F));

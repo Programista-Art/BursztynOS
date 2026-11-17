@@ -214,6 +214,7 @@ uint32_t aktualne_modyfikatory() {
     if (lewy_shift || prawy_shift) m |= BWS_MOD_SHIFT;
     if (lewy_ctrl || prawy_ctrl) m |= BWS_MOD_CTRL;
     if (lewy_alt || prawy_alt) m |= BWS_MOD_ALT;
+    if (prawy_alt) m |= BWS_MOD_ALTGR;
     if (lewy_super || prawy_super) m |= BWS_MOD_SUPER;
     if (caps_lock) m |= BWS_MOD_CAPS;
     if (num_lock) m |= BWS_MOD_NUM;

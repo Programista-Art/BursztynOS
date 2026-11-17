@@ -1,0 +1,4 @@
+   20.00 s  puls hosta 20 s bez przestojow, start QEMU
+   40.92 s  pulpit gotowy po 20.9 s
+   65.77 s  Husarz: wpisano w pasek adresu "szukaj ąćęłńóśźż ĄĆĘŁŃÓŚŹŻ"
+   65.77 s  przestoje hosta (start s, dlugosc s): []

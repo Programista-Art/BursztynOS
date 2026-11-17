@@ -1637,6 +1637,15 @@ QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
 QEMUDISPLAYARGS ?= $(if $(strip $(QEMU_DISPLAY_ARGS)),$(QEMU_DISPLAY_ARGS),-display sdl)
+# SDL2 (-display sdl) przy aktywnym IBus (XMODIFIERS=@im=ibus) oddaje klawisze tekstowe metodzie wprowadzania:
+# dla AltGr+litera IBus zatwierdza gotowy znak (SDL_TEXTINPUT), a SDL NIE wysyla SDL_KEYDOWN litery. QEMU
+# przekazuje gosciowi wylacznie KEYDOWN/KEYUP, wiec system dostawal sam AltGr bez litery (brak ą ć ę ł ń ó ś ź ż).
+# Odciecie IBus tylko dla procesow uruchamianych przez make (nieistniejacy adres) przywraca surowe klawisze;
+# pulpit hosta nadal uzywa IBus. Diagnoza: narzedzia/sdl_ime_probe.py. Wylaczenie: make QEMU_SDL_BEZ_IME=0 ...
+QEMU_SDL_BEZ_IME ?= 1
+ifeq ($(QEMU_SDL_BEZ_IME),1)
+export IBUS_ADDRESS := unix:path=/nonexistent/bursztyn-qemu-bez-ibus
+endif
 QEMU_VIRTIO_XRES ?= 1280
 QEMU_VIRTIO_YRES ?= 720
 
@@ -2466,6 +2475,10 @@ endif
 test-launcher-parity:
 	$(PYTHON) testy/test_launcher_parity.py
 
+.PHONY: test-unix-launcher
+test-unix-launcher:
+	$(PYTHON) testy/test_unix_launcher.py
+
 .PHONY: test-virtio-input-qemu-parity-host
 test-virtio-input-qemu-parity-host:
 	$(PYTHON) testy/test_virtio_input_qemu_parity.py
@@ -2897,6 +2910,12 @@ test-notepad-unicode-host:
 	@mkdir -p .bsf-test
 	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
+
+.PHONY: test-notatnik-polski-host
+test-notatnik-polski-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. testy/test_notatnik_polski_host.cpp sterowniki/wejscie/klawiatura.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notatnik-polski
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notatnik-polski
 
 .PHONY: test-notepad-bidi-host
 test-notepad-bidi-host:
