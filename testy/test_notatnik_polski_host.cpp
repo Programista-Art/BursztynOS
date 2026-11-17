@@ -16,6 +16,7 @@
 #include "../jadro/bws/okna_podrzedne.h"
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <fstream>
 #include <iterator>
@@ -42,6 +43,8 @@ static bool awaria_alokacji=false, awaria_usuwania=false;
 static bool rejestruj_migawki=false;
 static std::vector<std::map<std::string,std::string>> migawki;
 
+static std::set<std::string> chronione;   // katalogi systemowe: odmowa tworzenia podkatalogow
+static unsigned utworzone_katalogi=0;
 static std::string rodzic(const std::string& p){size_t s=p.rfind('/');return s==0?"/":p.substr(0,s);}
 static void dodaj_katalog(const std::string& p){fs[p].katalog=true;}
 static void dodaj_plik(const std::string& p,const std::string& d){fs[p]=Wpis{false,d};}
@@ -55,7 +58,14 @@ static uint64_t hook(uint64_t nr,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t){
     if(nr==4){auto f=fs.find(path?path:"");if(f==fs.end()||f->second.katalog)return 0;*reinterpret_cast<uint32_t*>(a2)=uint32_t(f->second.dane.size());return 1;}
     if(nr==47){auto f=fs.find(path?path:"");if(f==fs.end())return 0;auto* m=reinterpret_cast<BwsMetadanePliku*>(a2);*m={};
         m->typ=f->second.katalog?BWS_TYP_KATALOG:BWS_TYP_PLIK;m->rozmiar=f->second.dane.size();return 1;}
-    if(nr==46){std::string p(path);if(fs.count(p)||!fs.count(rodzic(p)))return 0;dodaj_katalog(p);return 1;}
+    if(nr==46){std::string p(path);const bool status=a2==BWS_STATUS_PLIKOWY;
+        // Jak PZB: katalogi systemowe (poziom jadra) nie przyjmuja nowych podkatalogow.
+        WynikPlikowy w=WynikPlikowy::Ok;
+        if(chronione.count(rodzic(p)))w=WynikPlikowy::BrakUprawnien;
+        else if(!fs.count(rodzic(p))||!fs[rodzic(p)].katalog)w=WynikPlikowy::Brak;
+        else if(fs.count(p))w=WynikPlikowy::Istnieje;
+        if(w==WynikPlikowy::Ok){dodaj_katalog(p);++utworzone_katalogi;}
+        return status?uint64_t(w):(w==WynikPlikowy::Ok?1:0);}
     if(nr==6){std::string dir(path);auto d=fs.find(dir);if(d==fs.end()||!d->second.katalog)return 0;
         std::string out;std::string pref=dir=="/"?"/":dir+"/";
         for(auto& [k,v]:fs){if(k.size()<=pref.size()||k.compare(0,pref.size(),pref))continue;std::string rest=k.substr(pref.size());
@@ -167,6 +177,12 @@ static Punkt punkt_narzedzia(PasekNarzedzi* p,size_t i){Prostokat o=p->obszar_ek
     CHECK(p->element(i)->czy_na_pasku());return Punkt(o.x+r.x+r.szerokosc/2,o.y+r.y+r.wysokosc/2);}
 static Punkt punkt_miejsca(Drzewo* d,int wiersz){Prostokat o=d->obszar_ekranu();return Punkt(o.x+40,o.y+1+wiersz*20+10);}
 
+static Punkt punkt_narzedzia_nazwa(PasekNarzedzi* p,const char* tekst){
+    for(size_t i=0;i<p->liczba_elementow();++i)if(p->element(i)->tekst()&&!strcmp(p->element(i)->tekst(),tekst))return punkt_narzedzia(p,i);
+    fprintf(stderr,"brak narzedzia %s\n",tekst);abort();}
+static OknoDialogowe* gorny_dialog(){return static_cast<OknoDialogowe*>(popupy().powierzchnia(popupy().liczba_powierzchni()-1));}
+static bool komunikat_zawiera(const char* frag){OknoDialogowe* k=gorny_dialog();return k&&strstr(k->wiadomosc(),frag)!=nullptr;}
+static size_t liczba_wpisow_fs(){return fs.size();}
 static void wyczysc_dokument(){g_notatnik.memo->ustaw_tekst("");g_notatnik.memo->wyczysc_historie();g_notatnik.zmodyfikowany=false;
     g_notatnik.biezaca_sciezka[0]=0;g_notatnik.aktualizuj_tytul();g_okno->ustaw_fokus(g_notatnik.memo);}
 
@@ -580,6 +596,99 @@ int main(){
      argument_startowy="/uzytkownicy/Dokumenty/Prywatne ąę/Notatka źródłowa.txt";
      CHECK(g_notatnik.otworz_plik(argument_startowy.c_str()));CHECK(tekst()=="Nowa notatka: łódź");}
 
+    // 9c. Nowy katalog i skrot Dokumenty przez prawdziwe zdarzenia (mysz/klawiatura).
+    // Przyczyny bledow: fokus startowy dialogu nazwy byl na przycisku "Utworz"
+    // (wpisywane znaki ginely), skrot Dokumenty wskazywal nieistniejacy
+    // /uzytkownicy/Dokumenty, a odmowa PZB dawala ogolny komunikat.
+    {const std::string DOM=KatalogiUzytkownika::Domowy,DOKU=KatalogiUzytkownika::Dokumenty,ZG="Zażółć gęślą jaźń";
+     dodaj_katalog(DOM);dodaj_katalog(DOKU);dodaj_katalog("/system");dodaj_plik("/system/konfig.ini","x");
+     chronione={"/","/uzytkownicy","/system"};
+     wyczysc_dokument();
+     // Nowy dokument: dialog startuje w Dokumentach uzytkownika.
+     skrot_ctrl('o');d=g_notatnik.dialog_pliku;CHECK(d&&d->czy_otwarta());CHECK(d->biezacy_katalog()==DOKU);
+     PasekNarzedzi* pn=d->pasek_narzedzi();Tabela* t=d->tabela_plikow();
+     // Skrot "Dokumenty" (wiersz 3) z innego katalogu.
+     klik(punkt_miejsca(d->drzewo_miejsc(),1));CHECK(d->biezacy_katalog()==std::string("/uzytkownicy"));
+     klik(punkt_miejsca(d->drzewo_miejsc(),3));CHECK(d->biezacy_katalog()==DOKU);CHECK(popupy().liczba_powierzchni()==1);
+     // Katalog chroniony (System): przegladanie dozwolone, tworzenie odrzucone z bledem PZB.
+     klik(punkt_miejsca(d->drzewo_miejsc(),4));CHECK(d->biezacy_katalog()==std::string("/system"));
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));DialogNowegoKatalogu* nk=d->dialog_nowego_katalogu();
+     CHECK(nk&&nk->czy_otwarta());CHECK(popupy().liczba_powierzchni()==2);
+     CHECK(popupy().fokus_popupu()==nk->pole_nazwy());CHECK(!strcmp(nk->pole_nazwy()->tekst(),"Nowy katalog"));
+     CHECK(nk->pole_nazwy()->czy_ma_zaznaczenie());
+     {size_t przed=liczba_wpisow_fs();wpisz("Zablokowany");nacisnij(K_ENTER);
+      CHECK(popupy().liczba_powierzchni()==3);CHECK(komunikat_zawiera("Brak uprawnień"));
+      nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==2);CHECK(nk->czy_otwarta());
+      nacisnij(K_ESC);CHECK(popupy().liczba_powierzchni()==1);CHECK(liczba_wpisow_fs()==przed);CHECK(!fs.count("/system/Zablokowany"));}
+     // Dokumenty: nazwa z polskimi znakami wpisana z klawiatury, Enter tworzy katalog w biezacym katalogu.
+     klik(punkt_miejsca(d->drzewo_miejsc(),3));CHECK(d->biezacy_katalog()==DOKU);
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));CHECK(popupy().fokus_popupu()==nk->pole_nazwy());
+     wpisz(ZG.c_str());CHECK(nk->pole_nazwy()->tekst()==ZG);nacisnij(K_ENTER);
+     CHECK(popupy().liczba_powierzchni()==1);CHECK(fs.count(DOKU+"/"+ZG)&&fs[DOKU+"/"+ZG].katalog);
+     CHECK(!fs.count(DOKU+"/"+ZG+".txt"));CHECK(d->biezacy_katalog()==DOKU);
+     // Nowy katalog zaznaczony na liscie; podwojne klikniecie od razu do niego wchodzi.
+     CHECK(t->zaznaczony_wiersz()>=0&&strstr(t->komorka(size_t(t->zaznaczony_wiersz()),0),ZG.c_str()));
+     dwuklik(punkt_wiersza(t,ZG.c_str()));CHECK(d->biezacy_katalog()==DOKU+"/"+ZG);CHECK(t->liczba_wierszy()==0);
+     klik(punkt_narzedzia(pn,0));CHECK(d->biezacy_katalog()==DOKU);
+     // Propozycja nazwy i kolejna nazwa przy zajetej: "Nowy katalog", potem "Nowy katalog (2)".
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nacisnij(K_ENTER);CHECK(fs.count(DOKU+"/Nowy katalog"));
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));CHECK(!strcmp(nk->pole_nazwy()->tekst(),"Nowy katalog (2)"));
+     // Anuluj (mysz) nie zmienia systemu plikow.
+     {size_t przed=liczba_wpisow_fs();unsigned u=utworzone_katalogi;
+      klik(srodek(nk->przycisk_anuluj()->obszar_ekranu()));CHECK(popupy().liczba_powierzchni()==1);
+      CHECK(liczba_wpisow_fs()==przed&&utworzone_katalogi==u);
+      klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nacisnij(K_ESC);CHECK(liczba_wpisow_fs()==przed&&utworzone_katalogi==u);}
+     // Duplikat (katalog i plik) oraz nazwy niepoprawne: ostrzezenie, nic nie powstaje, dialog nazwy zostaje.
+     dodaj_plik(DOKU+"/plik.txt","p");
+     {unsigned u=utworzone_katalogi;
+      const std::string zle[]={ZG,"plik.txt","a/b","..",".","x\\y","   ",std::string(56,'d'),"\x01zly","\xc3\x28","\xc0\x80"};
+      for(const std::string& z:zle){klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nk->pole_nazwy()->ustaw_tekst(z.c_str());
+       nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==3);nacisnij(K_ENTER);CHECK(nk->czy_otwarta());nacisnij(K_ESC);
+       CHECK(popupy().liczba_powierzchni()==1);}
+      CHECK(utworzone_katalogi==u);CHECK(fs[DOKU+"/plik.txt"].dane=="p"&&!fs[DOKU+"/plik.txt"].katalog);
+      // 55 bajtow (limit PSF) jest poprawne, spacje na brzegach obciete.
+      klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nk->pole_nazwy()->ustaw_tekst((" "+std::string(53,'e')+"ą ").c_str());
+      nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==1);CHECK(fs.count(DOKU+"/"+std::string(53,'e')+"ą"));
+      CHECK(utworzone_katalogi==u+1);}
+     // Brak katalogu nadrzednego (usuniety w tle): rzeczywisty blad z BWS.
+     dwuklik(punkt_wiersza(t,ZG.c_str()));CHECK(d->biezacy_katalog()==DOKU+"/"+ZG);
+     fs.erase(DOKU+"/"+ZG);klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nacisnij(K_ENTER);
+     CHECK(popupy().liczba_powierzchni()==3);CHECK(komunikat_zawiera("Nie znaleziono"));nacisnij(K_ENTER);nacisnij(K_ESC);
+     dodaj_katalog(DOKU+"/"+ZG);
+     // Przycisk "Utworz" mysza.
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nk->pole_nazwy()->ustaw_tekst("Mysz ą");
+     klik(srodek(nk->przycisk_utworz()->obszar_ekranu()));CHECK(popupy().liczba_powierzchni()==1);
+     CHECK(fs.count(DOKU+"/"+ZG+"/Mysz ą")&&fs[DOKU+"/"+ZG+"/Mysz ą"].katalog);
+     // Rozroznienie bledow nawigacji: brak katalogu vs element nie bedacy katalogiem.
+     d->pole_nazwy()->ustaw_tekst("/nie/istnieje/");nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==2);nacisnij(K_ENTER);
+     CHECK(d->przejdz_do_katalogu("/brak")==false);CHECK(komunikat_zawiera("nie istnieje"));nacisnij(K_ENTER);
+     CHECK(d->przejdz_do_katalogu((DOKU+"/plik.txt").c_str())==false);CHECK(komunikat_zawiera("nie jest katalogiem"));nacisnij(K_ENTER);
+     nacisnij(K_ESC);CHECK(!popupy().czy_otwarty());
+
+     // Zapisz jako: Nowy katalog nie zmienia nazwy pliku; zapis i ponowne otwarcie pliku z polska nazwa.
+     wpisz("Treść w nowym katalogu: ąćęłńóśźż");
+     skrot_ctrl('s');d=g_notatnik.dialog_pliku;CHECK(d&&d->tryb()==TrybDialoguPliku::Zapisz);CHECK(d->biezacy_katalog()==DOKU);
+     pn=d->pasek_narzedzi();t=d->tabela_plikow();nk=nullptr;
+     d->pole_nazwy()->ustaw_tekst("Łódź – notatka");
+     dwuklik(punkt_wiersza(t,ZG.c_str()));CHECK(d->biezacy_katalog()==DOKU+"/"+ZG);
+     klik(punkt_narzedzia_nazwa(pn,"Nowy katalog"));nk=d->dialog_nowego_katalogu();CHECK(popupy().fokus_popupu()==nk->pole_nazwy());
+     wpisz("Nowy katalog");nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==1);
+     CHECK(!strcmp(d->pole_nazwy()->tekst(),"Łódź – notatka"));
+     const std::string NK=DOKU+"/"+ZG+"/Nowy katalog";CHECK(fs.count(NK)&&fs[NK].katalog);
+     dwuklik(punkt_wiersza(t,"Nowy katalog"));CHECK(d->biezacy_katalog()==NK);CHECK(!strcmp(d->pole_nazwy()->tekst(),"Łódź – notatka"));
+     klik(srodek(d->przycisk_akcji()->obszar_ekranu()));CHECK(!popupy().czy_otwarty());
+     const std::string PL=NK+"/Łódź – notatka.txt";
+     CHECK(fs.count(PL)&&fs[PL].dane==tekst());CHECK(std::string(g_notatnik.biezaca_sciezka)==PL);CHECK(tytul_zawiera("Łódź – notatka.txt"));
+     {const std::string zapis=tekst();wyczysc_dokument();
+      skrot_ctrl('o');d=g_notatnik.dialog_pliku;CHECK(d->biezacy_katalog()==DOKU);t=d->tabela_plikow();
+      dwuklik(punkt_wiersza(t,ZG.c_str()));dwuklik(punkt_wiersza(t,"Nowy katalog"));
+      dwuklik(punkt_wiersza(t,"Łódź – notatka.txt"));CHECK(!popupy().czy_otwarty());CHECK(tekst()==zapis);
+      CHECK(tytul_zawiera("Łódź – notatka.txt"));}
+     // Sprzatanie: kolejne sekcje oczekuja poprzedniego ukladu.
+     for(auto it=fs.begin();it!=fs.end();)if(!it->first.compare(0,DOM.size(),DOM)||!it->first.compare(0,7,"/system"))it=fs.erase(it);else ++it;
+     chronione.clear();
+     CHECK(g_notatnik.otworz_plik(argument_startowy.c_str()));CHECK(tekst()=="Nowa notatka: łódź");}
+
     // 10. Duzy plik: >2048 linii wizualnych bez ucinania; puste pliki; dlugie linie.
     {std::string duzy;for(int i=0;i<6000;++i)duzy+="l"+std::to_string(i)+" ą\n";CHECK(duzy.size()<65535);
      dodaj_plik("/uzytkownicy/duzy.txt",duzy);CHECK(g_notatnik.otworz_plik("/uzytkownicy/duzy.txt"));CHECK(tekst()==duzy);
@@ -596,6 +705,55 @@ int main(){
     // Powtarzane edycje i cofanie nie psuja UTF-8.
     wyczysc_dokument();for(int i=0;i<200;++i){wpisz("żółw ");if(i%3==0)nacisnij(K_BS);if(i%7==0)skrot_ctrl('z');}
     {const std::string t=tekst();size_t p=0;while(p<t.size()){uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(t.c_str(),p,&cp);CHECK(n>0&&cp!=0xFFFD);p+=n;}}
+
+    // 10b. Pasek stanu: szerokosci z metryk czcionki, bez ucinania liczb, waskie okna.
+    {PasekStanu& sb=*g_notatnik.pasek_stanu;
+     CHECK(sb.liczba_sekcji()==4&&!strcmp(sb.tekst(3),"UTF-8"));
+     // pelny: sekcje 1..3 widoczne; zawsze: brak nachodzenia, w granicach paska,
+     // widoczne sekcje informacyjne pokazuja pelny tekst.
+     auto sprawdz=[&](bool pelny){const int W=sb.obszar_ekranu().szerokosc;int koniec=0;
+        CHECK(sb.czy_sekcja_widoczna_w_ukladzie(1));
+        for(size_t i=0;i<sb.liczba_sekcji();++i){if(!sb.czy_sekcja_widoczna_w_ukladzie(i)){CHECK(!pelny||i==0);continue;}
+            const Prostokat r=sb.prostokat_sekcji(i);CHECK(r.x>=koniec&&r.szerokosc>0&&r.x+r.szerokosc<=W-2);koniec=r.x+r.szerokosc;
+            if(i>0){char out[256];sb.tekst_wyswietlany(i,out,sizeof(out));
+                // Pelny tekst; skrot z "…" tylko gdy sama sekcja jest szersza niz caly pasek.
+                if(strcmp(out,sb.tekst(i))){CHECK(r.x+r.szerokosc==W-2);const std::string o=out;
+                    CHECK(o.size()>=3&&o.compare(o.size()-3,3,"\xE2\x80\xA6")==0);
+                    CHECK(CzcionkaUI::zmierz_tekst(out,sb.skala_dpi())<=r.szerokosc);continue;}
+                CHECK(CzcionkaUI::zmierz_tekst(sb.tekst(i),sb.skala_dpi())<=r.szerokosc);}}};
+     auto linie=[&](size_t n){memo.ustaw_tekst(std::string(n-1,'\n').c_str());z_modyfikatorem(K_LCTRL,K_END);g_notatnik.aktualizuj_stan();
+        CHECK(std::string(sb.tekst(2))=="Linii: "+std::to_string(n));CHECK(std::string(sb.tekst(1))=="Wiersz: "+std::to_string(n)+", Kol: 1");};
+     for(size_t n:{size_t(1),size_t(999),size_t(10000)}){linie(n);sprawdz(true);}
+     // 100000 linii przekracza limit dokumentu (64 KiB), wiec sam tekst sekcji.
+     sb.ustaw_tekst(1,"Wiersz: 100000, Kol: 100000");sb.ustaw_tekst(2,"Linii: 100000");sprawdz(true);
+     const int szer_100k=sb.prostokat_sekcji(2).szerokosc;linie(10);CHECK(sb.prostokat_sekcji(2).szerokosc<szer_100k);
+     // Wzorzec: kolejne cyfry do 4 nie zmieniaja szerokosci sekcji (bez skakania).
+     {const int w1=sb.prostokat_sekcji(2).szerokosc;linie(999);CHECK(sb.prostokat_sekcji(2).szerokosc==w1);}
+     // Stan operacji: rozciagany, dlugi komunikat skrocony z wielokropkiem na granicy znaku.
+     sb.ustaw_tekst(0,"Zapisano: /uzytkownicy/domyslny/Dokumenty/Zażółć gęślą jaźń/bardzo długa nazwa pliku ąę.txt");
+     {char out[256];sb.tekst_wyswietlany(0,out,sizeof(out));const std::string o=out;
+      if(o!=sb.tekst(0)){CHECK(o.size()>=3&&o.compare(o.size()-3,3,"\xE2\x80\xA6")==0);}
+      size_t p=0;while(p<o.size()){uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(o.c_str(),p,&cp);CHECK(n>0&&cp!=0xFFFD);p+=n;}
+      CHECK(CzcionkaUI::zmierz_tekst(out,sb.skala_dpi())<=sb.prostokat_sekcji(0).szerokosc);}
+     // Dlugi tekst w sekcji: bufor 192 B bez rozcinania UTF-8.
+     {std::string dl;for(int i=0;i<150;++i)dl+="ż";sb.ustaw_tekst(0,dl.c_str());const std::string t=sb.tekst(0);
+      CHECK(t.size()<=191&&t.size()%2==0);for(size_t i=0;i<t.size();i+=2)CHECK(t.compare(i,2,"ż")==0);}
+     // Rozne szerokosci okna: od szerokiego do bardzo waskiego.
+     for(int w:{1280,680,420,300,220,160}){okno.ustaw_rozmiar(w,400);okno.przelicz_uklad();sprawdz(w>=420);}
+     okno.ustaw_rozmiar(220,400);okno.przelicz_uklad();
+     CHECK(!sb.czy_sekcja_widoczna_w_ukladzie(3));          // kodowanie znika pierwsze, pozycja zostaje
+     // Wieksza czcionka systemowa i skala UI: szerokosci z nowych metryk.
+     okno.ustaw_rozmiar(680,500);okno.przelicz_uklad();linie(10000);
+     const int przed=sb.prostokat_sekcji(1).szerokosc;
+     BSF::preview(BSF::default_id(),26);sb.po_zmianie_czcionki();okno.przelicz_uklad();
+     CHECK(sb.prostokat_sekcji(1).szerokosc>przed);sprawdz(true);
+     for(int w:{1280,500,300}){okno.ustaw_rozmiar(w,500);okno.przelicz_uklad();sprawdz(false);}
+     BSF::end_preview();okno.ustaw_rozmiar(680,500);
+     sb.ustaw_skale_dpi(SkalaUI::procent(150));okno.przelicz_uklad();sprawdz(true);
+     CHECK(sb.prostokat_sekcji(1).szerokosc>przed);
+     sb.ustaw_skale_dpi(SkalaUI::procent(100));sb.po_zmianie_czcionki();okno.przelicz_uklad();
+     CHECK(sb.prostokat_sekcji(1).szerokosc==przed);sprawdz(true);
+     wyczysc_dokument();g_notatnik.aktualizuj_stan();}
 
     // 11. Pismo od prawej do lewej nadal dziala obok polskiego.
     wyczysc_dokument();wpisz("ąę שלום ść");CHECK(tekst()=="ąę שלום ść");

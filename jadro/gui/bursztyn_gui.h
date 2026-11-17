@@ -120,6 +120,8 @@ bool gui_zastap_region(int x,int y,int szer,int wys,const uint32_t* piksele);
 bool gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t display_generation=0);
 // BWS42 optional exact executable filter; same bounded snapshot ABI.
 uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* path);
+/* Jak wyzej, ale okno podrzedne (BWS 101) nalezy do programu swojego wlasciciela. */
+uint32_t gui_pobierz_okna_aplikacji(GuiOknoInfo* okna,uint32_t max,const char* path);
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa);
 bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane);
 bool przenies_twor_uzytkownika(const char* sciezka,

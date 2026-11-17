@@ -670,6 +670,9 @@ void NotatnikApp::pokaz_dialog_pliku(TrybDialoguPliku tryb) {
 
     char katalog[NOTATNIK_MAKS_SCIEZKI];
     katalog_pliku(biezaca_sciezka, katalog, sizeof(katalog));
+    // Nowy dokument: Dokumenty uzytkownika (zapisywalne w modelu PZB), a gdy ich
+    // brak (starszy dysk bez katalogu domowego) - dotychczasowe /uzytkownicy.
+    if (!czy_katalog(katalog)) DialogPliku::kopiuj_str(katalog, sizeof(katalog), KatalogiUzytkownika::Dokumenty);
     if (!czy_katalog(katalog)) DialogPliku::kopiuj_str(katalog, sizeof(katalog), NOTATNIK_KATALOG_DOMYSLNY);
 
     dialog_pliku = new DialogPliku(tryb,
@@ -943,10 +946,18 @@ static void zbuduj_notatnik(OknoNotatnika& okno) {
     g_notatnik.pasek_stanu = &sb;
     sb.ustaw_preferowany_rozmiar(Rozmiar(-1, 24));
     sb.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-    sb.dodaj_sekcje("Gotowy", 160, RozmiarSekcjiStanu::Rozciagnij);
-    sb.dodaj_sekcje("Wiersz: 1, Kol: 1", 140, RozmiarSekcjiStanu::Stala);
-    sb.dodaj_sekcje("Linii: 1", 90, RozmiarSekcjiStanu::Stala);
-    sb.dodaj_sekcje("UTF-8", 60, RozmiarSekcjiStanu::Stala);
+    // Szerokosci z metryk biezacej czcionki (wzorce na typowe liczby cyfr,
+    // dalsze cyfry poszerzaja sekcje); stan operacji zajmuje reszte paska.
+    // W waskim oknie znikaja kolejno: kodowanie, liczba linii (pozycja zostaje).
+    sb.dodaj_sekcje("Gotowy", 0, RozmiarSekcjiStanu::Rozciagnij);
+    sb.dodaj_sekcje("Wiersz: 1, Kol: 1", 0, RozmiarSekcjiStanu::DopasujDoTresci);
+    sb.dodaj_sekcje("Linii: 1", 0, RozmiarSekcjiStanu::DopasujDoTresci);
+    sb.dodaj_sekcje("UTF-8", 0, RozmiarSekcjiStanu::DopasujDoTresci, WyrownaniePoziome::Srodek);
+    sb.ustaw_wzorzec(1, "Wiersz: 0000, Kol: 000");
+    sb.ustaw_wzorzec(2, "Linii: 0000");
+    sb.ustaw_priorytet(1, 30);
+    sb.ustaw_priorytet(2, 20);
+    sb.ustaw_priorytet(3, 10);
 
     okno.ustaw_fokus(memo);
 }

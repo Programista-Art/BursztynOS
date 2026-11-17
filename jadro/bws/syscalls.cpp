@@ -2993,10 +2993,15 @@ void bws_zakoncz_biezacy_proces() {
     }
 }
 
+extern "C" int okna_podrzedne_wlasciciel(int pid) __attribute__((weak));
+// arg3 = sciezka programu (filtr), arg4 = BWS_OKNA_TOZSAMOSC_APLIKACJI: okno
+// podrzedne (BWS 101) liczy sie jako okno programu swojego wlasciciela (ikona
+// na pasku zadan). Okno osierocone nie ma wlasciciela, wiec ponowne uzycie
+// pid-u wlasciciela nie przypisze go innemu programowi.
 __attribute__((noinline)) uint64_t bws_snapshot_okien(
     proces_t& proces,
     uint64_t arg1,
-    uint64_t arg2, uint64_t arg3=0
+    uint64_t arg2, uint64_t arg3=0, uint64_t arg4=0
 ) {
     char test_arg[32] = {};
     const char* test_path = "/programy/test.cebula/test.bur";
@@ -3020,6 +3025,7 @@ __attribute__((noinline)) uint64_t bws_snapshot_okien(
     if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(arg1), bytes)) return 0;
     char executable[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if(arg4 > BWS_OKNA_TOZSAMOSC_APLIKACJI || (arg4 && !arg3))return 0;
     if(arg3 && !pobierz_sciezke_pliku(arg3,executable))return 0;
     GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
     uint32_t count = skladacz_obrazu_snapshot_okien(
@@ -3027,6 +3033,10 @@ __attribute__((noinline)) uint64_t bws_snapshot_okien(
     if(arg3){
         uint32_t kept=0;
         for(uint32_t i=0;i<count;++i){int pid=snapshot[i].pid;
+            if(pid>0 && pid<MAKS_PROCESOW && arg4==BWS_OKNA_TOZSAMOSC_APLIKACJI && okna_podrzedne_wlasciciel){
+                const int wlasciciel=okna_podrzedne_wlasciciel(pid);
+                if(wlasciciel!=0)pid=wlasciciel;          // -1: osierocone (zadnego programu)
+            }
             if(pid>0 && pid<MAKS_PROCESOW && AppIdentity::equal(tablica_procesow[pid].sciezka_pliku,executable))snapshot[kept++]=snapshot[i];
         }
         count=kept>max?max:kept;
@@ -4061,7 +4071,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_gui_minimalizuj_warstwe(aktualny_pid) ? 1ULL : 0ULL;
 
         case 42:
-            return bws_snapshot_okien(proces, arg1, arg2, arg3);
+            return bws_snapshot_okien(proces, arg1, arg2, arg3, arg4);
 
         case 43:
             if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;

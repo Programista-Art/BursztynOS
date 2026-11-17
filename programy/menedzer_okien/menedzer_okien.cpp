@@ -5,6 +5,7 @@
 #include "desktop_layout.h"
 #include "desktop_selection_paint.h"
 #include "desktop_entries.h"
+#include "app_icons.h"
 #include "desktop_layout_settings.h"
 #include "obrazy/png_dekoder.h"
 /*
@@ -82,7 +83,7 @@ int SKROT_H = 32;
 
 constexpr int BUFOR_CZASU = 32;
 int TASK_BUTTON_X = 66;
-int TASK_BUTTON_W = 112;
+int TASK_BUTTON_W = 44;
 int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = DesktopEntries::ModelCapacity;
 // Match the established BWS/Explorer enumeration budget; not a model increase.
@@ -137,7 +138,7 @@ PULPIT_LINE_GAP=pulpit.odstep_linii;
 SKROT_W=ui_skaluj(32,ui_skala_procent);
 SKROT_H=ui_skaluj(32,ui_skala_procent);
 TASK_BUTTON_X=ui_skaluj(66,ui_skala_procent);
-TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
+TASK_BUTTON_W=ui_skaluj(44,ui_skala_procent);     // przycisk z sama ikona aplikacji
 TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
@@ -1384,10 +1385,75 @@ void zarejestruj_pasek_zadan() {
     }
 }
 
+// Ikona przycisku okna na pasku: indeks w AppIcons (-1 = ikona ogolna),
+// rownolegle do okna_taskbara. Przypisanie po tozsamosci programu z jadra
+// (sciezka wykonywalna; okno podrzedne BWS 101 -> program wlasciciela), nigdy
+// po tytule okna - tytul Notatnika zmienia sie z nazwa dokumentu.
+int ikona_okna_taskbara[SKLADACZ_MAKS_WARSTW] = {};
+uint64_t sygnatura_ikon_paska = 0;
+uint64_t hover_okna_paska = 0;
+BursztynUI::IkonaPNG* ikony_paska = nullptr;
+
+// Identyfikator okna zawiera generacje, wiec ponowne uzycie pid-u daje nowa
+// sygnature i ponowne przypisanie (bez starej ikony dla nowego procesu).
+uint64_t sygnatura_tozsamosci_okien() {
+    uint64_t h = 0x9E3779B97F4A7C15ULL ^ liczba_okien_taskbara;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        h ^= okna_taskbara[i].window_id + 0x9E3779B97F4A7C15ULL + (h << 6U) + (h >> 2U);
+        h ^= static_cast<uint64_t>(static_cast<uint32_t>(okna_taskbara[i].pid)) * 0xFF51AFD7ED558CCDULL;
+    }
+    return h;
+}
+
+void przypisz_ikony_okien() {
+    const uint64_t sig = sygnatura_tozsamosci_okien();
+    if (sig == sygnatura_ikon_paska) return;
+    sygnatura_ikon_paska = sig;
+    for (uint32_t i = 0; i < SKLADACZ_MAKS_WARSTW; ++i) ikona_okna_taskbara[i] = -1;
+    if (!liczba_okien_taskbara) return;
+    static GuiOknoInfo okna_programu[SKLADACZ_MAKS_WARSTW];
+    for (int a = 0; a < AppIcons::Count; ++a) {
+        const char* exe = AppIcons::executable(a);
+        if (!exe) continue;
+        const uint32_t n = gui_pobierz_okna_aplikacji(okna_programu, SKLADACZ_MAKS_WARSTW, exe);
+        for (uint32_t k = 0; k < n && k < SKLADACZ_MAKS_WARSTW; ++k)
+            for (uint32_t i = 0; i < liczba_okien_taskbara; ++i)
+                if (okna_taskbara[i].window_id == okna_programu[k].window_id && ikona_okna_taskbara[i] < 0)
+                    ikona_okna_taskbara[i] = a;
+    }
+}
+
 void odswiez_snapshot_okien() {
     liczba_okien_taskbara = gui_pobierz_okna(
         okna_taskbara, SKLADACZ_MAKS_WARSTW);
     wyczysc_nad_paskiem_zamknietych(okna_taskbara, liczba_okien_taskbara);
+    przypisz_ikony_okien();
+}
+
+// Uklad przyciskow paska (rysowanie, klikniecia, prawy przycisk, hover):
+// okna bez tytulu sa pomijane, przycisk niemieszczacy sie przed zegarem nie
+// jest ani rysowany, ani trafiany.
+bool prostokat_przycisku_paska(uint32_t indeks, int* x, int* y) {
+    int task_x = TASK_BUTTON_X;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        if (okna_taskbara[i].tytul[0] == '\0') continue;
+        if (task_x + TASK_BUTTON_W > poczatek_zegara()) return false;
+        if (i == indeks) {
+            *x = task_x;
+            *y = desktop_geometry.taskbar_y + ui_skaluj(4, ui_skala_procent);
+            return true;
+        }
+        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+    }
+    return false;
+}
+int przycisk_paska_pod(int mx, int my) {
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        int x = 0, y = 0;
+        if (prostokat_przycisku_paska(i, &x, &y) && punkt_w_prostokacie(mx, my, x, y, TASK_BUTTON_W, SKROT_H))
+            return static_cast<int>(i);
+    }
+    return -1;
 }
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h) {
@@ -1654,6 +1720,70 @@ bool RysujZegar(bool force=false) {
         return gui_zastap_regiony(&region,1,desktop_geometry.generation);
     });
 }
+// Ikony paska: te same pliki co skroty pulpitu/menu Start (AppIcons), w
+// rozmiarze paska; przygotowywane przed rysowaniem, przeskalowane po zmianie skali.
+const BursztynUI::IkonaPNG* ikona_paska(int indeks) {
+    if (indeks < 0 || indeks >= AppIcons::Count) return nullptr;
+    if (!ikony_paska) ikony_paska = new BursztynUI::IkonaPNG[AppIcons::Count];
+    if (!ikony_paska) return nullptr;
+    const int bok = ui_skaluj(24, ui_skala_procent);
+    ikony_paska[indeks].przygotuj(AppIcons::icon_png(indeks), bok);
+    return ikony_paska[indeks].piksele() && ikony_paska[indeks].bok() == bok ? &ikony_paska[indeks] : nullptr;
+}
+
+// Ikona ogolna dla programu bez zarejestrowanej ikony (albo nieudanego
+// odczytu PNG): stylizowane okno w kolorach motywu zamiast nazwy/zaslepki.
+void RysujOgolnaIkonePaska(int x, int y, int bok, uint32_t akcent, bool przygaszona) {
+    const uint32_t ramka = przygaszona ? motyw_kolor(MOTYW_KOLOR_RAMKA) : motyw_kolor(MOTYW_KOLOR_TEKST);
+    const int t = bok >= 32 ? 2 : 1, belka = bok / 4;
+    pulpit_prostokat(x + 1, y + 2, bok - 2, bok - 4, motyw_kolor(MOTYW_KOLOR_PRZYCISK));
+    pulpit_prostokat(x + 1, y + 2, bok - 2, belka, przygaszona ? ramka : akcent);
+    pulpit_prostokat(x + 1, y + 2, bok - 2, t, ramka);
+    pulpit_prostokat(x + 1, y + bok - 2 - t, bok - 2, t, ramka);
+    pulpit_prostokat(x + 1, y + 2, t, bok - 4, ramka);
+    pulpit_prostokat(x + bok - 1 - t, y + 2, t, bok - 4, ramka);
+}
+
+// Przycisk okna: sama ikona (bez tytulu). Aktywne: tlo podniesione i
+// pomaranczowy pasek akcentu u dolu; najechane: tlo podniesione;
+// zminimalizowane: przygaszona ikona i krotki neutralny pasek; okno "nad
+// paskiem" (opcja z prawego przycisku): maly znacznik akcentu w rogu.
+void RysujPrzyciskOknaPaska(const GuiOknoInfo& o, int indeks_ikony, int bx, int by,
+                            uint32_t akcent, uint32_t podniesiony, uint32_t ramka_paska) {
+    const bool zminimalizowane = o.stan == GUI_OKNO_ZMINIMALIZOWANE;
+    const bool hover = hover_okna_paska != 0 && hover_okna_paska == o.window_id;
+    if (o.aktywne || hover) {
+        pulpit_prostokat(bx, by, TASK_BUTTON_W, SKROT_H, podniesiony);
+        if (hover && !o.aktywne) {
+            pulpit_prostokat(bx, by, TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(bx, by + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(bx, by, 1, SKROT_H, ramka_paska);
+            pulpit_prostokat(bx + TASK_BUTTON_W - 1, by, 1, SKROT_H, ramka_paska);
+        }
+    }
+    const int bok = ui_skaluj(24, ui_skala_procent);
+    const int ix = bx + (TASK_BUTTON_W - bok) / 2;
+    const int iy = by + (SKROT_H - bok) / 2 - ui_skaluj(1, ui_skala_procent);
+    const BursztynUI::IkonaPNG* ikona = ikona_paska(indeks_ikony);
+    if (ikona && pulpit_canvas)
+        BursztynUI::rysuj_png(*pulpit_canvas, {ix, iy, bok, bok}, ikona->piksele(), bok, !zminimalizowane);
+    else
+        RysujOgolnaIkonePaska(ix, iy, bok, akcent, zminimalizowane);
+
+    const int wys_paska = ui_skaluj(3, ui_skala_procent);
+    if (o.aktywne) {
+        const int w = TASK_BUTTON_W - 2 * ui_skaluj(8, ui_skala_procent);
+        pulpit_prostokat(bx + (TASK_BUTTON_W - w) / 2, by + SKROT_H - wys_paska, w, wys_paska, akcent);
+    } else if (zminimalizowane) {
+        const int w = ui_skaluj(8, ui_skala_procent);
+        pulpit_prostokat(bx + (TASK_BUTTON_W - w) / 2, by + SKROT_H - wys_paska, w, wys_paska, ramka_paska);
+    }
+    if (czy_nad_paskiem(o.window_id)) {
+        const int z = ui_skaluj(5, ui_skala_procent);
+        pulpit_prostokat(bx + TASK_BUTTON_W - z - 2, by + 2, z, z, akcent);
+    }
+}
+
 void RysujTaskbarZawartosc() {
     const uint32_t tlo_paska = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t ramka_paska = motyw_kolor(MOTYW_KOLOR_RAMKA);
@@ -1664,32 +1794,11 @@ void RysujTaskbarZawartosc() {
     pulpit_prostokat(0, desktop_geometry.taskbar_y, poczatek_zegara(), 1, ramka_paska);
 
     RysujPrzyciskMenu();
-    int task_x = TASK_BUTTON_X;
+    przypisz_ikony_okien();     // bez zmian zestawu okien: tylko porownanie sygnatury
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        const GuiOknoInfo& o = okna_taskbara[i];
-        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > poczatek_zegara())
-            continue;
-        const uint32_t kolor = o.aktywne ? akcent :
-            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : motyw_kolor(MOTYW_KOLOR_PRZYCISK));
-        const uint32_t kolor_tekst = o.aktywne ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST);
-
-        pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
-                            TASK_BUTTON_W, SKROT_H, kolor);
-        if (!o.aktywne) {
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), TASK_BUTTON_W, 1, ramka_paska);
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent) + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
-            pulpit_prostokat(task_x + TASK_BUTTON_W - 1, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
-        }
-        char podpis[15] = {};
-        int pc = 0;
-        if (czy_nad_paskiem(o.window_id)) { podpis[pc++] = '^'; podpis[pc++] = ' '; }   // okno nad paskiem
-        for (int c = 0; pc < 14 && o.tytul[c] != '\0'; ++c)
-            podpis[pc++] = o.tytul[c];
-        pulpit_tekst(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
-                                 TASK_BUTTON_W, SKROT_H, 1,
-                                 kolor_tekst, podpis);
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+        int bx = 0, by = 0;
+        if (!prostokat_przycisku_paska(i, &bx, &by)) continue;
+        RysujPrzyciskOknaPaska(okna_taskbara[i], ikona_okna_taskbara[i], bx, by, akcent, podniesiony, ramka_paska);
     }
 
     if(!ostatni_czas[0])(void)pobierz_i_zaktualizuj_czas();
@@ -2489,33 +2598,26 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
-    int task_x = TASK_BUTTON_X;
-    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
-        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
-                                TASK_BUTTON_W, SKROT_H)) {
-            (void)gui_aktywuj_okno(okna_taskbara[i].window_id);
-            return;
-        }
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
-    }
+    // Aktywacja okna (takze przywrocenie zminimalizowanego) przez jadro.
+    const int przycisk = przycisk_paska_pod(mx, my);
+    if (przycisk >= 0) (void)gui_aktywuj_okno(okna_taskbara[przycisk].window_id);
 }
 
 // Prawy przycisk na przycisku okna w pasku: przelacza "Zawsze na wierzchu takze nad paskiem zadan".
 bool obsluz_prawy_klik_paska(int mx, int my) {
-    int task_x = TASK_BUTTON_X;
-    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
-        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
-                                TASK_BUTTON_W, SKROT_H)) {
-            if (przelacz_nad_paskiem(okna_taskbara[i].window_id)) { RysujTaskbar(); wm_gui_odswiez(); }
-            return true;
-        }
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
-    }
-    return false;
+    const int przycisk = przycisk_paska_pod(mx, my);
+    if (przycisk < 0) return false;
+    if (przelacz_nad_paskiem(okna_taskbara[przycisk].window_id)) { RysujTaskbar(); wm_gui_odswiez(); }
+    return true;
+}
+
+// Najechanie na przycisk okna: subtelne tlo (odrysowanie tylko przy zmianie).
+bool aktualizuj_hover_paska(int mx, int my) {
+    const int przycisk = przycisk_paska_pod(mx, my);
+    const uint64_t id = przycisk >= 0 ? okna_taskbara[przycisk].window_id : 0;
+    if (id == hover_okna_paska) return false;
+    hover_okna_paska = id;
+    return true;
 }
 
 void rozmiesc_ikony_ekranu(){
@@ -2754,6 +2856,10 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (hover_now != menu_przycisk_hover) {
                 menu_przycisk_hover = hover_now;
                 RysujPrzyciskMenu();
+                wm_gui_odswiez();
+            }
+            if (aktualizuj_hover_paska(mx, my)) {
+                RysujTaskbar();
                 wm_gui_odswiez();
             }
         } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {

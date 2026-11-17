@@ -37,6 +37,7 @@ extern "C" void odblokuj_ekran();
 #include "pamiec.h"
 #include "psf.h"
 #include "psf_bootstrap.h"
+#include "katalogi_uzytkownika.h"
 #include "grafika.h"
 #include "loader.h"
 #include "ahci.h"
@@ -186,6 +187,7 @@ extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
+extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
@@ -841,7 +843,9 @@ bool instaluj_paczke(
 // (poziom PZB_UZYTKOWNIK) dla /uzytkownicy/domyslny/Ustawienia; aplikacja tworzy tylko swoj podkatalog
 // i nie dostaje zadnych podwyzszonych uprawnien. Istniejace katalogi (z dysku) nie sa zmieniane.
 void zapewnij_katalogi_ustawien_uzytkownika() {
-    static const char* const sciezki[] = {"/uzytkownicy/domyslny", "/uzytkownicy/domyslny/Ustawienia"};
+    // Dokumenty: domyslne miejsce dokumentow (skrot "Dokumenty" w dialogach plikow).
+    static const char* const sciezki[] = {KatalogiUzytkownika::Domowy, "/uzytkownicy/domyslny/Ustawienia",
+                                          KatalogiUzytkownika::Dokumenty};
     for (const char* s : sciezki)
         if (!katalog_istnieje(s)) (void)utworz_katalog_z_pzb(s, PZB_UZYTKOWNIK);
 }
@@ -1583,6 +1587,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_diagnostyka.png",_binary_ikonki_app_diagnostyka_png_start,_binary_ikonki_app_diagnostyka_png_end},
         {"/ikonki/app_shell.png",_binary_ikonki_app_shell_png_start,_binary_ikonki_app_shell_png_end},
         {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
+        {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;

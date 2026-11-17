@@ -80,6 +80,11 @@ public:
         return n;
     }
     bool jest_dzieckiem(int pid) const { return indeks_dziecka(pid) >= 0; }
+    // Wlasciciel uruchomionego dziecka: pid > 0, -1 = osierocone, 0 = to nie jest dziecko.
+    int wlasciciel_dziecka(int pid) const {
+        const int i = indeks_dziecka(pid);
+        return i < 0 ? 0 : w[i].wlasciciel;
+    }
 
     // Rezerwuje wpis (jeszcze bez pid). `*idx` = indeks wpisu przy Wynik::OK.
     Wynik zarezerwuj(int wlasciciel, uint32_t rodzaj, const char* tytul, size_t dl_tytulu,

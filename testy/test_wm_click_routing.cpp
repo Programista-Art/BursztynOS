@@ -3,6 +3,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <algorithm>
 #include "bursztyn_ui_host_fixture.h"
 #include "wm_input.h"
 #include "wm_belka_hit.h"
@@ -12,7 +13,17 @@
 #undef _start
 static std::string launched;
 struct PowerIntercept { uint64_t syscall; };
-static uint64_t launch_hook(uint64_t nr,uint64_t a,uint64_t,uint64_t,uint64_t) {
+// Prawdziwe pliki ikon z repozytorium (/ikonki/x.png -> ikonki/x.png); brakujaca
+// ikona symulowana przez test_brak_ikony.
+static bool test_czytaj_ikony=false;
+static std::string test_brak_ikony;
+static std::vector<char> plik_ikony(const char* p) {
+    std::vector<char> d;if(!test_czytaj_ikony||!p||strncmp(p,"/ikonki/",8)||test_brak_ikony==p)return d;
+    FILE* f=fopen(p+1,"rb");if(!f)return d;char b[4096];size_t n;while((n=fread(b,1,sizeof b,f))>0)d.insert(d.end(),b,b+n);fclose(f);return d;
+}
+static uint64_t launch_hook(uint64_t nr,uint64_t a,uint64_t a2,uint64_t,uint64_t) {
+    if(nr==4&&test_czytaj_ikony){auto d=plik_ikony(reinterpret_cast<const char*>(a));if(d.empty())return 0;
+        *reinterpret_cast<uint32_t*>(a2)=uint32_t(d.size());return 1;}
     if(nr==25 || nr==26)throw PowerIntercept{nr};
     if(nr==10)launched=reinterpret_cast<const char*>(a);
     return 1;
@@ -22,7 +33,10 @@ void gui_ustaw_system_overlay(bool,int,int,int,int) {}
 void rysuj_tekst_wysrodkowany(int,int,int,int,int,uint32_t,const char*) {}
 void gui_odswiez_pulpit() {}
 int bws_utworz_warstwe(int,int,int,int,int) {return 1;}
-bool czytaj_fragment_pliku(const char*, uint64_t, char*, uint32_t, uint32_t*) { return false; }
+bool czytaj_fragment_pliku(const char* p, uint64_t off, char* out, uint32_t n, uint32_t* got) {
+    auto d=plik_ikony(p);if(d.empty()||off>d.size()||!out)return false;
+    const uint32_t k=uint32_t(std::min<uint64_t>(n,d.size()-off));memcpy(out,d.data()+off,k);if(got)*got=k;return true;
+}
 static unsigned checks=0;
 #undef assert
 #define assert(condition) do {++checks;if(!(condition)){fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#condition);abort();}} while(0)
@@ -161,6 +175,127 @@ int main() {
             assert(hit(35,699)==1 && hit(150,160)==2 && hit(150,110)==2);
             assert(scene[60*400+50]==0); // no full-client decoration coverage
         }
+    }
+    // Pasek zadan z ikonami aplikacji: tozsamosc programu (nie tytul), okna
+    // podrzedne, ponowne uzycie pid, brak ikony, stany, motywy, wiele okien, skala.
+    {
+        ui_skala_procent=100;metryki_ekranu();test_czytaj_ikony=true;
+        test_surface_width=1280;test_surface_height=720;test_surface.assign(1280*720,0);
+        const int iN=AppIcons::indeks_programu(SCIEZKA_NOTATNIK),iE=AppIcons::indeks_programu(SCIEZKA_EKSPLORATOR);
+        const int iD=AppIcons::indeks_programu(AppIdentity::DisplaySettings),iS=AppIcons::indeks_programu(AppIdentity::Settings);
+        const int iK=AppIcons::indeks_programu(SCIEZKA_KALKULATOR),iH=AppIcons::indeks_programu(SCIEZKA_HUSSAR);
+        const int iSn=AppIcons::indeks_programu(SCIEZKA_SNAKE),iO=AppIcons::indeks_programu(SCIEZKA_PRZEGLADARKA_OBRAZOW);
+        assert(iN>=0&&iE>=0&&iD>=0&&iS>=0&&iK>=0&&iH>=0&&iSn>=0&&iO>=0&&iD!=iS);
+        // Te same pliki co skroty pulpitu i menu Start; Ustawienia ekranu = nowa ikona, nie ikona Ustawien.
+        for(int i=0;i<DesktopEntries::Count;++i)assert(!strcmp(AppIcons::icon_png(i),DesktopEntries::Launchers[i].icon_png));
+        assert(!strcmp(AppIcons::icon_png(iD),"/ikonki/app_ustawienia_ekranu.png"));
+        assert(!strcmp(AppIcons::icon_png(iS),"/ikonki/app_ustawienia.png"));
+        for(const auto& app:StartMenu::apps)if(app.action==12)assert(!strcmp(app.icon_png,AppIcons::icon_png(iD)));
+        for(const auto& app:StartMenu::apps)if(app.action==2)assert(!strcmp(app.icon_png,AppIcons::icon_png(iN)));
+        for(const auto& app:StartMenu::apps)if(app.action==20)assert(!strcmp(app.icon_png,AppIcons::icon_png(iS)));
+        for(const auto& app:StartMenu::apps)if(app.icon_png){bool znana=false;for(int i=0;i<AppIcons::Count;++i)znana|=!strcmp(app.icon_png,AppIcons::icon_png(i));assert(znana);}
+        assert(AppIcons::indeks_programu("/programy/nieznany.bur")==-1&&AppIcons::indeks_programu(nullptr)==-1);
+        assert(AppIcons::indeks_programu("/programy/notatnik.cebula/notatnik.bu")==-1);
+        // Okna: Notatnik (aktywny), Eksplorator (zminimalizowany), Ustawienia ekranu,
+        // nieznany program, okno informacyjne Notatnika (BWS 101), osierocone okno informacyjne.
+        auto okno=[](int i,uint64_t id,int pid,const char* t,bool akt,uint32_t stan){
+            okna_taskbara[i]={};okna_taskbara[i].window_id=id;okna_taskbara[i].pid=pid;okna_taskbara[i].aktywne=akt;
+            okna_taskbara[i].stan=stan;strcpy(okna_taskbara[i].tytul,t);};
+        okno(0,0x100000005ULL,5,"Notatnik - Zażółć gęślą jaźń.txt",true,0);
+        okno(1,0x100000006ULL,6,"Eksplorator Plików",false,GUI_OKNO_ZMINIMALIZOWANE);
+        okno(2,0x100000007ULL,7,"Ustawienia ekranu",false,0);
+        okno(3,0x100000008ULL,8,"Instalator",false,0);
+        okno(4,0x100000009ULL,9,"O Notatniku",false,0);
+        okno(5,0x10000000AULL,10,"Okno informacyjne",false,0);
+        liczba_okien_taskbara=6;
+        test_okna_aplikacji={{0x100000005ULL,SCIEZKA_NOTATNIK},{0x100000006ULL,SCIEZKA_EKSPLORATOR},
+            {0x100000007ULL,AppIdentity::DisplaySettings},{0x100000009ULL,SCIEZKA_NOTATNIK}};   // dziecko -> wlasciciel
+        przypisz_ikony_okien();
+        assert(ikona_okna_taskbara[0]==iN&&ikona_okna_taskbara[1]==iE&&ikona_okna_taskbara[2]==iD);
+        assert(ikona_okna_taskbara[3]==-1&&ikona_okna_taskbara[4]==iN&&ikona_okna_taskbara[5]==-1);
+        // Zmiana tytulu (nowy dokument) nie zmienia ikony i nie wymaga ponownego zapytania.
+        unsigned q=test_zapytania_aplikacji;
+        strcpy(okna_taskbara[0].tytul,"Notatnik - Inny dokument.txt *");okna_taskbara[0].aktywne=false;przypisz_ikony_okien();
+        assert(test_zapytania_aplikacji==q&&ikona_okna_taskbara[0]==iN);okna_taskbara[0].aktywne=true;
+        // Ponowne uzycie pid (nowa generacja okna) przez inny program: nowa ikona.
+        okna_taskbara[0].window_id=0x200000005ULL;test_okna_aplikacji[0]={0x200000005ULL,SCIEZKA_KALKULATOR};
+        przypisz_ikony_okien();assert(test_zapytania_aplikacji>q&&ikona_okna_taskbara[0]==iK);
+        okna_taskbara[0].window_id=0x100000005ULL;test_okna_aplikacji[0]={0x100000005ULL,SCIEZKA_NOTATNIK};
+        przypisz_ikony_okien();assert(ikona_okna_taskbara[0]==iN);
+        // Rysowanie: ikony z prawdziwych PNG, bez tytulu, stany aktywne/zminimalizowane.
+        auto px=[](int x,int y){return test_surface[size_t(y)*1280+x]&0xFFFFFFU;};
+        auto rysuj=[&](){test_surface.assign(1280*720,0xABCDEF);RysujTaskbar();};
+        auto opaque_match=[&](int i)->double{   // udzial w pelni kryjacych pikseli ikony narysowanych 1:1
+            int bx,by;assert(prostokat_przycisku_paska(i,&bx,&by));const auto* ik=ikona_paska(ikona_okna_taskbara[i]);assert(ik);
+            const int bok=ik->bok(),ix=bx+(TASK_BUTTON_W-bok)/2,iy=by+(SKROT_H-bok)/2-ui_skaluj(1,ui_skala_procent);int all=0,ok=0;
+            for(int y=0;y<bok;++y)for(int x=0;x<bok;++x){uint32_t c=ik->piksele()[y*bok+x];if((c>>24)!=255)continue;++all;ok+=px(ix+x,iy+y)==(c&0xFFFFFF);}
+            return all?double(ok)/all:0.0;};
+        for(const BursztynMotyw* theme:{&g_domyslny_motyw_fallback,(const BursztynMotyw*)nullptr}){
+            static BursztynMotyw jasny=g_domyslny_motyw_fallback;
+            if(!theme){jasny.panel=0xF2F2F2;jasny.podniesiony=0xFFFFFF;jasny.ramka=0xC8C8C8;jasny.tekst=0x202020;jasny.przycisk=0xE6E6E6;theme=&jasny;}
+            g_aktywny_test_motyw=theme;rysuj();
+            const uint32_t akcent=motyw_kolor(MOTYW_KOLOR_AKCENT)&0xFFFFFF,panel=motyw_kolor(MOTYW_KOLOR_PANEL)&0xFFFFFF;
+            const uint32_t podn=motyw_kolor(MOTYW_KOLOR_PODNIESIONY)&0xFFFFFF,ramka=motyw_kolor(MOTYW_KOLOR_RAMKA)&0xFFFFFF;
+            for(int i:{0,2,4})assert(opaque_match(i)>0.95);                      // ikony bez znieksztalcen
+            int bx,by;
+            assert(prostokat_przycisku_paska(0,&bx,&by));                         // aktywny: tlo + pomaranczowy pasek
+            assert(px(bx+TASK_BUTTON_W/2,by+SKROT_H-1)==akcent&&px(bx+2,by+2)==podn);
+            assert(prostokat_przycisku_paska(1,&bx,&by));                         // zminimalizowany: przygaszony + krotki pasek
+            assert(px(bx+TASK_BUTTON_W/2,by+SKROT_H-1)==ramka&&px(bx+2,by+2)==panel&&opaque_match(1)<0.5);
+            assert(prostokat_przycisku_paska(2,&bx,&by));                         // nieaktywny: bez paska i tla
+            assert(px(bx+TASK_BUTTON_W/2,by+SKROT_H-1)==panel&&px(bx+2,by+2)==panel);
+            assert(prostokat_przycisku_paska(3,&bx,&by));                         // ikona ogolna (belka w kolorze akcentu)
+            {const int bok=ui_skaluj(24,ui_skala_procent),ix=bx+(TASK_BUTTON_W-bok)/2,iy=by+(SKROT_H-bok)/2-1;
+             assert(px(ix+bok/2,iy+4)==akcent&&px(ix+bok/2,iy+bok/2+2)==(motyw_kolor(MOTYW_KOLOR_PRZYCISK)&0xFFFFFF));}
+            // Nic poza paskiem zadan.
+            for(int y=0;y<desktop_geometry.taskbar_y;y+=7)for(int x=0;x<1280;x+=7)assert(px(x,y)==0xABCDEF);
+            for(const auto& r:test_batch_regions)assert(r.y>=desktop_geometry.taskbar_y&&r.y+r.h<=720&&r.x>=0&&r.x+r.w<=1280);
+        }
+        g_aktywny_test_motyw=&g_domyslny_motyw_fallback;
+        // Brak pliku ikony: ikona ogolna zamiast zaslepki.
+        {int bx,by;test_brak_ikony="/ikonki/app_snake.png";okno(2,0x10000000BULL,11,"Snake",false,0);
+         test_okna_aplikacji.push_back({0x10000000BULL,SCIEZKA_SNAKE});przypisz_ikony_okien();assert(ikona_okna_taskbara[2]==iSn);
+         assert(!ikona_paska(iSn));rysuj();assert(prostokat_przycisku_paska(2,&bx,&by));
+         const int bok=ui_skaluj(24,ui_skala_procent),ix=bx+(TASK_BUTTON_W-bok)/2,iy=by+(SKROT_H-bok)/2-1;
+         assert(px(ix+bok/2,iy+4)==(motyw_kolor(MOTYW_KOLOR_AKCENT)&0xFFFFFF));test_brak_ikony.clear();
+         okno(2,0x100000007ULL,7,"Ustawienia ekranu",false,0);przypisz_ikony_okien();}
+        // Hover: tylko przy zmianie przycisku; klik aktywuje/przywraca; prawy przycisk = znacznik "nad paskiem".
+        {int bx,by;assert(prostokat_przycisku_paska(1,&bx,&by));
+         assert(aktualizuj_hover_paska(bx+5,by+5)&&!aktualizuj_hover_paska(bx+6,by+6)&&hover_okna_paska==okna_taskbara[1].window_id);
+         rysuj();assert(px(bx+2,by+2)==(motyw_kolor(MOTYW_KOLOR_PODNIESIONY)&0xFFFFFF));
+         assert(aktualizuj_hover_paska(5,5)&&hover_okna_paska==0);
+         test_activated_window=0;obsluz_klikniecie(bx+TASK_BUTTON_W/2,by+SKROT_H/2);assert(test_activated_window==okna_taskbara[1].window_id);
+         assert(prostokat_przycisku_paska(2,&bx,&by));test_activated_window=0;obsluz_klikniecie(bx+1,by+1);
+         assert(test_activated_window==okna_taskbara[2].window_id);
+         assert(obsluz_prawy_klik_paska(bx+2,by+2)&&czy_nad_paskiem(okna_taskbara[2].window_id));
+         rysuj();const int z=ui_skaluj(5,ui_skala_procent);assert(px(bx+TASK_BUTTON_W-z,by+3)==(motyw_kolor(MOTYW_KOLOR_AKCENT)&0xFFFFFF));
+         assert(obsluz_prawy_klik_paska(bx+2,by+2)&&!czy_nad_paskiem(okna_taskbara[2].window_id));
+         test_activated_window=0;obsluz_klikniecie(TASK_BUTTON_X-2,by+2);assert(test_activated_window==0);}
+        // Zamkniecie okna: wpis znika, kolejne przesuwaja sie, bez starej ikony.
+        okna_taskbara[1]=okna_taskbara[2];okna_taskbara[2]=okna_taskbara[3];liczba_okien_taskbara=3;przypisz_ikony_okien();
+        assert(ikona_okna_taskbara[0]==iN&&ikona_okna_taskbara[1]==iD&&ikona_okna_taskbara[2]==-1&&ikona_okna_taskbara[3]==-1);
+        {int bx,by;assert(!prostokat_przycisku_paska(3,&bx,&by));}
+        // Wiele okien: przyciski rowno rozmieszczone, nie nachodza i nie wchodza na zegar.
+        {liczba_okien_taskbara=SKLADACZ_MAKS_WARSTW;test_okna_aplikacji.clear();
+         const char* progi[]={SCIEZKA_NOTATNIK,SCIEZKA_HUSSAR,SCIEZKA_SNAKE,SCIEZKA_PRZEGLADARKA_OBRAZOW,SCIEZKA_EKSPLORATOR};
+         for(uint32_t i=0;i<liczba_okien_taskbara;++i){okno(int(i),0x500000000ULL+i,20+int(i),"Okno",i==3,0);test_okna_aplikacji.push_back({0x500000000ULL+i,progi[i%5]});}
+         for(int szer:{1280,640}){screen_w=szer;metryki_ekranu();
+          przypisz_ikony_okien();rysuj();int poprz=-1,widoczne=0;
+          for(uint32_t i=0;i<liczba_okien_taskbara;++i){int bx,by;if(!prostokat_przycisku_paska(i,&bx,&by))continue;++widoczne;
+             assert(bx+TASK_BUTTON_W<=poczatek_zegara()&&(poprz<0||bx==poprz+TASK_BUTTON_W+TASK_BUTTON_GAP));poprz=bx;}
+          // 1280: wszystkie 16 ikon (tytuly zajmowaly ~9); 640: tylko mieszczace sie przed zegarem.
+          if(szer==1280)assert(widoczne==int(liczba_okien_taskbara));else assert(widoczne>5&&widoczne<int(liczba_okien_taskbara));
+          for(int y=0;y<desktop_geometry.taskbar_y;y+=11)for(int x=0;x<1280;x+=11)assert(px(x,y)==0xABCDEF);}
+         screen_w=1280;metryki_ekranu();rysuj();
+         assert(ikona_okna_taskbara[1]==iH&&ikona_okna_taskbara[2]==iSn&&ikona_okna_taskbara[3]==iO);
+        }
+        // Skala 125%: ikony przeskalowane z oryginalu, przycisk szerszy.
+        ui_skala_procent=125;metryki_ekranu();liczba_okien_taskbara=2;przypisz_ikony_okien();rysuj();
+        assert(ikona_paska(ikona_okna_taskbara[0])&&ikona_paska(ikona_okna_taskbara[0])->bok()==ui_skaluj(24,125));
+        assert(TASK_BUTTON_W==ui_skaluj(44,125)&&opaque_match(0)>0.95);
+        ui_skala_procent=100;metryki_ekranu();
+        liczba_okien_taskbara=0;przypisz_ikony_okien();test_okna_aplikacji.clear();test_czytaj_ikony=false;
+        test_surface_width=test_surface_height=0;test_surface.clear();hover_okna_paska=0;
     }
     printf("WM routing %u/%u PASS: ",checks,checks);puts("WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw");
 }

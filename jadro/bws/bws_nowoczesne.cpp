@@ -1302,6 +1302,13 @@ extern "C" size_t okna_podrzedne_dzieci(int wlasciciel, int* out, size_t cap) {
     return g_okna_podrzedne.dzieci(wlasciciel, out, cap);
 }
 
+/* Dla BWS 42 (pasek zadan): wlasciciel okna podrzednego (0 = brak, -1 = osierocone). */
+extern "C" int okna_podrzedne_wlasciciel(int pid) {
+    if (pid <= 0) return 0;
+    BlokadaIrqOkien irq;
+    return g_okna_podrzedne.wlasciciel_dziecka(pid);
+}
+
 extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW)) return;
 

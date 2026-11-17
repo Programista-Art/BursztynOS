@@ -4,6 +4,7 @@
  */
 
 #include "bursztyn_gui.h"
+#include "app_identity.h"
 #include "ui_skala.h"
 #include "wm_belka_hit.h"
 #if defined(BSF_NATIVE)
@@ -1117,6 +1118,12 @@ bool gui_aktywuj_okno(uint64_t window_id) {
 uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* path) {
     if(!okna||!max||!path)return 0;
     return static_cast<uint32_t>(bws_wywolaj(42,reinterpret_cast<uint64_t>(okna),max,reinterpret_cast<uint64_t>(path),0));
+}
+
+uint32_t gui_pobierz_okna_aplikacji(GuiOknoInfo* okna,uint32_t max,const char* path) {
+    if(!okna||!max||!path)return 0;
+    return static_cast<uint32_t>(bws_wywolaj(42,reinterpret_cast<uint64_t>(okna),max,reinterpret_cast<uint64_t>(path),
+        BWS_OKNA_TOZSAMOSC_APLIKACJI));
 }
 
 bool usun_twor_uzytkownika(const char* sciezka) {

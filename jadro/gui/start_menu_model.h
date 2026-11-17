@@ -15,7 +15,7 @@ inline constexpr App apps[]={
  {"Kontrolki 4","",9,"/ikonki/app_kontrolki4.png"},
  {"Testy systemu","",10,"/ikonki/app_testy.png"},
  {"Tapety","",11,"/ikonki/app_tapety.png"},
- {"Ustawienia ekranu","monitor rozdzielczość",12,nullptr},
+ {"Ustawienia ekranu","monitor rozdzielczość",12,"/ikonki/app_ustawienia_ekranu.png"},
  {"Aktualizacje Systemu","",13,"/ikonki/app_aktualizacje.png"},
  {"Test dźwięku","audio",15,"/ikonki/app_test_dzwieku.png"},
  {"Diagnostyka systemu","",16,"/ikonki/app_diagnostyka.png"},

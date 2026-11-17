@@ -161,6 +161,16 @@ uint32_t gui_pobierz_okna_programu(GuiOknoInfo* out,uint32_t max,const char* pat
     if(!test_running_executable||strcmp(test_running_executable,path))return 0;
     return gui_pobierz_okna(out,max);
 }
+// Okna wg tozsamosci programu (BWS 42 + BWS_OKNA_TOZSAMOSC_APLIKACJI): test
+// podaje pary (window_id, program po rozwiazaniu wlasciciela okna podrzednego).
+struct TestOknoAplikacji { uint64_t window_id; const char* program; };
+static std::vector<TestOknoAplikacji> test_okna_aplikacji;
+static unsigned test_zapytania_aplikacji=0;
+uint32_t gui_pobierz_okna_aplikacji(GuiOknoInfo* out,uint32_t max,const char* path){
+    ++test_zapytania_aplikacji;uint32_t n=0;
+    for(const auto& o:test_okna_aplikacji)if(n<max&&o.program&&path&&!strcmp(o.program,path)){out[n]={};out[n].window_id=o.window_id;++n;}
+    return n;
+}
 bool gui_aktywuj_okno(uint64_t id) {test_activated_window=id;return true;}
 void gui_wypisz_tekst_kolor_skala(int, int, uint32_t, int, const char*) {}
 void motyw_odswiez_lokalny() {}

@@ -151,6 +151,7 @@ public:
         return false;
     }
     int liczba_powierzchni() const { return liczba_; }
+    PowierzchniaPopup* powierzchnia(int i) const { return i >= 0 && i < liczba_ ? powierzchnie_[i] : nullptr; }
     bool czy_ma_wpis_paska_zadan() const { return false; }
     bool czy_przechwytuje_mysz() const { return przechwycenie_ != nullptr; }
     Kontrolka* fokus_popupu() const { return fokus_popupu_; }

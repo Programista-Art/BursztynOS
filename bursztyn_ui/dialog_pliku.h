@@ -14,6 +14,8 @@
 #include "panel_dokowany.h"
 #include "bursztyn_gui.h"
 #include "ikony_eksplorator_dane.h"
+#include "plik_operacje_ui.h"
+#include "katalogi_uzytkownika.h"
 
 namespace BursztynUI {
 
@@ -47,6 +49,32 @@ public:
     ~DialogNowegoKatalogu() override = default;
 
     PoleTekstowe* pole_nazwy() const { return pole_nazwy_; }
+    Przycisk* przycisk_utworz() const { return btn_utworz_; }
+    Przycisk* przycisk_anuluj() const { return btn_anuluj_; }
+
+    // Klawiatura od razu w polu nazwy (zaznaczona propozycja), aby wpisanie
+    // nazwy i Enter dzialaly bez klikania. Bez tego fokus trafial na przycisk
+    // "Utworz", wpisywane znaki ginely, a Enter tworzyl katalog o domyslnej nazwie.
+    bool pokaz_dla(ZarzadcaPopupow& z, Kontrolka* owner, const char* propozycja) {
+        kopiuj_propozycje(propozycja);
+        if (!OknoDialogowe::pokaz(z, owner)) return false;
+        if (pole_nazwy_) {
+            z.ustaw_fokus_popupu(pole_nazwy_);
+            pole_nazwy_->zaznacz_wszystko();
+        }
+        return true;
+    }
+
+    void obsluz_wcisniecie_klawisza(ZdarzenieKlawiatury& e) override {
+        // Enter poza przyciskiem Anuluj zawsze tworzy katalog (nigdy samo
+        // zamkniecie z wynikiem OK bez utworzenia katalogu).
+        if (e.polecenie() == 13U && !(zarzadca() && zarzadca()->fokus_popupu() == btn_anuluj_)) {
+            zatwierdz_katalog();
+            e.obsluzone = true;
+            return;
+        }
+        OknoDialogowe::obsluz_wcisniecie_klawisza(e);
+    }
 
 protected:
     void oblicz_geometrie_dialogu(int& szer, int& wys) override {
@@ -58,6 +86,14 @@ protected:
     void zbuduj_interfejs(int w, int h) override {
         wyczysc_kontrolki();
         wyczysc_sloty_przyciskow();
+        // Wskazniki bazy na kontrolki zwolnione przez wyczysc_kontrolki():
+        // bez wyzerowania aktualizuj_obszary_ukladu() czytal zwolniona pamiec.
+        panel_tresci_ = nullptr;
+        panel_przyciskow_ = nullptr;
+        uklad_ = nullptr;
+        pole_nazwy_ = nullptr;
+        btn_utworz_ = nullptr;
+        btn_anuluj_ = nullptr;
         SkalaUI s = skala_dpi_;
 
         uklad_ = new PanelDokowany();
@@ -105,15 +141,16 @@ protected:
         tresc->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
         wyzeruj_tlo(*tresc);
         uklad_->dodaj_dokowany(tresc, Dokowanie::Wypelnij);
+        panel_tresci_ = tresc;
 
         Etykieta* ety = new Etykieta("Wprowadź nazwę nowego katalogu:");
         ety->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST));
         tresc->dodaj_kontrolke(ety);
 
-        pole_nazwy_ = new PoleTekstowe("Nowy folder");
+        pole_nazwy_ = new PoleTekstowe(propozycja_);
         pole_nazwy_->ustaw_preferowany_rozmiar(Rozmiar(-1, 30));
         pole_nazwy_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-        pole_nazwy_->ustaw_tekst("Nowy folder");
+        pole_nazwy_->ustaw_tekst(propozycja_);
         pole_nazwy_->przy_zatwierdzeniu([](PoleTekstowe*, const char*, void* d) {
             static_cast<DialogNowegoKatalogu*>(d)->zatwierdz_katalog();
         }, this);
@@ -125,7 +162,13 @@ protected:
 
 private:
     void zatwierdz_katalog();
+    void kopiuj_propozycje(const char* p) {
+        size_t i = 0;
+        if (p) while (p[i] && i + 1 < sizeof(propozycja_)) { propozycja_[i] = p[i]; ++i; }
+        propozycja_[i] = '\0';
+    }
 
+    char propozycja_[64]{"Nowy katalog"};
     DialogPliku* rodzic_dialogu_{nullptr};
     PoleTekstowe* pole_nazwy_{nullptr};
     Przycisk* btn_utworz_{nullptr};
@@ -140,6 +183,7 @@ public:
     static constexpr size_t MAKS_WPISOW = 512;
     static constexpr size_t ROZMIAR_LISTINGU = 64U * 1024U;
     static constexpr size_t MAKS_HISTORII = 16;
+    static constexpr size_t MAKS_NAZWY_PSF = 56;   // PSF_MAX_NAZWA (z terminatorem)
 
     using FunkcjaWynikuPliku = void (*)(DialogPliku* dialog, WynikDialoguPliku wynik,
                                         const char* sciezka, void* dane);
@@ -177,7 +221,16 @@ public:
         }
     }
 
-    ~DialogPliku() override = default;
+    ~DialogPliku() override {
+        // Podrzedny dialog nalezy do tego dialogu: najpierw zdjecie z ekranu.
+        if (dialog_nowego_katalogu_) {
+            if (dialog_nowego_katalogu_->zarzadca())
+                dialog_nowego_katalogu_->zarzadca()->zamknij_powierzchnie(dialog_nowego_katalogu_);
+            delete dialog_nowego_katalogu_;
+        }
+    }
+
+    DialogNowegoKatalogu* dialog_nowego_katalogu() const { return dialog_nowego_katalogu_; }
 
     bool pokaz(ZarzadcaPopupow& z,Kontrolka* owner=nullptr) {
         wynik_pliku_=WynikDialoguPliku::Brak;wybrana_sciezka_[0]=0;
@@ -352,8 +405,7 @@ public:
         // Sprawdz czy katalog istnieje i jest czytelny
         if (!czy_katalog_czytelny(norm)) {
             if (zarzadca()) {
-                Komunikat::blad(*zarzadca(), "Błąd katalogu",
-                                "Nie można otworzyć katalogu.\nBrak uprawnień lub ścieżka nie istnieje.",
+                Komunikat::blad(*zarzadca(), "Błąd katalogu", opis_bledu_katalogu(norm),
                                 nullptr, nullptr, this);
             }
             return false;
@@ -402,10 +454,64 @@ public:
         (void)odswiez_katalog();
     }
 
+    // Jeden (wielokrotnie uzywany) dialog na DialogPliku; wczesniej kazde
+    // klikniecie przydzielalo nowy obiekt, ktorego nikt nie zwalnial.
     void otworz_dialog_nowego_katalogu() {
         if (!zarzadca()) return;
-        DialogNowegoKatalogu* dlg = new DialogNowegoKatalogu(this);
-        dlg->pokaz(*zarzadca(), this);
+        if (!dialog_nowego_katalogu_) dialog_nowego_katalogu_ = new DialogNowegoKatalogu(this);
+        if (!dialog_nowego_katalogu_) return;
+        char propozycja[MAKS_NAZWY]{};
+        zaproponuj_nazwe_katalogu(propozycja, sizeof(propozycja));
+        dialog_nowego_katalogu_->pokaz_dla(*zarzadca(), this, propozycja);
+    }
+
+    // "Nowy katalog", a gdy zajety: "Nowy katalog (2)", "(3)", ...
+    void zaproponuj_nazwe_katalogu(char* out, size_t cap) const {
+        static constexpr const char* BAZA = "Nowy katalog";
+        kopiuj_str(out, cap, BAZA);
+        for (unsigned n = 2; n < 100 && czy_wpis_istnieje(out); ++n) {
+            char num[24]{};
+            formatuj_u64(n, num, sizeof(num));
+            kopiuj_str(out, cap, BAZA);
+            size_t l = dlugosc_str(out);
+            const char* czesci[3] = {" (", num, ")"};
+            for (const char* t : czesci)
+                for (size_t i = 0; t[i] && l + 1 < cap; ++i) out[l++] = t[i];
+            out[l] = '\0';
+        }
+    }
+    bool czy_wpis_istnieje(const char* nazwa) const {
+        for (size_t i = 0; i < liczba_wpisow_; ++i)
+            if (rowne_str(wpisy_[i].nazwa, nazwa)) return true;
+        return false;
+    }
+
+    // Komunikat dla katalogu, do ktorego nie da sie wejsc: brak elementu,
+    // element nie bedacy katalogiem albo brak uprawnien do odczytu.
+    static const char* opis_bledu_katalogu(const char* sciezka) {
+        BwsMetadanePliku meta{};
+        if (!pobierz_metadane_pliku(sciezka, &meta))
+            return "Katalog nie istnieje.";
+        if (meta.typ != BWS_TYP_KATALOG)
+            return "Wskazany element nie jest katalogiem.";
+        return "Brak uprawnień do odczytu katalogu.";
+    }
+
+    // Powod odrzucenia nazwy elementu albo nullptr dla poprawnej nazwy.
+    static const char* blad_nazwy_elementu(const char* s) {
+        if (!s || !s[0]) return "Nazwa nie może być pusta.";
+        if (rowne_str(s, ".") || rowne_str(s, "..")) return "Nazwy „.” i „..” są zarezerwowane.";
+        const size_t l = dlugosc_str(s);
+        if (l >= MAKS_NAZWY_PSF) return "Nazwa jest zbyt długa (maksymalnie 55 bajtów UTF-8).";
+        for (size_t i = 0; i < l; ++i) {
+            const char c = s[i];
+            if (c == '/' || c == '\\' || c == ':' || c == '*' ||
+                c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+                return "Nazwa nie może zawierać znaków / \\ : * ? \" < > |";
+        }
+        if (!PlikiUI::nazwa_poprawna(s, MAKS_NAZWY_PSF))
+            return "Nazwa zawiera znaki sterujące lub niepoprawny UTF-8.";
+        return nullptr;
     }
 
     bool utworz_nowy_katalog(const char* nazwa = nullptr) {
@@ -414,12 +520,12 @@ public:
             return true;
         }
 
-        // Walidacja nazwy folderu
-        if (!czy_poprawna_nazwa_elementu(nazwa)) {
+        // Walidacja nazwy folderu (bez separatorow, "." / "..", sterujacych,
+        // blednego UTF-8 i dluzszych niz limit nazwy PSF).
+        if (const char* powod = blad_nazwy_elementu(nazwa)) {
             if (zarzadca()) {
-                Komunikat::ostrzezenie(*zarzadca(), "Nieprawidłowa nazwa",
-                                       "Nazwa katalogu zawiera niedozwolone znaki lub jest nieprawidłowa.",
-                                       nullptr, nullptr, this);
+                Komunikat::ostrzezenie(*zarzadca(), "Nieprawidłowa nazwa", powod,
+                                       nullptr, nullptr, popup_komunikatow());
             }
             return false;
         }
@@ -428,27 +534,37 @@ public:
         if (!polacz_sciezki(biezacy_katalog_, nazwa, pelna, sizeof(pelna))) {
             if (zarzadca()) {
                 Komunikat::blad(*zarzadca(), "Błąd ścieżki", "Ścieżka katalogu jest zbyt długa.",
-                                nullptr, nullptr, this);
+                                nullptr, nullptr, popup_komunikatow());
             }
             return false;
         }
 
-        // Sprawdzenie czy katalog juz istnieje
+        // Istniejacy element (katalog albo plik) nigdy nie jest nadpisywany.
         BwsMetadanePliku meta{};
         if (pobierz_metadane_pliku(pelna, &meta)) {
             if (zarzadca()) {
-                Komunikat::ostrzezenie(*zarzadca(), "Katalog już istnieje",
-                                       "Katalog o podanej nazwie już istnieje w bieżącej lokalizacji.",
-                                       nullptr, nullptr, this);
+                Komunikat::ostrzezenie(*zarzadca(), "Element już istnieje",
+                                       meta.typ == BWS_TYP_KATALOG
+                                           ? "Katalog o tej nazwie już istnieje w bieżącej lokalizacji."
+                                           : "Plik o tej nazwie już istnieje w bieżącej lokalizacji.",
+                                       nullptr, nullptr, popup_komunikatow());
             }
             return false;
         }
 
-        if (!utworz_katalog_uzytkownika(pelna)) {
+        // BWS 46 w trybie statusu zwraca rzeczywisty wynik PSF/PZB
+        // (brak uprawnien, brak katalogu nadrzednego, brak miejsca, ...).
+        WynikPlikowy wynik = static_cast<WynikPlikowy>(bws_wywolaj(
+            46, reinterpret_cast<uint64_t>(pelna), BWS_STATUS_PLIKOWY, 0, 0));
+        if (wynik == WynikPlikowy::BladIO && pobierz_metadane_pliku(pelna, &meta) &&
+            meta.typ == BWS_TYP_KATALOG) wynik = WynikPlikowy::Ok;
+        if (wynik != WynikPlikowy::Ok) {
             if (zarzadca()) {
                 Komunikat::blad(*zarzadca(), "Błąd tworzenia katalogu",
-                                "Nie udało się utworzyć katalogu.\nBrak uprawnień do zapisu w tym katalogu.",
-                                nullptr, nullptr, this);
+                                wynik == WynikPlikowy::BrakUprawnien
+                                    ? "Brak uprawnień do tworzenia katalogów w tej lokalizacji."
+                                    : PlikiUI::komunikat_bledu(wynik),
+                                nullptr, nullptr, popup_komunikatow());
             }
             return false;
         }
@@ -462,18 +578,13 @@ public:
     }
 
     static bool czy_poprawna_nazwa_elementu(const char* s) {
-        if (!s || !s[0]) return false;
-        if (!czy_poprawny_utf8(s)) return false;
-        size_t l = dlugosc_str(s);
-        if (l >= MAKS_NAZWY) return false;
-        for (size_t i = 0; i < l; ++i) {
-            char c = s[i];
-            if (c == '/' || c == '\\' || c == ':' || c == '*' ||
-                c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
-                return false;
-            }
-        }
-        return true;
+        return blad_nazwy_elementu(s) == nullptr;
+    }
+
+    // Komunikaty bledow tworzenia katalogu nad dialogiem nazwy (gdy otwarty).
+    Kontrolka* popup_komunikatow() {
+        if (dialog_nowego_katalogu_ && dialog_nowego_katalogu_->czy_otwarta()) return dialog_nowego_katalogu_;
+        return this;
     }
 
     static bool czy_poprawna_sciezka_dialogu(const char* s) {
@@ -691,13 +802,13 @@ public:
             char num[24]; formatuj_u64(kb, num, sizeof(num));
             kopiuj_str(out, cap, num);
             size_t l = dlugosc_str(out);
-            if (l + 4 < cap) { out[l++] = ' '; out[l++] = 'K'; out[l] = 'B'; out[l] = '\0'; }
+            if (l + 4 < cap) { out[l++] = ' '; out[l++] = 'K'; out[l++] = 'B'; out[l] = '\0'; }
         } else {
             uint64_t mb = bajty / (1024ULL * 1024ULL);
             char num[24]; formatuj_u64(mb, num, sizeof(num));
             kopiuj_str(out, cap, num);
             size_t l = dlugosc_str(out);
-            if (l + 4 < cap) { out[l++] = ' '; out[l++] = 'M'; out[l] = 'B'; out[l] = '\0'; }
+            if (l + 4 < cap) { out[l++] = ' '; out[l++] = 'M'; out[l++] = 'B'; out[l] = '\0'; }
         }
     }
 
@@ -1394,7 +1505,7 @@ private:
         {"Główny (/)", "/"},
         {"Użytkownicy", "/uzytkownicy"},
         {"Pulpit", "/uzytkownicy/Pulpit"},
-        {"Dokumenty", "/uzytkownicy/Dokumenty"},
+        {"Dokumenty", KatalogiUzytkownika::Dokumenty},
         {"System", "/system"},
     };
 
@@ -1741,6 +1852,7 @@ private:
 
     UchwytWezlaDrzewa uchwyty_miejsc_[LICZBA_MIEJSC]{};
     bool synchronizacja_drzewa_{false};
+    DialogNowegoKatalogu* dialog_nowego_katalogu_{nullptr};
     ElementPaskaNarzedzi* el_wstecz_{nullptr};
     ElementPaskaNarzedzi* el_wyzej_{nullptr};
 
@@ -1769,18 +1881,23 @@ private:
 };
 
 inline void DialogNowegoKatalogu::zatwierdz_katalog() {
+    // Spacje na brzegach sa obcinane; reszte nazwy sprawdza DialogPliku
+    // (te same reguly co PSF: limit bajtow, separatory, "." / "..", UTF-8).
     const char* txt = pole_nazwy_ ? pole_nazwy_->tekst() : "";
     while (*txt == ' ') ++txt;
-    if (!txt[0] || !DialogPliku::czy_poprawna_nazwa_elementu(txt)) {
+    char nazwa[DialogPliku::MAKS_SCIEZKI]{};
+    size_t n = 0;
+    while (txt[n] && n + 1 < sizeof(nazwa)) { nazwa[n] = txt[n]; ++n; }
+    nazwa[n] = '\0';
+    while (n > 0 && nazwa[n - 1] == ' ') nazwa[--n] = '\0';
+    if (const char* powod = DialogPliku::blad_nazwy_elementu(nazwa)) {
         if (zarzadca()) {
-            Komunikat::ostrzezenie(*zarzadca(), "Nieprawidłowa nazwa",
-                                   "Nazwa katalogu jest nieprawidłowa lub zawiera niedozwolone znaki.",
-                                   nullptr, nullptr, this);
+            Komunikat::ostrzezenie(*zarzadca(), "Nieprawidłowa nazwa", powod, nullptr, nullptr, this);
         }
         return;
     }
     if (rodzic_dialogu_) {
-        if (rodzic_dialogu_->utworz_nowy_katalog(txt)) {
+        if (rodzic_dialogu_->utworz_nowy_katalog(nazwa)) {
             zamknij_z_wynikiem(WynikDialogu::OK);
         }
     } else {

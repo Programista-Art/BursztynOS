@@ -564,6 +564,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_diagnostyka_blob.o \
 	ikona_app_shell_blob.o \
 	ikona_app_tapety_blob.o \
+	ikona_app_ustawienia_ekranu_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -2804,6 +2805,9 @@ ikona_app_diagnostyka_blob.o: ikonki/app_diagnostyka.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_app_shell_blob.o: ikonki/app_shell.png
+	$(LD) -r -b binary $< -o $@
+
+ikona_app_ustawienia_ekranu_blob.o: ikonki/app_ustawienia_ekranu.png
 	$(LD) -r -b binary $< -o $@
 
 ikona_app_tapety_blob.o: ikonki/app_tapety.png

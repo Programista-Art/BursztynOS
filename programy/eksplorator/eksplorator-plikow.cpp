@@ -1,4 +1,5 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
+#include "katalogi_uzytkownika.h"
 #include "bursztyn_gui.h"
 #include "plik_popup_ui.h"
 #include "desktop_entries.h"
@@ -963,10 +964,8 @@ private:
         add_quick("Użytkownicy", "/uzytkownicy", false, true);
         add_quick("Programy", "/programy", false, true);
         add_quick("Gry", "/gry", false, true);
-        if (directory_exists("/uzytkownicy/dokumenty"))
-            add_quick("Dokumenty", "/uzytkownicy/dokumenty", false, false);
-        else
-            add_quick("Dokumenty", "/dokumenty", false, true);
+        // Ten sam katalog Dokumentow co w dialogach plikow (jadro zapewnia go przy starcie).
+        add_quick("Dokumenty", KatalogiUzytkownika::Dokumenty, false, true);
         if (directory_exists("/kosz"))
             add_quick("Kosz", "/kosz", false, false);
         else
