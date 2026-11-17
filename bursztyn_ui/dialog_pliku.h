@@ -13,6 +13,7 @@
 #include "panel.h"
 #include "panel_dokowany.h"
 #include "bursztyn_gui.h"
+#include "ikony_eksplorator_dane.h"
 
 namespace BursztynUI {
 
@@ -349,12 +350,7 @@ public:
         normalizuj_sciezke(sciezka, norm, sizeof(norm));
 
         // Sprawdz czy katalog istnieje i jest czytelny
-        char* test_buf = static_cast<char*>(gui_malloc(1024));
-        if (!test_buf) return false;
-        bool ok = wylistuj_katalog_uzytkownika(norm, test_buf, 1024);
-        gui_free(test_buf);
-
-        if (!ok) {
+        if (!czy_katalog_czytelny(norm)) {
             if (zarzadca()) {
                 Komunikat::blad(*zarzadca(), "Błąd katalogu",
                                 "Nie można otworzyć katalogu.\nBrak uprawnień lub ścieżka nie istnieje.",
@@ -368,9 +364,7 @@ public:
         }
 
         kopiuj_str(biezacy_katalog_, sizeof(biezacy_katalog_), norm);
-        if (pasek_sciezki_) pasek_sciezki_->ustaw_sciezke(biezacy_katalog_);
-
-        return odswiez_katalog();
+        return po_zmianie_katalogu();
     }
 
     bool przejdz_poziom_wyzej() {
@@ -383,17 +377,26 @@ public:
     }
     bool przejdz_w_gore() { return przejdz_poziom_wyzej(); }
 
+    // Powrot do poprzednio odwiedzonego katalogu (stos historii). Katalog,
+    // ktory w miedzyczasie zniknal, jest pomijany z komunikatem.
     bool przejdz_wstecz() {
-        if (pozycja_historii_ >= 0 && pozycja_historii_ < static_cast<int>(liczba_historii_)) {
-            char target[MAKS_SCIEZKI]{};
-            kopiuj_str(target, sizeof(target), historia_[pozycja_historii_]);
-            --pozycja_historii_;
-            kopiuj_str(biezacy_katalog_, sizeof(biezacy_katalog_), target);
-            if (pasek_sciezki_) pasek_sciezki_->ustaw_sciezke(biezacy_katalog_);
-            return odswiez_katalog();
+        if (liczba_historii_ == 0) return false;
+        char target[MAKS_SCIEZKI]{};
+        kopiuj_str(target, sizeof(target), historia_[liczba_historii_ - 1]);
+        --liczba_historii_;
+        if (!czy_katalog_czytelny(target)) {
+            aktualizuj_przyciski_nawigacji();
+            if (zarzadca()) {
+                Komunikat::blad(*zarzadca(), "Błąd katalogu",
+                                "Poprzedni katalog nie jest już dostępny.",
+                                nullptr, nullptr, this);
+            }
+            return false;
         }
-        return false;
+        kopiuj_str(biezacy_katalog_, sizeof(biezacy_katalog_), target);
+        return po_zmianie_katalogu();
     }
+    bool czy_mozna_wstecz() const { return liczba_historii_ > 0; }
 
     void odswiez() {
         (void)odswiez_katalog();
@@ -451,7 +454,10 @@ public:
         }
 
         odswiez();
-        if (pole_nazwy_) pole_nazwy_->ustaw_tekst(nazwa);
+        // Nowy katalog zostaje zaznaczony na liscie (Otworz/Zapisz wejdzie do
+        // niego); nazwa pliku w polu (np. przy Zapisz jako) zostaje bez zmian.
+        zaznacz_wpis(nazwa);
+        if (tryb_ == TrybDialoguPliku::WybierzKatalog && pole_nazwy_) pole_nazwy_->ustaw_tekst(nazwa);
         return true;
     }
 
@@ -712,6 +718,13 @@ public:
             return;
         }
 
+        // Backspace na liscie plikow: poziom wyzej (w polu nazwy kasuje znak).
+        if (kod == 8U && zarzadca() && zarzadca()->fokus_popupu() == tabela_plikow_) {
+            przejdz_poziom_wyzej();
+            e.obsluzone = true;
+            return;
+        }
+
         // Tab / Shift+Tab
         const bool tab = kod == 9U;
         if (tab) {
@@ -727,6 +740,48 @@ public:
     void zatwierdz() {
         const char* name_txt = pole_nazwy_ ? pole_nazwy_->tekst() : "";
         while (*name_txt == ' ') ++name_txt;
+
+        // Katalog zaznaczony na liscie, a pole nazwy nie zmienione od tego
+        // czasu: przycisk Otworz/Zapisz (lub Enter) wchodzi do katalogu.
+        if (tryb_ != TrybDialoguPliku::WybierzKatalog && zaznaczony_katalog_[0] &&
+            pole_nazwy_ && rowne_str(pole_nazwy_->tekst(), tekst_przy_zaznaczeniu_)) {
+            char target[MAKS_SCIEZKI]{};
+            if (polacz_sciezki(biezacy_katalog_, zaznaczony_katalog_, target, sizeof(target))) {
+                przejdz_do_katalogu(target);
+            }
+            return;
+        }
+
+        // Sciezka wpisana w polu ("Dokumenty/a.txt", "/uzytkownicy", ".."):
+        // katalog -> nawigacja; plik -> przejscie do katalogu nadrzednego i
+        // dalej zwykla obsluga samej nazwy.
+        if (tryb_ != TrybDialoguPliku::WybierzKatalog && czy_zawiera_ukosnik_lub_kropki(name_txt)) {
+            char target[MAKS_SCIEZKI]{};
+            if (name_txt[0] == '/') normalizuj_sciezke(name_txt, target, sizeof(target));
+            else polacz_sciezki(biezacy_katalog_, name_txt, target, sizeof(target));
+            BwsMetadanePliku meta{};
+            if (pobierz_metadane_pliku(target, &meta) && meta.typ == BWS_TYP_KATALOG) {
+                if (przejdz_do_katalogu(target)) przywroc_nazwe_po_nawigacji();
+                return;
+            }
+            if (name_txt[dlugosc_str(name_txt) - 1] == '/') {
+                if (zarzadca()) {
+                    Komunikat::blad(*zarzadca(), "Błąd katalogu",
+                                    "Wpisany katalog nie istnieje.", nullptr, nullptr, this);
+                }
+                return;
+            }
+            char rodzic[MAKS_SCIEZKI]{};
+            pobierz_katalog_nadrzedny(target, rodzic, sizeof(rodzic));
+            const char* baza = target + dlugosc_str(rodzic);
+            while (*baza == '/') ++baza;
+            char nazwa_bazowa[MAKS_NAZWY]{};
+            kopiuj_str(nazwa_bazowa, sizeof(nazwa_bazowa), baza);
+            if (!nazwa_bazowa[0]) return;
+            if (!rowne_str(rodzic, biezacy_katalog_) && !przejdz_do_katalogu(rodzic)) return;
+            pole_nazwy_->ustaw_tekst(nazwa_bazowa);
+            name_txt = pole_nazwy_->tekst();
+        }
 
         if (tryb_ == TrybDialoguPliku::WybierzKatalog) {
             char target[MAKS_SCIEZKI]{};
@@ -786,6 +841,18 @@ public:
             return;
         }
 
+        // Nazwa istniejacego katalogu (w obu trybach, przed dopisaniem
+        // rozszerzenia z filtra): wejscie do niego.
+        {
+            char kat[MAKS_SCIEZKI]{};
+            BwsMetadanePliku meta_kat{};
+            if (polacz_sciezki(biezacy_katalog_, pelna_nazwa, kat, sizeof(kat)) &&
+                pobierz_metadane_pliku(kat, &meta_kat) && meta_kat.typ == BWS_TYP_KATALOG) {
+                if (przejdz_do_katalogu(kat)) przywroc_nazwe_po_nawigacji();
+                return;
+            }
+        }
+
         if (tryb_ == TrybDialoguPliku::Zapisz && !ma_rozszerzenie(pelna_nazwa)) {
             const char* ext = pobierz_domyslne_rozszerzenie_filtru();
             if (ext && ext[0]) {
@@ -821,10 +888,6 @@ public:
         if (tryb_ == TrybDialoguPliku::Otworz) {
             BwsMetadanePliku meta{};
             bool exists = pobierz_metadane_pliku(pelna_sciezka, &meta);
-            if (exists && meta.typ == BWS_TYP_KATALOG) {
-                przejdz_do_katalogu(pelna_sciezka);
-                return;
-            }
             if (!exists) {
                 uint32_t r = 0;
                 if (!pobierz_rozmiar_pliku(pelna_sciezka, &r)) {
@@ -1066,12 +1129,22 @@ protected:
         pasek_narzedzi_ = new PasekNarzedzi();
         pasek_narzedzi_->ustaw_preferowany_rozmiar(Rozmiar(-1, 32));
         pasek_narzedzi_->ustaw_pokazywanie_tekstu(true);
-        pasek_narzedzi_->dodaj_przycisk("Wstecz", 0, [](ElementPaskaNarzedzi*, void* d) {
-            static_cast<DialogPliku*>(d)->przejdz_wstecz();
-        }, this);
-        pasek_narzedzi_->dodaj_przycisk("Poziom wyżej", 0, [](ElementPaskaNarzedzi*, void* d) {
-            static_cast<DialogPliku*>(d)->przejdz_poziom_wyzej();
-        }, this);
+        // Wstecz / Poziom wyzej: strzalki z zestawu ikon (ikonki/nav_wstecz.png,
+        // nav_wgore.png, jak w Eksploratorze). Tekst zostaje jako podpowiedz i
+        // pozycja menu nadmiaru, ale nie jest rysowany na pasku.
+        {
+            using namespace IkonyEksplorator;
+            ElementPaskaNarzedzi& wstecz = pasek_narzedzi_->dodaj_przycisk("Wstecz", 0,
+                [](ElementPaskaNarzedzi*, void* d) { static_cast<DialogPliku*>(d)->przejdz_wstecz(); }, this);
+            wstecz.ustaw_piksele_ikony(nav_wstecz, BOK);
+            wstecz.ustaw_podpowiedz("Wstecz");
+            ElementPaskaNarzedzi& wyzej = pasek_narzedzi_->dodaj_przycisk("Poziom wyżej", 0,
+                [](ElementPaskaNarzedzi*, void* d) { static_cast<DialogPliku*>(d)->przejdz_poziom_wyzej(); }, this);
+            wyzej.ustaw_piksele_ikony(nav_wgore, BOK);
+            wyzej.ustaw_podpowiedz("Poziom wyżej");
+            el_wstecz_ = &wstecz;
+            el_wyzej_ = &wyzej;
+        }
         pasek_narzedzi_->dodaj_przycisk("Odśwież", 0, [](ElementPaskaNarzedzi*, void* d) {
             static_cast<DialogPliku*>(d)->odswiez();
         }, this);
@@ -1237,8 +1310,14 @@ protected:
             if (!dlg || row < 0 || row >= static_cast<int>(dlg->liczba_wyswietlanych_)) return;
             const WpisKatalogu& w = dlg->wyswietlane_[row];
             if (dlg->tryb_ != TrybDialoguPliku::WybierzKatalog) {
-                if (!w.katalog && dlg->pole_nazwy_) {
-                    dlg->pole_nazwy_->ustaw_tekst(w.nazwa);
+                if (w.katalog) {
+                    // Pole nazwy bez zmian; zapamietany katalog dla przycisku akcji.
+                    kopiuj_str(dlg->zaznaczony_katalog_, sizeof(dlg->zaznaczony_katalog_), w.nazwa);
+                    kopiuj_str(dlg->tekst_przy_zaznaczeniu_, sizeof(dlg->tekst_przy_zaznaczeniu_),
+                               dlg->pole_nazwy_ ? dlg->pole_nazwy_->tekst() : "");
+                } else {
+                    dlg->zaznaczony_katalog_[0] = '\0';
+                    if (dlg->pole_nazwy_) dlg->pole_nazwy_->ustaw_tekst(w.nazwa);
                 }
             } else {
                 if (dlg->pole_nazwy_) {
@@ -1250,12 +1329,16 @@ protected:
         tabela_plikow_->przy_aktywacji([](Tabela*, int row, void* d) {
             DialogPliku* dlg = static_cast<DialogPliku*>(d);
             if (!dlg || row < 0 || row >= static_cast<int>(dlg->liczba_wyswietlanych_)) return;
-            const WpisKatalogu& w = dlg->wyswietlane_[row];
+            // Kopia: nawigacja przebudowuje wyswietlane_.
+            const WpisKatalogu w = dlg->wyswietlane_[row];
             if (w.katalog) {
                 char target[MAKS_SCIEZKI]{};
-                dlg->polacz_sciezki(dlg->biezacy_katalog_, w.nazwa, target, sizeof(target));
-                dlg->przejdz_do_katalogu(target);
-            } else if (dlg->tryb_ == TrybDialoguPliku::Otworz) {
+                if (dlg->polacz_sciezki(dlg->biezacy_katalog_, w.nazwa, target, sizeof(target)))
+                    dlg->przejdz_do_katalogu(target);
+            } else if (dlg->tryb_ != TrybDialoguPliku::WybierzKatalog) {
+                // Otworz: otwarcie pliku. Zapisz: zapis pod ta nazwa (z pytaniem
+                // o zastapienie istniejacego pliku).
+                dlg->zaznaczony_katalog_[0] = '\0';
                 if (dlg->pole_nazwy_) dlg->pole_nazwy_->ustaw_tekst(w.nazwa);
                 dlg->zatwierdz();
             }
@@ -1276,31 +1359,108 @@ protected:
         uklad_->rozmiesc(Prostokat(0, 32 * s, w, h > 32 * s ? h - 32 * s : 0));
         aktualizuj_obszary_ukladu();
 
-        (void)odswiez_katalog();
+        (void)po_zmianie_katalogu();
     }
 
 private:
     void zainicjalizuj_drzewo_miejsc() {
         if (!drzewo_miejsc_) return;
         drzewo_miejsc_->wyczysc();
-        UchwytWezlaDrzewa k_root = drzewo_miejsc_->dodaj_korzen("Główny (/)", 1);
-        drzewo_miejsc_->dodaj_dziecko(k_root, "Użytkownicy", 2);
-        drzewo_miejsc_->dodaj_dziecko(k_root, "Pulpit", 3);
-        drzewo_miejsc_->dodaj_dziecko(k_root, "Dokumenty", 4);
-        drzewo_miejsc_->dodaj_dziecko(k_root, "System", 5);
+        // Tag wezla = indeks w MIEJSCA + 1 (uchwyt.indeks to slot w puli wezlow).
+        UchwytWezlaDrzewa k_root = drzewo_miejsc_->dodaj_korzen(MIEJSCA[0].etykieta, 1);
+        uchwyty_miejsc_[0] = k_root;
+        for (size_t i = 1; i < LICZBA_MIEJSC; ++i)
+            uchwyty_miejsc_[i] = drzewo_miejsc_->dodaj_dziecko(k_root, MIEJSCA[i].etykieta, i + 1);
+        drzewo_miejsc_->ustaw_rozwiniety(k_root, true);
 
-        drzewo_miejsc_->przy_aktywacji([](Drzewo*, UchwytWezlaDrzewa w, void* d) {
+        // Pojedyncze klikniecie (zmiana wyboru) i Enter/aktywacja przechodza do miejsca.
+        auto idz = [](Drzewo* dr, UchwytWezlaDrzewa w, void* d) {
             DialogPliku* dlg = static_cast<DialogPliku*>(d);
-            if (!dlg) return;
-            switch (w.indeks) {
-                case 0: dlg->przejdz_do_katalogu("/"); break;
-                case 1: dlg->przejdz_do_katalogu("/uzytkownicy"); break;
-                case 2: dlg->przejdz_do_katalogu("/uzytkownicy/Pulpit"); break;
-                case 3: dlg->przejdz_do_katalogu("/uzytkownicy/Dokumenty"); break;
-                case 4: dlg->przejdz_do_katalogu("/system"); break;
-                default: break;
+            if (!dlg || dlg->synchronizacja_drzewa_ || !w.czy_poprawny()) return;
+            const uint64_t tag = dr->tag(w);
+            if (tag < 1 || tag > LICZBA_MIEJSC) return;
+            if (!rowne_str(dlg->biezacy_katalog_, MIEJSCA[tag - 1].sciezka) &&
+                !dlg->przejdz_do_katalogu(MIEJSCA[tag - 1].sciezka)) {
+                dlg->synchronizuj_drzewo_miejsc();
             }
-        }, this);
+        };
+        drzewo_miejsc_->przy_zmianie_wyboru(idz, this);
+        drzewo_miejsc_->przy_aktywacji(idz, this);
+    }
+
+    struct Miejsce { const char* etykieta; const char* sciezka; };
+    static constexpr size_t LICZBA_MIEJSC = 5;
+    static constexpr Miejsce MIEJSCA[LICZBA_MIEJSC] = {
+        {"Główny (/)", "/"},
+        {"Użytkownicy", "/uzytkownicy"},
+        {"Pulpit", "/uzytkownicy/Pulpit"},
+        {"Dokumenty", "/uzytkownicy/Dokumenty"},
+        {"System", "/system"},
+    };
+
+    // Wspolny koniec kazdej zmiany katalogu: pasek sciezki, lista, drzewo,
+    // stan przyciskow i wyczyszczony wybor katalogu z poprzedniej listy.
+    bool po_zmianie_katalogu() {
+        zaznaczony_katalog_[0] = '\0';
+        if (pasek_sciezki_) pasek_sciezki_->ustaw_sciezke(biezacy_katalog_);
+        const bool ok = odswiez_katalog();
+        synchronizuj_drzewo_miejsc();
+        aktualizuj_przyciski_nawigacji();
+        return ok;
+    }
+
+    void synchronizuj_drzewo_miejsc() {
+        if (!drzewo_miejsc_) return;
+        UchwytWezlaDrzewa cel{};
+        for (size_t i = 0; i < LICZBA_MIEJSC; ++i)
+            if (rowne_str(biezacy_katalog_, MIEJSCA[i].sciezka)) cel = uchwyty_miejsc_[i];
+        synchronizacja_drzewa_ = true;
+        drzewo_miejsc_->ustaw_wybrany(cel);
+        synchronizacja_drzewa_ = false;
+    }
+
+    void aktualizuj_przyciski_nawigacji() {
+        if (el_wstecz_) el_wstecz_->ustaw_wlaczony(liczba_historii_ > 0);
+        if (el_wyzej_) el_wyzej_->ustaw_wlaczony(!rowne_str(biezacy_katalog_, "/"));
+    }
+
+    // Zaznacza wiersz o danej nazwie (np. nowo utworzony katalog).
+    void zaznacz_wpis(const char* nazwa) {
+        if (!tabela_plikow_ || !nazwa) return;
+        for (size_t i = 0; i < liczba_wyswietlanych_; ++i) {
+            if (rowne_str(wyswietlane_[i].nazwa, nazwa)) {
+                tabela_plikow_->ustaw_zaznaczony_wiersz(static_cast<int>(i));
+                return;
+            }
+        }
+    }
+
+    // Po wejsciu do katalogu wpisanego w polu: Otworz czysci pole, Zapisz
+    // przywraca proponowana nazwe pliku.
+    void przywroc_nazwe_po_nawigacji() {
+        if (!pole_nazwy_) return;
+        pole_nazwy_->ustaw_tekst(tryb_ == TrybDialoguPliku::Zapisz ? wybrana_nazwa_ : "");
+    }
+
+    static bool czy_zawiera_ukosnik_lub_kropki(const char* s) {
+        if (!s) return false;
+        if (rowne_str(s, "..") || rowne_str(s, ".")) return true;
+        for (size_t i = 0; s[i]; ++i) if (s[i] == '/') return true;
+        return false;
+    }
+
+    static bool czy_katalog_czytelny(const char* sciezka) {
+        char* test_buf = static_cast<char*>(gui_malloc(1024));
+        if (!test_buf) return false;
+        // Bufor testowy moze byc za maly dla duzego katalogu: liczy sie odpowiedz
+        // "katalog istnieje", wiec przy porazce sprawdzamy jeszcze metadane.
+        bool ok = wylistuj_katalog_uzytkownika(sciezka, test_buf, 1024);
+        gui_free(test_buf);
+        if (!ok) {
+            BwsMetadanePliku meta{};
+            ok = pobierz_metadane_pliku(sciezka, &meta) && meta.typ == BWS_TYP_KATALOG;
+        }
+        return ok;
     }
 
     bool odswiez_katalog() {
@@ -1520,13 +1680,16 @@ private:
         return "";
     }
 
+    // Stos odwiedzonych katalogow; przy pelnym stosie najstarszy wpis odpada.
     void dodaj_do_historii(const char* sciezka) {
         if (!sciezka || !sciezka[0]) return;
-        if (pozycja_historii_ + 1 < static_cast<int>(MAKS_HISTORII)) {
-            ++pozycja_historii_;
-            kopiuj_str(historia_[pozycja_historii_], sizeof(historia_[0]), sciezka);
-            liczba_historii_ = static_cast<size_t>(pozycja_historii_ + 1);
+        if (liczba_historii_ == MAKS_HISTORII) {
+            for (size_t i = 1; i < MAKS_HISTORII; ++i)
+                kopiuj_str(historia_[i - 1], sizeof(historia_[0]), historia_[i]);
+            --liczba_historii_;
         }
+        kopiuj_str(historia_[liczba_historii_], sizeof(historia_[0]), sciezka);
+        ++liczba_historii_;
     }
 
     void nawiguj_fokus(bool nastepny) {
@@ -1571,7 +1734,15 @@ private:
 
     char historia_[MAKS_HISTORII][MAKS_SCIEZKI]{};
     size_t liczba_historii_{0};
-    int pozycja_historii_{-1};
+
+    // Katalog zaznaczony na liscie i tekst pola nazwy w tym momencie.
+    char zaznaczony_katalog_[MAKS_NAZWY]{};
+    char tekst_przy_zaznaczeniu_[MAKS_NAZWY]{};
+
+    UchwytWezlaDrzewa uchwyty_miejsc_[LICZBA_MIEJSC]{};
+    bool synchronizacja_drzewa_{false};
+    ElementPaskaNarzedzi* el_wstecz_{nullptr};
+    ElementPaskaNarzedzi* el_wyzej_{nullptr};
 
     WpisKatalogu wpisy_[MAKS_WPISOW]{};
     size_t liczba_wpisow_{0};

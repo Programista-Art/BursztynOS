@@ -317,6 +317,8 @@ public:
         liczba_ = poziom;
         najechana_ = nullptr;
         przechwycenie_ = nullptr;
+        ost_klik_kontrolka_ = nullptr;
+        ost_klik_czas_ = 0;
         gui_ustaw_capture_myszy(false);
         aktualizuj_rejestracje();
         if (liczba_ > 0) {
@@ -336,6 +338,8 @@ public:
         }
         najechana_ = nullptr;
         przechwycenie_ = nullptr;
+        ost_klik_kontrolka_ = nullptr;
+        ost_klik_czas_ = 0;
         gui_ustaw_capture_myszy(false);
         for (int i = liczba_ - 1; i >= 0; --i) {
             odlacz(i, powod);
@@ -418,9 +422,46 @@ public:
         przechwycenie_ = hit;
         gui_ustaw_capture_myszy(true);
         if (hit->czy_moze_miec_fokus()) ustaw_fokus_popupu(hit);
+        // Podwojne klikniecie w popupie (np. wiersz tabeli w DialogPliku) -
+        // ta sama semantyka co w Okno: drugie DOWN jest zwyklym DOWN, a potem
+        // dodatkowo PodwojneKlikniecie. Tylko dla tej samej kontrolki i tylko
+        // lewym przyciskiem; prawy przycisk zrywa sekwencje.
+        const bool lewy = e.czy_lewy_przycisk();
+        const bool podwojne = lewy && hit == ost_klik_kontrolka_ &&
+                              czy_podwojne_klikniecie(e.timestamp, ost_klik_czas_, e.x, e.y,
+                                                      ost_klik_x_, ost_klik_y_);
         hit->obsluz_wcisniecie_myszy(e);
+        if (podwojne) {
+            ost_klik_czas_ = 0;
+            ost_klik_kontrolka_ = nullptr;
+            // DOWN mogl zamknac powierzchnie kontrolki (np. pozycja menu):
+            // zamkniecie zeruje przechwycenie, wtedy nie ma juz komu dostarczyc.
+            if (przechwycenie_ == hit) {
+                ZdarzenieMyszki dwa = e;
+                dwa.typ = TypZdarzenia::PodwojneKlikniecie;
+                dwa.liczba_klikniec = 2;
+                dwa.obsluzone = false;
+                hit->obsluz_podwojne_klikniecie(dwa);
+            }
+        } else {
+            ost_klik_czas_ = lewy ? e.timestamp : 0;
+            ost_klik_kontrolka_ = lewy ? hit : nullptr;
+            ost_klik_x_ = e.x;
+            ost_klik_y_ = e.y;
+        }
         e.obsluzone = true;
         return true;
+    }
+
+    // Kryterium jak w Okno::obsluz_zdarzenie: < 400 ms (znaczniki w ns albo,
+    // na hostach testowych, w ms) i przesuniecie < 5 px.
+    static bool czy_podwojne_klikniecie(uint64_t teraz, uint64_t poprzedni, int x, int y,
+                                        int px, int py) {
+        if (teraz == 0 || poprzedni == 0 || teraz < poprzedni) return false;
+        const uint64_t d = teraz - poprzedni;
+        const int dx = x > px ? x - px : px - x;
+        const int dy = y > py ? y - py : py - y;
+        return (d < 400000000ULL || (d < 400 && teraz < 1000000000ULL)) && dx < 5 && dy < 5;
     }
 
     bool obsluz_zwolnienie(ZdarzenieMyszki& e) {
@@ -652,6 +693,11 @@ private:
     Kontrolka* fokus_popupu_{nullptr};
     Kontrolka* najechana_{nullptr};
     Kontrolka* przechwycenie_{nullptr};
+    // Sekwencja podwojnego klikniecia; wskaznik tylko porownywany, nigdy dereferencjonowany.
+    Kontrolka* ost_klik_kontrolka_{nullptr};
+    uint64_t ost_klik_czas_{0};
+    int ost_klik_x_{0};
+    int ost_klik_y_{0};
 };
 
 inline PowierzchniaPopup::~PowierzchniaPopup() {

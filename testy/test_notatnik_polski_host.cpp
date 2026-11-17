@@ -150,6 +150,23 @@ static Punkt punkt_tekstu(size_t linia,int x){
     return Punkt(v.x+x,v.y+int(linia)*g_notatnik.memo->wysokosc_jednej_linii()+2);  // juz w ekranie
 }
 static void mysz(uint32_t typ,Punkt p){bws_zdarzenie e{};e.typ=typ;e.x=p.x;e.y=p.y;e.timestamp=0;wyslij(e);}
+// Klikniecia z narastajacym znacznikiem czasu w ns (jak HPET w BWS): kolejne
+// pojedyncze klikniecia sa od siebie o 1 s, podwojne o 100 ms.
+static uint64_t czas_myszy=10000000000ULL;
+static void klik_ts(Punkt p,uint64_t ts){bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_MYSZ_DOWN;e.x=p.x;e.y=p.y;e.timestamp=ts;wyslij(e);
+    e.typ=BWS_ZDARZENIE_MYSZ_UP;wyslij(e);}
+static void klik(Punkt p){czas_myszy+=1000000000ULL;klik_ts(p,czas_myszy);}
+static void dwuklik(Punkt p){czas_myszy+=1000000000ULL;klik_ts(p,czas_myszy);klik_ts(p,czas_myszy+100000000ULL);}
+static Punkt srodek(Prostokat r){return Punkt(r.x+r.szerokosc/2,r.y+r.wysokosc/2);}
+static Punkt punkt_wiersza(Tabela* t,const char* nazwa){
+    for(size_t i=0;i<t->liczba_wierszy();++i){const char* n=t->komorka(i,0);const char* bez=strncmp(n,"[KAT] ",6)?n:n+6;
+        if(!strcmp(bez,nazwa)){Prostokat o=t->obszar_ekranu(),d=t->prostokat_danych();int h=t->wysokosc_wiersza();
+            return Punkt(o.x+d.x+30,o.y+d.y+int(i)*h+h/2);}}
+    fprintf(stderr,"brak wiersza %s\n",nazwa);abort();}
+static Punkt punkt_narzedzia(PasekNarzedzi* p,size_t i){Prostokat o=p->obszar_ekranu(),r=p->element(i)->prostokat();
+    CHECK(p->element(i)->czy_na_pasku());return Punkt(o.x+r.x+r.szerokosc/2,o.y+r.y+r.wysokosc/2);}
+static Punkt punkt_miejsca(Drzewo* d,int wiersz){Prostokat o=d->obszar_ekranu();return Punkt(o.x+40,o.y+1+wiersz*20+10);}
+
 static void wyczysc_dokument(){g_notatnik.memo->ustaw_tekst("");g_notatnik.memo->wyczysc_historie();g_notatnik.zmodyfikowany=false;
     g_notatnik.biezaca_sciezka[0]=0;g_notatnik.aktualizuj_tytul();g_okno->ustaw_fokus(g_notatnik.memo);}
 
@@ -488,6 +505,80 @@ int main(){
     // Brak duplikatow dialogow: drugi Ctrl+O przy otwartym dialogu nic nie robi.
     skrot_ctrl('o');DialogPliku* pierwszy=g_notatnik.dialog_pliku;skrot_ctrl('o');CHECK(g_notatnik.dialog_pliku==pierwszy);
     CHECK(popupy().liczba_powierzchni()==1);nacisnij(K_ESC);
+
+    // 9b. Przegladanie myszka przez prawdziwy potok zdarzen okna (popup):
+    // podwojne klikniecie katalogu/pliku, strzalki Wstecz/W gore, miejsca,
+    // zaznaczony katalog + przycisk akcji, Zapisz jako do biezacego katalogu.
+    // Przed poprawka ZarzadcaPopupow nie generowal podwojnego klikniecia, wiec
+    // lista w dialogu nie reagowala na mysz, a drzewo miejsc tylko na Enter.
+    {const std::string DOK="/uzytkownicy/Dokumenty",PRYW=DOK+"/Prywatne ąę";
+     CHECK(!g_notatnik.zmodyfikowany);skrot_ctrl('o');d=g_notatnik.dialog_pliku;CHECK(d&&d->czy_otwarta());
+     CHECK(d->biezacy_katalog()==PRYW);
+     PasekNarzedzi* pn=d->pasek_narzedzi();Tabela* t=d->tabela_plikow();
+     // Strzalki z zestawu ikon zamiast napisow; tekst tylko jako podpowiedz/menu nadmiaru.
+     CHECK(pn->element(0)->piksele_ikony()==IkonyEksplorator::nav_wstecz&&pn->element(0)->bok_ikony()==IkonyEksplorator::BOK);
+     CHECK(pn->element(1)->piksele_ikony()==IkonyEksplorator::nav_wgore);
+     CHECK(!strcmp(pn->element(0)->podpowiedz(),"Wstecz")&&!strcmp(pn->element(1)->podpowiedz(),"Poziom wyżej"));
+     CHECK(pn->element(0)->prostokat().szerokosc<CzcionkaUI::zmierz_tekst("Wstecz",1)+16);   // bez napisu
+     CHECK(!pn->element(0)->czy_wlaczony()&&pn->element(1)->czy_wlaczony());               // brak historii
+     klik(punkt_narzedzia(pn,1));CHECK(d->biezacy_katalog()==DOK);CHECK(pn->element(0)->czy_wlaczony());
+     // Podwojne klikniecie katalogu: wejscie; Wstecz: powrot.
+     dwuklik(punkt_wiersza(t,"Prywatne ąę"));CHECK(d->biezacy_katalog()==PRYW);CHECK(popupy().czy_otwarty());
+     klik(punkt_narzedzia(pn,0));CHECK(d->biezacy_katalog()==DOK);
+     // Dwa pojedyncze klikniecia (> 400 ms) nie sa podwojnym: tylko zaznaczenie.
+     klik(punkt_wiersza(t,"Prywatne ąę"));klik(punkt_wiersza(t,"Prywatne ąę"));CHECK(d->biezacy_katalog()==DOK);
+     // Zaznaczony katalog + przycisk Otworz: wejscie do katalogu, nie otwarcie pliku.
+     klik(srodek(d->przycisk_akcji()->obszar_ekranu()));CHECK(d->biezacy_katalog()==PRYW);CHECK(popupy().czy_otwarty());
+     // Backspace na liscie: poziom wyzej.
+     klik(punkt_narzedzia(pn,1));CHECK(d->biezacy_katalog()==DOK);
+     klik(punkt_wiersza(t,"Prywatne ąę"));CHECK(popupy().fokus_popupu()==t);nacisnij(K_BS);CHECK(d->biezacy_katalog()==std::string("/uzytkownicy"));
+     // Miejsca: pojedyncze klikniecie (Glowny=0, Uzytkownicy=1, ...).
+     klik(punkt_miejsca(d->drzewo_miejsc(),0));CHECK(d->biezacy_katalog()==std::string("/"));CHECK(!pn->element(1)->czy_wlaczony());
+     klik(punkt_miejsca(d->drzewo_miejsc(),1));CHECK(d->biezacy_katalog()==std::string("/uzytkownicy"));
+     // Miejsce, ktore nie istnieje: komunikat, katalog bez zmian.
+     klik(punkt_miejsca(d->drzewo_miejsc(),2));CHECK(d->biezacy_katalog()==std::string("/uzytkownicy"));
+     CHECK(popupy().liczba_powierzchni()==2);nacisnij(K_ENTER);CHECK(popupy().liczba_powierzchni()==1);
+     // Sciezka wpisana w polu nazwy: katalog -> nawigacja (pole wyczyszczone).
+     d->pole_nazwy()->ustaw_tekst("Dokumenty/Prywatne ąę/");nacisnij(K_ENTER);CHECK(d->biezacy_katalog()==PRYW);
+     CHECK(!strcmp(d->pole_nazwy()->tekst(),""));
+     d->pole_nazwy()->ustaw_tekst("..");nacisnij(K_ENTER);CHECK(d->biezacy_katalog()==DOK);
+     // Podwojne klikniecie pliku w Otworz: plik otwarty, dialog zamkniety.
+     dwuklik(punkt_wiersza(t,ZAZOLC.c_str()));CHECK(!popupy().czy_otwarty());
+     CHECK(std::string(g_notatnik.biezaca_sciezka)==DOK+"/"+ZAZOLC);CHECK(tekst()==fs[DOK+"/"+ZAZOLC].dane);
+
+     // Zapisz jako: nawigacja myszka, zapis do biezacego (otwartego) katalogu.
+     klawisz(K_LCTRL,1);klawisz(K_LSHIFT,1);nacisnij(kod_litery('s'));klawisz(K_LSHIFT,0);klawisz(K_LCTRL,0);
+     d=g_notatnik.dialog_pliku;CHECK(d&&d->czy_otwarta()&&d->tryb()==TrybDialoguPliku::Zapisz);pn=d->pasek_narzedzi();t=d->tabela_plikow();
+     CHECK(d->biezacy_katalog()==DOK);
+     klik(punkt_narzedzia(pn,1));CHECK(d->biezacy_katalog()==std::string("/uzytkownicy"));
+     dwuklik(punkt_wiersza(t,"Dokumenty"));CHECK(d->biezacy_katalog()==DOK);
+     dwuklik(punkt_wiersza(t,"Prywatne ąę"));CHECK(d->biezacy_katalog()==PRYW);CHECK(popupy().czy_otwarty());
+     CHECK(!strcmp(d->pole_nazwy()->tekst(),ZAZOLC.c_str()));       // nazwa pliku zachowana przy nawigacji
+     d->pole_nazwy()->ustaw_tekst("z myszy");klik(srodek(d->przycisk_akcji()->obszar_ekranu()));
+     CHECK(!popupy().czy_otwarty());CHECK(fs.count(PRYW+"/z myszy.txt")&&fs[PRYW+"/z myszy.txt"].dane==tekst());
+     CHECK(std::string(g_notatnik.biezaca_sciezka)==PRYW+"/z myszy.txt");
+     // Nazwa katalogu wpisana przy Zapisz: wejscie (bez dopisania .txt), nazwa pliku przywrocona.
+     klawisz(K_LCTRL,1);klawisz(K_LSHIFT,1);nacisnij(kod_litery('s'));klawisz(K_LSHIFT,0);klawisz(K_LCTRL,0);
+     d=g_notatnik.dialog_pliku;pn=d->pasek_narzedzi();t=d->tabela_plikow();CHECK(d->biezacy_katalog()==PRYW);
+     klik(punkt_narzedzia(pn,1));d->pole_nazwy()->ustaw_tekst("Prywatne ąę");nacisnij(K_ENTER);
+     CHECK(d->biezacy_katalog()==PRYW);CHECK(!strcmp(d->pole_nazwy()->tekst(),"z myszy.txt"));CHECK(popupy().czy_otwarty());
+     // Nowy katalog: zaznaczony na liscie, nazwa pliku bez zmian; Zapisz wchodzi, drugi Zapisz zapisuje.
+     CHECK(d->utworz_nowy_katalog("Nowy ź"));CHECK(!strcmp(d->pole_nazwy()->tekst(),"z myszy.txt"));
+     CHECK(fs.count(PRYW+"/Nowy ź")&&fs[PRYW+"/Nowy ź"].katalog);
+     klik(srodek(d->przycisk_akcji()->obszar_ekranu()));CHECK(d->biezacy_katalog()==PRYW+"/Nowy ź");CHECK(popupy().czy_otwarty());
+     klik(srodek(d->przycisk_akcji()->obszar_ekranu()));CHECK(!popupy().czy_otwarty());
+     CHECK(fs.count(PRYW+"/Nowy ź/z myszy.txt"));CHECK(std::string(g_notatnik.biezaca_sciezka)==PRYW+"/Nowy ź/z myszy.txt");
+     // Odswiez nie gubi katalogu ani nazwy.
+     klawisz(K_LCTRL,1);klawisz(K_LSHIFT,1);nacisnij(kod_litery('s'));klawisz(K_LSHIFT,0);klawisz(K_LCTRL,0);
+     d=g_notatnik.dialog_pliku;pn=d->pasek_narzedzi();CHECK(d->biezacy_katalog()==PRYW+"/Nowy ź");
+     klik(punkt_narzedzia(pn,2));CHECK(d->biezacy_katalog()==PRYW+"/Nowy ź");CHECK(d->tabela_plikow()->liczba_wierszy()==1);
+     // Podwojne klikniecie istniejacego pliku w Zapisz: pytanie o zastapienie; Esc = bez zapisu.
+     dwuklik(punkt_wiersza(d->tabela_plikow(),"z myszy.txt"));CHECK(popupy().liczba_powierzchni()==2);
+     nacisnij(K_ESC);CHECK(popupy().liczba_powierzchni()==1);nacisnij(K_ESC);CHECK(!popupy().czy_otwarty());
+     // Przywrocenie stanu dla dalszej czesci testu.
+     fs.erase(PRYW+"/Nowy ź/z myszy.txt");fs.erase(PRYW+"/Nowy ź");fs.erase(PRYW+"/z myszy.txt");
+     argument_startowy="/uzytkownicy/Dokumenty/Prywatne ąę/Notatka źródłowa.txt";
+     CHECK(g_notatnik.otworz_plik(argument_startowy.c_str()));CHECK(tekst()=="Nowa notatka: łódź");}
 
     // 10. Duzy plik: >2048 linii wizualnych bez ucinania; puste pliki; dlugie linie.
     {std::string duzy;for(int i=0;i<6000;++i)duzy+="l"+std::to_string(i)+" ą\n";CHECK(duzy.size()<65535);
