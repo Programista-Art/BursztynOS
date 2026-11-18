@@ -193,10 +193,12 @@ void gui_ustaw_capture_myszy(bool value) {test_mouse_capture=value;}
 static uint32_t test_cursor_shape=0;
 bool gui_ustaw_kursor(uint32_t shape) {test_cursor_shape=shape;return true;}
 static bool test_pasek_otwarty=false;static int test_pasek_rect[4]={};static std::map<uint64_t,bool> test_nad_paskiem;
-bool gui_ustaw_pasek_zadan(bool otwarty,int x,int y,int w,int h) {test_pasek_otwarty=otwarty;test_pasek_rect[0]=x;test_pasek_rect[1]=y;test_pasek_rect[2]=w;test_pasek_rect[3]=h;return true;}
+static int test_pasek_wywolania=0;static bool test_pasek_odrzuc=false;
+bool gui_ustaw_pasek_zadan(bool otwarty,int x,int y,int w,int h) {++test_pasek_wywolania;if(test_pasek_odrzuc)return false;test_pasek_otwarty=otwarty;test_pasek_rect[0]=x;test_pasek_rect[1]=y;test_pasek_rect[2]=w;test_pasek_rect[3]=h;return true;}
 bool gui_ustaw_nad_paskiem(uint64_t id,bool v) {test_nad_paskiem[id]=v;return true;}
 bool gui_ustaw_geometrie_okna(int, int, int, int, int) { return true; }
-bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
+static bool test_monitor_ok=false;static GuiMonitorInfo test_monitor{};
+bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo* out) { if(!test_monitor_ok||!out)return false;*out=test_monitor;return true; }
 void bws_przesun_warstwe(int, int) {}
 static bool test_popup_registered=false;
 bool gui_ustaw_popup_aplikacji(bool open, int, int, int, int) {test_popup_registered=open;return true;}

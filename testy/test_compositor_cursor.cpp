@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
+#include <cstring>
 #define BURSZTYN_COMPOSITOR_HOST_TEST 1
 #include "../jadro/gui/skladacz_obrazu.cpp"
 #include "../jadro/bws/popup_autoryzacja.h"
@@ -460,6 +461,98 @@ static void bws56_security_cases(){
     assert(utworz_warstwe(1,0,0,sw,sh,0)==1);assert(skladacz_obrazu_publikuj_klatke(1));
     skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
 }
+// ---------------------------------------------------------------------------
+// Rejestracja paska zadan (BWS 40 -> skladacz_obrazu_ustaw_pasek): kody
+// przyczyn, brak zmian stanu przy odmowie, kolejnosc skladania i sprzatanie.
+// ---------------------------------------------------------------------------
+static unsigned pasek_checks=0;
+static void wypelnij_warstwe(int pid,uint32_t kolor){
+    auto* w=pobierz_warstwe(pid);assert(w&&w->bufor_pikseli);
+    for(int i=0;i<w->szerokosc*w->wysokosc;++i)w->bufor_pikseli[i]=kolor;
+}
+static void taskbar_registration_cases(){
+    use_clock=false;
+    const int ty=sh-40,tw=sw,th=40;
+    auto info_rowne=[](int pid,int x,int y,int w,int h){
+        int pp=-1,px=0,py=0,pw=0,ph=0;
+        return skladacz_obrazu_pasek_info(&pp,&px,&py,&pw,&ph)&&pp==pid&&px==x&&py==y&&pw==w&&ph==h;
+    };
+    assert(!skladacz_obrazu_pasek_info(nullptr,nullptr,nullptr,nullptr,nullptr));++pasek_checks;
+    // Warstwa bez opublikowanej klatki: dokladnie sytuacja z kazdego startu WM.
+    assert(utworz_warstwe(4,0,0,320,200,5)==4);
+    assert(skladacz_obrazu_ustaw_pasek(4,true,0,ty,tw,th)==SKLADACZ_PASEK_BRAK_KLATKI);
+    assert(!skladacz_obrazu_pasek_info(nullptr,nullptr,nullptr,nullptr,nullptr));
+    assert(skladacz_obrazu_publikuj_klatke(4));
+    assert(skladacz_obrazu_ustaw_pasek(4,true,0,ty,tw,th)==SKLADACZ_PASEK_OK);
+    assert(info_rowne(4,0,ty,tw,th));
+    assert(skladacz_obrazu_ustaw_pasek(4,false,0,0,0,0)==SKLADACZ_PASEK_OK);pasek_checks+=6;
+    // Wlasciwy wlasciciel: warstwa pulpitu WM (pid 1, opublikowana).
+    assert(skladacz_obrazu_ustaw_pasek(1,true,0,ty,tw,th)==SKLADACZ_PASEK_OK);
+    assert(info_rowne(1,0,ty,tw,th));++pasek_checks;
+    // Odmowy z konkretna przyczyna; aktywna rejestracja bez zmian.
+    assert(skladacz_obrazu_ustaw_pasek(0,true,0,ty,tw,th)==SKLADACZ_PASEK_INNY_WLASCICIEL);++pasek_checks;   // pid 0 (terminal) to inny proces
+    for(int pid:{-1,MAKS_WARSTW,1000,INT32_MIN})
+        {assert(skladacz_obrazu_ustaw_pasek(pid,true,0,ty,tw,th)==SKLADACZ_PASEK_ZLY_PID);assert(info_rowne(1,0,ty,tw,th));pasek_checks+=2;}
+    const int zle_wymiary[][2]={{0,40},{1280,0},{-1,40},{1280,-1},{16385,40},{1280,4097},{INT32_MIN,40},{INT32_MAX,INT32_MAX}};
+    for(auto& d:zle_wymiary)
+        {assert(skladacz_obrazu_ustaw_pasek(1,true,0,ty,d[0],d[1])==SKLADACZ_PASEK_ZLY_ROZMIAR);assert(info_rowne(1,0,ty,tw,th));pasek_checks+=2;}
+    const int zle_pozycje[][2]={{-16384,0},{0,-16384},{16384,0},{0,16384},{INT32_MIN,0},{0,INT32_MAX}};
+    for(auto& p:zle_pozycje)
+        {assert(skladacz_obrazu_ustaw_pasek(1,true,p[0],p[1],tw,th)==SKLADACZ_PASEK_ZLA_POZYCJA);assert(info_rowne(1,0,ty,tw,th));pasek_checks+=2;}
+    // Duplikat (ta sama geometria) jest idempotentny; nowa geometria (modeset) zastepuje stara.
+    for(int i=0;i<3;++i){assert(skladacz_obrazu_ustaw_pasek(1,true,0,ty,tw,th)==SKLADACZ_PASEK_OK);assert(info_rowne(1,0,ty,tw,th));pasek_checks+=2;}
+    assert(skladacz_obrazu_ustaw_pasek(1,true,0,ty-8,tw,th+8)==SKLADACZ_PASEK_OK);assert(info_rowne(1,0,ty-8,tw,th+8));
+    assert(skladacz_obrazu_ustaw_pasek(1,true,0,ty,tw,th)==SKLADACZ_PASEK_OK);pasek_checks+=3;
+    // Inny proces nie przejmie ani nie zamknie paska.
+    assert(skladacz_obrazu_ustaw_pasek(4,true,0,ty,tw,th)==SKLADACZ_PASEK_INNY_WLASCICIEL);
+    assert(skladacz_obrazu_ustaw_pasek(4,false,0,0,0,0)==SKLADACZ_PASEK_INNY_WLASCICIEL);
+    assert(info_rowne(1,0,ty,tw,th));pasek_checks+=3;
+    // Kolejnosc skladania: okno -> pasek -> "nad paskiem" -> popup.
+    assert(utworz_warstwe(5,100,ty-100,400,140,20)==5);wypelnij_warstwe(5,0xff00ff00U);assert(skladacz_obrazu_publikuj_klatke(5));
+    auto* pulpit=pobierz_warstwe(1);const uint32_t kolor_paska=0xff802040U;
+    for(int y=ty;y<sh;++y)for(int x=0;x<sw;++x)pulpit->bufor_pikseli[y*pulpit->szerokosc+x]=kolor_paska;
+    skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+    const uint32_t oczekiwany_pasek=motyw_pulpit_skladaj(0x123456,kolor_paska,true,motyw_pobierz_aktywny());
+    assert(scene[(ty-50)*sw+200]==0x00ff00U);              // nad paskiem: zwykle okno
+    assert(scene[(ty+10)*sw+200]==oczekiwany_pasek);        // obszar paska: pasek nad oknem (z=20)
+    assert(scene[(sh-1)*sw+499]==oczekiwany_pasek);pasek_checks+=3;
+    const uint64_t id5=skladacz_obrazu_id_okna(5);
+    assert(!skladacz_obrazu_ustaw_nad_paskiem(skladacz_obrazu_id_okna(1),true));   // pasek nie jest oknem
+    assert(skladacz_obrazu_ustaw_nad_paskiem(id5,true));skladacz_obrazu_obsluz_dirty();
+    assert(scene[(ty+10)*sw+200]==0x00ff00U);               // jawne zezwolenie "nad paskiem"
+    assert(skladacz_obrazu_ustaw_nad_paskiem(id5,false));skladacz_obrazu_obsluz_dirty();
+    assert(scene[(ty+10)*sw+200]==oczekiwany_pasek);pasek_checks+=4;
+    // Popup aplikacji i dymek WM leza nad paskiem.
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(5,true,150,ty+5,60,20,false));
+    std::vector<uint32_t> pp(60*20,0xff0000ffU);assert(skladacz_obrazu_blit_popup(5,150,ty+5,60,20,pp.data()));
+    assert(scene[(ty+10)*sw+160]==0x0000ffU);
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(5,false,0,0,0,0));skladacz_obrazu_obsluz_dirty();
+    assert(scene[(ty+10)*sw+160]==oczekiwany_pasek);
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(1,true,150,ty-30,60,20,true));
+    std::fill(pp.begin(),pp.end(),0xffff8800U);assert(skladacz_obrazu_blit_popup(1,150,ty-30,60,20,pp.data()));
+    assert(scene[(ty-25)*sw+160]==0xff8800U);               // dymek nad oknem 5
+    assert(skladacz_obrazu_overlay_pod_punktem(160,ty-25)==-1);   // bez przechwytywania myszy
+    assert(skladacz_obrazu_ustaw_popup_aplikacji(1,false,0,0,0,0));pasek_checks+=6;
+    // Zmiana fokusu/kolejnosci okien nie dotyka rejestracji paska.
+    for(int k=0;k<3;++k){
+        skladacz_obrazu_podnies_warstwe(k%2?5:1);skladacz_obrazu_obsluz_dirty();
+        assert(info_rowne(1,0,ty,tw,th));
+        assert(scene[(ty+10)*sw+200]==oczekiwany_pasek && scene[(ty-50)*sw+200]==0x00ff00U);pasek_checks+=2;
+    }
+    // Zakonczenie wlasciciela zwalnia pasek; nowy proces na tym pid nie dziedziczy go.
+    assert(skladacz_obrazu_ustaw_pasek(1,false,0,0,0,0)==SKLADACZ_PASEK_OK);
+    assert(skladacz_obrazu_ustaw_pasek(4,true,0,ty,tw,th)==SKLADACZ_PASEK_OK);
+    usun_warstwe(4);assert(!skladacz_obrazu_pasek_info(nullptr,nullptr,nullptr,nullptr,nullptr));
+    assert(utworz_warstwe(4,0,0,320,200,5)==4);
+    assert(!skladacz_obrazu_pasek_info(nullptr,nullptr,nullptr,nullptr,nullptr));
+    assert(skladacz_obrazu_ustaw_pasek(4,true,0,ty,tw,th)==SKLADACZ_PASEK_BRAK_KLATKI);pasek_checks+=4;
+    // Opisy przyczyn dla logu jadra.
+    for(int k=SKLADACZ_PASEK_OK;k<=SKLADACZ_PASEK_INNY_WLASCICIEL;++k)
+        {assert(strcmp(skladacz_obrazu_pasek_opis(k),"nieznany")!=0);++pasek_checks;}
+    usun_warstwe(4);usun_warstwe(5);
+    for(int y=ty;y<sh;++y)for(int x=0;x<sw;++x)pulpit->bufor_pikseli[y*pulpit->szerokosc+x]=0;
+    skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+}
 int main(){
     // Compare packed rows against the pixel contract, including transparent
     // holes, black markers, high bytes and every short/unaligned tail.
@@ -493,6 +586,7 @@ int main(){
         desktop->bufor_pikseli[0]=0;
         popup_restoration_cases();
         if(dpi==100)bws56_security_cases();
+        if(dpi==100)taskbar_registration_cases();
         // A stationary pointer must still get its first visible transaction
         // after the desktop handshake queues the current position.
         overlay={};dirty_count=0;cursor_pending=false;lx=320;ly=240;
@@ -589,6 +683,7 @@ int main(){
     printf("Compositor lifecycle/scene: %u/%u PASS\n",compositor_checks,compositor_checks);
     printf("Popup compositor background restoration: %u/%u PASS\n",popup_checks,popup_checks);
     printf("BWS 56 popup authorization (security): %u/%u PASS\n",bws56_checks,bws56_checks);
+    printf("Taskbar registration lifecycle (BWS 40): %u/%u PASS\n",pasek_checks,pasek_checks);
     puts("Production compositor host PASS: modeset dirty geometry, Shell-equivalent layer preserves cursor/screen/generation, coalescing and theme/decor/full scene transactions");
     return 0;
 }

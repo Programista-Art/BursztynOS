@@ -24,7 +24,46 @@ static uint64_t hook(uint64_t n,uint64_t a,uint64_t b,uint64_t c,uint64_t){
 }
 static void key(StartMenu::Surface& s,uint32_t k){ZdarzenieKlawiatury e{};e.kod_klawisza=k;CHECK(s.events.popups.obsluz_klawisz(e));}
 static void event(StartMenu::Surface& s,uint32_t type,int x=0,int y=0){bws_zdarzenie e{};e.typ=type;e.x=x;e.y=y;s.handle(e);}
+// [TEST 9/9] z programy/test/test.cpp: dawne stale oczekiwania kontra
+// faktyczne motywy wbudowane. Odtwarza liczbe porazek z logu natywnego
+// (aktywny motyw uzytkownika != domyslny) i sprawdza nowe kryteria.
+static void native_theme_expectation_cases(){
+ BursztynMotyw nocny{};CHECK(motyw_parsuj(PLIK_BURSZTYN_NOCNY,strlen(PLIK_BURSZTYN_NOCNY),&nocny));
+ CHECK(memcmp(&nocny,&g_domyslny_motyw_fallback,sizeof(nocny))==0);          // wzorzec testu = wbudowany plik
+ CHECK(nocny.ostrzezenie==0x00D97706U && nocny.zaznaczenie==0x00314A63U);   // dawny test oczekiwal 0xF2A900
+ struct Stary{const char* pole;uint32_t BursztynMotyw::*m;uint32_t v;};
+ const Stary stare[]={{"pulpit",&BursztynMotyw::pulpit,0x111315},{"oknotlo",&BursztynMotyw::oknotlo,0x191C20},
+  {"panel",&BursztynMotyw::panel,0x20242A},{"podniesiony",&BursztynMotyw::podniesiony,0x262B31},{"ramka",&BursztynMotyw::ramka,0x343A42},
+  {"tekst",&BursztynMotyw::tekst,0xF2F3F5},{"tekstdrugorzedny",&BursztynMotyw::tekstdrugorzedny,0xA7ADB5},{"wylaczony",&BursztynMotyw::wylaczony,0x6F7680},
+  {"akcent",&BursztynMotyw::akcent,0xF2A900},{"akcentnajechany",&BursztynMotyw::akcentnajechany,0xFFBC32},{"akcentaktywny",&BursztynMotyw::akcentaktywny,0xD99100},
+  {"blad",&BursztynMotyw::blad,0xE85D5D},{"sukces",&BursztynMotyw::sukces,0x51B87A},{"ostrzezenie",&BursztynMotyw::ostrzezenie,0xF2A900},
+  {"informacja",&BursztynMotyw::informacja,0x58A6E7},{"poletekstowe",&BursztynMotyw::poletekstowe,0x15181C},{"zaznaczenie",&BursztynMotyw::zaznaczenie,0xF2A900},
+  {"przycisk",&BursztynMotyw::przycisk,0x262B31},{"przycisknajechany",&BursztynMotyw::przycisknajechany,0x343A42},{"tekstakcentu",&BursztynMotyw::tekstakcentu,0x111315}};
+ struct Wbudowany{const char* tekst;unsigned stare_porazki;};
+ const Wbudowany wbudowane[]={{PLIK_BURSZTYN_NOCNY,2},{PLIK_BALTYCKA_NOC,277},{PLIK_GRAFIT,382},{PLIK_BURSZTYN_KLASYCZNY,277},{PLIK_BURSZTYN_JASNY,278}};
+ for(const auto& w:wbudowane){
+  BursztynMotyw m{};CHECK(motyw_parsuj(w.tekst,strlen(w.tekst),&m));CHECK(motyw_waliduj(&m));
+  const bool id=!strcmp(m.id,"bursztynnocny");
+  unsigned f=!id;                                                         // id poczatkowe
+  for(const auto& st:stare)f+=m.*st.m!=st.v;                                // 20 kolorow
+  f+=(m.rogokna!=10)+(m.rogpanelu!=8)+(m.rogprzycisku!=7)+(m.rogpola!=6)+(m.rogmenu!=8)+(m.rogpodpowiedzi!=6)+(m.gruboscramki!=1)+(m.cienokna!=1);
+  f+=2*((m.pulpit!=0x111315)+(m.akcent!=0xF2A900));                         // akcesory + BWS86 v2
+  f+=(m.pulpit!=0x111315)+(m.akcent!=0xF2A900)+!id;                         // ABI v1
+  f+=50*(!id+(m.pulpit!=0x111315)+(m.akcent!=0xF2A900)+(m.panel!=0x20242A)+(m.ramka!=0x343A42)+(m.rogokna!=10)+(m.rogpanelu!=8));
+  CHECK(f==w.stare_porazki);
+  printf("TEST 9/9 dawne oczekiwania, aktywny %-18s -> %u porazek\n",m.id,f);
+  // Nowe kryteria: aktywny motyw z akcesorami (motyw_kolor) zgodny z samym soba.
+  test_ustaw_aktywny_motyw(&m);
+  CHECK(motyw_waliduj_id(m.id));
+  CHECK(motyw_kolor(MOTYW_KOLOR_PULPIT)==m.pulpit && motyw_kolor(MOTYW_KOLOR_AKCENT)==m.akcent &&
+        motyw_kolor(MOTYW_KOLOR_OSTRZEZENIE)==m.ostrzezenie && motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE)==m.zaznaczenie &&
+        motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU)==m.tekstakcentu);
+  CHECK(motyw_promien(MOTYW_ROG_OKNA)==m.rogokna && motyw_promien(MOTYW_ROG_PODPOWIEDZI)==m.rogpodpowiedzi);
+ }
+ test_ustaw_aktywny_motyw(nullptr);
+}
 int main(){
+ native_theme_expectation_cases();
  {
   StartMenu::Surface s;s.open({0,0,1280,680},10);s.open_power();
   struct Probe:Kontrolka{size_t offset(){return reinterpret_cast<char*>(&obszar_ekranu_)-reinterpret_cast<char*>(this);}} probe;

@@ -423,7 +423,17 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y);
  * skladany ponownie PO zwyklych oknach aplikacji, a PRZED oknami z jawnym zezwoleniem
  * "nad paskiem", popupami i overlayem systemowym. Rejestracja wylacznie przez zaufany
  * Menedzer Okien (BWS 40, patrz syscalls.cpp). Hit-test (wm_input.h) uzywa tej samej kolejnosci. */
-void skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys);
+/* Wynik rejestracji/zamkniecia paska: konkretna przyczyna odrzucenia (diagnostyka BWS 40). */
+enum SkladaczPasekWynik : int {
+    SKLADACZ_PASEK_OK = 0,
+    SKLADACZ_PASEK_ZLY_PID = 1,          // pid spoza zakresu warstw
+    SKLADACZ_PASEK_BRAK_KLATKI = 2,      // warstwa wlasciciela nie ma jeszcze opublikowanej klatki
+    SKLADACZ_PASEK_ZLY_ROZMIAR = 3,      // szerokosc/wysokosc poza 1..16384 / 1..4096
+    SKLADACZ_PASEK_ZLA_POZYCJA = 4,      // x/y poza (-16384, 16384)
+    SKLADACZ_PASEK_INNY_WLASCICIEL = 5,  // pasek nalezy do innego procesu
+};
+const char* skladacz_obrazu_pasek_opis(int wynik);
+int skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys);
 bool skladacz_obrazu_pasek_info(int* pid, int* x, int* y, int* szer, int* wys);
 /* Zezwolenie "Zawsze na wierzchu takze nad paskiem zadan" dla okna (window_id z snapshotu).
  * Domyslnie wylaczone; ustawiane tylko przez zaufany Menedzer Okien; zerowane przy zamknieciu okna. */

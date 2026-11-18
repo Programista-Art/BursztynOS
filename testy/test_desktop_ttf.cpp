@@ -113,6 +113,27 @@ static bool inside(Prostokat outer,Prostokat r){return r.x>=0&&r.y>=0&&r.prawy()
 #include "slider_pixel_cases.h"
 #include "power_png_cases.h"
 #include "power_theme_pixel_cases.h"
+// Sekcja "[BURSZTYNUI 1/4]" z programy/test/test.cpp (BSF_NATIVE, TTF gotowy):
+// trzy dawne asercje (16/32 px i 0xC0) nie odpowiadaja rendererowi BSF,
+// nowe oczekiwania sa spelnione; polskie litery dekodowane bez zmian.
+static void unicode_bursztynui_cases(){
+ CHECK(BSF::ready());
+ const int w1=CzcionkaUI::pobierz_wysokosc(1),w2=CzcionkaUI::pobierz_wysokosc(2);
+ CHECK(w1==BSF::height(ui_skaluj(BSF::ui_size(),100)) && w2==BSF::height(ui_skaluj(BSF::ui_size(),200)));
+ CHECK(w1>=8 && w1<=64 && w2>=2*w1-2 && w2<=2*w1+2);
+ const bool stare_wysokosci_ok=(w1==16)&&(w2==32);
+ const char bad[]={char(0xC0),' ','\0'};uint32_t cp=0;
+ CHECK(CzcionkaUI::dekoduj_utf8(bad,0,&cp)==1);CHECK(cp==0xFFFDU);CHECK(cp!=0xC0U);
+ uint32_t next=0;CHECK(CzcionkaUI::dekoduj_utf8(bad,1,&next)==1 && next==0x20U);
+ const char uciete[]={char(0xC5),'\0'};uint32_t cu=0;CHECK(CzcionkaUI::dekoduj_utf8(uciete,0,&cu)==1 && cu==0xFFFDU);
+ const char* pl[]={"Ą","ą","Ć","ć","Ę","ę","Ł","ł","Ń","ń","Ó","ó","Ś","ś","Ź","ź","Ż","ż"};
+ const uint32_t cps[]={260,261,262,263,280,281,321,322,323,324,211,243,346,347,377,378,379,380};
+ for(int i=0;i<18;++i){uint32_t c=0;CHECK(CzcionkaUI::dekoduj_utf8(pl[i],0,&c)==2 && c==cps[i]);int w=CzcionkaUI::szerokosc_znaku(c);CHECK(w>=4&&w<=16);}
+ for(uint32_t u:{1170U,2000U,0x1F600U,0x10FFFFU,0xFFFFFFFFU})CHECK(CzcionkaUI::szerokosc_znaku(u)==CzcionkaUI::szerokosc_znaku('?'));
+ CHECK(CzcionkaUI::zmierz_tekst("Zażółć gęślą jaźń ZAŻÓŁĆ GĘŚLĄ JAŹŃ",1)>150);
+ printf("BursztynUI Unicode (BSF_NATIVE): wysokosc 1x=%d 2x=%d (dawne 16/32: %s), 0xC0 -> U+%04X\n",
+        w1,w2,stare_wysokosci_ok?"zgodne":"niezgodne",cp);
+}
 int main(){
  saved.checksum=BSF::checksum(saved);g_test_bws_hook=hook;
  for(const char* name:{"DejaVuSans.ttf","DejaVuSans-Bold.ttf","DejaVuSansMono.ttf","DejaVuSerifCondensed-Italic.ttf"}){
@@ -123,6 +144,7 @@ int main(){
   std::ifstream f(path.substr(1),std::ios::binary);files[path]={std::istreambuf_iterator<char>(f),{}};CHECK(!files[path].empty());
  }
  CHECK(BSF::ready());
+ unicode_bursztynui_cases();
  power_theme_pixel_cases();
  power_png_cases();
  if(getenv("BURSZTYN_POWER_PNG_ONLY"))return 0;

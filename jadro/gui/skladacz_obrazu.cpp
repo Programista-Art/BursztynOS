@@ -1500,7 +1500,7 @@ void usun_warstwe(
     if (system_overlay.pid == pid)
         skladacz_obrazu_ustaw_overlay(pid, false, 0, 0, 0, 0);
     if (taskbar_overlay.otwarty && taskbar_overlay.pid == pid)
-        skladacz_obrazu_ustaw_pasek(pid, false, 0, 0, 0, 0);
+        (void)skladacz_obrazu_ustaw_pasek(pid, false, 0, 0, 0, 0);
     if (pid_poprawny(pid)) nad_paskiem_flaga[pid] = false;     // zezwolenie nie przechodzi na nowe okno tego pid
     if (!pid_poprawny(
             pid)) {
@@ -2580,21 +2580,36 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
     return -1;
 }
 
-void skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys) {
+const char* skladacz_obrazu_pasek_opis(int wynik) {
+    switch (wynik) {
+        case SKLADACZ_PASEK_OK: return "ok";
+        case SKLADACZ_PASEK_ZLY_PID: return "nieprawidlowy pid warstwy";
+        case SKLADACZ_PASEK_BRAK_KLATKI: return "warstwa bez opublikowanej klatki";
+        case SKLADACZ_PASEK_ZLY_ROZMIAR: return "nieprawidlowy rozmiar";
+        case SKLADACZ_PASEK_ZLA_POZYCJA: return "nieprawidlowa pozycja";
+        case SKLADACZ_PASEK_INNY_WLASCICIEL: return "pasek nalezy do innego procesu";
+        default: return "nieznany";
+    }
+}
+
+int skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys) {
     const GuiDirtyRect stary = taskbar_overlay.rect;
     const bool byl = taskbar_overlay.otwarty;
     if (!otwarty) {
-        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid) return;       // tylko wlasciciel zamyka
+        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid)
+            return SKLADACZ_PASEK_INNY_WLASCICIEL;                              // tylko wlasciciel zamyka
         taskbar_overlay = {false, -1, {0, 0, 0, 0}};
-    } else if (pid_poprawny(pid) && warstwa_ma_spojny_bufor(pid) && szer > 0 && wys > 0 &&
-               szer <= 16384 && wys <= 4096 && x > -16384 && y > -16384 && x < 16384 && y < 16384 &&
-               (!taskbar_overlay.otwarty || taskbar_overlay.pid == pid)) {
-        taskbar_overlay = {true, pid, {x, y, szer, wys}};
     } else {
-        return;
+        if (!pid_poprawny(pid)) return SKLADACZ_PASEK_ZLY_PID;
+        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid) return SKLADACZ_PASEK_INNY_WLASCICIEL;
+        if (szer <= 0 || wys <= 0 || szer > 16384 || wys > 4096) return SKLADACZ_PASEK_ZLY_ROZMIAR;
+        if (x <= -16384 || y <= -16384 || x >= 16384 || y >= 16384) return SKLADACZ_PASEK_ZLA_POZYCJA;
+        if (!warstwa_ma_spojny_bufor(pid)) return SKLADACZ_PASEK_BRAK_KLATKI;
+        taskbar_overlay = {true, pid, {x, y, szer, wys}};
     }
     if (byl) skladacz_obrazu_oznacz_dirty_rect(stary.x, stary.y, stary.width, stary.height);
     if (taskbar_overlay.otwarty) skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+    return SKLADACZ_PASEK_OK;
 }
 
 bool skladacz_obrazu_pasek_info(int* pid, int* x, int* y, int* szer, int* wys) {

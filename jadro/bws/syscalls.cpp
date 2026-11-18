@@ -4045,15 +4045,32 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                 }
                 switch (arg1) {
                     case 2:   /* zamknij powierzchnie paska */
-                        skladacz_obrazu_ustaw_pasek(aktualny_pid, false, 0, 0, 0, 0);
-                        return 1;
+                        return skladacz_obrazu_ustaw_pasek(aktualny_pid, false, 0, 0, 0, 0) == SKLADACZ_PASEK_OK
+                            ? 1ULL : 0ULL;
                     case 3: { /* zarejestruj prostokat paska (warstwa WM) */
-                        skladacz_obrazu_ustaw_pasek(aktualny_pid, true, gorne_i32(arg2), dolne_i32(arg2),
-                                                    gorne_i32(arg3), dolne_i32(arg3));
-                        int pp = -1, px = 0, py = 0, pw = 0, ph = 0;
-                        const bool ok = skladacz_obrazu_pasek_info(&pp, &px, &py, &pw, &ph) && pp == aktualny_pid;
-                        if (!ok) wypisz_log("[GUI] Pasek zadan: rejestracja odrzucona przez kompozytor (warstwa/rozmiar).");
-                        return ok ? 1ULL : 0ULL;
+                        const int x = gorne_i32(arg2), y = dolne_i32(arg2);
+                        const int w = gorne_i32(arg3), h = dolne_i32(arg3);
+                        const int wynik = skladacz_obrazu_ustaw_pasek(aktualny_pid, true, x, y, w, h);
+                        if (wynik != SKLADACZ_PASEK_OK) {
+                            // Dokladna przyczyna + zadana geometria i pid (bez danych wrazliwych).
+                            char linia[200] = {};
+                            size_t n = 0;
+                            auto tekst = [&](const char* t) { while (*t && n + 1 < sizeof(linia)) linia[n++] = *t++; };
+                            auto liczba = [&](int64_t v) {
+                                char c[24]; int k = 0; const bool minus = v < 0; uint64_t u = minus ? uint64_t(-v) : uint64_t(v);
+                                do { c[k++] = char('0' + u % 10); u /= 10; } while (u && k < 22);
+                                if (minus) c[k++] = '-';
+                                while (k && n + 1 < sizeof(linia)) linia[n++] = c[--k];
+                            };
+                            tekst("[GUI] Pasek zadan: kompozytor odrzucil rejestracje: ");
+                            tekst(skladacz_obrazu_pasek_opis(wynik));
+                            tekst(" pid="); liczba(aktualny_pid);
+                            tekst(" x="); liczba(x); tekst(" y="); liczba(y);
+                            tekst(" w="); liczba(w); tekst(" h="); liczba(h);
+                            tekst(" ekran="); liczba(grafika_pobierz_szerokosc()); tekst("x"); liczba(grafika_pobierz_wysokosc());
+                            wypisz_log(linia);
+                        }
+                        return wynik == SKLADACZ_PASEK_OK ? 1ULL : 0ULL;
                     }
                     case 4:   /* cofnij zezwolenie "nad paskiem" okna arg2 (window_id) */
                     case 5:   /* przyznaj zezwolenie "nad paskiem" oknu arg2 (window_id) */

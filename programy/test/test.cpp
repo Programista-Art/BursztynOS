@@ -85,6 +85,25 @@ static void bws_log_u64(const char* opis, uint64_t wartosc) {
     bws_log(bufor);
 }
 
+// Raport sekcji: "...: OK" tylko gdy od poprzedniego raportu nie bylo zadnej
+// nieudanej asercji; w przeciwnym razie "...: FAIL (bledy: N)". Dzieki temu
+// pojedyncza sekcja nie moze zglosic OK po wlasnych bledach.
+static uint32_t bws_bledy_przy_ostatniej_sekcji = 0;
+static void bws_log_sekcja(const char* komunikat_ok) {
+    // Licznik bledow jest zerowany przed kolejnym przebiegiem pakietu.
+    if (bws_bledy_przy_ostatniej_sekcji > bws_test_blad) bws_bledy_przy_ostatniej_sekcji = 0;
+    const uint32_t nowe = bws_test_blad - bws_bledy_przy_ostatniej_sekcji;
+    bws_bledy_przy_ostatniej_sekcji = bws_test_blad;
+    if (!nowe || !komunikat_ok) { bws_log(komunikat_ok); return; }
+    char bufor[192];
+    size_t n = 0;
+    while (komunikat_ok[n] && n + 1 < sizeof(bufor)) { bufor[n] = komunikat_ok[n]; ++n; }
+    if (n >= 3 && bufor[n - 3] == 'O' && bufor[n - 2] == 'K' && bufor[n - 1] == '\n') n -= 3;
+    bufor[n] = '\0';
+    bws_log(bufor);
+    bws_log_u64("FAIL (bledy: ", nowe);
+}
+
 static void bws_dopisz_i32(char* buf, size_t cap, size_t* pos, int32_t val) {
     if (!buf || !pos || *pos >= cap) return;
     if (val < 0) {
@@ -232,23 +251,72 @@ __attribute__((noinline)) static void usun_kontrolke_testowa(Kontrolka* kontrolk
     delete kontrolka;
 }
 
-static void bws_sprawdz(bool warunek) {
+// Kazda nieudana asercja podaje linie w test.cpp (i komunikat, jesli jest),
+// zeby log natywny jednoznacznie wskazywal sprawdzenie.
+static void bws_log_linia_bledu(int linia) {
+    char bufor[48];
+    const char prefiks[] = "[BWS TEST FAIL] test.cpp:";
+    size_t pos = 0;
+    for (; prefiks[pos] && pos + 1 < sizeof(bufor); ++pos) bufor[pos] = prefiks[pos];
+    char cyfry[12];
+    int k = 0;
+    uint32_t v = linia > 0 ? static_cast<uint32_t>(linia) : 0;
+    do { cyfry[k++] = static_cast<char>('0' + v % 10); v /= 10; } while (v && k < 11);
+    while (k && pos + 1 < sizeof(bufor)) bufor[pos++] = cyfry[--k];
+    bufor[pos] = '\0';
+    bws_log(bufor);
+}
+
+static void bws_sprawdz(bool warunek, int linia = __builtin_LINE()) {
     if (warunek) ++bws_test_ok;
     else {
         ++bws_test_blad;
-        bws_log("[BWS TEST FAIL] Asercja nie powiodla sie!\n");
+        bws_log_linia_bledu(linia);
+        bws_log(" asercja nie powiodla sie\n");
     }
 }
 
-static void bws_sprawdz_msg(bool warunek, const char* msg) {
+static void bws_sprawdz_msg(bool warunek, const char* msg, int linia = __builtin_LINE()) {
     if (warunek) ++bws_test_ok;
     else {
         ++bws_test_blad;
-        bws_log("[BWS TEST FAIL] ");
+        bws_log_linia_bledu(linia);
+        bws_log(" ");
         if (msg) bws_log(msg);
         bws_log("\n");
     }
 }
+
+static void bws_log_hex(const char* opis, uint64_t wartosc) {
+    char bufor[96];
+    size_t pos = 0;
+    if (opis) for (; opis[pos] && pos + 1 < sizeof(bufor) - 20; ++pos) bufor[pos] = opis[pos];
+    bufor[pos++] = '0'; bufor[pos++] = 'x';
+    bool cyfra = false;
+    for (int przesun = 60; przesun >= 0; przesun -= 4) {
+        const unsigned c = static_cast<unsigned>((wartosc >> przesun) & 0xFU);
+        if (!c && !cyfra && przesun) continue;
+        cyfra = true;
+        bufor[pos++] = "0123456789ABCDEF"[c];
+    }
+    bufor[pos] = '\0';
+    bws_log(bufor);
+}
+
+// Asercja wartosci: scenariusz, wartosc faktyczna i oczekiwana w logu.
+static void bws_sprawdz_rowne(uint64_t faktyczna, uint64_t oczekiwana, const char* opis, int linia = __builtin_LINE()) {
+    if (faktyczna == oczekiwana) { ++bws_test_ok; return; }
+    ++bws_test_blad;
+    bws_log_linia_bledu(linia);
+    bws_log(" ");
+    if (opis) bws_log(opis);
+    bws_log_hex(": faktycznie=", faktyczna);
+    bws_log_hex(" oczekiwano=", oczekiwana);
+    bws_log("\n");
+}
+
+// Linia wywolania z __builtin_LINE() w argumencie domyslnym (bez makr, wiec
+// argumenty z inicjalizatorami {..} dzialaja jak dotad).
 
 static bool bws_tekst_rowny(const char* a, const char* b) {
     if (!a || !b) return a == b;
@@ -272,7 +340,7 @@ static void wykonaj_testy_bws_61_83() {
     const uint64_t czas0 = gui_czas_monotoniczny_ns();
     const uint64_t czas1 = gui_czas_monotoniczny_ns();
     bws_sprawdz(czas0 <= czas1);
-    bws_log("[TEST 1/8] Monitory, work-area, HPET monotoniczny: OK\n");
+    bws_log_sekcja("[TEST 1/8] Monitory, work-area, HPET monotoniczny: OK\n");
 
     // 2. Geometria okna i walidacja granic
     bws_sprawdz(gui_ustaw_geometrie_okna(WIN_X, WIN_Y, WIN_W, WIN_H));
@@ -280,7 +348,7 @@ static void wykonaj_testy_bws_61_83() {
     bws_sprawdz(!gui_ustaw_geometrie_okna(WIN_X, WIN_Y, WIN_W, 0));
     bws_sprawdz(!gui_ustaw_geometrie_okna(WIN_X, WIN_Y, -1, WIN_H));
     bws_sprawdz(!gui_ustaw_geometrie_okna(WIN_X, WIN_Y, 4096, 4096)); // Over screen limit
-    bws_log("[TEST 2/8] Geometria okna BWS 61 rollback & boundaries: OK\n");
+    bws_log_sekcja("[TEST 2/8] Geometria okna BWS 61 rollback & boundaries: OK\n");
 
     // 3. Stres-test SHM: 30 powtórzeń create -> map -> write/read -> unmap -> close
     for (uint32_t iter = 0; iter < 30; ++iter) {
@@ -321,7 +389,7 @@ static void wykonaj_testy_bws_61_83() {
         if (mapy[i]) bws_sprawdz(shm_unmap(mapy[i]));
     }
     bws_sprawdz(shm_close(shm_multi));
-    bws_log("[TEST 3/8] Stres-test SHM 30x cykl, 8 mapowan + stale handles: OK\n");
+    bws_log_sekcja("[TEST 3/8] Stres-test SHM 30x cykl, 8 mapowan + stale handles: OK\n");
 
     // 4. Stres-test IPC: 30 powtórzeń create -> send 16 wiadomości -> receive 16 -> close
     for (uint32_t iter = 0; iter < 30; ++iter) {
@@ -401,13 +469,13 @@ static void wykonaj_testy_bws_61_83() {
     bws_sprawdz(shm_close(o_q.shm_handle));
     bws_sprawdz(!shm_close(o_q.shm_handle));
     bws_sprawdz(ipc_close(ep_queue));
-    bws_log("[TEST 4/8] Stres-test IPC 30x cykl + SHM transfer z zamknieciem nadawcy: OK\n");
+    bws_log_sekcja("[TEST 4/8] Stres-test IPC 30x cykl + SHM transfer z zamknieciem nadawcy: OK\n");
 
     // 5. File watch (odrzucenie root / bez uprawnień)
     bws_sprawdz(file_watch("/", BWS_FILE_WATCH_WSZYSTKO) == 0);
     bws_sprawdz(file_watch(nullptr, BWS_FILE_WATCH_WSZYSTKO) == 0);
     bws_sprawdz(file_unwatch(0) == false);
-    bws_log("[TEST 5/8] File watch boundary & handle checks: OK\n");
+    bws_log_sekcja("[TEST 5/8] File watch boundary & handle checks: OK\n");
 
     // 6. Schowek MIME: testy formatów i limitów
     const char mime1[] = "text/plain";
@@ -423,7 +491,7 @@ static void wykonaj_testy_bws_61_83() {
     bws_sprawdz(!clipboard_size("invalid-mime-no-slash", &r_size));
     bws_sprawdz(!clipboard_set("inv", dane1, sizeof(dane1)));
     bws_sprawdz(!clipboard_set(nullptr, dane1, sizeof(dane1)));
-    bws_log("[TEST 6/8] MIME clipboard multi-format & PZB enforcement: OK\n");
+    bws_log_sekcja("[TEST 6/8] MIME clipboard multi-format & PZB enforcement: OK\n");
 
     // 7. Kursory systemowe i custom
     for (uint32_t k = 0; k <= GUI_CURSOR_CROSSHAIR; ++k) {
@@ -449,74 +517,95 @@ static void wykonaj_testy_bws_61_83() {
     kursor.hotspot_x = GUI_CURSOR_CUSTOM_MAX_W; // Hotspot poza obszarem
     bws_sprawdz(!gui_ustaw_kursor_custom(&kursor));
     bws_sprawdz(gui_ustaw_kursor(GUI_CURSOR_ARROW));
-    bws_log("[TEST 7/8] System & custom cursors bounds and formats: OK\n");
+    bws_log_sekcja("[TEST 7/8] System & custom cursors bounds and formats: OK\n");
 
     // 8. Socket (odrzucenie braku PRAWO_SIEC w manifeście)
     bws_sprawdz(socket_create() == 0);
     bws_sprawdz(socket_close(1) == false);
-    bws_log("[TEST 8/9] Socket permission & ownership: OK\n");
+    bws_log_sekcja("[TEST 8/9] Socket permission & ownership: OK\n");
 
     // 9. Podsystem motywów BWS 86..87, accessors, transakcja podglądu i 50x stres-test przełączeń
     {
         bws_log("[TEST 9/9] Podsystem motywów BWS 86..87 i 50x stres-test przełączeń...\n");
+        const uint32_t bledy_motywow_przed = bws_test_blad;
+        // Aktywny motyw jest wyborem uzytkownika (/ustawienia, BWS 87 z Ustawien)
+        // i moze byc dowolnym poprawnym motywem - test nie zaklada domyslnego.
+        // Dokladne wartosci sprawdzamy wzgledem wbudowanej definicji
+        // g_domyslny_motyw_fallback tylko wtedy, gdy aktywny jest bursztynnocny;
+        // dla kazdego motywu sprawdzamy zgodnosc BWS 86, ABI v1 i akcesorow.
+        using PoleKoloru = uint32_t BursztynMotyw::*;
+        static const PoleKoloru kolory[20] = {
+            &BursztynMotyw::pulpit, &BursztynMotyw::oknotlo, &BursztynMotyw::panel,
+            &BursztynMotyw::podniesiony, &BursztynMotyw::ramka, &BursztynMotyw::tekst,
+            &BursztynMotyw::tekstdrugorzedny, &BursztynMotyw::wylaczony, &BursztynMotyw::akcent,
+            &BursztynMotyw::akcentnajechany, &BursztynMotyw::akcentaktywny, &BursztynMotyw::blad,
+            &BursztynMotyw::sukces, &BursztynMotyw::ostrzezenie, &BursztynMotyw::informacja,
+            &BursztynMotyw::poletekstowe, &BursztynMotyw::zaznaczenie, &BursztynMotyw::przycisk,
+            &BursztynMotyw::przycisknajechany, &BursztynMotyw::tekstakcentu};
+        static const char* const nazwy_kolorow[20] = {
+            "MOTYW pulpit", "MOTYW oknotlo", "MOTYW panel", "MOTYW podniesiony", "MOTYW ramka",
+            "MOTYW tekst", "MOTYW tekstdrugorzedny", "MOTYW wylaczony", "MOTYW akcent",
+            "MOTYW akcentnajechany", "MOTYW akcentaktywny", "MOTYW blad", "MOTYW sukces",
+            "MOTYW ostrzezenie", "MOTYW informacja", "MOTYW poletekstowe", "MOTYW zaznaczenie",
+            "MOTYW przycisk", "MOTYW przycisknajechany", "MOTYW tekstakcentu"};
         const BursztynMotyw* m_poczatkowy = gui_pobierz_motyw();
-        bws_sprawdz(m_poczatkowy != nullptr);
-        if (m_poczatkowy) {
-            bws_sprawdz(m_poczatkowy->wersja == 2);
-            bws_sprawdz(m_poczatkowy->rozmiar_struktury == 172);
-            bws_sprawdz(bws_tekst_rowny(m_poczatkowy->id, "bursztynnocny"));
-            bws_sprawdz(m_poczatkowy->pulpit == 0x00111315U);
-            bws_sprawdz(m_poczatkowy->oknotlo == 0x00191C20U);
-            bws_sprawdz(m_poczatkowy->panel == 0x0020242AU);
-            bws_sprawdz(m_poczatkowy->podniesiony == 0x00262B31U);
-            bws_sprawdz(m_poczatkowy->ramka == 0x00343A42U);
-            bws_sprawdz(m_poczatkowy->tekst == 0x00F2F3F5U);
-            bws_sprawdz(m_poczatkowy->tekstdrugorzedny == 0x00A7ADB5U);
-            bws_sprawdz(m_poczatkowy->wylaczony == 0x006F7680U);
-            bws_sprawdz(m_poczatkowy->akcent == 0x00F2A900U);
-            bws_sprawdz(m_poczatkowy->akcentnajechany == 0x00FFBC32U);
-            bws_sprawdz(m_poczatkowy->akcentaktywny == 0x00D99100U);
-            bws_sprawdz(m_poczatkowy->blad == 0x00E85D5DU);
-            bws_sprawdz(m_poczatkowy->sukces == 0x0051B87AU);
-            bws_sprawdz(m_poczatkowy->ostrzezenie == 0x00F2A900U);
-            bws_sprawdz(m_poczatkowy->informacja == 0x0058A6E7U);
-            bws_sprawdz(m_poczatkowy->poletekstowe == 0x0015181CU);
-            bws_sprawdz(m_poczatkowy->zaznaczenie == 0x00F2A900U);
-            bws_sprawdz(m_poczatkowy->przycisk == 0x00262B31U);
-            bws_sprawdz(m_poczatkowy->przycisknajechany == 0x00343A42U);
-            bws_sprawdz(m_poczatkowy->tekstakcentu == 0x00111315U);
+        bws_sprawdz_msg(m_poczatkowy != nullptr, "MOTYW: brak aktywnego motywu (BWS 86)");
+        BursztynMotyw aktywny{};
+        if (m_poczatkowy) aktywny = *m_poczatkowy;
+        aktywny.id[sizeof(aktywny.id) - 1] = '\0';
+        bws_log("[TEST 9/9] Aktywny motyw: ");
+        bws_log(aktywny.id[0] ? aktywny.id : "(brak)");
+        bws_log("\n");
+        bws_sprawdz_rowne(aktywny.wersja, 2, "MOTYW: wersja ABI");
+        bws_sprawdz_rowne(aktywny.rozmiar_struktury, 172, "MOTYW: rozmiar struktury ABI v2");
+        bws_sprawdz_msg(motyw_waliduj_id(aktywny.id), "MOTYW: niepoprawny identyfikator aktywnego motywu");
+        if (bws_tekst_rowny(aktywny.id, "bursztynnocny")) {
+            const BursztynMotyw& wzor = g_domyslny_motyw_fallback;
+            for (int i = 0; i < 20; ++i)
+                bws_sprawdz_rowne(aktywny.*kolory[i], wzor.*kolory[i], nazwy_kolorow[i]);
+            bws_sprawdz_rowne(aktywny.rogokna, wzor.rogokna, "MOTYW rogokna");
+            bws_sprawdz_rowne(aktywny.rogpanelu, wzor.rogpanelu, "MOTYW rogpanelu");
+            bws_sprawdz_rowne(aktywny.rogprzycisku, wzor.rogprzycisku, "MOTYW rogprzycisku");
+            bws_sprawdz_rowne(aktywny.rogpola, wzor.rogpola, "MOTYW rogpola");
+            bws_sprawdz_rowne(aktywny.rogmenu, wzor.rogmenu, "MOTYW rogmenu");
+            bws_sprawdz_rowne(aktywny.rogpodpowiedzi, wzor.rogpodpowiedzi, "MOTYW rogpodpowiedzi");
+            bws_sprawdz_rowne(aktywny.gruboscramki, wzor.gruboscramki, "MOTYW gruboscramki");
+            bws_sprawdz_rowne(aktywny.cienokna, wzor.cienokna, "MOTYW cienokna");
         }
-        bws_sprawdz(motyw_promien(MOTYW_ROG_OKNA) == 10);
-        bws_sprawdz(motyw_promien(MOTYW_ROG_PANELU) == 8);
-        bws_sprawdz(motyw_promien(MOTYW_ROG_PRZYCISKU) == 7);
-        bws_sprawdz(motyw_promien(MOTYW_ROG_POLA) == 6);
-        bws_sprawdz(motyw_promien(MOTYW_ROG_MENU) == 8);
-        bws_sprawdz(motyw_promien(MOTYW_ROG_PODPOWIEDZI) == 6);
-        bws_sprawdz(motyw_grubosc_ramki() == 1);
-        bws_sprawdz(motyw_cien_okna() == 1);
-        bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PULPIT) == 0x00111315U);
-        bws_sprawdz(motyw_kolor(MOTYW_KOLOR_AKCENT) == 0x00F2A900U);
+        // Akcesory zwracaja dokladnie pola aktywnego motywu (kazdy motyw).
+        for (uint32_t i = 0; i < 20; ++i)
+            bws_sprawdz_rowne(motyw_kolor(i), aktywny.*kolory[i], nazwy_kolorow[i]);
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_OKNA), aktywny.rogokna, "MOTYW akcesor rogokna");
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_PANELU), aktywny.rogpanelu, "MOTYW akcesor rogpanelu");
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_PRZYCISKU), aktywny.rogprzycisku, "MOTYW akcesor rogprzycisku");
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_POLA), aktywny.rogpola, "MOTYW akcesor rogpola");
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_MENU), aktywny.rogmenu, "MOTYW akcesor rogmenu");
+        bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_PODPOWIEDZI), aktywny.rogpodpowiedzi, "MOTYW akcesor rogpodpowiedzi");
+        bws_sprawdz_rowne(motyw_grubosc_ramki(), aktywny.gruboscramki, "MOTYW akcesor gruboscramki");
+        bws_sprawdz_rowne(motyw_cien_okna(), aktywny.cienokna, "MOTYW akcesor cienokna");
+        bws_sprawdz_rowne(motyw_promien(0xFFFFU), 0, "MOTYW nieznany rog");
 
         // BWS 86: Walidacja wskaźnika użytkownika (fail-closed)
-        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, 1, 0, 0, 0) == 0);
-        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, 0, 0, 0, 0) == 0);
+        bws_sprawdz_rowne(bws_wywolaj(BWS_MOTYW_POBIERZ, 1, 0, 0, 0), 0, "BWS86 wskaznik 1");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_MOTYW_POBIERZ, 0, 0, 0, 0), 0, "BWS86 wskaznik NULL");
 
-        // BWS 86: Odczyt do bufora ABI v2 (172 B)
+        // BWS 86: Odczyt do bufora ABI v2 (172 B) - identyczny z motywem lokalnym
         BursztynMotyw m_buf{};
-        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&m_buf), 0, 0, 0) == 1);
-        bws_sprawdz(m_buf.wersja == 2);
-        bws_sprawdz(m_buf.rozmiar_struktury == 172);
-        bws_sprawdz(m_buf.pulpit == 0x00111315U);
-        bws_sprawdz(m_buf.akcent == 0x00F2A900U);
+        bws_sprawdz_rowne(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&m_buf), 0, 0, 0), 1, "BWS86 odczyt v2");
+        bws_sprawdz_rowne(m_buf.wersja, 2, "BWS86 v2 wersja");
+        bws_sprawdz_rowne(m_buf.rozmiar_struktury, 172, "BWS86 v2 rozmiar");
+        for (int i = 0; i < 20; ++i) bws_sprawdz_rowne(m_buf.*kolory[i], aktywny.*kolory[i], nazwy_kolorow[i]);
+        bws_sprawdz_msg(bws_tekst_rowny(m_buf.id, aktywny.id), "BWS86 v2: id rozne od motywu lokalnego");
 
         // BWS 86: Zgodność wsteczna odczytu ABI v1 (144 B) gdy wersja == 1
         BursztynMotywV1 v1_buf{};
         v1_buf.wersja = 1;
-        bws_sprawdz(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&v1_buf), 0, 0, 0) == 1);
-        bws_sprawdz(v1_buf.wersja == 1);
-        bws_sprawdz(v1_buf.pulpit == 0x00111315U);
-        bws_sprawdz(v1_buf.akcent == 0x00F2A900U);
-        bws_sprawdz(bws_tekst_rowny(v1_buf.id, "bursztynnocny"));
+        bws_sprawdz_rowne(bws_wywolaj(BWS_MOTYW_POBIERZ, reinterpret_cast<uint64_t>(&v1_buf), 0, 0, 0), 1, "BWS86 odczyt v1");
+        bws_sprawdz_rowne(v1_buf.wersja, 1, "BWS86 v1 wersja");
+        bws_sprawdz_rowne(v1_buf.pulpit, aktywny.pulpit, "BWS86 v1 pulpit");
+        bws_sprawdz_rowne(v1_buf.akcent, aktywny.akcent, "BWS86 v1 akcent");
+        bws_sprawdz_rowne(v1_buf.informacja, aktywny.informacja, "BWS86 v1 informacja");
+        bws_sprawdz_msg(bws_tekst_rowny(v1_buf.id, aktywny.id), "BWS86 v1: id rozne od motywu lokalnego");
 
         // BWS 87: Wymóg autoryzacji (PZB <= PZB_ZAUFANE i PRAWO_SYSTEM_CONFIG).
         // test.bur jest zwykłym procesem Ring 3 (PZB_UZYTKOWNIK) - wszystkie operacje mutujące muszą zawieść.
@@ -540,22 +629,25 @@ static void wykonaj_testy_bws_61_83() {
         bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("GRAFIT"), 0, 0) == 0);
         bws_sprawdz(bws_wywolaj(BWS_MOTYW_POLECENIE, MOTYW_CMD_USTAW, reinterpret_cast<uint64_t>("motyw ze spacja"), 0, 0) == 0);
 
-        // 50-krotny stres-test odczytu motywów, accessors i weryfikacji braku wycieków
+        // 50-krotny stres-test odczytu motywów, accessors i weryfikacji braku wycieków:
+        // stan po kazdym odswiezeniu identyczny z motywem z poczatku testu.
         const uint64_t alokacje_przed_50 = gui_liczba_aktywnych_alokacji_sterty();
         for (int i = 0; i < 50; ++i) {
             motyw_odswiez_lokalny();
             const BursztynMotyw* m_biezacy = gui_pobierz_motyw();
-            bws_sprawdz(m_biezacy != nullptr && bws_tekst_rowny(m_biezacy->id, "bursztynnocny"));
-            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PULPIT) == 0x00111315U);
-            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_AKCENT) == 0x00F2A900U);
-            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_PANEL) == 0x0020242AU);
-            bws_sprawdz(motyw_kolor(MOTYW_KOLOR_RAMKA) == 0x00343A42U);
-            bws_sprawdz(motyw_promien(MOTYW_ROG_OKNA) == 10);
-            bws_sprawdz(motyw_promien(MOTYW_ROG_PANELU) == 8);
+            bws_sprawdz_msg(m_biezacy != nullptr && bws_tekst_rowny(m_biezacy->id, aktywny.id),
+                            "MOTYW stres: zmienil sie identyfikator aktywnego motywu");
+            bws_sprawdz_rowne(motyw_kolor(MOTYW_KOLOR_PULPIT), aktywny.pulpit, "MOTYW stres pulpit");
+            bws_sprawdz_rowne(motyw_kolor(MOTYW_KOLOR_AKCENT), aktywny.akcent, "MOTYW stres akcent");
+            bws_sprawdz_rowne(motyw_kolor(MOTYW_KOLOR_PANEL), aktywny.panel, "MOTYW stres panel");
+            bws_sprawdz_rowne(motyw_kolor(MOTYW_KOLOR_RAMKA), aktywny.ramka, "MOTYW stres ramka");
+            bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_OKNA), aktywny.rogokna, "MOTYW stres rogokna");
+            bws_sprawdz_rowne(motyw_promien(MOTYW_ROG_PANELU), aktywny.rogpanelu, "MOTYW stres rogpanelu");
         }
         const uint64_t alokacje_po_50 = gui_liczba_aktywnych_alokacji_sterty();
-        bws_sprawdz(alokacje_przed_50 == alokacje_po_50);
-        bws_log("[TEST 9/9] Podsystem motywów BWS 86..87, accessors, 50x stres-test i brak wycieków: OK\n");
+        bws_sprawdz_rowne(alokacje_po_50, alokacje_przed_50, "MOTYW stres: aktywne alokacje sterty");
+        (void)bledy_motywow_przed;
+        bws_log_sekcja("[TEST 9/9] Podsystem motywów BWS 86..87, accessors, 50x stres-test i brak wycieków: OK\n");
     }
 
     if (bws_test_blad == 0) {
@@ -703,7 +795,7 @@ __attribute__((noinline)) static void testy_interaktywne_bursztyn_ui() {
         delete k;
     }
 
-    bws_log("[INTERAKTYWNOSC AUDYT] WidokPrzewijany, Drzewo i Efektywna Widocznosc: OK\n");
+    bws_log_sekcja("[INTERAKTYWNOSC AUDYT] WidokPrzewijany, Drzewo i Efektywna Widocznosc: OK\n");
 }
 
 static void formatuj_liczbe_t(char* buf, size_t cap, int n) {
@@ -965,7 +1057,7 @@ static void wykonaj_testy_kontrolki2() {
             track_up.typ = BWS_ZDARZENIE_MYSZ_UP;
             ok_tabela.obsluz_zdarzenie(track_up);
         }
-        bws_log("[KONTROLKI2 1/8] Tabela: OK\n");
+        bws_log_sekcja("[KONTROLKI2 1/8] Tabela: OK\n");
     }
 
     // 2. Rozdzielacz (orientacje, ograniczenia, układ)
@@ -1098,7 +1190,7 @@ static void wykonaj_testy_kontrolki2() {
                             "Rozdzielacz release poza paskiem konczy capture");
         }
 
-        bws_log("[KONTROLKI2 2/8] Rozdzielacz: OK\n");
+        bws_log_sekcja("[KONTROLKI2 2/8] Rozdzielacz: OK\n");
     }
 
     // 3. WidokIkon (1000 elementów, siatka, selekcja)
@@ -1329,7 +1421,7 @@ static void wykonaj_testy_kontrolki2() {
                     nav_dirty_bounding_px);
         delete ok_nav;
 
-        bws_log("[KONTROLKI2 3/8] WidokIkon: OK\n");
+        bws_log_sekcja("[KONTROLKI2 3/8] WidokIkon: OK\n");
     }
 
     // 4. Obraz (bufor pikseli, tryby skalowania)
@@ -1366,7 +1458,7 @@ static void wykonaj_testy_kontrolki2() {
         bws_sprawdz_msg(!img->czy_ma_obraz(), "Obraz wyczysc_obraz");
         bws_log_u64("[OBRAZ POMIAR] paint_allocations=", img_alok_po - img_alok_przed);
         delete img;
-        bws_log("[KONTROLKI2 4/8] Obraz: OK\n");
+        bws_log_sekcja("[KONTROLKI2 4/8] Obraz: OK\n");
     }
 
     // 5. PrzyciskObrazkowy (tryby ikony i tekstu)
@@ -1396,7 +1488,7 @@ static void wykonaj_testy_kontrolki2() {
         btn.obsluz_wcisniecie_myszy(bm);
         btn.obsluz_zwolnienie_myszy(bm);
         bws_sprawdz_msg(klikniecia == 1, "PrzyciskObrazkowy disabled");
-        bws_log("[KONTROLKI2 5/8] PrzyciskObrazkowy: OK\n");
+        bws_log_sekcja("[KONTROLKI2 5/8] PrzyciskObrazkowy: OK\n");
     }
 
     // 6. PasekSciezki (segmenty, parsowanie, skrót)
@@ -1424,7 +1516,7 @@ static void wykonaj_testy_kontrolki2() {
         ps->obsluz_wcisniecie_myszy(pm);
         bws_sprawdz_msg(wybrany_segment == 3, "PasekSciezki callback segmentu");
         delete ps;
-        bws_log("[KONTROLKI2 6/8] PasekSciezki: OK\n");
+        bws_log_sekcja("[KONTROLKI2 6/8] PasekSciezki: OK\n");
     }
 
     // 7. Kalendarz (obliczenia dat, lata przestępne, dni tygodnia)
@@ -1609,7 +1701,7 @@ static void wykonaj_testy_kontrolki2() {
         bws_log_u64("[PERF 5S KALENDARZ] layout_passes=", 0);
         bws_log_u64("[PERF 5S KALENDARZ] allocations=",
                     cal_move_alok_po - cal_move_alok_przed);
-        bws_log("[KONTROLKI2 7/8] Kalendarz: OK\n");
+        bws_log_sekcja("[KONTROLKI2 7/8] Kalendarz: OK\n");
     }
 
     // 8. PoleDaty i PoleCzasu (walidacja i manipulacja)
@@ -1874,7 +1966,7 @@ static void wykonaj_testy_kontrolki2() {
 
         bws_sprawdz_msg(CzasDnia{25, 0, 0}.czy_poprawny() == false, "CzasDnia(25) niepoprawny");
         bws_sprawdz_msg(CzasDnia{12, 60, 0}.czy_poprawny() == false, "CzasDnia(60m) niepoprawny");
-        bws_log("[KONTROLKI2 8/8] PoleDaty i PoleCzasu: OK\n");
+        bws_log_sekcja("[KONTROLKI2 8/8] PoleDaty i PoleCzasu: OK\n");
     }
 
     bws_log("=== TESTY WDROZONYCH KONTROLEK 1-8 ZAKONCZONE (PASS) ===\n");
@@ -1889,9 +1981,23 @@ static void wykonaj_testy_bursztyn_ui() {
     // -------------------------------------------------------------------------
     bws_log("[BURSZTYNUI 1/4] Bezpieczenstwo extronic16B_unicode.h i UTF-8...\n");
 
-    // Wysokosc kanoniczna
-    bws_sprawdz(CzcionkaUI::pobierz_wysokosc(1) == 16);
-    bws_sprawdz(CzcionkaUI::pobierz_wysokosc(2) == 32);
+    // Wysokosc linii: test.bur jest budowany z BSF_NATIVE, wiec UI uzywa
+    // czcionki systemowej TTF (wysokosc z metryk kroju), a stale 16/32 px
+    // dotycza tylko awaryjnej czcionki bitmapowej (brak gotowego BSF).
+    const int wys_1 = CzcionkaUI::pobierz_wysokosc(1);
+    const int wys_2 = CzcionkaUI::pobierz_wysokosc(2);
+#if defined(BSF_NATIVE)
+    if (BSF::ready()) {
+        bws_sprawdz_rowne(wys_1, BSF::height(ui_skaluj(BSF::ui_size(), 100)), "UNICODE wysokosc linii TTF 100%");
+        bws_sprawdz_rowne(wys_2, BSF::height(ui_skaluj(BSF::ui_size(), 200)), "UNICODE wysokosc linii TTF 200%");
+        bws_sprawdz_msg(wys_1 >= 8 && wys_1 <= 64, "UNICODE: wysokosc linii TTF poza zakresem");
+        bws_sprawdz_msg(wys_2 >= 2 * wys_1 - 2 && wys_2 <= 2 * wys_1 + 2, "UNICODE: wysokosc 200% nie skaluje sie 2x");
+    } else
+#endif
+    {
+        bws_sprawdz_rowne(wys_1, 16, "UNICODE wysokosc bitmapowa 1x");
+        bws_sprawdz_rowne(wys_2, 32, "UNICODE wysokosc bitmapowa 2x");
+    }
 
     // Polskie znaki UTF-8 (male i duze) - pelna reprezentacja diakrytykow
     const char* pl_utf8 = "Zażółć gęślą jaźń ZAŻÓŁĆ GĘŚLĄ JAŹŃ";
@@ -1910,10 +2016,10 @@ static void wykonaj_testy_bursztyn_ui() {
     for (int i = 0; i < 18; ++i) {
         uint32_t cp = 0;
         size_t z = CzcionkaUI::dekoduj_utf8(pojedyncze_pl[i], 0, &cp);
-        bws_sprawdz(z == (oczekiwane_cp[i] <= 0x7FF ? 2 : 3));
-        bws_sprawdz(cp == oczekiwane_cp[i]);
+        bws_sprawdz_rowne(z, (oczekiwane_cp[i] <= 0x7FF ? 2 : 3), pojedyncze_pl[i]);
+        bws_sprawdz_rowne(cp, oczekiwane_cp[i], pojedyncze_pl[i]);
         int w = CzcionkaUI::szerokosc_znaku(cp);
-        bws_sprawdz(w >= 4 && w <= 16);
+        bws_sprawdz_msg(w >= 4 && w <= 16, pojedyncze_pl[i]);
     }
 
     // Bezpieczenstwo przed wyjsciem poza tablice dla nieobslugiwanych punktow kodowych
@@ -1921,17 +2027,33 @@ static void wykonaj_testy_bursztyn_ui() {
     int w_pytajnik = CzcionkaUI::szerokosc_znaku('?');
     for (int i = 0; i < 5; ++i) {
         int w = CzcionkaUI::szerokosc_znaku(nieobslugiwane[i]);
-        bws_sprawdz(w == w_pytajnik); // Zastapienie bezpiecznym znakiem '?'
+        bws_sprawdz_rowne(w, w_pytajnik, "UNICODE: nieobslugiwany punkt kodowy -> szerokosc '?'");
     }
 
     // Bezpieczenstwo uszkodzonego UTF-8 w dekoderze
     const char uszkodzony_utf8[] = { static_cast<char>(0xC0), static_cast<char>(0x20), '\0' };
     uint32_t cp_bad = 0;
     size_t zuzyte_bad = CzcionkaUI::dekoduj_utf8(uszkodzony_utf8, 0, &cp_bad);
-    bws_sprawdz(zuzyte_bad == 1);
-    bws_sprawdz(cp_bad == 0xC0);
+    // Bajt 0xC0 (zakazany poczatek overlong) zuzywa 1 bajt i daje znak
+    // zastepczy: w BSF_NATIVE U+FFFD (BSF::utf8, standard Unicode), w
+    // dekoderze awaryjnym '?'. Nigdy surowy bajt 0xC0 jako punkt kodowy.
+    bws_sprawdz_rowne(zuzyte_bad, 1, "UNICODE: 0xC0 zuzywa 1 bajt");
+#if defined(BSF_NATIVE)
+    bws_sprawdz_rowne(cp_bad, 0xFFFDU, "UNICODE: 0xC0 -> U+FFFD");
+#else
+    bws_sprawdz_rowne(cp_bad, static_cast<uint32_t>('?'), "UNICODE: 0xC0 -> '?'");
+#endif
+    // Kontynuacja po bledzie dekoduje nastepny znak (spacja).
+    uint32_t cp_dalej = 0;
+    bws_sprawdz_rowne(CzcionkaUI::dekoduj_utf8(uszkodzony_utf8, zuzyte_bad, &cp_dalej), 1, "UNICODE: znak po bledzie");
+    bws_sprawdz_rowne(cp_dalej, 0x20U, "UNICODE: znak po bledzie = spacja");
+    // Ucieta sekwencja polskiej litery ("ż" bez bajtu kontynuacji).
+    const char uciete[] = { static_cast<char>(0xC5), '\0' };
+    uint32_t cp_uciete = 0;
+    bws_sprawdz_rowne(CzcionkaUI::dekoduj_utf8(uciete, 0, &cp_uciete), 1, "UNICODE: ucieta sekwencja zuzywa 1 bajt");
+    bws_sprawdz_msg(cp_uciete != 0xC5U && cp_uciete != 0x17CU, "UNICODE: ucieta sekwencja nie daje litery");
 
-    bws_log("[BURSZTYNUI 1/4] extronic16B_unicode.h & UTF-8: OK\n");
+    bws_log_sekcja("[BURSZTYNUI 1/4] extronic16B_unicode.h & UTF-8: OK\n");
 
     // -------------------------------------------------------------------------
     // 2. Audyt przestrzeni wspolrzednych i hierarchii (Okno -> Kolumna -> Wiersz -> Przycisk)
@@ -2062,7 +2184,7 @@ static void wykonaj_testy_bursztyn_ui() {
     }
     bws_sprawdz_msg(licznik_btn2 == 10, "btn2 10 clicks callback failed");
 
-    bws_log("[BURSZTYNUI 2/4] Audyt wspolrzednych i 10x klikniec: OK\n");
+    bws_log_sekcja("[BURSZTYNUI 2/4] Audyt wspolrzednych i 10x klikniec: OK\n");
 
     // -------------------------------------------------------------------------
     // 3. Dirty Redraw i pomiar powierzchni odrysowywania
@@ -2178,7 +2300,7 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_log_u64("[MOUSE PERF] dirty_pixels=", okno_hover.liczba_brudnych_pikseli() - neutral_px_przed);
     bws_log_u64("[MOUSE PERF] heap_allocations=", neutral_alloc_po - neutral_alloc_przed);
 
-    bws_log("[BURSZTYNUI 3/4] Dirty Redraw + hover 100x: OK\n");
+    bws_log_sekcja("[BURSZTYNUI 3/4] Dirty Redraw + hover 100x: OK\n");
 
     // -------------------------------------------------------------------------
     // 4. Zaawansowane komponenty (PoleTekstowe, PoleWyboru, Fokus Tab, Maximize)
@@ -2354,13 +2476,38 @@ static void wykonaj_testy_bursztyn_ui() {
     ograniczone.ustaw_geometrie(ui_monitor.work_x + ui_monitor.work_szer - 20,
                                ui_monitor.work_y + ui_monitor.work_wys - 20,
                                300, 180);
-    bws_sprawdz_msg(ograniczone.x() >= ui_monitor.work_x &&
-                    ograniczone.y() >= ui_monitor.work_y &&
-                    ograniczone.x() + ograniczone.szerokosc() <= ui_monitor.work_x + ui_monitor.work_szer &&
-                    ograniczone.y() + ograniczone.wysokosc() <= ui_monitor.work_y + ui_monitor.work_wys,
-                    "BursztynUI: ruch/resize przy dolnej krawedzi zaslania pasek zadan");
+    // Polityka ruchu (docs/window-manager-resizing.md, OknoGeometria::przytnij_ruch):
+    // okno moze czesciowo wyjsc poza obszar roboczy, ale belka tytulu nigdy nie
+    // schodzi ponizej jego dolnej krawedzi (nad paskiem zadan) i >= 96 px belki
+    // zostaje widoczne. Czesc okna nizej jest skladana POD paskiem zadan -
+    // kompozytor rysuje pasek nad zwyklymi oknami (testy hosta kompozytora).
+    {
+        const int s_proc = ograniczone.skala_dpi().procent();
+        const int belka = Okno::WYSOKOSC_BELKI_TYTULOWEJ * ograniczone.skala_dpi();
+        const int uchwyt = ui_skaluj(96, s_proc);
+        const int dol = ui_monitor.work_y + ui_monitor.work_wys;
+        const int prawo = ui_monitor.work_x + ui_monitor.work_szer;
+        bws_sprawdz_msg(OknoGeometria::pasek_uchwytny(
+                            {ograniczone.x(), ograniczone.y(), ograniczone.szerokosc(), ograniczone.wysokosc()},
+                            {ui_monitor.work_x, ui_monitor.work_y, ui_monitor.work_szer, ui_monitor.work_wys},
+                            uchwyt, belka, belka / 2),
+                        "BursztynUI: belka tytulu przy dolnej krawedzi nieuchwytna");
+        bws_sprawdz_msg(ograniczone.y() + belka <= dol,
+                        "BursztynUI: belka tytulu zeszla pod pasek zadan (ponizej obszaru roboczego)");
+        bws_sprawdz_msg(ograniczone.x() + uchwyt <= prawo,
+                        "BursztynUI: za malo belki widocznej przy prawej krawedzi");
+        // Zadane (prawo-20, dol-20): belka (>= 28 px) wychodzilaby pod pasek -> przyciecie.
+        bws_sprawdz_rowne(ograniczone.y(), dol - belka, "BursztynUI: y przy dolnej krawedzi po przycieciu");
+        bws_sprawdz_rowne(ograniczone.x(), prawo - uchwyt, "BursztynUI: x przy prawej krawedzi po przycieciu");
+        bws_sprawdz_rowne(ograniczone.szerokosc(), 300, "BursztynUI: ruch przy krawedzi zmienil szerokosc");
+        bws_sprawdz_rowne(ograniczone.wysokosc(), 180, "BursztynUI: ruch przy krawedzi zmienil wysokosc");
+        // Zmiana rozmiaru w dol (ponad obszar roboczy) nie przesuwa belki pod pasek.
+        ograniczone.ustaw_geometrie(ui_monitor.work_x + 40, dol - belka - 10, 300, ui_monitor.work_wys + 100);
+        bws_sprawdz_msg(ograniczone.y() + belka <= dol && ograniczone.y() >= ui_monitor.work_y - belka / 2,
+                        "BursztynUI: resize przy dolnej krawedzi przesunal belke pod pasek zadan");
+    }
 
-    bws_log("[BURSZTYNUI 4/4] Komponenty, Fokus i Geometria: OK\n");
+    bws_log_sekcja("[BURSZTYNUI 4/4] Komponenty, Fokus i Geometria: OK\n");
 
     // -------------------------------------------------------------------------
     // 5. Suwak: model, wejście, capture, callbacki, dirty rect i alokacje
@@ -2555,7 +2702,7 @@ static void wykonaj_testy_bursztyn_ui() {
     pion.obsluz_wcisniecie_klawisza(vk);
     bws_sprawdz(pion.wartosc() == 0);
 
-    bws_log("[BURSZTYNUI SUWAK] Model, wejscie, capture i pomiary: OK\n");
+    bws_log_sekcja("[BURSZTYNUI SUWAK] Model, wejscie, capture i pomiary: OK\n");
 
     // -------------------------------------------------------------------------
     // 6. ModelPrzewijania i PasekPrzewijania: int64, geometria i capture
@@ -2719,7 +2866,7 @@ static void wykonaj_testy_bursztyn_ui() {
 
     bws_log_u64("[PASEK POMIAR] redraw_area_px=", static_cast<uint64_t>(pasek_obszar_drag));
     bws_log_u64("[PASEK POMIAR] heap_allocations_drag=", pasek_alokacje_po - pasek_alokacje_przed);
-    bws_log("[BURSZTYNUI PASEK] Model, capture, dirty i alokacje: OK\n");
+    bws_log_sekcja("[BURSZTYNUI PASEK] Model, capture, dirty i alokacje: OK\n");
 
     // -------------------------------------------------------------------------
     // 7. PrzyciskOpcji/RamkaGrupy oraz ListaWyboru
@@ -2849,7 +2996,7 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_log_u64("[LISTA POMIAR] heap_allocations_repaint=", lista_alokacje_po - lista_alokacje_przed);
     bws_log_u64("[LISTA POMIAR] wheel_dirty_area_px=", pole_brudne_kola);
     bws_log_u64("[LISTA POMIAR] heap_allocations_wheel=", lista_kolo_alok_po - lista_kolo_alok_przed);
-    bws_log("[BURSZTYNUI WYBOR] Grupy, klawiatura i 1200 elementow: OK\n");
+    bws_log_sekcja("[BURSZTYNUI WYBOR] Grupy, klawiatura i 1200 elementow: OK\n");
 
     // -------------------------------------------------------------------------
     // 8. PoleWielowierszowe: UTF-8, nowe linie, historia i widoczny rendering
@@ -3675,7 +3822,7 @@ static void wykonaj_testy_bursztyn_ui() {
     bws_log_u64("[MENU POMIAR] hover_100_heap_allocations=",
                 hover_alok_po - hover_alok_przed);
     bws_log_u64("[MENU POMIAR] hover_dirty_area_px=", hover_dirty_px);
-    bws_log("[BURSZTYNUI POPUP] Popup, ListaRozwijana, MenuGlowne i MenuKontekstowe: OK\n");
+    bws_log_sekcja("[BURSZTYNUI POPUP] Popup, ListaRozwijana, MenuGlowne i MenuKontekstowe: OK\n");
     delete ctx_popup_ptr;
     delete menu_glowne_test_ptr;
     delete menu_kontekstowe_ptr;
@@ -4215,7 +4362,7 @@ static void wykonaj_testy_bursztyn_ui() {
     delete btn_page2;
     delete num_ptr;
     delete postep_ptr;
-    bws_log("[BURSZTYNUI ROZSZERZONE] Wszystkie 8 kontrolek przetestowane: OK\n");
+    bws_log_sekcja("[BURSZTYNUI ROZSZERZONE] Wszystkie 8 kontrolek przetestowane: OK\n");
 
     // ---------------------------------------------------------------------
     // 9. Kompletny test struktury i geometrii okna demonstracyjnego DemoUI
@@ -4478,7 +4625,7 @@ static void wykonaj_testy_bursztyn_ui() {
         }
 
         delete demo_win;
-        bws_log("[DEMO AUDYT] Architektura i geometria DemoUI 5 zakladek: OK\n");
+        bws_log_sekcja("[DEMO AUDYT] Architektura i geometria DemoUI 5 zakladek: OK\n");
     }
 
     // 10. Rozlegle testy mechanizmu STRETCH i obslugi sentinela Rozmiar(-1, -1)
@@ -4700,7 +4847,7 @@ static void wykonaj_testy_bursztyn_ui() {
             delete k12;
         }
 
-        bws_log("[STRETCH AUDYT] Wszystkie 12 scenariuszy STRETCH i sentineli: OK\n");
+        bws_log_sekcja("[STRETCH AUDYT] Wszystkie 12 scenariuszy STRETCH i sentineli: OK\n");
     }
 
     // Okno::dodaj() zwraca dynamiczny korzen, ale Okno zachowuje wlasnosc
@@ -4714,7 +4861,7 @@ static void wykonaj_testy_bursztyn_ui() {
     delete memo_clip_ptr;
     delete okno_listy_ptr;
     delete lista_ptr;
-    bws_log("[BURSZTYNUI MEMO] Edycja, historia, schowek i rendering: OK\n");
+    bws_log_sekcja("[BURSZTYNUI MEMO] Edycja, historia, schowek i rendering: OK\n");
 
     // ---------------------------------------------------------------------
     // 10. Test regresji 20 cykli rerun z zachowaniem chromu i geometrii
@@ -5281,6 +5428,7 @@ static WynikTestow uruchom_pelny_pakiet_testow() {
     WynikTestow wynik{};
     bws_test_ok = 0;
     bws_test_blad = 0;
+    bws_bledy_przy_ostatniej_sekcji = 0;
     const uint64_t aktywne_przed = gui_liczba_aktywnych_alokacji_sterty();
 
     uint32_t bledy_przed = bws_test_blad;
@@ -5617,6 +5765,7 @@ static void rozpocznij_interaktywny_przebieg_testow(StanOknaWynikow* stan) {
 
     bws_test_ok = 0;
     bws_test_blad = 0;
+    bws_bledy_przy_ostatniej_sekcji = 0;
     stan->wynik = WynikTestow{};
 
     stan->testy_zaplanowane = true;

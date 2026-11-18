@@ -57,6 +57,9 @@ namespace {
 bool wm_refresh_batch_active=false;
 bool wm_refresh_pending=false;
 static void wm_gui_odswiez();
+// Kompozytor przyjmuje pasek tylko dla warstwy z opublikowana klatka (BWS 17).
+bool warstwa_wm_opublikowana = false;
+void zarejestruj_pasek_zadan();
 
 int screen_w = 1024;
 int screen_h = 768;
@@ -1378,6 +1381,9 @@ void wyczysc_nad_paskiem_zamknietych(const GuiOknoInfo* okna, uint32_t n) {
 // Pasek zadan jako powierzchnia kompozytora: rejestrowany tylko przy zmianie geometrii.
 int rejestr_pasek_x = -1, rejestr_pasek_y = -1, rejestr_pasek_w = -1, rejestr_pasek_h = -1;
 void zarejestruj_pasek_zadan() {
+    // Przed pierwsza publikacja warstwy WM rejestracja zawsze bylaby odrzucona
+    // (warstwa bez klatki); wtedy nic nie wysylamy - nastapi po publikacji.
+    if (!warstwa_wm_opublikowana) return;
     const int x = desktop_geometry.taskbar_x, y = desktop_geometry.taskbar_y;
     const int w = desktop_geometry.taskbar_width, h = desktop_geometry.taskbar_height;
     if (x == rejestr_pasek_x && y == rejestr_pasek_y && w == rejestr_pasek_w && h == rejestr_pasek_h) return;
@@ -1866,7 +1872,7 @@ void RysujTaskbarZawartosc() {
 }
 
 void RysujTaskbar() {
-    zarejestruj_pasek_zadan();
+    // Rejestracja paska w kompozytorze: po publikacji klatki (wm_gui_odswiez).
     static DesktopSelectionPaint* paint=nullptr;
     static BursztynUI::KontekstRysowania* ctx=nullptr;
     if(!paint)paint=new DesktopSelectionPaint;
@@ -2983,6 +2989,8 @@ static void wm_gui_odswiez() {
         return;
     }
     gui_odswiez();
+    warstwa_wm_opublikowana = true;
+    zarejestruj_pasek_zadan();      // tylko przy zmianie geometrii (albo po wczesniejszej odmowie)
 }
 
 struct WmRefreshBatch {
@@ -2992,6 +3000,8 @@ struct WmRefreshBatch {
         if(wm_refresh_pending) {
             wm_refresh_pending=false;
             gui_odswiez();
+            warstwa_wm_opublikowana=true;
+            zarejestruj_pasek_zadan();
         }
     }
 };
@@ -3139,7 +3149,6 @@ extern "C" __attribute__((noreturn)) void _start() {
             ? gui_czekaj_na_zdarzenie_z_timeoutem(&zdarzenie, 5)
             : gui_czekaj_na_zdarzenie(&zdarzenie);
         if (!jest_zdarzenie) { obsluz_termin_dymka(gui_czas_monotoniczny_ns()); continue; }
-        zarejestruj_pasek_zadan();      // pasek jako powierzchnia kompozytora (retry do skutku, potem tylko przy zmianie)
         WmRefreshBatch frame_batch;
         if(zdarzenie.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY)desktop_modifiers=zdarzenie.przyciski;
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);

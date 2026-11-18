@@ -54,9 +54,32 @@ int main() {
     screen_w=1280;screen_h=720;metryki_ekranu();
     g_test_bws_hook=launch_hook;
     {   // pasek zadan jako powierzchnia kompozytora + "Zawsze na wierzchu takze nad paskiem zadan"
+        // Cykl rejestracji: przed pierwsza publikacja warstwy WM nic nie jest
+        // wysylane (kompozytor odrzucilby warstwe bez klatki - dawne ostrzezenie
+        // przy kazdym starcie); po publikacji jedna rejestracja.
+        warstwa_wm_opublikowana=false;rejestr_pasek_x=rejestr_pasek_y=rejestr_pasek_w=rejestr_pasek_h=-1;
+        test_pasek_otwarty=false;test_pasek_wywolania=0;test_pasek_odrzuc=false;
         RysujTaskbar();
+        assert(test_pasek_wywolania==0 && !test_pasek_otwarty);
+        wm_gui_odswiez();                                // publikacja klatki (BWS 17), jak na koncu RysujPulpit
+        assert(warstwa_wm_opublikowana && test_pasek_wywolania==1);
         assert(test_pasek_otwarty && test_pasek_rect[2]==desktop_geometry.taskbar_width &&
                test_pasek_rect[1]==desktop_geometry.taskbar_y && test_pasek_rect[3]==desktop_geometry.taskbar_height);
+        assert(test_pasek_rect[1]+test_pasek_rect[3]==screen_h && test_pasek_rect[0]==desktop_geometry.taskbar_x);
+        // Ta sama geometria: kolejne klatki nie powtarzaja wywolania.
+        for(int i=0;i<5;++i){RysujTaskbar();wm_gui_odswiez();}
+        assert(test_pasek_wywolania==1);
+        // Odmowa kompozytora: ponowienie przy kolejnej publikacji, nie w petli bez klatki.
+        screen_w=1366;screen_h=768;metryki_ekranu();test_pasek_odrzuc=true;
+        wm_gui_odswiez();assert(test_pasek_wywolania==2 && test_pasek_rect[2]!=desktop_geometry.taskbar_width);
+        test_pasek_odrzuc=false;wm_gui_odswiez();
+        assert(test_pasek_wywolania==3 && test_pasek_rect[2]==desktop_geometry.taskbar_width && test_pasek_rect[1]==768-desktop_geometry.taskbar_height);
+        // Obszar roboczy konczy sie dokladnie nad paskiem.
+        assert(desktop_geometry.work_height==desktop_geometry.taskbar_y);
+        // Zbiorcze odswiezanie (WmRefreshBatch) tez rejestruje po publikacji.
+        screen_w=1280;screen_h=720;metryki_ekranu();
+        { WmRefreshBatch batch; wm_gui_odswiez(); assert(test_pasek_wywolania==3); }
+        assert(test_pasek_wywolania==4 && test_pasek_rect[1]==desktop_geometry.taskbar_y && test_pasek_rect[2]==1280);
         liczba_okien_taskbara=2;okna_taskbara[0]={};okna_taskbara[1]={};
         okna_taskbara[0].window_id=0x100000005ULL;okna_taskbara[1].window_id=0x200000007ULL;
         strcpy(okna_taskbara[0].tytul,"Okno A");strcpy(okna_taskbara[1].tytul,"Okno B");
