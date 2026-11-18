@@ -18,7 +18,6 @@ struct Wpis {
 inline constexpr Wpis Dodatkowe[] = {
     {"/shell.bur", "/ikonki/app_shell.png"},
     {"/programy/tapety.cebula/tapety.bur", "/ikonki/app_tapety.png"},
-    {AppIdentity::DisplaySettings, "/ikonki/app_ustawienia_ekranu.png"},
 };
 inline constexpr int LiczbaDodatkowych = sizeof(Dodatkowe) / sizeof(Dodatkowe[0]);
 inline constexpr int Count = DesktopEntries::Count + LiczbaDodatkowych;

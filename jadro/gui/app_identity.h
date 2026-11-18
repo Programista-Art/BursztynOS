@@ -3,6 +3,8 @@
 #include <stdint.h>
 // BWS 42, arg4: filtr po programie liczy okna podrzedne (BWS 101) jako okna wlasciciela.
 inline constexpr uint64_t BWS_OKNA_TOZSAMOSC_APLIKACJI = 1;
+// BWS 56, arg4: popup czysto wizualny (dymek paska zadan), tylko proces zaufany.
+inline constexpr uint64_t BWS_POPUP_BEZ_WEJSCIA = 1;
 namespace AppIdentity {
 // Executable paths are the loader's stable singleton keys, never translated titles.
 inline constexpr char Settings[]="/programy/ustawienia.cebula/ustawienia.bur";

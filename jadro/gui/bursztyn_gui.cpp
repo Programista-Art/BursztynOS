@@ -1278,6 +1278,12 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
                        spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), 0) == 1ULL;
 }
 
+bool gui_ustaw_dymek_systemowy(bool otwarty, int x, int y, int szer, int wys) {
+    return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
+                       spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+                       spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), BWS_POPUP_BEZ_WEJSCIA) == 1ULL;
+}
+
 namespace {
 #if BURSZTYN_DIAG_GEOM_TRACE
 static void trace_dopisz_str(char* buf, size_t cap, size_t* pos, const char* str) {

@@ -147,6 +147,9 @@ uint64_t gui_czas_monotoniczny_ns();
  * oraz zezwolenie "Zawsze na wierzchu takze nad paskiem zadan" dla okna (window_id). */
 bool gui_ustaw_pasek_zadan(bool otwarty, int x, int y, int szer, int wys);
 bool gui_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone);
+/* Dymek systemowy (np. podpowiedz paska zadan): ten sam bufor co popup aplikacji
+   (gui_blit_popup), ale bez przechwytywania myszy; tylko proces zaufany. */
+bool gui_ustaw_dymek_systemowy(bool otwarty, int x, int y, int szer, int wys);
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
 

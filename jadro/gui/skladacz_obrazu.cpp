@@ -179,9 +179,10 @@ struct ApplicationPopupState {
     GuiDirtyRect rect;
     uint32_t* tlo;
     uint64_t piksele;
+    bool bez_wejscia;
 };
 ApplicationPopupState application_popup = {
-    false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+    false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
 
 struct DragOverlayState { bool aktywny; int pid; int x; int y; };
 struct PendingDragOverlay {
@@ -2575,7 +2576,7 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
     /* Otwarty popup jest modalny dla pierwszego MOUSE_DOWN. Dzieki temu
        klik poza nim zamyka popup i nie jest dostarczany drugi raz aplikacji. */
     if (system_overlay.otwarty) return system_overlay.pid;
-    if (popup_aplikacji_spojny()) return application_popup.pid;
+    if (popup_aplikacji_spojny() && !application_popup.bez_wejscia) return application_popup.pid;
     return -1;
 }
 
@@ -2643,7 +2644,8 @@ bool skladacz_obrazu_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone) {
 }
 
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
-                                           int x, int y, int szer, int wys) {
+                                           int x, int y, int szer, int wys,
+                                           bool bez_wejscia) {
     if (!pid_poprawny(pid)) return false;
     if (!otwarty) {
         if (application_popup.otwarty) {
@@ -2651,7 +2653,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
             const ApplicationPopupState stary = application_popup;
             if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
             application_popup = {
-                false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+                false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
             skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
                                               stary.rect.width, stary.rect.height);
             skladacz_obrazu_obsluz_dirty();
@@ -2668,7 +2670,12 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     // Zezwalaj na czesciowe wykraczanie poza ekran podczas przesuwania dialogu
     if (x < -2048 || y < -2048 || x > 4096 || y > 4096) return false;
 
-    if (application_popup.otwarty) {
+    // Interaktywny popup innego procesu zastepuje czysto wizualny dymek - ale
+    // dopiero po walidacji i udanej alokacji, zeby odrzucone zadanie nie
+    // zmienialo widocznego stanu. Kazdy inny cudzy popup: odmowa bez zmian.
+    const bool wypiera_dymek = !bez_wejscia && application_popup.otwarty &&
+                               application_popup.pid != pid && application_popup.bez_wejscia;
+    if (application_popup.otwarty && !wypiera_dymek) {
         if (application_popup.pid != pid) return false;
 
         // Atomowe przemieszczenie: jesli rozmiar sie nie zmienil, zachowujemy bufor pikseli!
@@ -2676,6 +2683,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
             application_popup.rect.height == wys &&
             application_popup.tlo != nullptr) {
 
+            application_popup.bez_wejscia = bez_wejscia;
             if (application_popup.rect.x == x && application_popup.rect.y == y) {
                 return true;
             }
@@ -2696,7 +2704,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
         const ApplicationPopupState stary = application_popup;
         if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
         application_popup = {
-            false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+            false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
         skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
                                           stary.rect.width, stary.rect.height);
     }
@@ -2704,8 +2712,14 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     uint32_t* tlo = static_cast<uint32_t*>(bufor_grafiki_alokuj(piksele * sizeof(uint32_t)));
     if (!tlo) return false;
     for (uint64_t i = 0; i < piksele; ++i) tlo[i] = SKLADACZ_PIKSEL_PRZEZROCZYSTY;
+    if (wypiera_dymek) {
+        const ApplicationPopupState stary = application_popup;
+        if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
+        skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
+                                          stary.rect.width, stary.rect.height);
+    }
     application_popup = {true, pid, generacja_okna[pid],
-                         {x, y, szer, wys}, tlo, piksele};
+                         {x, y, szer, wys}, tlo, piksele, bez_wejscia};
     skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
     skladacz_obrazu_obsluz_dirty();
     return true;

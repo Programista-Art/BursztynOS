@@ -432,8 +432,11 @@ bool skladacz_obrazu_nad_paskiem(int pid);
 /* Awaryjne cofniecie zezwolenia: wylacza tryb "nad paskiem" dla WSZYSTKICH okien (klawisz systemowy
  * Ctrl+Alt+B, obslugiwany w jadrze przed dostarczeniem do aplikacji). Zwraca liczbe cofnietych okien. */
 uint32_t skladacz_obrazu_wylacz_wszystkie_nad_paskiem();
+/* bez_wejscia: powierzchnia czysto wizualna (dymek paska zadan) - nie jest modalna
+   i nie przechwytuje myszy; interaktywny popup innego procesu ja zastepuje. */
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
-                                           int x, int y, int szer, int wys);
+                                           int x, int y, int szer, int wys,
+                                           bool bez_wejscia = false);
 bool skladacz_obrazu_blit_popup(int pid, int x, int y, int szer, int wys,
                                 const uint32_t* piksele);
 void skladacz_obrazu_ustaw_drag_overlay(int pid, bool aktywny, int x, int y);

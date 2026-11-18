@@ -59,6 +59,7 @@
 
 #include "pzb.h"
 #include "uruchamianie_polityka.h"
+#include "popup_autoryzacja.h"
 #include "tapety_format.h"
 #include "ustawienia_aplikacji.h"
 #include "polityka_alokacji.h"
@@ -4113,12 +4114,15 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         case 55:
             return bws_kopiuj_twor(proces, arg1, arg2);
 
-        case 56:
-            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
-            if (arg1 != 0 && bws_gui_aktywny_pid() != aktualny_pid) return 0;
-            return skladacz_obrazu_ustaw_popup_aplikacji(
-                aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
-                gorne_i32(arg3), dolne_i32(arg3)) ? 1ULL : 0ULL;
+        case 56: {
+            // Autoryzacja (w tym BWS_POPUP_BEZ_WEJSCIA tylko dla Menedzera
+            // Okien) i dekodowanie: popup_autoryzacja.h, wspolne z testami hosta.
+            const PopupAutoryzacja::Wywolujacy wywolujacy{
+                znane_prawa(proces), proces.poziom_zaufania, proces.sciezka_pliku,
+                sizeof(proces.sciezka_pliku), bws_gui_aktywny_pid() == aktualny_pid};
+            return PopupAutoryzacja::wykonaj(wywolujacy, aktualny_pid, arg1, arg2, arg3, arg4,
+                                             skladacz_obrazu_ustaw_popup_aplikacji);
+        }
 
         case 57: {
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;

@@ -200,6 +200,10 @@ bool gui_pobierz_monitor(uint32_t, GuiMonitorInfo*) { return false; }
 void bws_przesun_warstwe(int, int) {}
 static bool test_popup_registered=false;
 bool gui_ustaw_popup_aplikacji(bool open, int, int, int, int) {test_popup_registered=open;return true;}
+// Dymek systemowy (BWS 56 + BWS_POPUP_BEZ_WEJSCIA): ostatnia rejestracja do sprawdzenia w testach.
+static bool test_dymek_otwarty=false;static int test_dymek_rect[4]={};static unsigned test_dymek_rejestracje=0;
+bool gui_ustaw_dymek_systemowy(bool open,int x,int y,int w,int h) {
+    ++test_dymek_rejestracje;test_dymek_otwarty=open;test_dymek_rect[0]=x;test_dymek_rect[1]=y;test_dymek_rect[2]=w;test_dymek_rect[3]=h;return true;}
 void gui_pobierz_rozdzielczosc(int* w, int* h) {
     if (w) *w = 1280;
     if (h) *h = 720;
