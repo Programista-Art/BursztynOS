@@ -1,0 +1,7 @@
+8.0 rip=0x19e2e9 rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=0.0
+12.0 rip=0x11b352 rfl=0x202 if=1 cpl=0 cr3=0xcfae000 guest_t=7.9
+180.0 rip=0x164535 rfl=0x297 if=1 cpl=0 cr3=0xcfae000 guest_t=12.2
+180.5 rip=0x164520 rfl=0x246 if=1 cpl=0 cr3=0xcfae000 guest_t=177.4
+181.0 rip=0x11b352 rfl=0x202 if=1 cpl=0 cr3=0xcfae000 guest_t=177.4
+181.5 rip=0x11b352 rfl=0x202 if=1 cpl=0 cr3=0xcfae000 guest_t=177.4
+182.0 rip=0x11b352 rfl=0x202 if=1 cpl=0 cr3=0xcfae000 guest_t=179.0

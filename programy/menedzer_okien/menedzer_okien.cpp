@@ -5,6 +5,8 @@
 #include "desktop_layout.h"
 #include "desktop_selection_paint.h"
 #include "desktop_entries.h"
+#include "app_icons.h"
+#include "pasek_zadan_uklad.h"
 #include "desktop_layout_settings.h"
 #include "obrazy/png_dekoder.h"
 /*
@@ -55,6 +57,9 @@ namespace {
 bool wm_refresh_batch_active=false;
 bool wm_refresh_pending=false;
 static void wm_gui_odswiez();
+// Kompozytor przyjmuje pasek tylko dla warstwy z opublikowana klatka (BWS 17).
+bool warstwa_wm_opublikowana = false;
+void zarejestruj_pasek_zadan();
 
 int screen_w = 1024;
 int screen_h = 768;
@@ -82,7 +87,7 @@ int SKROT_H = 32;
 
 constexpr int BUFOR_CZASU = 32;
 int TASK_BUTTON_X = 66;
-int TASK_BUTTON_W = 112;
+int TASK_BUTTON_W = 44;
 int TASK_BUTTON_GAP = 4;
 constexpr int PULPIT_MAX_WPISOW = DesktopEntries::ModelCapacity;
 // Match the established BWS/Explorer enumeration budget; not a model increase.
@@ -137,7 +142,7 @@ PULPIT_LINE_GAP=pulpit.odstep_linii;
 SKROT_W=ui_skaluj(32,ui_skala_procent);
 SKROT_H=ui_skaluj(32,ui_skala_procent);
 TASK_BUTTON_X=ui_skaluj(66,ui_skala_procent);
-TASK_BUTTON_W=ui_skaluj(112,ui_skala_procent);
+TASK_BUTTON_W=ui_skaluj(44,ui_skala_procent);     // przycisk z sama ikona aplikacji
 TASK_BUTTON_GAP=ui_skaluj(4,ui_skala_procent);
 PULPIT_GRID_W=pulpit.komorka_szer;
 PULPIT_GRID_H=pulpit.komorka_wys;
@@ -1376,6 +1381,9 @@ void wyczysc_nad_paskiem_zamknietych(const GuiOknoInfo* okna, uint32_t n) {
 // Pasek zadan jako powierzchnia kompozytora: rejestrowany tylko przy zmianie geometrii.
 int rejestr_pasek_x = -1, rejestr_pasek_y = -1, rejestr_pasek_w = -1, rejestr_pasek_h = -1;
 void zarejestruj_pasek_zadan() {
+    // Przed pierwsza publikacja warstwy WM rejestracja zawsze bylaby odrzucona
+    // (warstwa bez klatki); wtedy nic nie wysylamy - nastapi po publikacji.
+    if (!warstwa_wm_opublikowana) return;
     const int x = desktop_geometry.taskbar_x, y = desktop_geometry.taskbar_y;
     const int w = desktop_geometry.taskbar_width, h = desktop_geometry.taskbar_height;
     if (x == rejestr_pasek_x && y == rejestr_pasek_y && w == rejestr_pasek_w && h == rejestr_pasek_h) return;
@@ -1384,10 +1392,106 @@ void zarejestruj_pasek_zadan() {
     }
 }
 
+// Ikona przycisku okna na pasku: indeks w AppIcons (-1 = ikona ogolna),
+// rownolegle do okna_taskbara. Przypisanie po tozsamosci programu z jadra
+// (sciezka wykonywalna; okno podrzedne BWS 101 -> program wlasciciela), nigdy
+// po tytule okna - tytul Notatnika zmienia sie z nazwa dokumentu.
+int ikona_okna_taskbara[SKLADACZ_MAKS_WARSTW] = {};
+uint64_t sygnatura_ikon_paska = 0;
+uint64_t hover_okna_paska = 0;
+BursztynUI::IkonaPNG* ikony_paska = nullptr;
+
+// Identyfikator okna zawiera generacje, wiec ponowne uzycie pid-u daje nowa
+// sygnature i ponowne przypisanie (bez starej ikony dla nowego procesu).
+uint64_t sygnatura_tozsamosci_okien() {
+    uint64_t h = 0x9E3779B97F4A7C15ULL ^ liczba_okien_taskbara;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        h ^= okna_taskbara[i].window_id + 0x9E3779B97F4A7C15ULL + (h << 6U) + (h >> 2U);
+        h ^= static_cast<uint64_t>(static_cast<uint32_t>(okna_taskbara[i].pid)) * 0xFF51AFD7ED558CCDULL;
+    }
+    return h;
+}
+
+void przypisz_ikony_okien() {
+    const uint64_t sig = sygnatura_tozsamosci_okien();
+    if (sig == sygnatura_ikon_paska) return;
+    sygnatura_ikon_paska = sig;
+    for (uint32_t i = 0; i < SKLADACZ_MAKS_WARSTW; ++i) ikona_okna_taskbara[i] = -1;
+    if (!liczba_okien_taskbara) return;
+    static GuiOknoInfo okna_programu[SKLADACZ_MAKS_WARSTW];
+    for (int a = 0; a < AppIcons::Count; ++a) {
+        const char* exe = AppIcons::executable(a);
+        if (!exe) continue;
+        const uint32_t n = gui_pobierz_okna_aplikacji(okna_programu, SKLADACZ_MAKS_WARSTW, exe);
+        for (uint32_t k = 0; k < n && k < SKLADACZ_MAKS_WARSTW; ++k)
+            for (uint32_t i = 0; i < liczba_okien_taskbara; ++i)
+                if (okna_taskbara[i].window_id == okna_programu[k].window_id && ikona_okna_taskbara[i] < 0)
+                    ikona_okna_taskbara[i] = a;
+    }
+}
+
+void przelicz_uklad_paska();
+void po_zmianie_okien_paska();
 void odswiez_snapshot_okien() {
     liczba_okien_taskbara = gui_pobierz_okna(
         okna_taskbara, SKLADACZ_MAKS_WARSTW);
     wyczysc_nad_paskiem_zamknietych(okna_taskbara, liczba_okien_taskbara);
+    przypisz_ikony_okien();
+    przelicz_uklad_paska();
+    po_zmianie_okien_paska();
+}
+
+// Uklad przyciskow paska (rysowanie, klikniecia, prawy przycisk, hover, dymek):
+// okna bez tytulu nie maja przycisku. Gdy wszystkie przyciski nie mieszcza sie
+// przed zegarem, nadmiar trafia do menu pod przyciskiem przepelnienia, wiec
+// kazde okno pozostaje dostepne (PasekZadan::uloz).
+PasekZadan::Uklad uklad_paska;
+PasekZadan::Metryki metryki_paska() {
+    PasekZadan::Metryki m;
+    m.start_x = TASK_BUTTON_X;
+    m.koniec_x = poczatek_zegara() - TASK_BUTTON_GAP;   // zegar zawsze odsloniety
+    m.szer = TASK_BUTTON_W;
+    m.odstep = TASK_BUTTON_GAP;
+    m.szer_przepelnienia = ui_skaluj(28, ui_skala_procent);
+    return m;
+}
+int y_przyciskow_paska() { return desktop_geometry.taskbar_y + ui_skaluj(4, ui_skala_procent); }
+void przelicz_uklad_paska() {
+    bool pokazywane[PasekZadan::MAKS_OKIEN] = {};
+    int aktywne = -1;
+    const int n = liczba_okien_taskbara < uint32_t(PasekZadan::MAKS_OKIEN) ? int(liczba_okien_taskbara) : PasekZadan::MAKS_OKIEN;
+    for (int i = 0; i < n; ++i) {
+        pokazywane[i] = okna_taskbara[i].tytul[0] != '\0';
+        if (okna_taskbara[i].aktywne) aktywne = i;
+    }
+    PasekZadan::uloz(metryki_paska(), pokazywane, n, aktywne, uklad_paska);
+}
+bool prostokat_przycisku_paska(uint32_t indeks, int* x, int* y) {
+    przelicz_uklad_paska();     // zawsze z biezacej listy okien i szerokosci (n <= 16, tanie)
+    const int slot = uklad_paska.slot_okna(int(indeks));
+    if (slot < 0) return false;
+    *x = uklad_paska.x_slotu(metryki_paska(), slot);
+    *y = y_przyciskow_paska();
+    return true;
+}
+int przycisk_paska_pod(int mx, int my) {
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
+        int x = 0, y = 0;
+        if (prostokat_przycisku_paska(i, &x, &y) && punkt_w_prostokacie(mx, my, x, y, TASK_BUTTON_W, SKROT_H))
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+bool przycisk_przepelnienia_pod(int mx, int my) {
+    przelicz_uklad_paska();
+    return uklad_paska.przepelnienie &&
+           punkt_w_prostokacie(mx, my, uklad_paska.x_przepelnienia, y_przyciskow_paska(),
+                               metryki_paska().szer_przepelnienia, SKROT_H);
+}
+int indeks_okna_paska(uint64_t id) {
+    if (!id) return -1;
+    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) if (okna_taskbara[i].window_id == id) return int(i);
+    return -1;
 }
 
 bool punkt_w_prostokacie(int px, int py, int x, int y, int w, int h) {
@@ -1654,6 +1758,96 @@ bool RysujZegar(bool force=false) {
         return gui_zastap_regiony(&region,1,desktop_geometry.generation);
     });
 }
+// Ikony paska: te same pliki co skroty pulpitu/menu Start (AppIcons), w
+// rozmiarze paska; przygotowywane przed rysowaniem, przeskalowane po zmianie skali.
+const BursztynUI::IkonaPNG* ikona_paska(int indeks) {
+    if (indeks < 0 || indeks >= AppIcons::Count) return nullptr;
+    if (!ikony_paska) ikony_paska = new BursztynUI::IkonaPNG[AppIcons::Count];
+    if (!ikony_paska) return nullptr;
+    const int bok = ui_skaluj(24, ui_skala_procent);
+    ikony_paska[indeks].przygotuj(AppIcons::icon_png(indeks), bok);
+    return ikony_paska[indeks].piksele() && ikony_paska[indeks].bok() == bok ? &ikony_paska[indeks] : nullptr;
+}
+
+// Ikona ogolna dla programu bez zarejestrowanej ikony (albo nieudanego
+// odczytu PNG): stylizowane okno w kolorach motywu zamiast nazwy/zaslepki.
+void RysujOgolnaIkonePaska(int x, int y, int bok, uint32_t akcent, bool przygaszona) {
+    const uint32_t ramka = przygaszona ? motyw_kolor(MOTYW_KOLOR_RAMKA) : motyw_kolor(MOTYW_KOLOR_TEKST);
+    const int t = bok >= 32 ? 2 : 1, belka = bok / 4;
+    pulpit_prostokat(x + 1, y + 2, bok - 2, bok - 4, motyw_kolor(MOTYW_KOLOR_PRZYCISK));
+    pulpit_prostokat(x + 1, y + 2, bok - 2, belka, przygaszona ? ramka : akcent);
+    pulpit_prostokat(x + 1, y + 2, bok - 2, t, ramka);
+    pulpit_prostokat(x + 1, y + bok - 2 - t, bok - 2, t, ramka);
+    pulpit_prostokat(x + 1, y + 2, t, bok - 4, ramka);
+    pulpit_prostokat(x + bok - 1 - t, y + 2, t, bok - 4, ramka);
+}
+
+// Przycisk okna: sama ikona (bez tytulu). Aktywne: tlo podniesione i
+// pomaranczowy pasek akcentu u dolu; najechane: tlo podniesione;
+// zminimalizowane: przygaszona ikona i krotki neutralny pasek; okno "nad
+// paskiem" (opcja z prawego przycisku): maly znacznik akcentu w rogu.
+void RysujPrzyciskOknaPaska(const GuiOknoInfo& o, int indeks_ikony, int bx, int by,
+                            uint32_t akcent, uint32_t podniesiony, uint32_t ramka_paska) {
+    const bool zminimalizowane = o.stan == GUI_OKNO_ZMINIMALIZOWANE;
+    const bool hover = hover_okna_paska != 0 && hover_okna_paska == o.window_id;
+    if (o.aktywne || hover) {
+        pulpit_prostokat(bx, by, TASK_BUTTON_W, SKROT_H, podniesiony);
+        if (hover && !o.aktywne) {
+            pulpit_prostokat(bx, by, TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(bx, by + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
+            pulpit_prostokat(bx, by, 1, SKROT_H, ramka_paska);
+            pulpit_prostokat(bx + TASK_BUTTON_W - 1, by, 1, SKROT_H, ramka_paska);
+        }
+    }
+    const int bok = ui_skaluj(24, ui_skala_procent);
+    const int ix = bx + (TASK_BUTTON_W - bok) / 2;
+    const int iy = by + (SKROT_H - bok) / 2 - ui_skaluj(1, ui_skala_procent);
+    const BursztynUI::IkonaPNG* ikona = ikona_paska(indeks_ikony);
+    if (ikona && pulpit_canvas)
+        BursztynUI::rysuj_png(*pulpit_canvas, {ix, iy, bok, bok}, ikona->piksele(), bok, !zminimalizowane);
+    else
+        RysujOgolnaIkonePaska(ix, iy, bok, akcent, zminimalizowane);
+
+    const int wys_paska = ui_skaluj(3, ui_skala_procent);
+    if (o.aktywne) {
+        const int w = TASK_BUTTON_W - 2 * ui_skaluj(8, ui_skala_procent);
+        pulpit_prostokat(bx + (TASK_BUTTON_W - w) / 2, by + SKROT_H - wys_paska, w, wys_paska, akcent);
+    } else if (zminimalizowane) {
+        const int w = ui_skaluj(8, ui_skala_procent);
+        pulpit_prostokat(bx + (TASK_BUTTON_W - w) / 2, by + SKROT_H - wys_paska, w, wys_paska, ramka_paska);
+    }
+    if (czy_nad_paskiem(o.window_id)) {
+        const int z = ui_skaluj(5, ui_skala_procent);
+        pulpit_prostokat(bx + TASK_BUTTON_W - z - 2, by + 2, z, z, akcent);
+    }
+}
+
+// Przycisk przepelnienia: trzy kropki (bez napisu); tlo podniesione przy
+// najechaniu lub otwartym menu, pasek akcentu gdy aktywne okno jest ukryte.
+bool menu_przepelnienia_otwarte();
+bool hover_przepelnienia = false;
+void RysujPrzyciskPrzepelnienia(uint32_t akcent, uint32_t podniesiony, uint32_t ramka_paska) {
+    const int bx = uklad_paska.x_przepelnienia, by = y_przyciskow_paska();
+    const int w = metryki_paska().szer_przepelnienia;
+    if (hover_przepelnienia || menu_przepelnienia_otwarte()) {
+        pulpit_prostokat(bx, by, w, SKROT_H, podniesiony);
+        pulpit_prostokat(bx, by, w, 1, ramka_paska);
+        pulpit_prostokat(bx, by + SKROT_H - 1, w, 1, ramka_paska);
+        pulpit_prostokat(bx, by, 1, SKROT_H, ramka_paska);
+        pulpit_prostokat(bx + w - 1, by, 1, SKROT_H, ramka_paska);
+    }
+    const int d = ui_skaluj(4, ui_skala_procent), odstep = ui_skaluj(3, ui_skala_procent);
+    const int x0 = bx + (w - (3 * d + 2 * odstep)) / 2, y0 = by + (SKROT_H - d) / 2;
+    for (int k = 0; k < 3; ++k) pulpit_prostokat(x0 + k * (d + odstep), y0, d, d, motyw_kolor(MOTYW_KOLOR_TEKST));
+    bool aktywne_ukryte = false;
+    for (int k = 0; k < uklad_paska.liczba_ukrytych; ++k)
+        aktywne_ukryte |= okna_taskbara[uklad_paska.ukryte[k]].aktywne != 0;
+    if (aktywne_ukryte) {
+        const int wp = w - 2 * ui_skaluj(6, ui_skala_procent), hp = ui_skaluj(3, ui_skala_procent);
+        pulpit_prostokat(bx + (w - wp) / 2, by + SKROT_H - hp, wp, hp, akcent);
+    }
+}
+
 void RysujTaskbarZawartosc() {
     const uint32_t tlo_paska = motyw_kolor(MOTYW_KOLOR_PANEL);
     const uint32_t ramka_paska = motyw_kolor(MOTYW_KOLOR_RAMKA);
@@ -1664,40 +1858,21 @@ void RysujTaskbarZawartosc() {
     pulpit_prostokat(0, desktop_geometry.taskbar_y, poczatek_zegara(), 1, ramka_paska);
 
     RysujPrzyciskMenu();
-    int task_x = TASK_BUTTON_X;
+    przypisz_ikony_okien();     // bez zmian zestawu okien: tylko porownanie sygnatury
+    przelicz_uklad_paska();     // szerokosc ekranu/skala mogly sie zmienic
     for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        const GuiOknoInfo& o = okna_taskbara[i];
-        if (o.tytul[0] == '\0' || task_x + TASK_BUTTON_W > poczatek_zegara())
-            continue;
-        const uint32_t kolor = o.aktywne ? akcent :
-            (o.stan == GUI_OKNO_ZMINIMALIZOWANE ? podniesiony : motyw_kolor(MOTYW_KOLOR_PRZYCISK));
-        const uint32_t kolor_tekst = o.aktywne ? motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU) : motyw_kolor(MOTYW_KOLOR_TEKST);
-
-        pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
-                            TASK_BUTTON_W, SKROT_H, kolor);
-        if (!o.aktywne) {
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), TASK_BUTTON_W, 1, ramka_paska);
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent) + SKROT_H - 1, TASK_BUTTON_W, 1, ramka_paska);
-            pulpit_prostokat(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
-            pulpit_prostokat(task_x + TASK_BUTTON_W - 1, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent), 1, SKROT_H, ramka_paska);
-        }
-        char podpis[15] = {};
-        int pc = 0;
-        if (czy_nad_paskiem(o.window_id)) { podpis[pc++] = '^'; podpis[pc++] = ' '; }   // okno nad paskiem
-        for (int c = 0; pc < 14 && o.tytul[c] != '\0'; ++c)
-            podpis[pc++] = o.tytul[c];
-        pulpit_tekst(task_x, desktop_geometry.taskbar_y + ui_skaluj(4,ui_skala_procent),
-                                 TASK_BUTTON_W, SKROT_H, 1,
-                                 kolor_tekst, podpis);
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
+        int bx = 0, by = 0;
+        if (!prostokat_przycisku_paska(i, &bx, &by)) continue;
+        RysujPrzyciskOknaPaska(okna_taskbara[i], ikona_okna_taskbara[i], bx, by, akcent, podniesiony, ramka_paska);
     }
+    if (uklad_paska.przepelnienie) RysujPrzyciskPrzepelnienia(akcent, podniesiony, ramka_paska);
 
     if(!ostatni_czas[0])(void)pobierz_i_zaktualizuj_czas();
     (void)RysujZegar(true);
 }
 
 void RysujTaskbar() {
-    zarejestruj_pasek_zadan();
+    // Rejestracja paska w kompozytorze: po publikacji klatki (wm_gui_odswiez).
     static DesktopSelectionPaint* paint=nullptr;
     static BursztynUI::KontekstRysowania* ctx=nullptr;
     if(!paint)paint=new DesktopSelectionPaint;
@@ -1709,6 +1884,283 @@ void RysujTaskbar() {
     pulpit_canvas=ctx;
     (void)paint->finish(*ctx,[](void*,Desktop::Prostokat){RysujTaskbarZawartosc();},nullptr,desktop_geometry.generation);
     pulpit_canvas=nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Dymek przycisku paska zadan: tytul okna (z metadanych okna w jadrze, po
+// window_id, nigdy po tresci tytulu). Czysto wizualny popup systemowy
+// (BWS 56 + BWS_POPUP_BEZ_WEJSCIA): nie przechwytuje myszy ani fokusu.
+// Pokazanie po PasekZadan::Dymek::OPOZNIENIE; tekst jest kopia (nie wskaznik
+// do pamieci okna), wiec zamkniecie okna nie zostawia wiszacych danych.
+// ---------------------------------------------------------------------------
+void zamknij_menu_i_odtworz_pulpit();
+PasekZadan::Dymek dymek_paska;
+uint32_t* bufor_dymka = nullptr;
+size_t pojemnosc_dymka = 0;
+bool dymek_zarejestrowany = false;
+char tekst_dymka[PasekZadan::MAKS_OKIEN * 2] = {};
+PasekZadan::Prostokat prostokat_dymka;
+
+bool inny_popup_wm_otwarty() {
+    return menu_start_otwarte || pulpit_context_open || pulpit_modal_typ != PulpitModalTyp::BRAK ||
+           menu_przepelnienia_otwarte();
+}
+
+void ukryj_dymek_paska() {
+    if (dymek_zarejestrowany) {
+        (void)gui_ustaw_dymek_systemowy(false, 0, 0, 0, 0);
+        dymek_zarejestrowany = false;
+    }
+}
+
+// Tekst dymka z biezacego tytulu okna (UTF-8 bez uszkodzonego ogona),
+// skrocony z "…" do szerokosci zaleznej od ekranu.
+bool przygotuj_tekst_dymka(const GuiOknoInfo& o, char* out, size_t cap, int maks_tekst) {
+    if (!PasekZadan::bezpieczny_tytul(o.tytul, sizeof(o.tytul), out, cap)) return false;
+    PasekZadan::skroc_do_szerokosci(out, cap, maks_tekst, ui_skala());
+    return out[0] != '\0';
+}
+
+bool pokaz_dymek_paska() {
+    const int i = indeks_okna_paska(dymek_paska.okno());
+    int bx = 0, by = 0;
+    if (i < 0 || inny_popup_wm_otwarty() || !prostokat_przycisku_paska(uint32_t(i), &bx, &by)) {
+        dymek_paska.anuluj();ukryj_dymek_paska();return false;
+    }
+    const SkalaUI s = ui_skala();
+    const int pad = ui_skaluj(8, ui_skala_procent), margines = ui_skaluj(4, ui_skala_procent);
+    int maks_szer = ui_skaluj(480, ui_skala_procent);
+    if (maks_szer > screen_w - 2 * margines) maks_szer = screen_w - 2 * margines;
+    char tekst[sizeof(tekst_dymka)] = {};
+    if (maks_szer <= 2 * pad || !przygotuj_tekst_dymka(okna_taskbara[i], tekst, sizeof(tekst), maks_szer - 2 * pad)) {
+        dymek_paska.anuluj();ukryj_dymek_paska();return false;
+    }
+    const int w = BursztynUI::CzcionkaUI::zmierz_tekst(tekst, s) + 2 * pad;
+    const int h = BursztynUI::CzcionkaUI::pobierz_wysokosc(s) + ui_skaluj(8, ui_skala_procent);
+    const auto r = PasekZadan::polozenie_dymka(bx, TASK_BUTTON_W, desktop_geometry.taskbar_y, w, h,
+                                               screen_w, margines, ui_skaluj(6, ui_skala_procent));
+    if (r.w <= 0 || r.h <= 0) return false;
+    const size_t piksele = size_t(r.w) * size_t(r.h);
+    if (piksele > pojemnosc_dymka) {             // tylko przy wiekszym dymku, nie przy ruchu myszy
+        delete[] bufor_dymka;
+        bufor_dymka = new uint32_t[piksele];
+        pojemnosc_dymka = bufor_dymka ? piksele : 0;
+        if (!bufor_dymka) return false;
+    }
+    for (size_t k = 0; k < piksele; ++k) bufor_dymka[k] = 0;
+    BursztynUI::KontekstRysowania ctx;
+    ctx.ustaw_cel(bufor_dymka, BursztynUI::Prostokat(r.x, r.y, r.w, r.h));
+    const int promien = ui_skaluj(4, ui_skala_procent);
+    ctx.rysuj_zaokraglony_prostokat(BursztynUI::Prostokat(r.x, r.y, r.w, r.h), motyw_kolor(MOTYW_KOLOR_RAMKA) | 0xFF000000U, promien);
+    ctx.rysuj_zaokraglony_prostokat(BursztynUI::Prostokat(r.x + 1, r.y + 1, r.w - 2, r.h - 2),
+                                    motyw_kolor(MOTYW_KOLOR_PODNIESIONY) | 0xFF000000U, promien > 1 ? promien - 1 : 1);
+    ctx.dodaj_przyciecie(BursztynUI::Prostokat(r.x + pad / 2, r.y, r.w - pad, r.h));
+    ctx.rysuj_tekst(BursztynUI::Punkt(r.x + pad, r.y + (r.h - BursztynUI::CzcionkaUI::pobierz_wysokosc(s)) / 2),
+                    tekst, motyw_kolor(MOTYW_KOLOR_TEKST), s);
+    ctx.zdejmij_przyciecie();
+    ctx.ustaw_cel(nullptr, BursztynUI::Prostokat());
+    if (!gui_ustaw_dymek_systemowy(true, r.x, r.y, r.w, r.h)) { dymek_zarejestrowany = false; return false; }
+    dymek_zarejestrowany = true;
+    (void)gui_blit_popup(r.x, r.y, r.w, r.h, bufor_dymka);
+    for (size_t k = 0; k < sizeof(tekst_dymka); ++k) tekst_dymka[k] = tekst[k];
+    prostokat_dymka = r;
+    return true;
+}
+
+// Klikniecie, klawisz, menu, przeciaganie: dymek znika i nie wraca nad tym przyciskiem.
+void anuluj_dymek_paska() {
+    dymek_paska.anuluj();
+    ukryj_dymek_paska();
+}
+
+// Termin opoznienia (wywolywane po kazdym zdarzeniu i po timeoucie oczekiwania).
+void obsluz_termin_dymka(uint64_t teraz) {
+    if (dymek_paska.czas_pokazac(teraz)) (void)pokaz_dymek_paska();
+}
+
+// ---------------------------------------------------------------------------
+// Menu przepelnienia: okna bez miejsca na pasku (ikona aplikacji + wlasny
+// tytul okna; kilka okien tej samej aplikacji to osobne pozycje). Istniejacy
+// WidokMenuPopup + ZarzadcaPopupow: Esc i klikniecie poza menu zamykaja je.
+// Pozycje przechowuja window_id (z generacja); wybor jest weryfikowany wobec
+// biezacej listy okien przed aktywacja.
+// ---------------------------------------------------------------------------
+struct MenuPrzepelnienia final : BursztynUI::ObslugaWidokuMenu {
+    static constexpr uint32_t ID_POPRZEDNIE = 0x7001, ID_NASTEPNE = 0x7002;
+    PlikiUI::ObslugaPopup events;
+    BursztynUI::Menu menu;
+    BursztynUI::WidokMenuPopup widok;
+    uint64_t okna[PasekZadan::MAKS_OKIEN] = {};
+    int liczba = 0, strona = 0, na_strone = 0;
+    uint64_t wybrane = 0, sygnatura = 0, aktywne_przy_otwarciu = 0;
+    BursztynUI::IkonaPNG* ikony = nullptr;
+    char teksty[PasekZadan::MAKS_OKIEN][96] = {};
+    MenuPrzepelnienia() { widok.ustaw(&menu, this); }
+    ~MenuPrzepelnienia() override { delete[] ikony; }
+    void menu_aktywuj(BursztynUI::WidokMenuPopup&, BursztynUI::ElementMenu& e) override {
+        const uint32_t id = e.identyfikator();
+        if (!e.czy_wlaczony()) return;
+        if (id == ID_POPRZEDNIE || id == ID_NASTEPNE) { strona += id == ID_NASTEPNE ? 1 : -1; przebuduj(); return; }
+        if (id >= 1 && int(id) <= liczba) {
+            wybrane = okna[id - 1];
+            events.popups.zamknij(BursztynUI::PowodZamknieciaPopup::Zatwierdzenie);
+        }
+    }
+    void menu_otworz_podmenu(BursztynUI::WidokMenuPopup&, BursztynUI::ElementMenu&, BursztynUI::Prostokat) override {}
+    void menu_kierunek_poziomy(BursztynUI::WidokMenuPopup&, int) override {}
+    bool otwarte() const { return widok.czy_otwarta(); }
+
+    static uint64_t sygnatura_ukrytych() {
+        uint64_t h = 0xCBF29CE484222325ULL;
+        for (int k = 0; k < uklad_paska.liczba_ukrytych; ++k) {
+            const GuiOknoInfo& o = okna_taskbara[uklad_paska.ukryte[k]];
+            h = (h ^ o.window_id) * 0x100000001B3ULL;
+            h = (h ^ (uint64_t(o.stan) << 1 | o.aktywne)) * 0x100000001B3ULL;
+            for (size_t c = 0; c < sizeof(o.tytul) && o.tytul[c]; ++c) h = (h ^ uint8_t(o.tytul[c])) * 0x100000001B3ULL;
+        }
+        return h;
+    }
+    const BursztynUI::IkonaPNG* ikona(int indeks, int bok) {
+        if (indeks < 0 || indeks >= AppIcons::Count) return nullptr;
+        if (!ikony) ikony = new BursztynUI::IkonaPNG[AppIcons::Count];
+        if (!ikony) return nullptr;
+        ikony[indeks].przygotuj(AppIcons::icon_png(indeks), bok);     // dekodowanie tylko raz na plik
+        return ikony[indeks].piksele() && ikony[indeks].bok() == bok ? &ikony[indeks] : nullptr;
+    }
+    // Wiersze mieszczace sie nad paskiem; nadmiar: strony z pozycjami nawigacji.
+    int wiersze_na_ekranie() const {
+        const SkalaUI s = ui_skala();
+        const int dostepne = desktop_geometry.taskbar_y - 2 * ui_skaluj(8, ui_skala_procent) - 4 * s;
+        const int wiersz = widok.wysokosc_wiersza(s);
+        int n = wiersz > 0 ? dostepne / wiersz : 1;
+        return n < 3 ? 3 : n;
+    }
+    void zbierz() {
+        liczba = 0;
+        for (int k = 0; k < uklad_paska.liczba_ukrytych && liczba < PasekZadan::MAKS_OKIEN; ++k)
+            okna[liczba++] = okna_taskbara[uklad_paska.ukryte[k]].window_id;
+        sygnatura = sygnatura_ukrytych();
+    }
+    void przebuduj() {
+        menu.wyczysc();
+        const int bok = ui_skaluj(20, ui_skala_procent);
+        const int wiersze = wiersze_na_ekranie();
+        na_strone = liczba <= wiersze ? liczba : wiersze - 2;
+        if (na_strone < 1) na_strone = 1;
+        const int stron = (liczba + na_strone - 1) / na_strone;
+        if (strona >= stron) strona = stron - 1;
+        if (strona < 0) strona = 0;
+        if (liczba > na_strone) menu.dodaj_element("Poprzednie okna", ID_POPRZEDNIE).ustaw_wlaczony(strona > 0);
+        for (int k = strona * na_strone; k < liczba && k < (strona + 1) * na_strone; ++k) {
+            const int i = indeks_okna_paska(okna[k]);
+            if (i < 0) continue;
+            if (!PasekZadan::bezpieczny_tytul(okna_taskbara[i].tytul, sizeof(okna_taskbara[i].tytul), teksty[k], sizeof(teksty[k])))
+                PasekZadan::bezpieczny_tytul("Okno", 5, teksty[k], sizeof(teksty[k]));
+            auto& e = menu.dodaj_element(teksty[k], uint32_t(k + 1));
+            if (const auto* png = ikona(ikona_okna_taskbara[i], bok)) e.ustaw_obraz_ikony(png);
+            else e.ustaw_ikone(1);
+        }
+        if (liczba > na_strone) menu.dodaj_element("Następne okna", ID_NASTEPNE).ustaw_wlaczony(strona + 1 < stron);
+        if (otwarte()) umiesc();
+    }
+    BursztynUI::Prostokat polozenie() const {
+        const SkalaUI s = ui_skala();
+        auto rz = widok.wymagany_rozmiar(s);
+        const int margines = ui_skaluj(4, ui_skala_procent);
+        int maks_w = ui_skaluj(420, ui_skala_procent);
+        if (maks_w > screen_w - 2 * margines) maks_w = screen_w - 2 * margines;
+        if (rz.szerokosc > maks_w) rz.szerokosc = maks_w;
+        const int prawa = uklad_paska.x_przepelnienia + metryki_paska().szer_przepelnienia;
+        int x = prawa - rz.szerokosc;
+        if (x + rz.szerokosc > screen_w - margines) x = screen_w - margines - rz.szerokosc;
+        if (x < margines) x = margines;
+        int y = desktop_geometry.taskbar_y - ui_skaluj(6, ui_skala_procent) - rz.wysokosc;
+        if (y < margines) y = margines;
+        return {x, y, rz.szerokosc, rz.wysokosc};
+    }
+    void umiesc() {
+        events.popups.przemiesc_powierzchnie(widok, polozenie());
+        widok.uniewaznij();
+        events.popups.odrysuj_popupy(true);
+    }
+    bool otworz() {
+        zbierz();
+        if (!liczba) return false;
+        strona = 0; wybrane = 0;
+        aktywne_przy_otwarciu = 0;
+        for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) if (okna_taskbara[i].aktywne) aktywne_przy_otwarciu = okna_taskbara[i].window_id;
+        events.reset_input();
+        events.geometria({0, 0, screen_w, screen_h}, {0, 0, screen_w, desktop_geometry.taskbar_y});
+        widok.zaktualizuj_motyw();
+        widok.ustaw(&menu, this);
+        przebuduj();
+        if (!events.popups.otworz(widok, polozenie(), nullptr, &widok)) return false;
+        widok.ustaw_aktywny_indeks(liczba > na_strone ? 1 : 0);
+        events.popups.odrysuj_popupy(true);
+        return true;
+    }
+    void zamknij() { if (otwarte()) events.popups.zamknij(); }
+};
+MenuPrzepelnienia* menu_przepelnienia = nullptr;
+bool menu_przepelnienia_otwarte() { return menu_przepelnienia && menu_przepelnienia->otwarte(); }
+
+void przelacz_menu_przepelnienia() {
+    anuluj_dymek_paska();
+    if (menu_przepelnienia_otwarte()) { menu_przepelnienia->zamknij(); RysujTaskbar(); wm_gui_odswiez(); return; }
+    if (!menu_przepelnienia) menu_przepelnienia = new MenuPrzepelnienia;
+    if (!menu_przepelnienia) return;
+    if (menu_start_otwarte) zamknij_menu_i_odtworz_pulpit();
+    (void)menu_przepelnienia->otworz();
+    RysujTaskbar();
+    wm_gui_odswiez();
+}
+
+// Po kazdej zmianie listy okien: dymek tylko dla istniejacego okna (nowa
+// generacja = inne okno), menu przepelnienia aktualizowane albo zamykane.
+void po_zmianie_okien_paska() {
+    if (dymek_paska.okno()) {
+        const int i = indeks_okna_paska(dymek_paska.okno());
+        int bx = 0, by = 0;
+        if (i < 0 || !prostokat_przycisku_paska(uint32_t(i), &bx, &by)) {
+            if (dymek_paska.okno_zniknelo(dymek_paska.okno())) ukryj_dymek_paska();
+            hover_okna_paska = 0;
+        } else if (dymek_paska.widoczny()) {
+            char tekst[sizeof(tekst_dymka)] = {};
+            int maks = ui_skaluj(480, ui_skala_procent) - 2 * ui_skaluj(8, ui_skala_procent);
+            if (maks > screen_w - 2 * ui_skaluj(12, ui_skala_procent)) maks = screen_w - 2 * ui_skaluj(12, ui_skala_procent);
+            (void)przygotuj_tekst_dymka(okna_taskbara[i], tekst, sizeof(tekst), maks);
+            bool inny = false;
+            for (size_t k = 0; k < sizeof(tekst); ++k) { inny |= tekst[k] != tekst_dymka[k]; if (!tekst[k] && !tekst_dymka[k]) break; }
+            if (inny) (void)pokaz_dymek_paska();      // np. Notatnik zapisal dokument pod nowa nazwa
+        }
+    }
+    if (menu_przepelnienia_otwarte()) {
+        uint64_t aktywne = 0;
+        for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) if (okna_taskbara[i].aktywne) aktywne = okna_taskbara[i].window_id;
+        if (!uklad_paska.przepelnienie || aktywne != menu_przepelnienia->aktywne_przy_otwarciu) {
+            menu_przepelnienia->zamknij();          // inna aplikacja aktywowana albo brak przepelnienia
+        } else if (MenuPrzepelnienia::sygnatura_ukrytych() != menu_przepelnienia->sygnatura) {
+            menu_przepelnienia->zbierz();
+            if (!menu_przepelnienia->liczba) menu_przepelnienia->zamknij();
+            else menu_przepelnienia->przebuduj();
+        }
+    }
+}
+
+// Zdarzenia dla otwartego menu przepelnienia (modalne jak menu kontekstowe).
+bool obsluz_menu_przepelnienia(const bws_zdarzenie& e) {
+    if (!menu_przepelnienia_otwarte()) return false;
+    const bool wynik = menu_przepelnienia->events.zdarzenie(e);
+    if (!menu_przepelnienia->otwarte()) {
+        const uint64_t id = menu_przepelnienia->wybrane;
+        menu_przepelnienia->wybrane = 0;
+        if (id && indeks_okna_paska(id) >= 0) (void)gui_aktywuj_okno(id);   // przywraca zminimalizowane
+        RysujTaskbar();
+        wm_gui_odswiez();
+        return true;
+    }
+    if (menu_przepelnienia->events.wymaga_odswiezenia()) wm_gui_odswiez();
+    return wynik;
 }
 
 void zarejestruj_pulpit_jako_cel_drop() {
@@ -2136,6 +2588,15 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,6,26,16,16,0x0051B87A);
             rysuj_fragment_ikony(x,y,26,26,16,16,0x00E85D5D);
             break;
+        case TypIkonyAplikacji::UstawieniaEkranu:
+            // Zapas na brak PNG: monitor ze strzalka skalowania w kolorach motywu.
+            rysuj_fragment_ikony(x,y,3,6,42,30,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            rysuj_fragment_ikony(x,y,6,9,36,24,motyw_kolor(MOTYW_KOLOR_PANEL));
+            rysuj_fragment_ikony(x,y,12,15,24,3,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,12,15,3,12,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,20,36,8,5,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            rysuj_fragment_ikony(x,y,14,41,20,3,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            break;
         case TypIkonyAplikacji::Diagnostyka:
             // A themed monitor with a diagnostic pulse, using native icon primitives.
             rysuj_fragment_ikony(x,y,3,6,42,30,motyw_kolor(MOTYW_KOLOR_RAMKA));
@@ -2489,33 +2950,32 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
-    int task_x = TASK_BUTTON_X;
-    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
-        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
-                                TASK_BUTTON_W, SKROT_H)) {
-            (void)gui_aktywuj_okno(okna_taskbara[i].window_id);
-            return;
-        }
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
-    }
+    if (przycisk_przepelnienia_pod(mx, my)) { przelacz_menu_przepelnienia(); return; }
+    // Aktywacja okna (takze przywrocenie zminimalizowanego) przez jadro.
+    const int przycisk = przycisk_paska_pod(mx, my);
+    if (przycisk >= 0) (void)gui_aktywuj_okno(okna_taskbara[przycisk].window_id);
 }
 
 // Prawy przycisk na przycisku okna w pasku: przelacza "Zawsze na wierzchu takze nad paskiem zadan".
 bool obsluz_prawy_klik_paska(int mx, int my) {
-    int task_x = TASK_BUTTON_X;
-    for (uint32_t i = 0; i < liczba_okien_taskbara; ++i) {
-        if (okna_taskbara[i].tytul[0] == '\0' ||
-            task_x + TASK_BUTTON_W > poczatek_zegara()) continue;
-        if (punkt_w_prostokacie(mx, my, task_x, screen_h - ui_skaluj(36,ui_skala_procent),
-                                TASK_BUTTON_W, SKROT_H)) {
-            if (przelacz_nad_paskiem(okna_taskbara[i].window_id)) { RysujTaskbar(); wm_gui_odswiez(); }
-            return true;
-        }
-        task_x += TASK_BUTTON_W + TASK_BUTTON_GAP;
-    }
-    return false;
+    if (przycisk_przepelnienia_pod(mx, my)) return true;        // bez menu kontekstowego pulpitu
+    const int przycisk = przycisk_paska_pod(mx, my);
+    if (przycisk < 0) return false;
+    if (przelacz_nad_paskiem(okna_taskbara[przycisk].window_id)) { RysujTaskbar(); wm_gui_odswiez(); }
+    return true;
+}
+
+// Najechanie na przycisk okna: subtelne tlo (odrysowanie tylko przy zmianie).
+bool aktualizuj_hover_paska(int mx, int my) {
+    const int przycisk = przycisk_paska_pod(mx, my);
+    const uint64_t id = przycisk >= 0 ? okna_taskbara[przycisk].window_id : 0;
+    // Dymek: nowy przycisk = nowe odliczanie; ruch w obrebie przycisku nic nie zmienia.
+    if (dymek_paska.najechanie(inny_popup_wm_otwarty() ? 0 : id, gui_czas_monotoniczny_ns())) ukryj_dymek_paska();
+    const bool nad_przepelnieniem = przycisk_przepelnienia_pod(mx, my);
+    const bool zmiana = id != hover_okna_paska || nad_przepelnieniem != hover_przepelnienia;
+    hover_okna_paska = id;
+    hover_przepelnienia = nad_przepelnieniem;
+    return zmiana;
 }
 
 void rozmiesc_ikony_ekranu(){
@@ -2529,6 +2989,8 @@ static void wm_gui_odswiez() {
         return;
     }
     gui_odswiez();
+    warstwa_wm_opublikowana = true;
+    zarejestruj_pasek_zadan();      // tylko przy zmianie geometrii (albo po wczesniejszej odmowie)
 }
 
 struct WmRefreshBatch {
@@ -2538,6 +3000,8 @@ struct WmRefreshBatch {
         if(wm_refresh_pending) {
             wm_refresh_pending=false;
             gui_odswiez();
+            warstwa_wm_opublikowana=true;
+            zarejestruj_pasek_zadan();
         }
     }
 };
@@ -2679,12 +3143,17 @@ extern "C" __attribute__((noreturn)) void _start() {
 
     while (true) {
         bws_zdarzenie zdarzenie{};
-        if (!gui_czekaj_na_zdarzenie(&zdarzenie)) continue;
-        zarejestruj_pasek_zadan();      // pasek jako powierzchnia kompozytora (retry do skutku, potem tylko przy zmianie)
+        // Tylko gdy dymek paska czeka na opoznienie: krotkie oczekiwanie z
+        // limitem (kilka tykniec), bez okresowego odrysowywania.
+        const bool jest_zdarzenie = dymek_paska.czeka()
+            ? gui_czekaj_na_zdarzenie_z_timeoutem(&zdarzenie, 5)
+            : gui_czekaj_na_zdarzenie(&zdarzenie);
+        if (!jest_zdarzenie) { obsluz_termin_dymka(gui_czas_monotoniczny_ns()); continue; }
         WmRefreshBatch frame_batch;
         if(zdarzenie.typ==BWS_ZDARZENIE_KLAWISZ_FIZYCZNY)desktop_modifiers=zdarzenie.przyciski;
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
+            anuluj_dymek_paska();if(menu_przepelnienia_otwarte())menu_przepelnienia->zamknij();
             zamknij_pulpit_context();zamknij_pulpit_modal();
             if(start_menu)start_menu->close();
             menu_start_otwarte=false;menu_gry_otwarte=false;anuluj_gest_pulpitu();
@@ -2717,6 +3186,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             continue;
         }
         if (zdarzenie.typ == BWS_ZDARZENIE_MOTYW_ZMIENIONY) {
+            anuluj_dymek_paska();if(menu_przepelnienia_otwarte())menu_przepelnienia->zamknij();
             BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
             metryki_ekranu();
             aktualizuj_layout_pulpitu();
@@ -2746,6 +3216,13 @@ extern "C" __attribute__((noreturn)) void _start() {
         const int mx = zdarzenie.x;
         const int my = zdarzenie.y;
         const bool klik = zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN;
+        // Dymek znika natychmiast przy kliknieciu (takze rozpoczeciu
+        // przeciagania), rolce i klawiaturze.
+        if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN || zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN ||
+            zdarzenie.typ == BWS_ZDARZENIE_MYSZ_KOLO || zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ ||
+            zdarzenie.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY || zdarzenie.typ == BWS_ZDARZENIE_TEXT_INPUT ||
+            zdarzenie.typ == BWS_ZDARZENIE_DRAG_HOVER)
+            anuluj_dymek_paska();
 
         if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_RUCH) {
             const bool hover_now = punkt_w_prostokacie(mx, my,
@@ -2754,6 +3231,10 @@ extern "C" __attribute__((noreturn)) void _start() {
             if (hover_now != menu_przycisk_hover) {
                 menu_przycisk_hover = hover_now;
                 RysujPrzyciskMenu();
+                wm_gui_odswiez();
+            }
+            if (aktualizuj_hover_paska(mx, my)) {
+                RysujTaskbar();
                 wm_gui_odswiez();
             }
         } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
@@ -2775,6 +3256,8 @@ extern "C" __attribute__((noreturn)) void _start() {
         }
 
         if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
+            anuluj_dymek_paska();
+            if (menu_przepelnienia_otwarte()) { menu_przepelnienia->zamknij(); RysujTaskbar(); wm_gui_odswiez(); }
             zamknij_menu_i_odtworz_pulpit();
             zamknij_pulpit_context();
             zamknij_pulpit_modal();
@@ -2790,6 +3273,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             else {RysujPrzyciskMenu();wm_gui_odswiez();}
             if(zdarzenie.typ!=BWS_ZDARZENIE_TIMER)continue;
         }
+        if(obsluz_menu_przepelnienia(zdarzenie))continue;
         if(obsluz_popupy_pulpitu(zdarzenie))continue;
 
         if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
@@ -2836,6 +3320,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             }
         }
 
+        obsluz_termin_dymka(gui_czas_monotoniczny_ns());
         const bool clock_changed=pobierz_i_zaktualizuj_czas();
         if(clock_changed || (taskbar_clock && taskbar_clock->needs_repaint())) {
             if(RysujZegar())wm_gui_odswiez();

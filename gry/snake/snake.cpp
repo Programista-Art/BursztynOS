@@ -15,6 +15,7 @@
 
 #include "loader.h"
 #include "bursztyn_ui/bursztyn_ui.h"
+#include "bursztyn_ui/okno_podrzedne.h"
 #include "bursztyn_gui.h"
 #include "gry/snake/snake_logika.h"
 #include "gry/snake/snake_ustawienia.h"
@@ -258,9 +259,10 @@ struct AplikacjaSnake {
 
     void ustaw_rozmiar_komorki(int k) { pokazana_komorka = k; }
 
-    void pokaz_pomoc(const char* tytul, const char* tekst) {
-        if (!okno) return;
-        Komunikat::informacja(okno->zarzadca_popupow(), tytul, tekst, nullptr, nullptr, okno->kontrolka_glowna());
+    // Okno podrzedne (modeless, wlasnosc okna gry); ponowne wybranie aktywuje istniejace. Klawisze ruchu trafiaja
+    // do okna podrzednego, dopoki ma fokus - waz ich nie dostaje.
+    void pokaz_pomoc(OknoPodrzedne::Rodzaj rodzaj, const char* tytul, const char* tekst) {
+        (void)OknoPodrzedne::otworz(rodzaj, tytul, tekst);
     }
 };
 
@@ -369,21 +371,43 @@ void rysuj_plansze(PowierzchniaRysunkowa* pow, KontekstRysowania& ctx, void*) {
     }
 }
 
+// Format tresci okien podrzednych: "# Sekcja", "Pole<TAB>Wartosc", pusta linia, akapit (bursztyn_ui/tresc_uklad.h).
 const char* TEKST_STEROWANIE =
-    "Strzałki lub W, A, S, D - kierunek ruchu węża.\n"
-    "Spacja - pauza / wznowienie.\n"
-    "R - rozpocznij od nowa.\n"
-    "Esc - zamknij menu.\n"
-    "Wąż skręca najwyżej raz na krok gry.";
+    "# Ruch węża\n"
+    "Strzałki lub W, A, S, D\tkierunek ruchu węża (najwyżej jeden skręt na krok gry)\n"
+    "Pierwszy klawisz ruchu\trozpoczyna grę ze stanu gotowości\n"
+    "\n"
+    "# Przebieg gry\n"
+    "Spacja lub P\tpauza / wznowienie\n"
+    "R\trozpocznij od nowa\n"
+    "\n"
+    "# Menu\n"
+    "Esc\tzamyka otwarte menu\n"
+    "Menu Gra\tnowa gra, pauza / wznów, rozpocznij od nowa, zakończ\n"
+    "Menu Ustawienia\tprędkość gry i widoczność siatki";
 const char* TEKST_ZASADY =
+    "# Cel gry\n"
     "Zjadaj jabłka, aby urosnąć i zdobyć punkty.\n"
+    "\n"
+    "# Punkty\n"
+    "Wynik\tliczba zjedzonych jabłek: każde dodaje punkt i wydłuża węża o jedno pole\n"
+    "Start\twąż ma na początku długość 3\n"
+    "\n"
+    "# Koniec gry\n"
     "Uderzenie w ścianę lub we własne ciało kończy grę.\n"
+    "\n"
+    "# Zwycięstwo\n"
     "Wygrywasz, gdy wąż wypełni całą planszę.\n"
-    "Najlepszy wynik jest zapamiętywany.";
+    "\n"
+    "# Najlepszy wynik\n"
+    "Najlepszy wynik jest zapamiętywany i wczytywany przy następnym uruchomieniu gry.";
 const char* TEKST_O_GRZE =
-    "Snake dla Bursztyn OS\n"
+    "# Snake dla Bursztyn OS\n"
     "Aplikacja BursztynUI (Ring 3).\n"
-    "Plansza 20 x 15, trzy prędkości gry.";
+    "\n"
+    "# Dane gry\n"
+    "Plansza\t20 x 15 pól siatki (18 x 13 widocznych)\n"
+    "Prędkości\twolno 300 ms, normalnie 220 ms, szybko 150 ms (odstęp między krokami)";
 
 class OknoSnake : public Okno {
 public:
@@ -466,9 +490,9 @@ static void snake_zbuduj_ui(AplikacjaGUI& app, OknoSnake& okno) {
     e_siatka.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole).ustaw_zaznaczony(g_snake.ust.siatka);
 
     Menu& m_pomoc = menu.menu().dodaj_podmenu("Pomoc", 300);
-    m_pomoc.dodaj_element("Sterowanie", 301, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("Sterowanie", TEKST_STEROWANIE); });
-    m_pomoc.dodaj_element("Zasady gry", 302, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("Zasady gry", TEKST_ZASADY); });
-    m_pomoc.dodaj_element("O grze", 303, [](ElementMenu&, void*) { g_snake.pokaz_pomoc("O grze", TEKST_O_GRZE); });
+    m_pomoc.dodaj_element("Sterowanie", 301, [](ElementMenu&, void*) { g_snake.pokaz_pomoc(OknoPodrzedne::Rodzaj::SterowanieSnake, "Sterowanie", TEKST_STEROWANIE); });
+    m_pomoc.dodaj_element("Zasady gry", 302, [](ElementMenu&, void*) { g_snake.pokaz_pomoc(OknoPodrzedne::Rodzaj::ZasadySnake, "Zasady gry", TEKST_ZASADY); });
+    m_pomoc.dodaj_element("O grze", 303, [](ElementMenu&, void*) { g_snake.pokaz_pomoc(OknoPodrzedne::Rodzaj::OGrzeSnake, "O grze", TEKST_O_GRZE); });
 
     Panel& info = korzen->dodaj<Panel>(Orientacja::Pozioma);
     info.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);

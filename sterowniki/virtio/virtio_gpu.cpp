@@ -514,23 +514,49 @@ static bool virtio_gpu_controlq_ready_locked(VirtioGpuDriver* drv) {
  * caller we fall back to `pause`. NO scheduling happens here: locks held by the
  * caller (driver, screen) stay held, exactly as before - this is not a yield.
  */
+/*
+ * Uprzywilejowane operacje CPU uzywane przez gpu_wait_for_irq. W jadrze to dokladnie te same instrukcje co wczesniej
+ * (inline, bez zmiany generowanego kodu). W buildzie hostowym (proces Linux w Ring 3) CLI/STI/HLT dalyby SIGSEGV, wiec
+ * test dostarcza model flagi IF i HLT (host_cpu_*): sprawdza protokol bez wykonywania instrukcji uprzywilejowanych.
+ */
+#ifdef BURSZTYN_VIRTIO_HOST_TEST
+/* Domyslny model (slabe symbole): sledzi tylko IF; test moze dostarczyc wlasny (testy/test_virtio_pci.cpp). */
+static bool g_host_cpu_if_domyslny = true;
+__attribute__((weak)) bool host_cpu_irq_enabled() { return g_host_cpu_if_domyslny; }
+__attribute__((weak)) void host_cpu_irq_disable() { g_host_cpu_if_domyslny = false; }
+__attribute__((weak)) void host_cpu_irq_enable() { g_host_cpu_if_domyslny = true; }
+__attribute__((weak)) void host_cpu_enable_irq_and_halt() { g_host_cpu_if_domyslny = true; }   // "przerwanie" budzi od razu
+static inline bool gpu_cpu_irq_enabled() { return host_cpu_irq_enabled(); }
+static inline void gpu_cpu_irq_disable() { host_cpu_irq_disable(); }
+static inline void gpu_cpu_irq_enable() { host_cpu_irq_enable(); }
+static inline void gpu_cpu_enable_irq_and_halt() { host_cpu_enable_irq_and_halt(); }
+#else
+static inline bool gpu_cpu_irq_enabled() {
+    uint64_t rflags = 0;
+    asm volatile("pushfq; popq %0" : "=r"(rflags));
+    return (rflags & (1ULL << 9)) != 0;
+}
+static inline void gpu_cpu_irq_disable() { asm volatile("cli" ::: "memory"); }
+static inline void gpu_cpu_irq_enable() { asm volatile("sti" ::: "memory"); }
+/* STI i HLT musza byc JEDNYM blokiem asm: cien przerwania STI obejmuje HLT, wiec IRQ nie wpadnie miedzy nie. */
+static inline void gpu_cpu_enable_irq_and_halt() { asm volatile("sti; hlt" ::: "memory", "cc"); }
+#endif
+
 static inline void gpu_wait_for_irq(VirtioGpuDriver* drv) {
 #if defined(BURSZTYN_GPU_POLL_WAIT) && BURSZTYN_GPU_POLL_WAIT
     (void)drv;
     asm volatile("pause" ::: "memory");   // A/B: zachowanie sprzed zmiany
 #else
-    uint64_t rflags = 0;
-    asm volatile("pushfq; popq %0" : "=r"(rflags));
-    if (!(rflags & (1ULL << 9))) {
+    if (!gpu_cpu_irq_enabled()) {
         asm volatile("pause" ::: "memory");
         return;
     }
-    asm volatile("cli" ::: "memory");
+    gpu_cpu_irq_disable();
     if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
-        asm volatile("sti" ::: "memory");
+        gpu_cpu_irq_enable();
         return;
     }
-    asm volatile("sti; hlt" ::: "memory", "cc");
+    gpu_cpu_enable_irq_and_halt();
 #endif
 }
 

@@ -67,6 +67,11 @@ constexpr uint16_t SELEKTOR_KODU_JADRA = 0x08;
  * P=1, DPL=0, typ=0xE (64-bit interrupt gate).
  */
 constexpr uint8_t FLAGA_INTERRUPT_GATE_RING0 = 0x8E;
+/* Wektor programowego oddania CPU: brama przerwan (typ 0xE: IF=0 przy wejsciu), DPL 0 (int z Ring 3 -> #GP), poza pula. */
+static_assert((FLAGA_INTERRUPT_GATE_RING0 & 0x0F) == 0x0E && (FLAGA_INTERRUPT_GATE_RING0 & 0x60) == 0 &&
+              (FLAGA_INTERRUPT_GATE_RING0 & 0x80) != 0, "brama Ring 0: obecna, DPL 0, 64-bit interrupt gate");
+static_assert(IDT_WEKTOR_ODDANIA_CPU > IDT_OSTATNI_WEKTOR_DYNAMICZNY && IDT_WEKTOR_ODDANIA_CPU < 256,
+              "wektor oddania CPU poza pula dynamicznych IRQ");
 
 constexpr uint16_t LICZBA_WPISOW_IDT = 256;
 constexpr uint16_t LICZBA_AKTYWNYCH_ISR = 256;
@@ -747,6 +752,11 @@ void panic_wyjatek(const RejestryStanowe* stan) {
 
 } // namespace
 
+#ifdef BURSZTYN_IDT_HOST_TEST
+/* Hak testu hosta (testy/test_irq_allocation.cpp): prawdziwa logika EOI na atrapie rejestrow LAPIC. */
+void idt_host_test_eoi(uint8_t wektor) { wyslij_eoi_jesli_potrzebne(wektor); }
+#endif
+
 DeskryptorIDT tablica_idt[LICZBA_WPISOW_IDT]
     __attribute__((aligned(4096)));
 
@@ -878,6 +888,22 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         uint64_t handler_rsp = 0;
         asm volatile("mov %%rsp, %0" : "=r"(handler_rsp));
         stos_probkuj_rsp_kontekst(aktualny_pid, handler_rsp, irq_ctx);
+    }
+
+    if (wektor == IDT_WEKTOR_ODDANIA_CPU) {
+        /*
+         * Programowe oddanie CPU z punktu zwrotu syscallu (scheduler_punkt_zwrotu_syscalla): bez ksiegowosci timera.
+         * Przelaczamy tylko, gdy proces Ring 0 jawnie na to zezwolil (jawne_czekanie_sieci).
+         *
+         * EOI: programowe `int $253` nie ustawia bitu ISR w LAPIC, wiec wyslij_eoi_jesli_potrzebne niczego nie wysyla.
+         * Gdyby kontroler kiedykolwiek dostarczyl 253 sprzetowo (bledna konfiguracja MSI/IOAPIC; pula dynamiczna konczy
+         * sie na 252), bit ISR bylby ustawiony, a brak EOI zablokowalby w LAPIC wszystkie przerwania o priorytecie <= 253,
+         * lacznie z timerem. EOI przed ewentualna zmiana CR3/RSP, jak w glownej sciezce ponizej.
+         */
+        wyslij_eoi_jesli_potrzebne(wektor);
+        if (idt_oddanie_cpu_przelacz(przerwano_ring0, aktualny_pid, MAKS_PROCESOW, scheduler_czeka_w_sieci(aktualny_pid)))
+            return PrzelaczKontekstProgramowy(rsp);
+        return rsp;
     }
 
     switch (wektor) {
@@ -1041,6 +1067,9 @@ extern "C" void InicjalizujIDT() {
             adres_isr,
             FLAGA_INTERRUPT_GATE_RING0);
     }
+
+    /* Programowe oddanie CPU: DPL 0 (int z Ring 3 daje #GP), stub z tablicy ISR. */
+    UstawWpisIDT(static_cast<uint8_t>(IDT_WEKTOR_ODDANIA_CPU), tablica_isr[IDT_WEKTOR_ODDANIA_CPU], FLAGA_INTERRUPT_GATE_RING0);
 
     wskaznik_idtr.rozmiar =
         static_cast<uint16_t>(

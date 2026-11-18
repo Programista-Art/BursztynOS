@@ -1,0 +1,14 @@
+g++ -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen    -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -DBURSZTYN_VIRTIO_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_pointer_regression.cpp sterowniki/usb/hid_pointer.cpp sterowniki/wejscie/input_device.cpp -o .pointingtest/pointer-regression
+testy/test_pointer_regression.cpp: In lambda function:
+testy/test_pointer_regression.cpp:104:19: warning: ISO C++ does not support ‘__int128’ for ‘span’ [-Wpedantic]
+  104 |             const __int128 span=int64_t(range.second)-range.first;
+      |                   ^~~~~~~~
+testy/test_pointer_regression.cpp:105:26: warning: ISO C++ does not support ‘__int128’ for ‘type name’ [-Wpedantic]
+  105 |             return int(((__int128(clamped)-range.first)*(extent-1)+span/2)/span);
+      |                          ^~~~~~~~
+.pointingtest/pointer-regression
+Signed relative cursor regression: 396600 checks PASS
+Absolute physical endpoints: 3864 checks PASS
+InputDevice modes/readiness/API regression: 56 checks PASS
+python3 testy/test_pointer_boot_order.py
+Pointer boot order/barrier: 6 checks PASS

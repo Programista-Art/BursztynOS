@@ -213,6 +213,8 @@ extern "C" void bur_formatuj_blad(char*, size_t, const char*, const BurObrazPlik
  *           juz instancja tego samego programu.
  */
 extern "C" uint8_t loader_ostatni_blad(void);
+/* PID ostatnio pomyslnie uruchomionego procesu (do rejestracji wlasnosci okien podrzednych). */
+extern "C" int loader_ostatni_pid_uruchomiony(void);
 
 // Jak bws_uruchom_program_z_pliku[_z_argumentem], ale wymaga tozsamosci systemowej
 // (SHA-256 wbudowany w jadro albo podpis release, tozsamosc_systemowa.h) dla bajtow,

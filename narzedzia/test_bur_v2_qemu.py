@@ -59,7 +59,9 @@ def main():
     run_cmd(['objcopy', '-O', 'binary', str(out/'launcher.elf'), str(out/'menedzer_okien.bin')])
     shutil.copy2(ROOT/'narzedzia/fixtures/bur_v1_legacy/fpu_probe.bin',out/'fpu_probe.bin')
     for app in ('test', 'menedzer_okien','fpu_probe'):
-        run_cmd(['ld','-r','-b','binary',app+'.bin','-o',app+'_blob.o'], cwd=out)
+        # Jadro oczekuje blobow SKOMPRESOWANYCH (_binary_*_bin_bz_*), jak w produkcyjnym Makefile.
+        run_cmd(['python3', str(ROOT/'narzedzia/kompresuj_blob.py'), str(out/(app+'.bin')), str(out/(app+'.bin.bz'))])
+        run_cmd(['ld','-r','-b','binary',app+'.bin.bz','-o',app+'_blob.o'], cwd=out)
     objects = [str(out/o) if o in ('test_blob.o','menedzer_okien_blob.o','fpu_probe_blob.o') else o
                for o in get_make_objs()]
     run_cmd(['x86_64-linux-gnu-g++','-T','jadro/arch/linker.ld','-nostdlib','-no-pie','-static',
@@ -117,7 +119,8 @@ def main():
             control.recv(4096)
             control.sendall(b'info registers\n')
             registers=b''
-            while b'(qemu)' not in registers:
+            # Odpowiedz monitora = echo polecenia + rejestry + prompt: czekamy na rejestry, nie na pierwszy prompt.
+            while not (b'CR4=' in registers and b'EFER=' in registers and registers.rstrip().endswith(b'(qemu)')):
                 registers+=control.recv(65536)
         (out/'registers.txt').write_bytes(registers)
         cr4=int(re.search(rb'CR4=([0-9a-fA-F]+)',registers)[1],16)

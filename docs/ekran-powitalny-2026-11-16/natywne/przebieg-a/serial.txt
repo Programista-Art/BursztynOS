@@ -1,0 +1,212 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0)
+BdsDxe: starting Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x5,0x0)
+[0m[30m[40m[2J[01;01H[0m[37m[40m[02;40HGNU GRUB  version 2.12
+
+[04;02H┌────────────────────────────────────────────────────────────────────────────────────────────────┐[05;02H│[05;99H│[06;02H│[06;99H│[07;02H│[07;99H│[08;02H│[08;99H│[09;02H│[09;99H│[10;02H│[10;99H│[11;02H│[11;99H│[12;02H│[12;99H│[13;02H│[13;99H│[14;02H│[14;99H│[15;02H│[15;99H│[16;02H│[16;99H│[17;02H│[17;99H│[18;02H│[18;99H│[19;02H│[19;99H│[20;02H│[20;99H│[21;02H│[21;99H│[22;02H│[22;99H│[23;02H│[23;99H│[24;02H└────────────────────────────────────────────────────────────────────────────────────────────────┘[25;02H[26;02H     Use the ▲ and ▼ keys to select which entry is highlighted.                              
+      Press enter to boot the selected OS, `e' to edit the commands before booting or `c' for 
+      a command-line.                                                                         [05;:0H [0m[30m[47m[05;03H*Bursztyn OS                                                                                    [0m[37m[40m[05;98H[06;03H Bursztyn OS - testy automatyczne                                                               [06;98H[07;03H Bursztyn OS - testy automatyczne (niszczacy test dysku)                                        [07;98H[08;03H Bursztyn OS Instalator                                                                         [08;98H[09;03H                                                                                                [09;98H[10;03H                                                                                                [10;98H[11;03H                                                                                                [11;98H[12;03H                                                                                                [12;98H[13;03H                                                                                                [13;98H[14;03H                                                                                                [14;98H[15;03H                                                                                                [15;98H[16;03H                                                                                                [16;98H[17;03H                                                                                                [17;98H[18;03H                                                                                                [18;98H[19;03H                                                                                                [19;98H[20;03H                                                                                                [20;98H[21;03H                                                                                                [21;98H[22;03H                                                                                                [22;98H[23;03H                                                                                                [23;98H[23;:0H [05;98H[29;01H   The highlighted entry will be executed automatically in 3s.                                     [05;98H[29;01H   The highlighted entry will be executed automatically in 2s.                                     [05;98H[29;01H   The highlighted entry will be executed automatically in 1s.                                     [05;98H[29;01H   The highlighted entry will be executed automatically in 0s.                                     [05;98H[0m[30m[40m[2J[01;01H[0m[37m[40m[0m[30m[40m[2J[01;01H[0m[37m[40m[HAL] Aktywacja sterownika UEFI GOP.
+[MOUSE BOUNDS] source=cursor screen=1920x1080 max=1919x1079 gen=1
+[EKRAN] Backend UEFI GOP (framebuffer).
+[SYSTEM] Bursztyn OS HAL gotowy!
+==================================================
+ Bursztyn OS v1.0.1.9 (x86-64)
+ Polski System Operacyjny
+ Github: Programista-Art/BursztynOS 
+ Autor: Dymitr Wygowski 
+==================================================
+[PMM] Skan pamieci fizycznej. Wykryto: 2046 MB RAM
+[VMM] Paging 4-poziomowy aktywowany.
+[HEAP] Sterta jadra 16 MiB gotowa.
+[STACK] Podsystem chronionych stosow Ring 0 zainicjalizowany.
+[ACPI] Multiboot2 ACPI new RSDP znaleziony.
+[ACPI] SDT FACP
+[ACPI] FADT bez obslugi RESET_REG.
+[ACPI] DSDT _S5 gotowy.
+[ACPI] SDT APIC
+[ACPI] SDT HPET
+[ACPI] SDT WAET
+[ACPI] SDT BGRT
+[ACPI] Uzywam XSDT.
+[HPET] ACPI HPET znaleziony.
+[HPET] MMIO=0xFED00000
+[HPET] period=10000000 fs
+[HPET] frequency=100000000 Hz
+[HPET-TEST] 32-bit wrap monotonic: OK
+[SCHED] PID 0 (idle) przygotowany.
+[KRYPTO] Pula mbedTLS gotowa.
+[PCI] Rozpoczynam skanowanie PCI...
+[TIMER] LAPIC measured=62941000 Hz
+[TIMER] Scheduler=250 Hz
+[TIMER] LAPIC initial_count=251764
+[APIC] LAPIC/IOAPIC uruchomiony.
+[USB] Inicjalizacja podsystemu USB.
+[xHCI controller] index=0 BDF=0:3.0 vendor=0x1B36 device=0xD BAR=0x0 ports=0 slots=0 version=0x0 result=detected
+[xHCI] PCI controller znaleziony.
+[xHCI] vendor=0x1B36 device=0xD
+[xHCI] BAR=0xC000008000 (64-bit), size=0x4000
+[xHCI] version=0x100
+[xHCI] max_slots=64
+[xHCI] max_ports=8
+[xHCI] max_intrs=16
+[xHCI] context_size=32
+[xHCI] scratchpads=0
+[xHCI] Protocol USB  rev=2.0 ports=5..8 PSIC=0 slot_type=0
+[xHCI] Speed IDs USB2 implied: 1=Full 2=Low 3=High.
+[xHCI] Protocol USB  rev=3.0 ports=1..4 PSIC=0 slot_type=0
+[xHCI] Speed IDs USB3 implied: 4=Super.
+[xHCI] Firmware handoff: not required
+[xHCI] Halt: OK
+[xHCI] Reset: OK
+[xHCI] pagesize mask=0x1
+[xHCI] DCBAA: OK
+[xHCI] Command Ring: OK
+[xHCI] Event Ring: OK
+[xHCI] Run: OK
+[xHCI controller] index=0 BDF=0:3.0 vendor=0x1B36 device=0xD BAR=0xC000008000 ports=8 slots=64 version=0x100 result=ready
+[USB] xHCI gotowy.
+[PS/2] controller absent
+[PS/2] keyboard unavailable
+[PS/2] controller absent
+[PS/2] mouse unavailable
+[BWS] API Wywolan Systemowych gotowe.
+[AHCI] Szukam kontrolera SATA AHCI...
+[AHCI] Nie znaleziono kontrolera AHCI.
+[VIRTIO-PCI] device=VirtIO-GPU (Karta graficzna) modern transport found (BDF 00:04.0)
+[VIRTIO-PCI] common cfg BAR=2 offset=0x1000 len=0x800
+[VIRTIO-PCI] notify cfg BAR=2 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130000002 driver=0x100000000
+[VIRTIO-PCI] device=VirtIO-BLK (Urzadzenie blokowe) modern transport found (BDF 00:05.0)
+[VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130006E74 driver=0x100000000
+[NORMAL BOOT] VirtIO self-tests skipped.
+[VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[VIRTIO-BLK] Sanity check: OK (read LBA 0).
+[VIRTIO-GPU] Wykryto urzadzenie VirtIO-GPU na magistrali PCI (BDF 0:4.0)
+[VIRTIO-GPU] MSI-X configured successfully (entry 0)
+[VIRTIO-GPU] Sprzetowa plaszczyzna kursora aktywna.
+[VIRTIO-GPU] GETDISPLAYINFO scanout0=1280x720 (enabled=1)
+[VIRTIO-GPU] boot mode=1920x1080
+[VIRTIO-GPU] mode source=guest-policy
+[VIRTIO-GPU] selected initial mode=1280x720
+[VIRTIO-GPU] Framebuffer gotowy: 1280x720 (stron=900, wpisow_sg=3, format=B8G8R8X8)
+[VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D.
+[VIRTIO-GPU] SETSCANOUT 1280x720 result=OK
+[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.
+[E1000] Szukam Intel 82540EM (8086:100E)...
+[E1000] MAC: 52:54:00:12:34:56
+[E1000] Karta gotowa; link aktywny.
+[E1000] Zarejestrowano jako NetworkDevice (eth0).
+[DHCP] Wysylam DHCPDISCOVER...
+[DHCP] DHCPOFFER odebrany, wysylam DHCPREQUEST...
+[DHCP] IPv4: 10.0.2.15
+[DHCP] Brama: 10.0.2.2
+[DHCP] Maska: 255.255.255.0
+[DHCP] DNS: 10.0.2.3
+[ROUTE] local subnet
+[ROUTE] next_hop=10.0.2.2
+[ARP] cache miss ip=10.0.2.2
+[ARP] request ip=10.0.2.2
+[ARP] reply/cache ip=10.0.2.2
+[ARP] resolved ip=10.0.2.2
+[SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.
+[SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[HDA] Brak dostepnego urzadzenia HDA.
+[BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2...
+[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.
+[PSF] total_blocks=32768
+[PSF] bitmap_start=1 count=1
+[PSF] inode_start=2 count=1024
+[PSF] data_start=1026 count=31742
+[ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.
+[PCI] Rozpoczynam skanowanie PCI...
+[PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[BSP] Drzewiasty system plikow PSF gotowy.
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] Obraz pulpitu z modulu Multiboot2: pulpit/test.bmp
+[BSP] Obraz pulpitu z modulu Multiboot2: pulpit/test1.bmp
+[BSP] /obrazy/logo.png dodany do planu instalacji.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[EKRAN] Aplikacja zainstalowana.
+[TAPETA] Aplikacja Tapety zainstalowana.
+[BSP] Kontrolki 3 zainstalowane jako .cebula.
+[BSP] Kontrolki 4 zainstalowane jako .cebula.
+[BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[BSP] Test dzwieku zainstalowany jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[GALERIA] zdjecia zaimportowane: 6
+[GALERIA] zdjecia pominiete (istnieja): 0
+[TAPETA] Znaleziono modul tapety.pak, bajtow: 10977056
+[TAPETA] Pakiet tapety.pak, liczba plikow: 28
+[TAPETA] Zainstalowano brakujacych: 28
+[TAPETA] Zachowano istniejacych: 0
+[PMM] Pamiec fizyczna modulu tapety.pak zwolniona do puli PMM.
+[EKRAN INIT] boot=1280x720x32
+[EKRAN INIT] backend=virtio-gpu-runtime
+[EKRAN INIT] cfg=missing; active=boot
+[DIAG] Boot report saved: /logi/BOOTLOG.TXT
+[SCHED] Wielozadaniowosc Round-Robin aktywna.
+--------------------------------------------------
+[KERNEL] Jadro i scheduler gotowe.
+[USB root port] controller=0 port=1
+[USB root port] disconnected PORTSC=0x202A0
+[USB root port] controller=0 port=2
+[USB root port] disconnected PORTSC=0x202A0
+[USB root port] controller=0 port=3
+[USB root port] disconnected PORTSC=0x202A0
+[USB root port] controller=0 port=4
+[USB root port] disconnected PORTSC=0x202A0
+[USB root port] controller=0 port=5
+[USB root port] connected PORTSC=0x20EE1
+[USB root port] controller=0 port=6
+[USB root port] connected PORTSC=0x20EE1
+[USB root port] controller=0 port=8
+[USB root port] disconnected PORTSC=0x202A0
+[xHCI] EP0 initial MaxPacket=64
+[xHCI] Device Context address=0x5812000
+[xHCI] Device Context OK.
+[xHCI] EP0 Ring address=0x5814000
+[xHCI] EP0 Ring OK.
+[USB root port] controller=0 port=7
+[USB root port] disconnected PORTSC=0x202A0
+[USB device] controller=0 port=5 slot=1 VID=0x627 PID=0x1 class=0 configuration=1 interfaces=1 HID interfaces=1
+[USB interface] controller=0 slot=1 interface=0 alternate=0 endpoints=1 class=3 subclass=1 protocol=1
+[USB HID descriptor] controller=0 slot=1 interface=0 alternate=0 subclass=1 protocol=1 endpoint=0x81 MPS=8 bInterval=7 report-length=63
+[USB HID] controller=0 port=5 slot=1 interface=0 endpoint=0x81 DCI=3 MPS=8 interval=6 role=boot-keyboard result=endpoint configured
+[INPUT REGISTER] dev='usb-keyboard' bus=USB id=1 kinds=0x1 prio=20
+[USB-HID] First Interrupt IN transfer queued.
+[USB HID] controller=0 port=5 slot=1 interface=0 endpoint=0x81 DCI=3 MPS=8 interval=6 role=boot-keyboard result=interrupt IN armed
+[xHCI] EP0 initial MaxPacket=64
+[xHCI] Device Context address=0x5970000
+[xHCI] Device Context OK.
+[xHCI] EP0 Ring address=0x5972000
+[xHCI] EP0 Ring OK.
+[USB device] controller=0 port=6 slot=2 VID=0x627 PID=0x1 class=0 configuration=1 interfaces=1 HID interfaces=1
+[USB interface] controller=0 slot=2 interface=0 alternate=0 endpoints=1 class=3 subclass=1 protocol=2
+[USB HID descriptor] controller=0 slot=2 interface=0 alternate=0 subclass=1 protocol=2 endpoint=0x81 MPS=4 bInterval=7 report-length=52
+[USB HID] controller=0 port=6 slot=2 interface=0 endpoint=0x81 DCI=3 MPS=4 interval=6 role=other/unknown result=endpoint configured
+[TAPETA] Tapeta gotowa.
+[GUI] Pasek zadan: rejestracja odrzucona przez kompozytor (warstwa/rozmiar).
+[BOOT-TELEMETRY] kernel_ready_time_us=11533589 desktop_ready_time_us=13268411 delta_us=1734822
+[SYSTEM] Pulpit gotowy.
+System operacyjny gotowy!
+[DIAG] Startup preference: autostart=1
+[DIAG] Startup preference: problems=1
+[WM] Initial Desktop ready
+[INPUT REGISTER] dev='usb-mouse' bus=USB id=2 kinds=0x2 prio=20
+[USB-HID] First Interrupt IN transfer queued.
+[USB HID] controller=0 port=6 slot=2 interface=0 endpoint=0x81 DCI=3 MPS=4 interval=6 role=boot-mouse result=interrupt IN armed
+[DIAG] Diagnostyka systemu launched in Ring 3
+[DIAG APP] Ring 3 diagnostic window initialized
+[DIAG APP] First frame submitted
+[DIAG] Boot report saved: /logi/BOOTLOG.TXT

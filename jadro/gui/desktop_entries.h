@@ -19,7 +19,8 @@ enum class TypIkonyAplikacji : uint8_t {
     Aktualizacje,
     Motywy,
     TestDzwieku,
-    Diagnostyka
+    Diagnostyka,
+    UstawieniaEkranu
 };
 
 struct Launcher {
@@ -47,6 +48,9 @@ inline constexpr Launcher Launchers[]={
     {"Kontrolki 4","/programy/kontrolki4.cebula/kontrolki4.bur","Kontrolki 4",TypIkonyAplikacji::Kontrolki4,"kontrolki4","/ikonki/app_kontrolki4.png"},
     {"Test dźwięku","/programy/test_dzwieku.cebula/test_dzwieku.bur","Test dźwięku",TypIkonyAplikacji::TestDzwieku,"test-dzwieku","/ikonki/app_test_dzwieku.png"},
     {"Diagnostyka systemu","/programy/diagnostyka.cebula/diagnostyka.bur","Diagnostyka systemu",TypIkonyAplikacji::Diagnostyka,"diagnostyka-systemu","/ikonki/app_diagnostyka.png"},
+    // Na koncu: istniejace indeksy i zapisane pozycje skrotow (klucz = id) bez zmian;
+    // nowy skrot bez zapisanej pozycji trafia do wolnej komorki siatki.
+    {"Ustawienia ekranu","/programy/ekran.cebula/ekran.bur","Ustawienia ekranu",TypIkonyAplikacji::UstawieniaEkranu,"ustawienia-ekranu","/ikonki/app_ustawienia_ekranu.png"},
 };
 inline constexpr int Count=sizeof(Launchers)/sizeof(Launchers[0]);
 // Logical UI budget, independent of grid capacity and filesystem limits.

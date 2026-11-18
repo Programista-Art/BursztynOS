@@ -2630,7 +2630,7 @@ extern "C" bool zaktualizuj_klawisz_fizyczny_gui(
     const bool tab=(kod&BWS_KEY_SOURCE_USB)?(kod&255U)==43U:
         !(kod&BWS_KEY_SOURCE_E0) && (kod&127U)==15U;
     if(tab && !wcisniety && system_tab_down){system_tab_down=false;return true;}
-    if(tab && wcisniety && (modyfikatory&BWS_MOD_ALT) &&
+    if(tab && wcisniety && bws_mod_alt_skrotu(modyfikatory) &&
        !(modyfikatory&(BWS_MOD_CTRL|BWS_MOD_SUPER)) && !powitanie_aktywne()){
         system_tab_down=true;
         przelacz_okno_klawiatura((modyfikatory&BWS_MOD_SHIFT)!=0);

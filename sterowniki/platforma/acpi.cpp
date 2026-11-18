@@ -1,4 +1,5 @@
 /* ACPI RSDP -> RSDT/XSDT -> HPET, bez dynamicznej alokacji. */
+#include "jadro/mm/zarezerwowane_va.h"
 #include "acpi.h"
 #include "pamiec.h"
 
@@ -14,7 +15,9 @@ constexpr uint32_t TAG_ACPI_NEW = 15;
 constexpr uint64_t STRONA = 4096;
 constexpr uint64_t LIMIT_IDENTITY = 4ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr uint64_t OKNO_ACPI = 0x140000000ULL;
+static_assert(OKNO_ACPI == ZarezerwowaneVA::OKNO_ACPI_START, "okno ACPI musi zgadzac sie z zarezerwowane_va.h");
 constexpr uint64_t ROZMIAR_OKNA = 1024ULL * 1024ULL;
+static_assert(ROZMIAR_OKNA == ZarezerwowaneVA::OKNO_ACPI_ROZMIAR, "rozmiar okna ACPI musi zgadzac sie z zarezerwowane_va.h");
 constexpr uint32_t FLAGI_ACPI = VMM_FLAGA_PRESENT | VMM_FLAGA_ZAPIS;
 constexpr uint32_t MAKS_WPISOW = 256;
 

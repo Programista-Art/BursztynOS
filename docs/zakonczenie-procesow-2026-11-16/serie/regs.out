@@ -1,0 +1,25 @@
+[run 1/8] FAIL powod=timeout czas=758s przerw>1s=18 maks_przerwa=168.9s min_tick_hz=0.3 pass=0 fail=0 zwolnien=83 maks_latencja_ms=53.1 aktywne_koniec=2 ramki=469891->469585
+   OKNO-BEZ-POSTEPU: brak postepu logu 51s od t=30s: CPU QEMU=100% steal=0 loadavg=0.28
+   OKNO-BEZ-POSTEPU: brak postepu logu 168s od t=149s: CPU QEMU=100% steal=0 loadavg=0.02
+   REJESTRY: probek=31 cpl0=23 cpl0_if0=5
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+[run 2/8] FAIL powod=timeout czas=656s przerw>1s=9 maks_przerwa=59.3s min_tick_hz=0.3 pass=0 fail=0 zwolnien=63 maks_latencja_ms=65.3 aktywne_koniec=2 ramki=469891->469584
+   REJESTRY: probek=32 cpl0=27 cpl0_if0=1
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+[run 3/8] FAIL powod=timeout czas=596s przerw>1s=5 maks_przerwa=334.3s min_tick_hz=0.7 pass=0 fail=0 zwolnien=35 maks_latencja_ms=59.3 aktywne_koniec=2 ramki=469891->468558
+   OKNO-BEZ-POSTEPU: brak postepu logu 43s od t=218s: CPU QEMU=103% steal=0 loadavg=0.01
+   REJESTRY: probek=12 cpl0=7 cpl0_if0=1
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+   HARNESS: scenariusze: [ZK] s3 kill heap FAIL; [ZK] s5 kill po sprzataniu = odmowa FAIL; [ZK] s7 40 cykli uruchom/zabij (PID reuse) FAIL; [ZK] s8 zabicie dziecka, wlasciciel zyje, nowe dziecko FAIL
+   scenariusz: [ZK] s3 kill heap FAIL
+   scenariusz: [ZK] s5 kill po sprzataniu = odmowa FAIL
+   scenariusz: [ZK] s7 40 cykli uruchom/zabij (PID reuse) FAIL
+   scenariusz: [ZK] s8 zabicie dziecka, wlasciciel zyje, nowe dziecko FAIL
+[run 4/8] FAIL powod=timeout czas=627s przerw>1s=1 maks_przerwa=224.9s min_tick_hz=0.2 pass=0 fail=0 zwolnien=3 maks_latencja_ms=10.6 aktywne_koniec=1 ramki=469891->469891
+   OKNO-BEZ-POSTEPU: brak postepu logu 381s od t=19s: CPU QEMU=100% steal=0 loadavg=42.92
+   REJESTRY: probek=3 cpl0=2 cpl0_if0=0
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+[run 5/8] FAIL powod=timeout czas=798s przerw>1s=15 maks_przerwa=399.9s min_tick_hz=0.0 pass=0 fail=0 zwolnien=75 maks_latencja_ms=77.9 aktywne_koniec=2 ramki=469890->469584
+   REJESTRY: probek=47 cpl0=39 cpl0_if0=6
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+done

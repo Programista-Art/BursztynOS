@@ -603,6 +603,28 @@ uint64_t host_czas_monotoniczny_ns(void) {
     );
 }
 
+// Model flagi IF i instrukcji HLT dla gpu_wait_for_irq (virtio_gpu.cpp). Proces testu dziala w Ring 3: prawdziwe
+// CLI/STI/HLT dalyby SIGSEGV, wiec sterownik w buildzie hostowym wola te funkcje. Model sprawdza protokol
+// "cli; sprawdz; sti; hlt": HLT tylko po CLI (inaczej okno utraconego wybudzenia), STI tylko przy IF=0.
+struct HostCpuModel {
+    bool if_flag = true;               // jak zwykly kontekst syscallu w jadrze: przerwania wlaczone
+    unsigned disables = 0, enables = 0, halts = 0, protocol_errors = 0;
+    unsigned deliver_gpu_reply_on_halt = 0;   // N>0: N-ty HLT "budzi" przerwanie z odpowiedzia GPU
+};
+static HostCpuModel g_host_cpu;
+bool host_cpu_irq_enabled() { return g_host_cpu.if_flag; }
+void host_cpu_irq_disable() { if (!g_host_cpu.if_flag) ++g_host_cpu.protocol_errors; g_host_cpu.if_flag = false; ++g_host_cpu.disables; }
+void host_cpu_irq_enable() { if (g_host_cpu.if_flag) ++g_host_cpu.protocol_errors; g_host_cpu.if_flag = true; ++g_host_cpu.enables; }
+void host_cpu_enable_irq_and_halt() {
+    if (g_host_cpu.if_flag) ++g_host_cpu.protocol_errors;   // HLT bez wczesniejszego CLI
+    g_host_cpu.if_flag = true; ++g_host_cpu.halts;
+    if (g_host_cpu.deliver_gpu_reply_on_halt && --g_host_cpu.deliver_gpu_reply_on_halt == 0) {
+        auto* drv = virtio_gpu_get_driver(0);
+        g_mock.gpu_skip_reply = false;
+        host_mmio_write16(virtio_pci_notify_address(drv->dev, drv->controlq->queue_notify_off), 0);
+    }
+}
+
 // Hooki MMIO
 uint8_t host_mmio_read8(volatile const void* addr) {
     uint64_t separate=0; if(init_read(addr,1,separate)) return static_cast<uint8_t>(separate);
@@ -3714,7 +3736,7 @@ void test_idt_dynamic_vector_allocator() {
     // 1. Pojedyncza alokacja i rejestracja
     int v1 = idt_alokuj_wektor_irq();
     TEST_ASSERT(v1 >= IDT_PIERWSZY_WEKTOR_DYNAMICZNY && v1 <= IDT_OSTATNI_WEKTOR_DYNAMICZNY,
-                "Wektor w dozwolonym zakresie dynamicznym (48..254)");
+                "Wektor w dozwolonym zakresie dynamicznym (48..252)");
     TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 1, "Zaalokowano 1 wektor");
 
     bool handler_called = false;
@@ -3740,14 +3762,16 @@ void test_idt_dynamic_vector_allocator() {
     TEST_ASSERT(!idt_zwolnij_wektor_irq(32), "Zwolnienie wektora statycznego < 48 odrzucone");
     TEST_ASSERT(!idt_zwolnij_wektor_irq(255), "Zwolnienie wektora 255 odrzucone");
 
-    // 4. Test wyczerpania puli (wszystkie 207 wektorow 48..254)
+    // 4. Test wyczerpania puli (wszystkie wektory IDT_PIERWSZY..IDT_OSTATNI; 253 = programowe oddanie CPU, poza pula)
+    constexpr int ROZMIAR_PULI = IDT_OSTATNI_WEKTOR_DYNAMICZNY - IDT_PIERWSZY_WEKTOR_DYNAMICZNY + 1;
     std::vector<int> vecs;
-    for (int i = 0; i < 207; ++i) {
+    for (int i = 0; i < ROZMIAR_PULI; ++i) {
         int v = idt_alokuj_wektor_irq();
         TEST_ASSERT(v >= 0, "Alokacja wektora z puli");
+        TEST_ASSERT(v != IDT_WEKTOR_ODDANIA_CPU, "Wektor oddania CPU nigdy nie trafia do puli");
         vecs.push_back(v);
     }
-    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == 207, "Zaalokowano wszystkie 207 wektorow");
+    TEST_ASSERT(idt_zaalokowane_wektory_liczba() == ROZMIAR_PULI, "Zaalokowano wszystkie wektory puli");
     TEST_ASSERT(idt_alokuj_wektor_irq() == -1, "Wyczerpana pula zwraca -1");
 
     for (int v : vecs) {
@@ -4845,12 +4869,58 @@ void test_virtio_gpu_command_timeout() {
     TEST_ASSERT(virtio_gpu_transfer_and_flush(drv,0,0,drv->fb_width,drv->fb_height),
                 "Complete initial frame before command timeout injection");
     g_mock.gpu_skip_reply = true;
+    g_host_cpu = HostCpuModel{};
     TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Timeout zwraca false");
+    TEST_ASSERT(g_host_cpu.halts > 0, "Oczekiwanie z IF=1 usypia CPU (model HLT) zamiast wirowac");
+    TEST_ASSERT(g_host_cpu.protocol_errors == 0 && g_host_cpu.if_flag, "Protokol cli/sti/hlt poprawny, IF przywrocone");
     TEST_ASSERT(drv->cmd_state == VIRTIO_GPU_CMD_TIMED_OUT_PENDING, "TIMED_OUT_PENDING po timeoucie");
     TEST_ASSERT(drv->recovery.soft_timeouts == 1, "soft_timeouts == 1");
     TEST_ASSERT(!virtio_gpu_cmd_resource_flush(drv, 1, 0, 0, 100, 100), "Kolejne polecenie odrzucone");
     TEST_ASSERT(drv->recovery.rejected_while_pending == 1, "odrzucone bez wysylki");
 
+    g_mock.gpu_skip_reply = false;
+    virtio_gpu_reset(drv);
+    virtio_gpu_reset_all();
+}
+
+// Regresja (2026-11-16): gpu_wait_for_irq wykonywal CLI w procesie testu (SIGSEGV). Teraz IF/HLT ida przez model
+// host_cpu_*; ponizsze przypadki sprawdzaja trzy galezie protokolu oczekiwania.
+void test_virtio_gpu_wait_irq_protocol() {
+    virtio_gpu_reset_all();
+    VirtioPciDevice dev{};
+    GpuDriverScope gpu_scope;
+    TEST_ASSERT(setup_mock_gpu_device(&dev), "Probe GPU (protokol IRQ)");
+    TEST_ASSERT(virtio_gpu_init(&dev), "Init GPU (protokol IRQ)");
+    VirtioGpuDriver* drv = virtio_gpu_get_driver(0);
+    TEST_ASSERT(virtio_gpu_transfer_and_flush(drv, 0, 0, drv->fb_width, drv->fb_height), "Pierwsza klatka");
+
+    // 1. Odpowiedz dostarczona przez przerwanie budzace HLT: dokladnie jeden HLT, polecenie zakonczone.
+    g_host_cpu = HostCpuModel{}; g_host_cpu.deliver_gpu_reply_on_halt = 1;
+    g_mock.gpu_skip_reply = true;
+    const bool ok_hlt = virtio_gpu_cmd_resource_flush(drv, drv->resource_id, 0, 0, 16, 16);
+    TEST_ASSERT(ok_hlt && !drv->has_error, "Odpowiedz po wybudzeniu z HLT konczy polecenie");
+    TEST_ASSERT(g_host_cpu.halts == 1 && g_host_cpu.disables == 1 && g_host_cpu.enables == 0, "Jeden cykl cli -> sti;hlt");
+    TEST_ASSERT(g_host_cpu.protocol_errors == 0 && g_host_cpu.if_flag, "IF=1 po wybudzeniu");
+
+    // 2. Odpowiedz widoczna miedzy CLI a HLT (odczyt zegara tuz przed oczekiwaniem): bez HLT, STI przywraca IF.
+    g_host_cpu = HostCpuModel{};
+    g_host_use_mock_time = true; g_host_mock_time_ns = 1;
+    g_mock.gpu_skip_reply = true; g_gpu_complete_on_clock_read = 2;
+    const bool ok_check = virtio_gpu_cmd_resource_flush(drv, drv->resource_id, 0, 0, 16, 16);
+    g_gpu_complete_on_clock_read = 0; g_host_use_mock_time = false;
+    TEST_ASSERT(ok_check && !drv->has_error, "Odpowiedz wykryta po CLI konczy polecenie");
+    TEST_ASSERT(g_host_cpu.halts == 0 && g_host_cpu.disables == 1 && g_host_cpu.enables == 1, "Brak HLT, gdy ring juz ma wpis");
+    TEST_ASSERT(g_host_cpu.protocol_errors == 0 && g_host_cpu.if_flag, "IF przywrocone bez HLT");
+
+    // 3. Wolajacy z wylaczonymi przerwaniami: tylko PAUSE, zadnego CLI/STI/HLT; IF pozostaje 0.
+    g_host_cpu = HostCpuModel{}; g_host_cpu.if_flag = false;
+    g_mock.gpu_skip_reply = true;
+    const bool ok_masked = virtio_gpu_cmd_resource_flush(drv, drv->resource_id, 0, 0, 16, 16);
+    TEST_ASSERT(!ok_masked, "Brak odpowiedzi przy IF=0 konczy sie timeoutem");
+    TEST_ASSERT(g_host_cpu.halts == 0 && g_host_cpu.disables == 0 && g_host_cpu.enables == 0, "IF=0: brak CLI/STI/HLT");
+    TEST_ASSERT(!g_host_cpu.if_flag && g_host_cpu.protocol_errors == 0, "IF=0 zachowane");
+
+    g_host_cpu = HostCpuModel{};
     g_mock.gpu_skip_reply = false;
     virtio_gpu_reset(drv);
     virtio_gpu_reset_all();
@@ -7393,6 +7463,7 @@ int main() {
     RUN_TEST(test_virtio_gpu_batched_dirty_publication);
     RUN_TEST(test_virtio_gpu_malformed_response);
     RUN_TEST(test_virtio_gpu_command_timeout);
+    RUN_TEST(test_virtio_gpu_wait_irq_protocol);
     RUN_TEST(test_virtio_gpu_completion_at_deadline);
     RUN_TEST(test_gpu_recovery_normal_completion_dormant);
     RUN_TEST(test_gpu_recovery_completion_just_before_timeout);

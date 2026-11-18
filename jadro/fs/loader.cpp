@@ -518,9 +518,19 @@ extern "C" bool loader_przegladarka_obrazow_zweryfikowana(uint64_t pid) {
     return pid > 0 && pid < MAKS_PROCESOW && g_przegladarka_obrazow_zweryfikowana[pid];
 }
 
+/* Jedyny program, ktory moze dzialac w wielu instancjach naraz: wbudowane okno informacyjne (okna podrzedne, BWS 101);
+ * kazda instancja to osobny proces z wlasna przestrzenia adresowa. Reszta programow: dokladnie jedna instancja. */
+static constexpr const char* SCIEZKA_OKNA_INFORMACYJNEGO = "/programy/okno-informacyjne.cebula/okno-informacyjne.bur";
+static constexpr int MAKS_INSTANCJI_OKNA_INFORMACYJNEGO = 6;
+static int g_ostatni_pid_uruchomiony = 0;
+
+extern "C" int loader_ostatni_pid_uruchomiony(void) { return g_ostatni_pid_uruchomiony; }
+
 static bool sciezka_juz_zarezerwowana(
     const char* sciezka
 ) {
+    const bool wielokrotna = takie_same_sciezki(sciezka, SCIEZKA_OKNA_INFORMACYJNEGO);
+    int instancje = 0;
     for (int i = 1; i < MAKS_PROCESOW; ++i) {
         const proces_t& proces = tablica_procesow[i];
 
@@ -529,11 +539,12 @@ static bool sciezka_juz_zarezerwowana(
         if (takie_same_sciezki(
                 proces.sciezka_pliku,
                 sciezka)) {
-            return true;
+            if (!wielokrotna) return true;
+            ++instancje;
         }
     }
 
-    return false;
+    return wielokrotna && instancje >= MAKS_INSTANCJI_OKNA_INFORMACYJNEGO;
 }
 
 static int zarezerwuj_slot_procesu(
@@ -1307,6 +1318,17 @@ static bool uruchom_program_z_pliku_impl(
 #endif
             layout = {};
             zaplanowano = bur_v2_zaplanuj_aslr(n2, random[0], random[1], random[2], random[3], &layout);
+#ifndef BURSZTYN_LOADER_HOST_TEST
+            // Niezalezna od listy zarezerwowane_va.h weryfikacja FAKTYCZNEGO stanu tabel: obraz, sterta i SHM
+            // musza lezec w calosci w niezmapowanych zakresach bazowej przestrzeni jadra (zrodla klonow).
+            if (zaplanowano) {
+                const uint64_t koniec_obrazu = layout.dane_va + n2.dane_rozmiar_pamieci;
+                zaplanowano = VmmZakresWolnyWBazie(layout.baza_obrazu, koniec_obrazu) &&
+                              VmmZakresWolnyWBazie(layout.sterta_baza, layout.sterta_limit) &&
+                              VmmZakresWolnyWBazie(layout.shm_baza, layout.shm_limit) &&
+                              VmmZakresWolnyWBazie(layout.stos_guard_dolny, layout.stos_guard_gorny + 4096ULL);
+            }
+#endif
             if (!zaplanowano) {
                 char linia[200] = "[LOADER] plan ASLR odrzucony (kolizja z oknem jadra), losowanie ponowne: ";
                 size_t n_l = 0; while (linia[n_l]) ++n_l;
@@ -1626,6 +1648,7 @@ static bool uruchom_program_z_pliku_impl(
 #endif
 
     proba.sukces = true;
+    g_ostatni_pid_uruchomiony = pid;
 
 #if BURSZTYN_DEBUG_LOADER_PERF
     const uint64_t loader_perf_map_end = loader_perf_now();
@@ -1858,6 +1881,8 @@ extern "C" bool pakiet_parsuj_manifest_tekst(
                             out_manifest->uprawnienia |= PRAWO_PLIKI_ZAPISZ;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "ustawienia_aplikacji")) {
                             out_manifest->uprawnienia |= PRAWO_USTAWIENIA_APLIKACJI;
+                        } else if (manifest_tekst_rowny(prawo_nazwa, "okno_podrzedne")) {
+                            out_manifest->uprawnienia |= PRAWO_OKNO_PODRZEDNE;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "system_config")) {
                             out_manifest->uprawnienia |= PRAWO_SYSTEM_CONFIG;
                         } else if (manifest_tekst_rowny(prawo_nazwa, "siec")) {

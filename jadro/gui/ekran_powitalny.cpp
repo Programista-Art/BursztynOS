@@ -27,6 +27,13 @@ uint64_t poprzedni_krok=UINT64_MAX;
 // a nie z uplywu czasu: w holdzie ekran jest identyczny przez sekundy i nie
 // wolno wtedy skladac pelnej klatki ani transferowac jej do GPU.
 uint64_t poprzednia_sygnatura=UINT64_MAX;
+// Najblizsza dozwolona prezentacja z watku startowego (punkty kontrolne startu).
+uint64_t nastepny_start=0;
+// Maski etapow ostatnio WYRENDEROWANEJ klatki. Etapy uznaje sie za pokazane
+// dopiero, gdy ta klatka zostanie opublikowana (powitanie_publikacja), nigdy
+// przy samym obliczeniu lub renderze, ktory nie trafil na ekran.
+unsigned wyrenderowane_widoczne=0, wyrenderowane_pelne=0;
+bool ramka_wyrenderowana=false;
 #if BURSZTYNDIAGSPLASHTIMING
 uint64_t prezentacje=0;
 void diag_czas(const char* event,uint64_t now) {
@@ -61,6 +68,7 @@ void zwolnij_powierzchnie() {
     pierwsza_klatka_gotowa=false;pierwsza_klatka_opublikowana=false;
     KlatkiStartuDiag::info().ready=false;
     powierzchnia=nullptr;bajty=0;szer=wys=stride=0;procent=0;
+    ramka_wyrenderowana=false;wyrenderowane_widoczne=wyrenderowane_pelne=0;
 }
 void zakoncz_powitanie() {
     animacja_rozpoczeta=false;
@@ -68,7 +76,7 @@ void zakoncz_powitanie() {
     zwolnij_powierzchnie();
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zakonczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
+    nastepny=0;nastepny_start=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 }
 void powitanie_wycisz() {
@@ -79,7 +87,7 @@ void powitanie_wycisz() {
     zakonczenie_oczekuje=false;pulpit_gotowy=false;gotowosc_utracona=false;tlo_tapeta=false;pulpit_pid=0;
     zwolnij_powierzchnie();
     sekwencja={};sekwencja.stan=Powitanie::Stan::Zniszczony;
-    nastepny=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
+    nastepny=0;nastepny_start=0;pelne_rysowanie=false;poprzedni_krok=UINT64_MAX;
 }
 void powitanie_reset_ekranu() {
     PrezentacjaStartu::uniewaznij();
@@ -104,6 +112,16 @@ void powitanie_publikacja() {
         }
         SplashFirstDiag::event("first_visible_commit",czas_monotoniczny_us());
         pierwsza_klatka_opublikowana=true;
+    }
+    // Kazda udana publikacja klatki powitania potwierdza etapy, ktore byly w niej
+    // widoczne. Dopiero to pozwala zaczac kolejny etap (sekwencjonowanie zalezne
+    // od prezentacji: zalegle etapy nie wchodza naraz po przerwie w odswiezaniu).
+    if(powitanie_aktywne()&&animacja_rozpoczeta&&ramka_wyrenderowana){
+        bool nowe=false;
+        for(unsigned e=0;e<Powitanie::LICZBA_ETAPOW;++e)
+            if(((wyrenderowane_widoczne>>e)&1u)&&!sekwencja.pokazany[e])nowe=true;
+        sekwencja.potwierdz(czas_monotoniczny_us(),wyrenderowane_widoczne,wyrenderowane_pelne);
+        if(nowe)diag_czas("stage_presented",czas_monotoniczny_us());
     }
 }
 bool powitanie_aktywne(){return sekwencja.aktywny()||zakonczenie_oczekuje;}
@@ -199,6 +217,11 @@ static void powitanie_aktualizuj_stan(bool pacing){
         poprzednia_sygnatura=sekwencja.sygnatura();
         skladacz_obrazu_oznacz_dirty();
     }
+    else if(pacing&&sekwencja.oczekuje_potwierdzenia()){
+        // Nowy etap jest juz w stanie, ale zadna klatka z nim nie trafila jeszcze
+        // na ekran: ponawiamy pelna klatke (z pacingiem) do skutku.
+        skladacz_obrazu_oznacz_dirty();
+    }
     if(sekwencja.stan==Powitanie::Stan::Zakonczony&&!zakonczenie_oczekuje){
         // Pacing may defer the full composition. Cursor-only presentation must
         // keep the previous welcome frame until a complete scene is committed.
@@ -207,6 +230,25 @@ static void powitanie_aktualizuj_stan(bool pacing){
     }
 }
 void powitanie_tick(){powitanie_aktualizuj_stan(true);}
+// Synchroniczna inicjalizacja jadra (siec, system plikow, instalacja aplikacji
+// i tapet) trwa po pierwszej klatce nawet kilka sekund, zanim petla PID 0 zacznie
+// obslugiwac kompozytor. Punkty kontrolne startu pozwalaja pokazac w tym czasie
+// kolejne etapy. Nic tu nie czeka: brak zmiany obrazu albo zbyt bliski poprzedni
+// punkt konczy sie natychmiast, a zmiana kosztuje jedna pelna prezentacje.
+bool powitanie_obsluz_start(){
+    if(!powitanie_aktywne()||!animacja_rozpoczeta||zakonczenie_oczekuje)return false;
+    const uint64_t now=czas_monotoniczny_us();
+    if(now<nastepny_start)return false;
+    nastepny_start=now>UINT64_MAX-POWITANIE_ODSTEP_STARTU_US?UINT64_MAX:now+POWITANIE_ODSTEP_STARTU_US;
+    const uint64_t przed=poprzednia_sygnatura;
+    powitanie_aktualizuj_stan(false);
+    if(!powitanie_aktywne())return false;
+    // Prezentacja, gdy zmienil sie obraz albo etap czeka na potwierdzenie
+    // (poprzednia publikacja mogla sie nie udac).
+    if(poprzednia_sygnatura==przed&&!sekwencja.oczekuje_potwierdzenia())return false;
+    PrzeniesNaEkran();
+    return true;
+}
 uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int rw,int rh,uint32_t skala){
     if(!powitanie_aktywne()||w<=0||h<=0||int64_t(pitch)<int64_t(w)*4)return scena;
     // Pacing limits scheduled work, never the state of an actual presentation.
@@ -248,6 +290,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         // background and title too; the reusable allocation carries no history.
         const auto frame=sekwencja;
         Powitanie::rysuj(dst,w,h,pitch/4,skala,frame,true);
+        wyrenderowane_widoczne=frame.widoczne;wyrenderowane_pelne=frame.pelne;ramka_wyrenderowana=true;
         ++SplashFirstDiag::id().frame;
         poprzedni_krok=sekwencja.krok;poprzednia_sygnatura=sekwencja.sygnatura();pelne_rysowanie=false;
     }
@@ -266,7 +309,7 @@ uint8_t* powitanie_zrodlo(uint8_t* scena,int w,int h,int pitch,int x,int y,int r
         };
         const auto znak=Powitanie::obszar_znaku(w,h,skala);
         SplashFirstDiag::id().title=ink(znak);
-        // Komunikaty pojawiaja sie dopiero po zapelnieniu paska, wiec pierwsza
+        // Podtytuly pojawiaja sie dopiero w pozniejszych etapach, wiec pierwsza
         // klatka sprawdza gotowosc ich obszaru, a nie atrament (go jeszcze nie ma).
         SplashFirstDiag::id().message=1;
 #endif

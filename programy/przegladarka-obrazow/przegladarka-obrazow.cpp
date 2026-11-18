@@ -16,6 +16,7 @@
  */
 #include "loader.h"
 #include "bursztyn_ui/bursztyn_ui.h"
+#include "bursztyn_ui/okno_podrzedne.h"
 #include "bursztyn_gui.h"
 #include "obrazy/dekoder_obrazu.h"
 #include "obrazy/podglad_jpeg.h"
@@ -827,26 +828,38 @@ struct AplikacjaObrazow {
 
     // Pomiary ostatniego otwarcia: tryb, wymiary, pamiec i czasy (pomoc w ocenie budzetu pamieci).
     void pokaz_informacje() {
-        char t[640] = {};
-        if (zrodlo != Zrodlo::Powierzchnia && zrodlo != Zrodlo::StrumienBmp) { pokaz_pomoc("Informacje o obrazie", "Brak otwartego obrazu."); return; }
-        dopisz_txt(t, sizeof(t), "Plik: "); dopisz_txt(t, sizeof(t), nazwa_pliku(sciezka)); dopisz_txt(t, sizeof(t), "\n");
-        dopisz_txt(t, sizeof(t), "Wymiary pliku: "); dopisz_u32(t, sizeof(t), skala_podgladu ? zrodlo_w : static_cast<uint32_t>(pow.szer));
-        dopisz_txt(t, sizeof(t), " x "); dopisz_u32(t, sizeof(t), skala_podgladu ? zrodlo_h : static_cast<uint32_t>(pow.wys)); dopisz_txt(t, sizeof(t), "\n");
+        // Okno podrzedne "Informacje o obrazie": wlasciwosci w dwoch kolumnach (Pole / Wartosc), wszystkie pola zawijane.
+        char t[1536] = {};
+        const char* tytul = "Informacje o obrazie";
+        if (zrodlo != Zrodlo::Powierzchnia && zrodlo != Zrodlo::StrumienBmp) {
+            pokaz_okno(OknoPodrzedne::Rodzaj::InfoObrazu, tytul, "Brak otwartego obrazu.");
+            return;
+        }
+        dopisz_txt(t, sizeof(t), "# Plik\nNazwa pliku\t"); dopisz_txt(t, sizeof(t), nazwa_pliku(sciezka));
+        dopisz_txt(t, sizeof(t), "\nFormat\t"); dopisz_txt(t, sizeof(t), Galeria::nazwa_formatu(format));
+        dopisz_txt(t, sizeof(t), "\nWymiary pliku\t"); dopisz_u32(t, sizeof(t), skala_podgladu ? zrodlo_w : static_cast<uint32_t>(pow.szer));
+        dopisz_txt(t, sizeof(t), " x "); dopisz_u32(t, sizeof(t), skala_podgladu ? zrodlo_h : static_cast<uint32_t>(pow.wys)); dopisz_txt(t, sizeof(t), " px");
         if (skala_podgladu) {
-            dopisz_txt(t, sizeof(t), "Tryb: PODGLĄD 1/"); dopisz_u32(t, sizeof(t), skala_podgladu);
+            dopisz_txt(t, sizeof(t), "\nTryb dekodowania\tPODGLĄD 1/"); dopisz_u32(t, sizeof(t), skala_podgladu);
             dopisz_txt(t, sizeof(t), " ("); dopisz_u32(t, sizeof(t), static_cast<uint32_t>(pow.szer)); dopisz_txt(t, sizeof(t), " x ");
-            dopisz_u32(t, sizeof(t), static_cast<uint32_t>(pow.wys)); dopisz_txt(t, sizeof(t), "), bez widoku 100%\n");
-        } else dopisz_txt(t, sizeof(t), "Tryb: pełna rozdzielczość\n");
-        dopisz_txt(t, sizeof(t), "Powierzchnia: "); dopisz_mib(t, sizeof(t), pom_powierzchnia);
-        dopisz_txt(t, sizeof(t), "\nSzczyt pamięci obrazu: "); dopisz_mib(t, sizeof(t), pom_szczyt);
-        dopisz_txt(t, sizeof(t), "\nAktualnie zajęte: "); dopisz_mib(t, sizeof(t), g_pam_aktualna);
-        dopisz_txt(t, sizeof(t), "\nCzas wczytania: ");
+            dopisz_u32(t, sizeof(t), static_cast<uint32_t>(pow.wys)); dopisz_txt(t, sizeof(t), " px), bez widoku 100%");
+        } else dopisz_txt(t, sizeof(t), "\nTryb dekodowania\tpełna rozdzielczość");
+        dopisz_txt(t, sizeof(t), "\n\n# Pamięć\nPowierzchnia obrazu\t"); dopisz_mib(t, sizeof(t), pom_powierzchnia);
+        dopisz_txt(t, sizeof(t), "\nSzczyt pamięci obrazu\t"); dopisz_mib(t, sizeof(t), pom_szczyt);
+        dopisz_txt(t, sizeof(t), "\nAktualnie zajęte\t"); dopisz_mib(t, sizeof(t), g_pam_aktualna);
+        dopisz_txt(t, sizeof(t), "\n\n# Wydajność\nCzas wczytania\t");
         dopisz_u32(t, sizeof(t), t_koniec_ns > t_start_ns ? static_cast<uint32_t>((t_koniec_ns - t_start_ns) / 1000000ULL) : 0U);
-        dopisz_txt(t, sizeof(t), " ms\nOstatnie rysowanie: ");
-        dopisz_u32(t, sizeof(t), static_cast<uint32_t>(render_ns / 1000ULL)); dopisz_txt(t, sizeof(t), " us\nAlokacji: ");
-        dopisz_u32(t, sizeof(t), static_cast<uint32_t>(g_pam_liczba)); dopisz_txt(t, sizeof(t), ", nieudanych: ");
+        dopisz_txt(t, sizeof(t), " ms\nOstatnie rysowanie\t");
+        dopisz_u32(t, sizeof(t), static_cast<uint32_t>(render_ns / 1000ULL)); dopisz_txt(t, sizeof(t), " µs");
+        dopisz_txt(t, sizeof(t), "\n\n# Alokacje\nLiczba alokacji\t");
+        dopisz_u32(t, sizeof(t), static_cast<uint32_t>(g_pam_liczba)); dopisz_txt(t, sizeof(t), "\nNieudane alokacje\t");
         dopisz_u32(t, sizeof(t), static_cast<uint32_t>(g_pam_nieudane));
-        pokaz_pomoc("Informacje o obrazie", t);
+        pokaz_okno(OknoPodrzedne::Rodzaj::InfoObrazu, tytul, t);
+    }
+
+    // Nowe okno podrzedne (modeless, wlasnosc tego okna) albo aktywacja istniejacego tego samego rodzaju.
+    static void pokaz_okno(OknoPodrzedne::Rodzaj rodzaj, const char* tytul, const char* tresc) {
+        (void)OknoPodrzedne::otworz(rodzaj, tytul, tresc);
     }
 
     void pokaz_pomoc(const char* tytul, const char* tekst) {
@@ -976,16 +989,37 @@ void mysz_rolka(PowierzchniaRysunkowa* pow_ui, const ZdarzenieRolki& e, void*) {
     }
 }
 
+// Format tresci okien podrzednych: "# Sekcja", "Pole<TAB>Wartosc", pusta linia, akapit (bursztyn_ui/tresc_uklad.h).
 const char* TEKST_STEROWANIE =
-    "Strzałki w lewo / w prawo, PgUp / PgDn - poprzednie / następne zdjęcie.\n"
-    "Home / End - pierwsze / ostatnie zdjęcie.\n"
-    "Ctrl + kółko myszy - powiększenie (punkt pod kursorem zostaje na miejscu).\n"
-    "Kółko myszy, W A S D, przeciąganie myszą - przesuwanie obrazu.\n"
-    "+ / - powiększ / pomniejsz, 0 lub 1 - 100%, F lub D - dopasuj do okna.";
+    "# Nawigacja po zdjęciach\n"
+    "Strzałka w lewo, PgUp\tpoprzednie zdjęcie\n"
+    "Strzałka w prawo, PgDn\tnastępne zdjęcie\n"
+    "Home\tpierwsze zdjęcie\n"
+    "End\tostatnie zdjęcie\n"
+    "\n"
+    "# Powiększanie i dopasowanie\n"
+    "+ / -\tpowiększ / pomniejsz\n"
+    "Ctrl + kółko myszy\tpowiększenie (punkt pod kursorem zostaje na miejscu)\n"
+    "0 lub 1\twidok 100%\n"
+    "F lub D\tdopasuj obraz do okna\n"
+    "\n"
+    "# Przesuwanie obrazu\n"
+    "Kółko myszy\tprzesuwanie obrazu\n"
+    "W, A, S, D\tprzesuwanie obrazu\n"
+    "Przeciąganie myszą\tprzesuwanie obrazu";
 const char* TEKST_O_PROGRAMIE =
-    "Przeglądarka Obrazów dla Bursztyn OS\n"
-    "Formaty: BMP, PNG, JPEG, BTP (BTP1 i BTP2).\n"
-    "Domyślna galeria: /dane/zdjecia.";
+    "# Przeglądarka Obrazów\n"
+    "Przeglądarka Obrazów dla Bursztyn OS - natywna aplikacja BursztynUI (Ring 3).\n"
+    "\n"
+    "# Podstawowe informacje\n"
+    "Wersja\t0.1\n"
+    "Obsługiwane formaty\tBMP, PNG, JPEG, BTP (BTP1 i BTP2)\n"
+    "Domyślna galeria\t/dane/zdjecia\n"
+    "\n"
+    "# Informacje techniczne\n"
+    "Pełna rozdzielczość\tdo 17 Mpx (bok do 8192 px)\n"
+    "Duże pliki JPEG\tpodgląd strumieniowy w skali 1/2, 1/4 lub 1/8\n"
+    "Budżet pamięci\tdo 200 MiB szczytu pamięci na jeden obraz";
 
 class OknoObrazow : public Okno {
 public:
@@ -1084,9 +1118,9 @@ static void obrazy_zbuduj_ui(AplikacjaGUI& app, OknoObrazow& okno) {
         g_obrazy.ustaw_zawijanie(!g_obrazy.zawijaj_galerie); el.ustaw_zaznaczony(g_obrazy.zawijaj_galerie); });
     e_zaw.ustaw_typ_zaznaczenia(TypZaznaczeniaMenu::Pole).ustaw_zaznaczony(true);
     Menu& m_pomoc = menu.menu().dodaj_podmenu("Pomoc", 400);
-    m_pomoc.dodaj_element("Sterowanie", 401, [](ElementMenu&, void*) { g_obrazy.pokaz_pomoc("Sterowanie", TEKST_STEROWANIE); });
+    m_pomoc.dodaj_element("Sterowanie", 401, [](ElementMenu&, void*) { AplikacjaObrazow::pokaz_okno(OknoPodrzedne::Rodzaj::SterowanieObrazy, "Sterowanie", TEKST_STEROWANIE); });
     m_pomoc.dodaj_element("Informacje o obrazie", 403, [](ElementMenu&, void*) { g_obrazy.pokaz_informacje(); });
-    m_pomoc.dodaj_element("O programie", 402, [](ElementMenu&, void*) { g_obrazy.pokaz_pomoc("O programie", TEKST_O_PROGRAMIE); });
+    m_pomoc.dodaj_element("O programie", 402, [](ElementMenu&, void*) { AplikacjaObrazow::pokaz_okno(OknoPodrzedne::Rodzaj::OProgramieObrazy, "O programie", TEKST_O_PROGRAMIE); });
 
     Panel& pasek = korzen->dodaj<Panel>(Orientacja::Pozioma);
     pasek.ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);

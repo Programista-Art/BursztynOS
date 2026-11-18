@@ -1,0 +1,21 @@
+# start realtime=1794825976.038 prog=1.5s czas=900.0s
+przerwa 2.0s monotonic_t=178.4s realtime=1794826154.439 dr=2.0s loadavg=0.88
+przerwa 8.7s monotonic_t=199.4s realtime=1794826175.476 dr=8.7s loadavg=0.92
+przerwa 3.4s monotonic_t=208.6s realtime=1794826184.679 dr=3.4s loadavg=0.78
+przerwa 2.9s monotonic_t=212.3s realtime=1794826188.322 dr=2.9s loadavg=0.71
+przerwa 62.7s monotonic_t=275.0s realtime=1794826251.031 dr=62.7s loadavg=0.90
+przerwa 1.8s monotonic_t=277.1s realtime=1794826253.115 dr=1.8s loadavg=0.82
+przerwa 1.7s monotonic_t=289.6s realtime=1794826265.594 dr=1.7s loadavg=1.01
+przerwa 2.5s monotonic_t=306.4s realtime=1794826282.478 dr=2.5s loadavg=1.45
+przerwa 50.9s monotonic_t=373.2s realtime=1794826349.272 dr=50.9s loadavg=0.48
+przerwa 2.5s monotonic_t=376.0s realtime=1794826352.009 dr=2.5s loadavg=0.48
+przerwa 176.3s monotonic_t=557.6s realtime=1794826533.589 dr=176.3s loadavg=0.02
+przerwa 2.5s monotonic_t=580.1s realtime=1794826556.120 dr=2.5s loadavg=0.28
+przerwa 2.6s monotonic_t=585.9s realtime=1794826561.908 dr=2.6s loadavg=0.26
+przerwa 3.7s monotonic_t=593.8s realtime=1794826569.832 dr=3.7s loadavg=0.29
+przerwa 61.2s monotonic_t=660.0s realtime=1794826636.052 dr=61.2s loadavg=0.13
+przerwa 67.0s monotonic_t=728.0s realtime=1794826704.016 dr=67.0s loadavg=0.04
+przerwa 66.1s monotonic_t=794.7s realtime=1794826769.604 dr=66.1s loadavg=7.30
+przerwa 15.6s monotonic_t=810.8s realtime=1794826785.696 dr=15.6s loadavg=5.91
+przerwa 186.9s monotonic_t=997.6s realtime=1794826972.571 dr=186.9s loadavg=6.95
+# koniec przerw=19 maks=186.9s

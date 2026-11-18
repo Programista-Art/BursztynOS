@@ -1,0 +1,24 @@
+{
+ "pulpit": true,
+ "sekundy": 46.7,
+ "mice": [
+  "QEMU PS/2 Mouse",
+  "QEMU Virtio Mouse",
+  "QEMU Virtio Tablet"
+ ],
+ "blad_qmp": "[Errno 104] Connection reset by peer",
+ "kod_launchera": 0,
+ "przestoje": [
+  [
+   26.8,
+   1.0
+  ]
+ ],
+ "bledy_jadra": 0,
+ "log:VirtIO-RNG": 2,
+ "log:VIRTIO-RNG": 3,
+ "log:Virtio Tablet": 1,
+ "log:QEMU Virtio Tablet": 1,
+ "log:QEMU Virtio Mouse": 2,
+ "log:QEMU Virtio Keyboard": 1
+}

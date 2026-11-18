@@ -73,6 +73,9 @@
 #define PRAWO_DEBUG           (UINT64_C(1) << 7)
 /* Zapis WYLACZNIE w prywatnym katalogu ustawien wlasnej aplikacji (patrz ustawienia_aplikacji.h). */
 #define PRAWO_USTAWIENIA_APLIKACJI (UINT64_C(1) << 8)
+/* Otwieranie WLASNYCH okien podrzednych (informacyjnych) przez BWS 101: tylko staly, wbudowany program okna
+ * informacyjnego, tresc <= 4 KiB, limit okien na wlasciciela; nie daje ogolnego uruchamiania programow. */
+#define PRAWO_OKNO_PODRZEDNE       (UINT64_C(1) << 9)
 
 /*
  * Brak praw.
@@ -95,7 +98,8 @@
      PRAWO_SYSTEM_CONFIG   | \
      PRAWO_STEROWNIK       | \
      PRAWO_DEBUG           | \
-     PRAWO_USTAWIENIA_APLIKACJI)
+     PRAWO_USTAWIENIA_APLIKACJI | \
+     PRAWO_OKNO_PODRZEDNE)
 
 /*
  * Prawa o szczegolnie wysokim ryzyku.

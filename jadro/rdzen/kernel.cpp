@@ -37,6 +37,7 @@ extern "C" void odblokuj_ekran();
 #include "pamiec.h"
 #include "psf.h"
 #include "psf_bootstrap.h"
+#include "katalogi_uzytkownika.h"
 #include "grafika.h"
 #include "loader.h"
 #include "ahci.h"
@@ -186,6 +187,7 @@ extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
+extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_start[];
 extern "C" uint8_t _binary_dane_sponsorze_mecenasi_txt_end[];
 extern "C" uint8_t _binary_dane_sponsorze_sponsorzy_txt_start[];
@@ -221,6 +223,8 @@ extern "C" uint8_t _binary_test_bin_bz_end[];
 
 extern "C" uint8_t _binary_snake_bin_bz_start[];
 extern "C" uint8_t _binary_snake_bin_bz_end[];
+extern "C" uint8_t _binary_okno_informacyjne_bin_bz_start[];
+extern "C" uint8_t _binary_okno_informacyjne_bin_bz_end[];
 
 extern "C" uint8_t _binary_demo_ui_bin_bz_start[];
 extern "C" uint8_t _binary_demo_ui_bin_bz_end[];
@@ -607,12 +611,14 @@ bool scisla_instalacja=false,pliki_instalacja_ok=true;
 bool ekran_aplikacja_instalacja_ok=false;
 bool tapety_aplikacja_instalacja_ok=false;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
-PlikKontrolny pliki_kontrolne[96]{};
+constexpr unsigned MAKS_PLIKOW_KONTROLNYCH = 112;   // = MAKS_PLANOWANYCH_PLIKOW (limit 96 zostal osiagniety)
+PlikKontrolny pliki_kontrolne[MAKS_PLIKOW_KONTROLNYCH]{};
 unsigned liczba_plikow_kontrolnych=0;
 // Kompresja blobow (2.2): data/koniec wskazuja skompresowany blob, a size
 // to rozmiar surowy; dane sa rozpakowywane dopiero przy zapisie pliku.
 struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;};
-PlanowanyPlik planowane_pliki[96]{};
+constexpr unsigned MAKS_PLANOWANYCH_PLIKOW = 112;   // plik .bur + manifest na aplikacje, ikony, dane; bylo 96 (limit osiagniety)
+PlanowanyPlik planowane_pliki[MAKS_PLANOWANYCH_PLIKOW]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
 size_t planowane_katalog_indeks=0;
 uint32_t planowane_offset=0,planowane_crc=~0U;
@@ -665,8 +671,11 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
      */
     (void)usun_twor(sciezka);
 
-    if (!utworz_plik(sciezka))
+    if (!utworz_plik(sciezka)) {
+        wypisz_log("[BSP-BLAD] utworz_plik nieudane (katalog nadrzedny/limit PSF):");
+        wypisz_log(sciezka);
         return false;
+    }
 
     if (rozmiar == 0)
         return true;
@@ -688,7 +697,7 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
 
 bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     if(planowanie_instalacji){
-        if(!path||(size&&!data)||planowane_liczba>=96||planowane_bajty_razem>UINT64_MAX-size){
+        if(!path||(size&&!data)||planowane_liczba>=MAKS_PLANOWANYCH_PLIKOW||planowane_bajty_razem>UINT64_MAX-size){
             pliki_instalacja_ok=false;return false;
         }
         auto&e=planowane_pliki[planowane_liczba++];unsigned i=0;
@@ -701,7 +710,7 @@ bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
     if(scisla_instalacja&&!pliki_instalacja_ok)return false;
     bool ok=zapisz_plik_od_nowa_impl(path,data,size);
     if(scisla_instalacja){
-        if(!ok||liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        if(!ok||liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
         auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];unsigned i=0;
         for(;i+1<sizeof(e.path)&&path[i];++i){
             e.path[i]=path[i];
@@ -798,10 +807,13 @@ bool instaluj_paczke(
     const char* sciezka_programu,
     const uint8_t* blob_start,
     const uint8_t* blob_end) {
+    powitanie_punkt_startu();
 
     if (!zapisz_manifest(
             sciezka_manifestu,
             manifest)) {
+        wypisz_log("[BSP-BLAD] instaluj_paczke: zapis manifestu nieudany");
+        wypisz_log(sciezka_manifestu);
         return false;
     }
 
@@ -811,6 +823,8 @@ bool instaluj_paczke(
             blob_end)) {
         (void)usun_twor(
             sciezka_manifestu);
+        wypisz_log("[BSP-BLAD] instaluj_paczke: zapis programu nieudany");
+        wypisz_log(sciezka_programu);
 
         return false;
     }
@@ -829,7 +843,9 @@ bool instaluj_paczke(
 // (poziom PZB_UZYTKOWNIK) dla /uzytkownicy/domyslny/Ustawienia; aplikacja tworzy tylko swoj podkatalog
 // i nie dostaje zadnych podwyzszonych uprawnien. Istniejace katalogi (z dysku) nie sa zmieniane.
 void zapewnij_katalogi_ustawien_uzytkownika() {
-    static const char* const sciezki[] = {"/uzytkownicy/domyslny", "/uzytkownicy/domyslny/Ustawienia"};
+    // Dokumenty: domyslne miejsce dokumentow (skrot "Dokumenty" w dialogach plikow).
+    static const char* const sciezki[] = {KatalogiUzytkownika::Domowy, "/uzytkownicy/domyslny/Ustawienia",
+                                          KatalogiUzytkownika::Dokumenty};
     for (const char* s : sciezki)
         if (!katalog_istnieje(s)) (void)utworz_katalog_z_pzb(s, PZB_UZYTKOWNIK);
 }
@@ -1334,7 +1350,8 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
-        "    \"pliki_zapisz\"\n"
+        "    \"pliki_zapisz\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";
 
     static const char MANIFEST_EKSPLORATORA[] =
@@ -1381,8 +1398,20 @@ void instaluj_wbudowane_programy() {
         "uprawnienia = [\n"
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
-        "    \"ustawienia_aplikacji\"\n"
+        "    \"ustawienia_aplikacji\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";   // zapis tylko w /uzytkownicy/<u>/Ustawienia/snake (PRAWO_USTAWIENIA_APLIKACJI); brak ogolnego pliki_zapisz
+
+    // Okno informacyjne: tylko GUI (bez plikow/sieci/uruchamiania); uruchamiane wylacznie przez BWS 101.
+    static const char MANIFEST_OKNO_INFORMACYJNE[] =
+        "nazwa = \"Okno informacyjne\"\n"
+        "autor = \"Programista Art\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"okno-informacyjne.bur\"\n"
+        "uprawnienia = [\n"
+        "    \"okna\"\n"
+        "]\n";
 
     static const char MANIFEST_PRZEGLADARKA_OBRAZOW[] =
         "nazwa = \"Przeglądarka Obrazów\"\n"
@@ -1392,7 +1421,8 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"przegladarka-obrazow.bur\"\n"
         "uprawnienia = [\n"
         "    \"okna\",\n"
-        "    \"pliki_czytaj\"\n"
+        "    \"pliki_czytaj\",\n"
+        "    \"okno_podrzedne\"\n"
         "]\n";
 
     static const char MANIFEST_DEMO_UI[] =
@@ -1557,6 +1587,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_diagnostyka.png",_binary_ikonki_app_diagnostyka_png_start,_binary_ikonki_app_diagnostyka_png_end},
         {"/ikonki/app_shell.png",_binary_ikonki_app_shell_png_start,_binary_ikonki_app_shell_png_end},
         {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
+        {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -1953,6 +1984,16 @@ void instaluj_wbudowane_programy() {
     }
 
     if (!instaluj_paczke(
+            "/programy/okno-informacyjne.cebula/opis.aplikacji",
+            MANIFEST_OKNO_INFORMACYJNE,
+            "/programy/okno-informacyjne.cebula/okno-informacyjne.bur",
+            _binary_okno_informacyjne_bin_bz_start,
+            _binary_okno_informacyjne_bin_bz_end)) {
+        wypisz_log(
+            "[BSP-BLAD] Nie mozna zainstalowac okna informacyjnego.");
+    }
+
+    if (!instaluj_paczke(
             "/programy/przegladarka-obrazow.cebula/opis.aplikacji",
             MANIFEST_PRZEGLADARKA_OBRAZOW,
             "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur",
@@ -2288,6 +2329,18 @@ void wypisz_ilosc_ram() {
 
 } // namespace
 
+// Punkt kontrolny synchronicznego startu: ekran powitalny moze pokazac kolejny
+// etap, zanim petla PID 0 przejmie kompozytor. Nieblokujace (powitanie_obsluz_start
+// konczy sie natychmiast bez zmiany obrazu); po wlaczeniu wielozadaniowosci
+// i po zakonczeniu ekranu powitalnego nie robi nic i nie bierze blokady.
+void powitanie_punkt_startu() {
+    if (wielozadaniowosc_aktywna || !powitanie_aktywne())
+        return;
+    zablokuj_ekran();
+    (void)powitanie_obsluz_start();
+    odblokuj_ekran();
+}
+
 // Interfejs dla instalatora (jadro/gui/instalator.cpp): kroki opcjonalnej kopii zdjec na dysk docelowy.
 extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem) { return galeria_inst_start(mbi, razem); }
 extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe) { galeria_inst_step(wykonane, gotowe); }
@@ -2398,7 +2451,7 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     }
     planowane_offset+=n;planowane_bajty+=n;
     if(planowane_offset==e.size){
-        if(liczba_plikow_kontrolnych>=96){pliki_instalacja_ok=false;return false;}
+        if(liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
         auto&k=pliki_kontrolne[liczba_plikow_kontrolnych++];
         unsigned i=0;for(;i+1<sizeof(k.path)&&e.path[i];++i){k.path[i]=e.path[i];}k.path[i]=0;
         k.size=e.size;k.crc=~planowane_crc;
@@ -2924,6 +2977,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
 
     wypisz_log(
         "[SIEC] Inicjalizacja stosu sieciowego zakonczona.");
+    powitanie_punkt_startu();
 
     /* ---------------------------------------------------------------------
      * Dzwiek
@@ -2941,6 +2995,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
         wypisz_log(
             "[HDA] Brak dostepnego urzadzenia HDA.");
     }
+    powitanie_punkt_startu();
 
     /* ---------------------------------------------------------------------
      * PSF - osobny, niekolidujacy obszar wirtualny
@@ -3021,6 +3076,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     /* Pierwszy skan wykrywa urzadzenia przed istnieniem PSF. Ten przebieg
        zapisuje raport dopiero po utworzeniu /logi. */
     skanuj_magistrale_pci();
+    powitanie_punkt_startu();
 
     wypisz_log(
         "[BSP] Drzewiasty system plikow PSF gotowy.");
@@ -3038,9 +3094,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     }
     // Restoring the display mode can compose immediately, before WM exists.
     // Resolve the current palette before that first composition.
+    powitanie_punkt_startu();
     motyw_inicjalizuj();
     tapety_inicjalizuj(g_multiboot_info_ptr);
+    powitanie_punkt_startu();
     ekran_inicjalizuj();
+    powitanie_punkt_startu();
     PrezentacjaStartu::zakoncz_inicjalizacje();
     input_set_pointer_ready(true);
     input_pointer_boot_diagnostic();

@@ -1,3 +1,4 @@
+#include "jadro/mm/zarezerwowane_va.h"
 #include "diagnostyka_systemu.h"
 #include "sterowniki/usb/xhci.h"
 #include "sterowniki/usb/xhci_ring.h"
@@ -37,6 +38,7 @@ void wypisz_log(const char* tekst);
 
 namespace {
 constexpr uint64_t MMIO_VIRTUAL_BASE = UINT64_C(0x2000000000);
+static_assert(MMIO_VIRTUAL_BASE == ZarezerwowaneVA::XHCI_MMIO_START, "okno MMIO xHCI musi zgadzac sie z zarezerwowane_va.h");
 constexpr uint64_t PAGE = 4096;
 constexpr uint64_t MAX_MMIO_SIZE = 16ULL * 1024ULL * 1024ULL;
 constexpr uint64_t MAX_PHYSICAL_ADDRESS = UINT64_C(0x000FFFFFFFFFFFFF);
@@ -183,6 +185,7 @@ struct Controller {
     uint32_t hid_service_slot{1};bool enumeration_started{};
 };
 constexpr size_t MAX_CONTROLLERS=8;
+static_assert(uint64_t(MAX_CONTROLLERS)*8ULL*MAX_MMIO_SIZE <= ZarezerwowaneVA::XHCI_MMIO_ROZMIAR, "okno MMIO xHCI musi miescic wszystkie kontrolery");
 Controller controllers[MAX_CONTROLLERS]{};
 size_t controller_count{};
 bool controllers_scanned{};

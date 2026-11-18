@@ -45,8 +45,21 @@ enum bws_modyfikatory : uint32_t {
     BWS_MOD_ALT   = 1U << 2,
     BWS_MOD_SUPER = 1U << 3,
     BWS_MOD_CAPS  = 1U << 4,
-    BWS_MOD_NUM   = 1U << 5
+    BWS_MOD_NUM   = 1U << 5,
+    /* Addytywny bit: prawy Alt dziala jako AltGr (uklad Polski Programisty).
+       BWS_MOD_ALT pozostaje ustawiony dla zgodnosci starszych aplikacji, ale
+       kombinacja z AltGr jest wprowadzaniem znaku, nigdy skrotem ani
+       aktywacja menu. Ctrl+AltGr (host wysylajacy LCtrl+RAlt) tez jest AltGr. */
+    BWS_MOD_ALTGR = 1U << 6
 };
+
+/* Skroty klawiaturowe: Ctrl/Alt trzymane razem z AltGr nie sa skrotami. */
+static constexpr inline bool bws_mod_ctrl_skrotu(uint32_t m) {
+    return (m & BWS_MOD_CTRL) != 0 && (m & BWS_MOD_ALTGR) == 0;
+}
+static constexpr inline bool bws_mod_alt_skrotu(uint32_t m) {
+    return (m & BWS_MOD_ALT) != 0 && (m & BWS_MOD_ALTGR) == 0;
+}
 
 #define BWS_KEY_SOURCE_E0  (1U << 8)
 #define BWS_KEY_SOURCE_USB (1U << 16)

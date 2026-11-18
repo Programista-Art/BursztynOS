@@ -5,6 +5,7 @@
 #include <vector>
 #include "bursztyn_ui_host_fixture.h"
 #include "wm_input.h"
+#include "bursztyn_ui/bursztyn_ui.h"
 static int checks = 0;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); exit(1); } } while (0)
 
@@ -27,7 +28,52 @@ static int hit(int x, int y, WmPasek pasek, int overlay = -1) {
         [](int pid) { return flaga[pid]; });
 }
 
+
+// Ta sama sekwencja co "[BURSZTYNUI 4/4]" w programy/test/test.cpp, na
+// prawdziwym BursztynUI::Okno: obszar roboczy 1280x720 bez paska zadan.
+static void ruch_przy_dolnej_krawedzi() {
+    using namespace BursztynUI;
+    for (unsigned skala : {100U, 125U, 150U, 200U}) {
+        ui_skala_procent = skala;
+        const int pasek = ui_skaluj(40, skala);
+        test_monitor_ok = true; test_monitor = {};
+        test_monitor.work_x = 0; test_monitor.work_y = 0; test_monitor.work_szer = 1280; test_monitor.work_wys = 720 - pasek;
+        const auto& m = test_monitor;
+        Okno ograniczone("Work area clamp", m.work_szer + 200, m.work_wys + 200);
+        ograniczone.ustaw_geometrie(m.work_x - 100, m.work_y + m.work_wys - 10, m.work_szer + 200, m.work_wys + 200);
+        ograniczone.dopasuj_do_obszaru_roboczego(true);
+        CHECK(ograniczone.x() == m.work_x && ograniczone.y() == m.work_y &&
+              ograniczone.szerokosc() == m.work_szer && ograniczone.wysokosc() == m.work_wys);
+        ograniczone.ustaw_geometrie(m.work_x + m.work_szer - 20, m.work_y + m.work_wys - 20, 300, 180);
+        const int s_proc = ograniczone.skala_dpi().procent();
+        const int belka = Okno::WYSOKOSC_BELKI_TYTULOWEJ * ograniczone.skala_dpi();
+        const int uchwyt = ui_skaluj(96, s_proc);
+        const int dol = m.work_y + m.work_wys, prawo = m.work_x + m.work_szer;
+        // Dawna asercja (pelne zawarcie w obszarze roboczym) nie odpowiada polityce
+        // z 7779afa: okno wystaje, ale belka zostaje nad paskiem.
+        CHECK(!(ograniczone.y() + ograniczone.wysokosc() <= dol));
+        CHECK(OknoGeometria::pasek_uchwytny({ograniczone.x(), ograniczone.y(), ograniczone.szerokosc(), ograniczone.wysokosc()},
+                                            {m.work_x, m.work_y, m.work_szer, m.work_wys}, uchwyt, belka, belka / 2));
+        CHECK(ograniczone.y() + belka <= dol);
+        CHECK(ograniczone.x() + uchwyt <= prawo);
+        CHECK(ograniczone.y() == dol - belka);
+        CHECK(ograniczone.x() == prawo - uchwyt);
+        CHECK(ograniczone.szerokosc() == 300 && ograniczone.wysokosc() == 180);
+        ograniczone.ustaw_geometrie(m.work_x + 40, dol - belka - 10, 300, m.work_wys + 100);
+        CHECK(ograniczone.y() + belka <= dol && ograniczone.y() >= m.work_y - belka / 2);
+        // Czesc okna pod obszarem roboczym jest w prostokacie paska; hit-test i
+        // kolejnosc skladania oddaja ten obszar paskowi (pasek nad oknem).
+        dodaj(1, 0, 0, 0, 1280, 720);
+        dodaj(2, 10, ograniczone.x(), ograniczone.y(), ograniczone.szerokosc(), ograniczone.wysokosc());
+        WmPasek p{true, 1, 0, dol, 1280, pasek};
+        CHECK(hit(ograniczone.x() + 50, dol + 2, p) == 1);
+        CHECK(hit(ograniczone.x() + 50, dol - 2, p) == 2);
+        warstwy[2] = {};
+    }
+    test_monitor_ok = false; ui_skala_procent = 100;
+}
 int main() {
+    ruch_przy_dolnej_krawedzi();
     // Pulpit (pid 1, z=0, caly ekran 1280x720, przezroczysty poza paskiem) + pasek y=680..720.
     dodaj(1, 0, 0, 0, 1280, 720, false, false);
     WmPasek pasek; pasek.aktywny = true; pasek.pid = 1; pasek.x = 0; pasek.y = 680; pasek.w = 1280; pasek.h = 40;

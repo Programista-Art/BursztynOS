@@ -112,7 +112,11 @@ def main() -> int:
     check("BWS_HDA_DIAG = 89" in api, "BWS_HDA_DIAG == 89")
     check("BWS_HDA_TEST = 90" in api, "BWS_HDA_TEST == 90")
     check("BWS_DIAGNOSTYKA_SYSTEMU = 91" in api, "system diagnostics reserves 91")
-    check("BWS_PIERWSZY_WOLNY = 98" in api, "next free is 98")
+    sys.path.insert(0, str(ROOT / "testy"))
+    from bws_numeracja import wczytaj_numeracje, zwaliduj_numeracje
+    _num = wczytaj_numeracje(ROOT)
+    _bledy = zwaliduj_numeracje(_num, {"BWS_HDA_DIAG": 89, "BWS_HDA_TEST": 90, "BWS_DIAGNOSTYKA_SYSTEMU": 91})
+    check(not _bledy, "BWS numbering consistent with bws_api.h (unique, 99 reserved, next free above all): " + "; ".join(_bledy))
 
     # --- built artifact ---
     blob = ROOT / "test_dzwieku.bin"

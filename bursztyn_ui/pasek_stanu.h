@@ -18,14 +18,27 @@ public:
     SekcjaStanu() = default;
 
     const char* tekst() const { return tekst_; }
-    void ustaw_tekst(const char* t) {
-        if (!t) { tekst_[0] = '\0'; return; }
+    void ustaw_tekst(const char* t) { kopiuj_utf8(tekst_, sizeof(tekst_), t); }
+
+    // Wzorzec najszerszej typowej tresci (np. "Linii: 00000"): sekcja
+    // DopasujDoTresci nie jest wezsza niz wzorzec zmierzony biezaca czcionka,
+    // wiec szerokosc nie skacze przy kazdej cyfrze.
+    const char* wzorzec() const { return wzorzec_; }
+    void ustaw_wzorzec(const char* t) { kopiuj_utf8(wzorzec_, sizeof(wzorzec_), t); }
+
+    // Wyzszy priorytet = dluzej widoczna w waskim oknie.
+    int priorytet() const { return priorytet_; }
+    void ustaw_priorytet(int p) { priorytet_ = p; }
+    bool czy_ukryta_ukladem() const { return ukryta_ukladem_; }
+
+    // Kopia bez rozcinania sekwencji UTF-8 na granicy bufora.
+    static void kopiuj_utf8(char* cel, size_t cap, const char* t) {
+        if (!cel || !cap) return;
         size_t i = 0;
-        while (t[i] != '\0' && i < sizeof(tekst_) - 1) {
-            tekst_[i] = t[i];
-            ++i;
-        }
-        tekst_[i] = '\0';
+        if (t) while (t[i] != '\0' && i + 1 < cap) { cel[i] = t[i]; ++i; }
+        if (t && t[i] != '\0')
+            while (i > 0 && (static_cast<uint8_t>(t[i]) & 0xC0U) == 0x80U) --i;
+        cel[i] = '\0';
     }
 
     int szerokosc() const { return szerokosc_; }
@@ -47,7 +60,10 @@ public:
 
 private:
     friend class PasekStanu;
-    char tekst_[64]{};
+    char tekst_[192]{};
+    char wzorzec_[48]{};
+    int priorytet_{0};
+    bool ukryta_ukladem_{false};
     int szerokosc_{100};
     RozmiarSekcjiStanu tryb_{RozmiarSekcjiStanu::DopasujDoTresci};
     WyrownaniePoziome wyrownanie_{WyrownaniePoziome::Poczatek};
@@ -71,6 +87,7 @@ public:
         styl_.normalny.tlo = motyw_kolor(MOTYW_KOLOR_PANEL);
         styl_.normalny.ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
         styl_.normalny.grubosc_ramki = 1;
+        przelicz_sekcje();       // motyw moze zmienic czcionke systemowa
         uniewaznij();
     }
 
@@ -124,7 +141,10 @@ public:
                    stary[i] == nowy[i]) ++i;
             if (stary[i] == nowy[i]) return;
             sekcje_[indeks].ustaw_tekst(tekst);
-            if (sekcje_[indeks].tryb_rozmiaru() == RozmiarSekcjiStanu::DopasujDoTresci) {
+            // Przeliczenie ukladu tylko, gdy zmienia sie szerokosc sekcji
+            // (np. kolejna cyfra ponad wzorzec); inaczej tylko jej obszar.
+            if (sekcje_[indeks].tryb_rozmiaru() == RozmiarSekcjiStanu::DopasujDoTresci &&
+                szerokosc_tresci(sekcje_[indeks]) != sekcje_[indeks].szerokosc()) {
                 przelicz_sekcje();
                 uniewaznij();
             } else {
@@ -160,6 +180,39 @@ public:
             sekcje_[indeks].ustaw_wyrownanie(wyr);
             uniewaznij_obszar(sekcje_[indeks].prostokat_);
         }
+    }
+
+    void ustaw_wzorzec(size_t indeks, const char* wzor) {
+        if (indeks < liczba_sekcji_) {
+            sekcje_[indeks].ustaw_wzorzec(wzor);
+            przelicz_sekcje();
+            uniewaznij();
+        }
+    }
+    void ustaw_priorytet(size_t indeks, int p) {
+        if (indeks < liczba_sekcji_) {
+            sekcje_[indeks].ustaw_priorytet(p);
+            przelicz_sekcje();
+            uniewaznij();
+        }
+    }
+    bool czy_sekcja_widoczna_w_ukladzie(size_t indeks) const {
+        return indeks < liczba_sekcji_ && sekcje_[indeks].czy_widoczna() &&
+               !sekcje_[indeks].ukryta_ukladem_ && sekcje_[indeks].prostokat_.szerokosc > 0;
+    }
+    // Tekst sekcji po ewentualnym skroceniu z wielokropkiem (jak rysowany).
+    void tekst_wyswietlany(size_t indeks, char* out, size_t cap) const {
+        if (!out || !cap) return;
+        out[0] = '\0';
+        if (indeks >= liczba_sekcji_) return;
+        const SekcjaStanu& s = sekcje_[indeks];
+        int dostepne = s.prostokat_.szerokosc - 2 * margines_tekstu();
+        skroc_do_szerokosci(s.tekst(), dostepne, out, cap);
+    }
+
+    void ustaw_skale_dpi(SkalaUI s) override {
+        Kontrolka::ustaw_skale_dpi(s);
+        przelicz_sekcje();
     }
 
     void ustaw_widoczna_sekcje(size_t indeks, bool widoczna) {
@@ -201,17 +254,27 @@ public:
         przelicz_sekcje();
     }
 
+    // Zmiana czcionki systemowej/motywu: szerokosci z metryk nowej czcionki.
+    void po_zmianie_czcionki() {
+        przelicz_sekcje();
+        uniewaznij();
+    }
+
     void rysuj_siebie(KontekstRysowania& ctx) override {
         Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
         ctx.rysuj_prostokat(b, styl_.normalny.tlo);
         ctx.rysuj_ramke(b, styl_.normalny.ramka, 1);
 
+        size_t ostatnia = liczba_sekcji_;
+        for (size_t i = 0; i < liczba_sekcji_; ++i)
+            if (czy_sekcja_widoczna_w_ukladzie(i)) ostatnia = i;
+        const int m = margines_tekstu();
         for (size_t i = 0; i < liczba_sekcji_; ++i) {
             SekcjaStanu& s = sekcje_[i];
-            if (!s.czy_widoczna() || s.prostokat_.szerokosc <= 0) continue;
+            if (!czy_sekcja_widoczna_w_ukladzie(i)) continue;
 
-            // Rysuj separator po prawej stronie (dla wszystkich poza ostatnią widoczną)
-            if (i + 1 < liczba_sekcji_) {
+            // Separator po prawej stronie kazdej widocznej sekcji poza ostatnia.
+            if (i < ostatnia) {
                 int sep_x = s.prostokat_.prawy();
                 ctx.rysuj_linie_pionowa(sep_x, 3, b.wysokosc - 6, motyw_kolor(MOTYW_KOLOR_RAMKA));
             }
@@ -219,23 +282,29 @@ public:
             if (s.kontrolka()) {
                 // Kontrolka rysuje się sama
             } else if (s.tekst()[0] != '\0') {
-                Prostokat tekst_r(s.prostokat_.x + 4, s.prostokat_.y + 2,
-                                  s.prostokat_.szerokosc > 8 ? s.prostokat_.szerokosc - 8 : 0,
+                Prostokat tekst_r(s.prostokat_.x + m, s.prostokat_.y + 2,
+                                  s.prostokat_.szerokosc > 2 * m ? s.prostokat_.szerokosc - 2 * m : 0,
                                   s.prostokat_.wysokosc > 4 ? s.prostokat_.wysokosc - 4 : 0);
+                if (tekst_r.szerokosc <= 0) continue;
+
+                // Za dlugi tekst: skrocony na granicy znaku z wielokropkiem
+                // (zamiast uciecia w polowie litery przez przyciecie).
+                char widoczny[sizeof(s.tekst_) + 4];
+                skroc_do_szerokosci(s.tekst(), tekst_r.szerokosc, widoczny, sizeof(widoczny));
 
                 ctx.dodaj_przyciecie(tekst_r);
 
                 int ty = tekst_r.y + (tekst_r.wysokosc - CzcionkaUI::pobierz_wysokosc(skala_dpi_)) / 2;
                 int tx = tekst_r.x;
                 if (s.wyrownanie() == WyrownaniePoziome::Srodek) {
-                    int tw = CzcionkaUI::zmierz_tekst(s.tekst(), skala_dpi_);
+                    int tw = CzcionkaUI::zmierz_tekst(widoczny, skala_dpi_);
                     tx = tekst_r.x + (tekst_r.szerokosc - tw) / 2;
                 } else if (s.wyrownanie() == WyrownaniePoziome::Koniec) {
-                    int tw = CzcionkaUI::zmierz_tekst(s.tekst(), skala_dpi_);
+                    int tw = CzcionkaUI::zmierz_tekst(widoczny, skala_dpi_);
                     tx = tekst_r.prawy() - tw;
                 }
 
-                ctx.rysuj_tekst(Punkt(tx, ty), s.tekst(), motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
+                ctx.rysuj_tekst(Punkt(tx, ty), widoczny, motyw_kolor(MOTYW_KOLOR_TEKST), skala_dpi_);
                 ctx.zdejmij_przyciecie();
             }
         }
@@ -243,6 +312,49 @@ public:
 
 private:
     int zadana_wysokosc_{24}, ostatnia_wysokosc_{-1};
+
+    int margines_tekstu() const { return 6 * skala_dpi_; }
+
+    // Prefiks tekstu mieszczacy sie w szerokosci (z "…" gdy skrocony).
+    void skroc_do_szerokosci(const char* t, int szer, char* out, size_t cap) const {
+        out[0] = '\0';
+        if (!t || szer <= 0) return;
+        if (CzcionkaUI::zmierz_tekst(t, skala_dpi_) <= szer) { SekcjaStanu::kopiuj_utf8(out, cap, t); return; }
+        static constexpr const char* WIELOKROPEK = "\xE2\x80\xA6";
+        const int w_kropek = CzcionkaUI::zmierz_tekst(WIELOKROPEK, skala_dpi_);
+        if (cap < 4) return;
+        size_t dobre = 0, i = 0;
+        char bufor[sizeof(SekcjaStanu::tekst_) + 4];
+        while (t[i] && i + 4 < sizeof(bufor) && i + 4 < cap) {
+            uint32_t cp = 0;
+            size_t n = CzcionkaUI::dekoduj_utf8(t, i, &cp);
+            if (!n) break;
+            size_t k = 0;
+            for (; k < i + n; ++k) bufor[k] = t[k];
+            bufor[k] = '\0';
+            if (CzcionkaUI::zmierz_tekst(bufor, skala_dpi_) + w_kropek > szer) break;
+            i += n;
+            dobre = i;
+        }
+        size_t k = 0;
+        for (; k < dobre; ++k) out[k] = t[k];
+        while (k > 0 && out[k - 1] == ' ') --k;
+        if (w_kropek <= szer) for (size_t j = 0; WIELOKROPEK[j]; ++j) out[k++] = WIELOKROPEK[j];
+        out[k] = '\0';
+    }
+
+    int szerokosc_tresci(const SekcjaStanu& s) const {
+        const int pad = 2 * margines_tekstu() + 2;
+        if (s.kontrolka()) return s.kontrolka()->preferowany_rozmiar().szerokosc + 8;
+        int tw = CzcionkaUI::zmierz_tekst(s.tekst(), skala_dpi_);
+        if (s.wzorzec()[0]) {
+            const int ww = CzcionkaUI::zmierz_tekst(s.wzorzec(), skala_dpi_);
+            if (ww > tw) tw = ww;
+        }
+        tw += pad;
+        return tw < 20 ? 20 : tw;
+    }
+
     void przelicz_sekcje() {
         int w = obszar_ekranu_.szerokosc;
         int h = obszar_ekranu_.wysokosc;
@@ -254,21 +366,37 @@ private:
 
         for (size_t i = 0; i < liczba_sekcji_; ++i) {
             SekcjaStanu& s = sekcje_[i];
+            s.ukryta_ukladem_ = false;
             if (!s.czy_widoczna()) continue;
 
             if (s.tryb_rozmiaru() == RozmiarSekcjiStanu::Stala) {
-                stala_szerokosc += s.szerokosc();
+                stala_szerokosc += s.szerokosc() + 1;
             } else if (s.tryb_rozmiaru() == RozmiarSekcjiStanu::DopasujDoTresci) {
-                int tw = CzcionkaUI::zmierz_tekst(s.tekst(), skala_dpi_) + 16;
-                if (s.kontrolka()) {
-                    tw = s.kontrolka()->preferowany_rozmiar().szerokosc + 8;
-                }
-                if (tw < 20) tw = 20;
+                int tw = szerokosc_tresci(s);
                 s.ustaw_szerokosc(tw);
-                stala_szerokosc += tw;
+                stala_szerokosc += tw + 1;
             } else if (s.tryb_rozmiaru() == RozmiarSekcjiStanu::Rozciagnij) {
                 ++liczba_rozciaganych;
             }
+        }
+
+        // Waskie okno: zamiast nachodzenia/uciecia ukrywane sa cale sekcje
+        // o najnizszym priorytecie (sekcje rozciagane i tak dostaja reszte).
+        while (stala_szerokosc > dostepna_szerokosc) {
+            int kandydat = -1;
+            for (size_t i = 0; i < liczba_sekcji_; ++i) {
+                const SekcjaStanu& s = sekcje_[i];
+                if (!s.czy_widoczna() || s.ukryta_ukladem_ || s.tryb_rozmiaru() == RozmiarSekcjiStanu::Rozciagnij) continue;
+                if (kandydat < 0 || s.priorytet() < sekcje_[kandydat].priorytet()) kandydat = static_cast<int>(i);
+            }
+            if (kandydat < 0) break;
+            size_t widocznych = 0;
+            for (size_t i = 0; i < liczba_sekcji_; ++i)
+                if (sekcje_[i].czy_widoczna() && !sekcje_[i].ukryta_ukladem_ &&
+                    sekcje_[i].tryb_rozmiaru() != RozmiarSekcjiStanu::Rozciagnij) ++widocznych;
+            if (widocznych <= 1) break;          // najwazniejsza zostaje (przycieta do okna)
+            sekcje_[kandydat].ukryta_ukladem_ = true;
+            stala_szerokosc -= sekcje_[kandydat].szerokosc() + 1;
         }
 
         int pozostala = dostepna_szerokosc - stala_szerokosc;
@@ -288,7 +416,7 @@ private:
         int rozciagana_idx = 0;
         for (size_t i = 0; i < liczba_sekcji_; ++i) {
             SekcjaStanu& s = sekcje_[i];
-            if (!s.czy_widoczna()) {
+            if (!s.czy_widoczna() || s.ukryta_ukladem_) {
                 s.prostokat_ = Prostokat();
                 if (s.kontrolka()) s.kontrolka()->ustaw_widoczna(false);
                 continue;

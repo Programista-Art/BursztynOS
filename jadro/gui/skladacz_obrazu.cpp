@@ -44,6 +44,10 @@
 
 #include "skladacz_obrazu.h"
 #include "rozszerzenie_powierzchni.h"
+#include <stddef.h>
+/* Okna podrzedne (jadro/bws/okna_podrzedne.h): dzieci wlasciciela pozostaja nad nim i minimalizuja/przywracaja sie razem z nim. */
+extern "C" size_t okna_podrzedne_dzieci(int wlasciciel, int* out, size_t cap) __attribute__((weak));
+static constexpr size_t MAKS_DZIECI_OKNA = 4;
 #ifndef BURSZTYN_DIAG_RESIZE_LATENCY
 #define BURSZTYN_DIAG_RESIZE_LATENCY 0
 #endif
@@ -175,9 +179,10 @@ struct ApplicationPopupState {
     GuiDirtyRect rect;
     uint32_t* tlo;
     uint64_t piksele;
+    bool bez_wejscia;
 };
 ApplicationPopupState application_popup = {
-    false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+    false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
 
 struct DragOverlayState { bool aktywny; int pid; int x; int y; };
 struct PendingDragOverlay {
@@ -1495,7 +1500,7 @@ void usun_warstwe(
     if (system_overlay.pid == pid)
         skladacz_obrazu_ustaw_overlay(pid, false, 0, 0, 0, 0);
     if (taskbar_overlay.otwarty && taskbar_overlay.pid == pid)
-        skladacz_obrazu_ustaw_pasek(pid, false, 0, 0, 0, 0);
+        (void)skladacz_obrazu_ustaw_pasek(pid, false, 0, 0, 0, 0);
     if (pid_poprawny(pid)) nad_paskiem_flaga[pid] = false;     // zezwolenie nie przechodzi na nowe okno tego pid
     if (!pid_poprawny(
             pid)) {
@@ -2379,7 +2384,7 @@ void skladacz_obrazu_obsluz_dirty() {
     if(hpet_dostepny()){uint64_t compose=compose_end>=start?compose_end-start:0;uint64_t present=present_end>=compose_end?present_end-compose_end:0;suma_compose_us+=compose;suma_present_us+=present;if(compose>maks_compose_us)maks_compose_us=compose;if(present>maks_present_us)maks_present_us=present;perf_log(present_end*1000ULL);}
 }
 
-void skladacz_obrazu_podnies_warstwe(int pid) {
+static void podnies_jedna_warstwe(int pid) {
     warstwa_obrazu* cel = pobierz_warstwe(pid);
     if (!cel || cel->z_order <= 0) return; /* pulpit pozostaje na dole */
     int maks = cel->z_order;
@@ -2406,6 +2411,14 @@ void skladacz_obrazu_podnies_warstwe(int pid) {
         cel->z_order=kolejny;
     }
     skladacz_obrazu_oznacz_dirty_rect(cel->x,cel->y,cel->szerokosc,cel->wysokosc);
+}
+
+void skladacz_obrazu_podnies_warstwe(int pid) {
+    podnies_jedna_warstwe(pid);
+    // Okna podrzedne zostaja NAD wlascicielem (kazde podniesienie wlasciciela podnosi tez jego dzieci).
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i) if (dzieci[i] != pid) podnies_jedna_warstwe(dzieci[i]);
 }
 
 bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
@@ -2456,7 +2469,7 @@ bool skladacz_obrazu_czy_widoczna(int pid) {
     return warstwa_ma_spojny_bufor(pid);
 }
 
-bool skladacz_obrazu_minimalizuj(int pid) {
+static bool minimalizuj_jedna_warstwe(int pid) {
     if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid) ||
         !widocznosc_warstwy[pid]) return false;
     warstwa_obrazu& w = tablica_warstw[pid];
@@ -2486,17 +2499,34 @@ bool skladacz_obrazu_minimalizuj(int pid) {
     return true;
 }
 
+bool skladacz_obrazu_minimalizuj(int pid) {
+    const bool ok = minimalizuj_jedna_warstwe(pid);
+    if (!ok) return false;
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i) if (dzieci[i] != pid) (void)minimalizuj_jedna_warstwe(dzieci[i]);
+    return true;
+}
+
+static void przywroc_jedna_warstwe(int pid) {
+    widocznosc_warstwy[pid] = true;
+    if (stan_okna[pid] == GUI_OKNO_ZMINIMALIZOWANE)
+        stan_okna[pid] = GUI_OKNO_NORMALNE;
+    const warstwa_obrazu& w = tablica_warstw[pid];
+    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+}
+
 bool skladacz_obrazu_przywroc(uint64_t window_id) {
     const int pid = static_cast<int>(static_cast<uint32_t>(window_id));
     const uint32_t generation = static_cast<uint32_t>(window_id >> 32U);
     if (!pid_poprawny(pid) || generation == 0 ||
         generacja_okna[pid] != generation || !warstwa_bufor_spojny(pid))
         return false;
-    widocznosc_warstwy[pid] = true;
-    if (stan_okna[pid] == GUI_OKNO_ZMINIMALIZOWANE)
-        stan_okna[pid] = GUI_OKNO_NORMALNE;
-    const warstwa_obrazu& w = tablica_warstw[pid];
-    skladacz_obrazu_oznacz_dirty_rect(w.x, w.y, w.szerokosc, w.wysokosc);
+    przywroc_jedna_warstwe(pid);
+    int dzieci[MAKS_DZIECI_OKNA] = {};
+    const size_t n = okna_podrzedne_dzieci ? okna_podrzedne_dzieci(pid, dzieci, MAKS_DZIECI_OKNA) : 0;
+    for (size_t i = 0; i < n; ++i)
+        if (dzieci[i] != pid && pid_poprawny(dzieci[i]) && warstwa_bufor_spojny(dzieci[i])) przywroc_jedna_warstwe(dzieci[i]);
     return true;
 }
 
@@ -2546,25 +2576,40 @@ int skladacz_obrazu_overlay_pod_punktem(int x, int y) {
     /* Otwarty popup jest modalny dla pierwszego MOUSE_DOWN. Dzieki temu
        klik poza nim zamyka popup i nie jest dostarczany drugi raz aplikacji. */
     if (system_overlay.otwarty) return system_overlay.pid;
-    if (popup_aplikacji_spojny()) return application_popup.pid;
+    if (popup_aplikacji_spojny() && !application_popup.bez_wejscia) return application_popup.pid;
     return -1;
 }
 
-void skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys) {
+const char* skladacz_obrazu_pasek_opis(int wynik) {
+    switch (wynik) {
+        case SKLADACZ_PASEK_OK: return "ok";
+        case SKLADACZ_PASEK_ZLY_PID: return "nieprawidlowy pid warstwy";
+        case SKLADACZ_PASEK_BRAK_KLATKI: return "warstwa bez opublikowanej klatki";
+        case SKLADACZ_PASEK_ZLY_ROZMIAR: return "nieprawidlowy rozmiar";
+        case SKLADACZ_PASEK_ZLA_POZYCJA: return "nieprawidlowa pozycja";
+        case SKLADACZ_PASEK_INNY_WLASCICIEL: return "pasek nalezy do innego procesu";
+        default: return "nieznany";
+    }
+}
+
+int skladacz_obrazu_ustaw_pasek(int pid, bool otwarty, int x, int y, int szer, int wys) {
     const GuiDirtyRect stary = taskbar_overlay.rect;
     const bool byl = taskbar_overlay.otwarty;
     if (!otwarty) {
-        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid) return;       // tylko wlasciciel zamyka
+        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid)
+            return SKLADACZ_PASEK_INNY_WLASCICIEL;                              // tylko wlasciciel zamyka
         taskbar_overlay = {false, -1, {0, 0, 0, 0}};
-    } else if (pid_poprawny(pid) && warstwa_ma_spojny_bufor(pid) && szer > 0 && wys > 0 &&
-               szer <= 16384 && wys <= 4096 && x > -16384 && y > -16384 && x < 16384 && y < 16384 &&
-               (!taskbar_overlay.otwarty || taskbar_overlay.pid == pid)) {
-        taskbar_overlay = {true, pid, {x, y, szer, wys}};
     } else {
-        return;
+        if (!pid_poprawny(pid)) return SKLADACZ_PASEK_ZLY_PID;
+        if (taskbar_overlay.otwarty && taskbar_overlay.pid != pid) return SKLADACZ_PASEK_INNY_WLASCICIEL;
+        if (szer <= 0 || wys <= 0 || szer > 16384 || wys > 4096) return SKLADACZ_PASEK_ZLY_ROZMIAR;
+        if (x <= -16384 || y <= -16384 || x >= 16384 || y >= 16384) return SKLADACZ_PASEK_ZLA_POZYCJA;
+        if (!warstwa_ma_spojny_bufor(pid)) return SKLADACZ_PASEK_BRAK_KLATKI;
+        taskbar_overlay = {true, pid, {x, y, szer, wys}};
     }
     if (byl) skladacz_obrazu_oznacz_dirty_rect(stary.x, stary.y, stary.width, stary.height);
     if (taskbar_overlay.otwarty) skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
+    return SKLADACZ_PASEK_OK;
 }
 
 bool skladacz_obrazu_pasek_info(int* pid, int* x, int* y, int* szer, int* wys) {
@@ -2614,7 +2659,8 @@ bool skladacz_obrazu_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone) {
 }
 
 bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
-                                           int x, int y, int szer, int wys) {
+                                           int x, int y, int szer, int wys,
+                                           bool bez_wejscia) {
     if (!pid_poprawny(pid)) return false;
     if (!otwarty) {
         if (application_popup.otwarty) {
@@ -2622,7 +2668,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
             const ApplicationPopupState stary = application_popup;
             if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
             application_popup = {
-                false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+                false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
             skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
                                               stary.rect.width, stary.rect.height);
             skladacz_obrazu_obsluz_dirty();
@@ -2639,7 +2685,12 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     // Zezwalaj na czesciowe wykraczanie poza ekran podczas przesuwania dialogu
     if (x < -2048 || y < -2048 || x > 4096 || y > 4096) return false;
 
-    if (application_popup.otwarty) {
+    // Interaktywny popup innego procesu zastepuje czysto wizualny dymek - ale
+    // dopiero po walidacji i udanej alokacji, zeby odrzucone zadanie nie
+    // zmienialo widocznego stanu. Kazdy inny cudzy popup: odmowa bez zmian.
+    const bool wypiera_dymek = !bez_wejscia && application_popup.otwarty &&
+                               application_popup.pid != pid && application_popup.bez_wejscia;
+    if (application_popup.otwarty && !wypiera_dymek) {
         if (application_popup.pid != pid) return false;
 
         // Atomowe przemieszczenie: jesli rozmiar sie nie zmienil, zachowujemy bufor pikseli!
@@ -2647,6 +2698,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
             application_popup.rect.height == wys &&
             application_popup.tlo != nullptr) {
 
+            application_popup.bez_wejscia = bez_wejscia;
             if (application_popup.rect.x == x && application_popup.rect.y == y) {
                 return true;
             }
@@ -2667,7 +2719,7 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
         const ApplicationPopupState stary = application_popup;
         if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
         application_popup = {
-            false, -1, 0, {0, 0, 0, 0}, nullptr, 0};
+            false, -1, 0, {0, 0, 0, 0}, nullptr, 0, false};
         skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
                                           stary.rect.width, stary.rect.height);
     }
@@ -2675,8 +2727,14 @@ bool skladacz_obrazu_ustaw_popup_aplikacji(int pid, bool otwarty,
     uint32_t* tlo = static_cast<uint32_t*>(bufor_grafiki_alokuj(piksele * sizeof(uint32_t)));
     if (!tlo) return false;
     for (uint64_t i = 0; i < piksele; ++i) tlo[i] = SKLADACZ_PIKSEL_PRZEZROCZYSTY;
+    if (wypiera_dymek) {
+        const ApplicationPopupState stary = application_popup;
+        if (stary.tlo) bufor_grafiki_zwolnij(stary.tlo);
+        skladacz_obrazu_oznacz_dirty_rect(stary.rect.x, stary.rect.y,
+                                          stary.rect.width, stary.rect.height);
+    }
     application_popup = {true, pid, generacja_okna[pid],
-                         {x, y, szer, wys}, tlo, piksele};
+                         {x, y, szer, wys}, tlo, piksele, bez_wejscia};
     skladacz_obrazu_oznacz_dirty_rect(x, y, szer, wys);
     skladacz_obrazu_obsluz_dirty();
     return true;

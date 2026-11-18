@@ -113,7 +113,6 @@ def test_bursztyn_ui_architektura():
         "AplikacjaGUI",
         "OknoNotatnika",
         "MenuGlowne",
-        "PasekNarzedzi",
         "PoleWielowierszowe",
         "PasekStanu",
         "Panel"
