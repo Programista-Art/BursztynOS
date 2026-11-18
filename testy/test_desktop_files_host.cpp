@@ -22,6 +22,7 @@ bool czytaj_fragment_pliku(const char*, uint64_t, char*, uint32_t, uint32_t*) { 
 #include "desktop_persistence_cases.h"
 #include "desktop_capacity_cases.h"
 #include "desktop_mutation_cases.h"
+#include "desktop_display_shortcut_cases.h"
 
 int main() {
     g_test_bws_hook=explorer_bws;
@@ -129,6 +130,7 @@ int main() {
     desktop_persistence_cases();
     desktop_capacity_cases();
     desktop_mutation_cases();
+    desktop_display_shortcut_cases();
     delete pulpit_menu;delete pulpit_dialog;delete pulpit_wybor;
     printf("Desktop production file actions: %d/%d PASS (RAM filesystem)\n",checks,checks);
 }

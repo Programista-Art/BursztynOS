@@ -5,7 +5,7 @@
     guest_ctl.py --port 5555 "click 100 200"
 
 One command per connection, one reply line (JSON). Commands:
-  ping | click X Y | dclick X Y | rclick X Y | move X Y | drag X0 Y0 X1 Y1 [steps]
+  ping | click X Y | dclick X Y | dclickq X Y (tablet, <400 ms) | rclick X Y | move X Y | drag X0 Y0 X1 Y1 [steps]
   down X Y | up (przycisk przytrzymany: zrzuty w trakcie przeciagania) | wheel DZ | key K1 [K2..] | type TEXT | shot NAME | launch QUERY | wait SECONDS
   peek SYMBOL [OFF..] | ctrlwheel N | perf (aggregated [GUI PERF] since last perf call) | serial N (last N lines)
   grep PATTERN (count/last match in serial) | cursor | quit
@@ -61,6 +61,19 @@ def handle(cmd):
         for _ in range(2):
             G.button(True)
             G.button(False)
+        t = G.ticks()
+        G.wait(lambda: G.ticks() - t >= 32, 'GUI dispatch', 180, .15)
+        time.sleep(.3)
+    elif op == 'dclickq':
+        # Podwojne klikniecie w tempie uzytkownika (~80 ms miedzy zdarzeniami),
+        # bez czekania na potwierdzenie gościa miedzy przyciskami: kryterium
+        # BursztynUI to < 400 ms. Tylko tablet (QMP input-send-event).
+        if not G.tablet:
+            return {'ok': False, 'error': 'dclickq wymaga --tablet'}
+        G.move(int(a[0]), int(a[1]))
+        for down in (True, False, True, False):
+            G.q.call('input-send-event', {'events': [{'type': 'btn', 'data': {'button': 'left', 'down': down}}]})
+            time.sleep(.08)
         t = G.ticks()
         G.wait(lambda: G.ticks() - t >= 32, 'GUI dispatch', 180, .15)
         time.sleep(.3)

@@ -8,6 +8,7 @@
 
 #include "pamiec.h"
 #include "bufory_grafiki.h"
+#include "ekran_powitalny_api.h"
 
 #ifndef BURSZTYNDIAGTAPETYPERF
 #define BURSZTYNDIAGTAPETYPERF 0
@@ -494,6 +495,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
     const uint32_t tend = hdr_sz + tbl_sz;
 
     for (uint32_t i = 0; i < liczba_plikow && toff < tend; ++i) {
+        powitanie_punkt_startu(); // weryfikacja CRC/BTP ~10 MB: nieblokujacy punkt kontrolny
         if (tend - toff < 16) break;
         const uint32_t nlen = odczytaj_u32_le(p + toff);
         const uint32_t bsz  = odczytaj_u32_le(p + toff + 4);
@@ -663,6 +665,7 @@ void instaluj(uint64_t mbi,bool tylko_przygotuj=false) {
     size_t biezaca_liczba = 0;
 
     for (size_t i = 0; i < pakiet_liczba; ++i) {
+        powitanie_punkt_startu(); // zapis kolejnej tapety: nieblokujacy punkt kontrolny
         char sciezka[TAPETY_SCIEZKA_MAX]{};
         if (!tapety_sciezka_z_pakietu(s_pakiet_wpisy[i], sciezka, sizeof(sciezka))) continue;
 
@@ -1104,6 +1107,7 @@ void tapety_inicjalizuj(uint64_t mbi) {
     aktualna = {};
     jpeg_do_przywrocenia = {};
     instaluj(mbi);
+    powitanie_punkt_startu();
     bufory_gotowe = grafika_przygotuj_bufory_tapety();
     if (!bufory_gotowe) klog_serial("[TAPETA] BLAD buforow BTP; uzywam fallback.");
 

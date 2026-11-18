@@ -38,8 +38,8 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertRegex(self.makefile,r'(?m)^QEMUACCEL\s*\?=\s*tcg,thread=single$')
         self.assertNotIn('"tcg,thread=multi"',self.launcher)
     def test_explicit_sdl_and_return_to_gtk(self):
-        self.assertRegex(self.launcher,r'"11"\s*\{\s*\$DisplayBackend = "gtk"')
-        self.assertRegex(self.launcher,r'"12"\s*\{\s*\$DisplayBackend = "sdl"')
+        self.assertRegex(self.launcher,r'"11"\s*\{\s*\$script:DisplayBackend = "gtk"')
+        self.assertRegex(self.launcher,r'"12"\s*\{\s*\$script:DisplayBackend = "sdl"')
         self.assertIn('[ValidateSet("gtk", "sdl", "")]',self.launcher)
     def test_display_status(self):
         self.assertIn('Write-Host "Display:      $($effectiveDisplay.ToUpperInvariant())"',self.launcher)
@@ -50,16 +50,16 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertIn('"-vga", "std"',self.launcher)
         self.assertIn('"-device", "ich9-ahci,id=ahci"',self.launcher)
     def test_backend_unavailable_has_explicit_error_and_no_fallback(self):
-        self.assertIn('& $Qemu -display help',self.launcher)
+        self.assertIn('Invoke-NativeCapture -Exe $Qemu -Arguments @("-display", "help")',self.launcher)
         self.assertIn('throw "QEMU nie udostepnia backendu',self.launcher)
-        self.assertEqual(self.launcher.count('$DisplayBackend = "sdl"'),1)
+        self.assertEqual(self.launcher.count('$script:DisplayBackend = "sdl"'),1)
         self.assertLess(self.launcher.index('Assert-QemuDisplay -Qemu $qemu'),self.launcher.index('{ Prepare-Disk }'))
     def test_known_good_pci_order_and_firmware_storage_preserved(self):
         code=self.launcher
         ordered=['"-device", "intel-hda"','$blkSpec,','"-device", "virtio-net-pci,','"-device", "virtio-rng-pci,','"-device", "virtio-vga,','"-device", "virtio-keyboard-pci"','"-device", "virtio-mouse-pci"']
         positions=[code.index(s) for s in ordered];self.assertEqual(positions,sorted(positions))
-        self.assertIn('$argsList = @("-bios", $ovmf) + $argsList',code)
-        self.assertIn('"-drive", "id=disk,file=$Disk,format=raw,if=none"',code)
+        self.assertIn('$argsList = @("-bios", (ConvertTo-QemuPath -Path $ovmf)) + $argsList',code)
+        self.assertEqual(code.count('"-drive", "id=disk,file=$diskOpt,format=raw,if=none"'),2)
         self.assertIn('"-audiodev", "none,id=snd"',code)
         self.assertIn('-audiodev alsa,id=snd',self.makefile)
         self.assertIn('"-boot", "order=d,menu=on"',code)
@@ -76,5 +76,32 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertIn('if ($PrintArgv -or $Audit) { $report | ConvertTo-Json -Depth 8; return }',self.launcher)
         self.assertIn('Get-UefiFirmware -ReadOnly',self.launcher)
         self.assertIn('runuefi-argv:',self.makefile)
+
+    # Audyt 2026-11-17: bezpieczne wywolania natywne, sciezki, kod wyjscia, dysk.
+    def test_native_calls_do_not_abort_on_stderr(self):
+        code=self.launcher
+        self.assertIn('function Invoke-NativeCapture',code)
+        self.assertIn('$ErrorActionPreference = "Continue"',code)
+        self.assertNotIn('Tee-Object',code)            # PS 5.1: UTF-16 i blad przy stderr
+        self.assertNotIn('& $qemuImg create',code)
+        self.assertIn('New-Object System.IO.StreamWriter($logFile, $false, $utf8)',code)
+    def test_paths_working_directory_and_commas(self):
+        code=self.launcher
+        self.assertIn('[System.Environment]::CurrentDirectory = $ScriptDir',code)
+        self.assertIn('Join-Path $InvocationDir $Iso',code)
+        self.assertIn('.Replace(",", ",,")',code)
+        self.assertIn('"-cdrom", (ConvertTo-QemuPath -Path $IsoPath)',code)
+        self.assertNotIn('C:\\Users',code)
+    def test_mode_parameter_and_exit_code(self):
+        code=self.launcher
+        self.assertIn("[ValidatePattern('^$|^([0-9]|1[0-8])$')]",code)
+        self.assertIn('exit $script:LastQemuExitCode',code)
+        self.assertIn('$script:LastQemuExitCode = $exitCode',code)
+    def test_disk_never_deleted_or_overwritten(self):
+        code=self.launcher
+        self.assertIn('[System.IO.FileMode]::CreateNew',code)
+        self.assertNotRegex(code,r'Remove-Item[^\n]*\$Disk')
+        self.assertNotIn('FileMode]::Create,\n            [System.IO.FileAccess]::ReadWrite',code)
+        self.assertIn('nie jest plikiem (katalog?) - odmowa',code)
 
 if __name__=='__main__':unittest.main()

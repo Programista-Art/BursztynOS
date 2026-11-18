@@ -4,6 +4,7 @@
  */
 
 #include "bursztyn_gui.h"
+#include "app_identity.h"
 #include "ui_skala.h"
 #include "wm_belka_hit.h"
 #if defined(BSF_NATIVE)
@@ -645,6 +646,17 @@ bool uruchom_program_z_argumentem_uzytkownika(const char* program,
         0, 0) == 1ULL;
 }
 
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dlugosc) {
+    if (!tytul || !tresc || dlugosc == 0) return 0;
+    return static_cast<uint32_t>(bws_wywolaj(101, rodzaj, reinterpret_cast<uint64_t>(tresc), dlugosc,
+                                              reinterpret_cast<uint64_t>(tytul)));
+}
+
+uint32_t gui_okno_podrzedne_tresc(char* bufor, uint32_t pojemnosc) {
+    if (!bufor || pojemnosc == 0) return 0;
+    return static_cast<uint32_t>(bws_wywolaj(102, reinterpret_cast<uint64_t>(bufor), pojemnosc, 0, 0));
+}
+
 bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
     if (!bufor || pojemnosc == 0) return false;
     return bws_wywolaj(
@@ -1108,6 +1120,12 @@ uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* pa
     return static_cast<uint32_t>(bws_wywolaj(42,reinterpret_cast<uint64_t>(okna),max,reinterpret_cast<uint64_t>(path),0));
 }
 
+uint32_t gui_pobierz_okna_aplikacji(GuiOknoInfo* okna,uint32_t max,const char* path) {
+    if(!okna||!max||!path)return 0;
+    return static_cast<uint32_t>(bws_wywolaj(42,reinterpret_cast<uint64_t>(okna),max,reinterpret_cast<uint64_t>(path),
+        BWS_OKNA_TOZSAMOSC_APLIKACJI));
+}
+
 bool usun_twor_uzytkownika(const char* sciezka) {
     return sciezka && bws_wywolaj(7, reinterpret_cast<uint64_t>(sciezka)) == 1ULL;
 }
@@ -1258,6 +1276,12 @@ bool gui_ustaw_popup_aplikacji(bool otwarty,
     return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
                        spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
                        spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), 0) == 1ULL;
+}
+
+bool gui_ustaw_dymek_systemowy(bool otwarty, int x, int y, int szer, int wys) {
+    return bws_wywolaj(56, otwarty ? 1ULL : 0ULL,
+                       spakuj_dwa_i32(legacy_x(x), legacy_y(y)),
+                       spakuj_dwa_i32(legacy_w(szer), legacy_h(wys)), BWS_POPUP_BEZ_WEJSCIA) == 1ULL;
 }
 
 namespace {

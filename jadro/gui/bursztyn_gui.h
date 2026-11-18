@@ -95,6 +95,11 @@ bool uruchom_program_z_argumentem_uzytkownika(const char* program,
 /* BWS 45: argument startowy biezacego procesu. */
 bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc);
 
+/* BWS 101: otwiera (1) albo aktywuje istniejace (2) okno podrzedne wlasciciela; 0 = odmowa (brak prawa, limit, zla tresc). */
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dlugosc);
+/* BWS 102 (tylko proces okna podrzednego): "tytul\n\ntresc" w buforze (NUL); zwraca liczbe bajtow albo 0. */
+uint32_t gui_okno_podrzedne_tresc(char* bufor, uint32_t pojemnosc);
+
 enum wynik_otwarcia_skojarzonego : uint32_t {
     OTWORZ_PLIK_BRAK_SKOJARZENIA = 0,
     OTWORZ_PLIK_URUCHOMIONO = 1,
@@ -115,6 +120,8 @@ bool gui_zastap_region(int x,int y,int szer,int wys,const uint32_t* piksele);
 bool gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t count,uint32_t display_generation=0);
 // BWS42 optional exact executable filter; same bounded snapshot ABI.
 uint32_t gui_pobierz_okna_programu(GuiOknoInfo* okna,uint32_t max,const char* path);
+/* Jak wyzej, ale okno podrzedne (BWS 101) nalezy do programu swojego wlasciciela. */
+uint32_t gui_pobierz_okna_aplikacji(GuiOknoInfo* okna,uint32_t max,const char* path);
 bool zmien_nazwe_uzytkownika(const char* sciezka, const char* nowa_nazwa);
 bool pobierz_metadane_pliku(const char* sciezka, BwsMetadanePliku* metadane);
 bool przenies_twor_uzytkownika(const char* sciezka,
@@ -140,6 +147,9 @@ uint64_t gui_czas_monotoniczny_ns();
  * oraz zezwolenie "Zawsze na wierzchu takze nad paskiem zadan" dla okna (window_id). */
 bool gui_ustaw_pasek_zadan(bool otwarty, int x, int y, int szer, int wys);
 bool gui_ustaw_nad_paskiem(uint64_t window_id, bool wlaczone);
+/* Dymek systemowy (np. podpowiedz paska zadan): ten sam bufor co popup aplikacji
+   (gui_blit_popup), ale bez przechwytywania myszy; tylko proces zaufany. */
+bool gui_ustaw_dymek_systemowy(bool otwarty, int x, int y, int szer, int wys);
 bool gui_ustaw_popup_aplikacji(bool otwarty,
                                int x, int y, int szer, int wys);
 

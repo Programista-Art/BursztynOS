@@ -375,6 +375,8 @@ public:
     bool czy_ma_skupienie() const { return czy_ma_fokus_; }
 
     bool czy_moze_miec_fokus() const { return czy_moze_miec_fokus_ && czy_widoczna_ && czy_wlaczona_; }
+    // Pasek menu okna (MenuGlowne): fokus wraca z niego do poprzedniej kontrolki po zakonczeniu pracy z menu.
+    virtual bool czy_pasek_menu() const { return false; }
     void ustaw_mozliwosc_fokusu(bool f) { czy_moze_miec_fokus_ = f; }
 
     int kolejnosc_tab() const { return kolejnosc_tab_; }

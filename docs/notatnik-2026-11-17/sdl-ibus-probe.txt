@@ -1,0 +1,22 @@
+== IBus aktywny (jak make runuefi)
+  n                    KEYDOWN=N                            TEXT=n
+  o                    KEYDOWN=O                            TEXT=o
+  t                    KEYDOWN=T                            TEXT=t
+  AltGr+a (ą)          KEYDOWN=Right Alt                    TEXT=ą
+  AltGr+s (ś)          KEYDOWN=Right Alt                    TEXT=ś
+  AltGr+z (ż)          KEYDOWN=Right Alt                    TEXT=ż
+  Shift+AltGr+l (Ł)    KEYDOWN=Left Shift,Right Alt         TEXT=Ł
+  LCtrl+AltGr+e (ę)    KEYDOWN=Left Ctrl,Right Alt,E        TEXT=-
+  Enter                KEYDOWN=Return                       TEXT=-
+  x                    KEYDOWN=X                            TEXT=x
+== IBus odlaczony (IBUS_ADDRESS=unix:path=/nonexistent)
+  n                    KEYDOWN=N                            TEXT=n
+  o                    KEYDOWN=O                            TEXT=o
+  t                    KEYDOWN=T                            TEXT=t
+  AltGr+a (ą)          KEYDOWN=-                            TEXT=-
+  AltGr+s (ś)          KEYDOWN=-                            TEXT=-
+  AltGr+z (ż)          KEYDOWN=Right Alt,Z                  TEXT=ż
+  Shift+AltGr+l (Ł)    KEYDOWN=Left Shift,Right Alt,L       TEXT=Ł
+  LCtrl+AltGr+e (ę)    KEYDOWN=Left Ctrl,Right Alt,E        TEXT=-
+  Enter                KEYDOWN=Return                       TEXT=-
+  x                    KEYDOWN=X                            TEXT=x

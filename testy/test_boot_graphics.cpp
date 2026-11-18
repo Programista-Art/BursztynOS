@@ -41,9 +41,12 @@ uint32_t ekran_skala() {return 100;}
 static bool test_clock=false;
 static uint64_t test_now=0;
 bool hpet_dostepny() {return test_clock;}
-uint64_t czas_monotoniczny_ns() {return 0;}
+static uint64_t test_ns=0;
+uint64_t czas_monotoniczny_ns() {return test_ns;}
 uint64_t czas_monotoniczny_us() {return test_now;}
-void* bufor_grafiki_alokuj(size_t n){return malloc(n);}
+void kfree(void*) {}   // bws_gui_usun_stan_procesu zwalnia tez bufory pomocnicze Ring 0 (tu nie alokowane)
+static bool test_alokacja_nie_dziala=false;
+void* bufor_grafiki_alokuj(size_t n){return test_alokacja_nie_dziala?nullptr:malloc(n);}
 void bufor_grafiki_zwolnij(void* p){free(p);}
 uint64_t scheduler_pobierz_tick() {return 0;}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie* e) {if(e->typ==BWS_ZDARZENIE_OKNO_POKAZANE)++shown;return true;}
@@ -122,6 +125,50 @@ int main() {
         bws_gui_odswiez_pulpit();assert(bws_gui_cien_warstwy(2,px*4));
         bws_gui_odswiez();
     }
+    // BWS 19: blad alokacji cienia, timeout cienia, zakonczenie procesu, wymiana powierzchni i wielokrotna zmiana rozmiaru.
+    {
+        auto bytes_of=[&]{return size_t(layer.szerokosc)*layer.wysokosc*4;};
+        // (a) brak pamieci na cien: odrysowanie dziala, brak cienia (kompozytor czyta bufor zywy), bez awarii
+        bws_gui_usun_stan_procesu(2);
+        test_alokacja_nie_dziala=true;
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00111111;
+        bws_gui_odswiez_pulpit();
+        assert(!bws_gui_cien_warstwy(2,bytes_of())&&bws_gui_warstwa_w_trakcie_rysowania(2)&&layer.bufor_pikseli[3]==0);
+        test_alokacja_nie_dziala=false;
+        bws_gui_odswiez();
+        // (b) timeout: cien starszy niz 1 s jest ignorowany (aplikacja, ktora nie wola gui_odswiez, nie zamraza okna)
+        test_clock=true;test_ns=5000;
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00222222;
+        bws_gui_odswiez_pulpit();
+        assert(bws_gui_cien_warstwy(2,bytes_of())&&bws_gui_cien_warstwy(2,bytes_of())[1]==0x00222222);
+        test_ns=5000+999999999ULL;assert(bws_gui_cien_warstwy(2,bytes_of()));            // tuz przed limitem: jeszcze cien
+        test_ns=5000+1000000001ULL;assert(!bws_gui_cien_warstwy(2,bytes_of()));          // po limicie: bufor zywy
+        bws_gui_odswiez();test_clock=false;test_ns=0;
+        // (c) zakonczenie procesu w trakcie transakcji: cien zwolniony i nieaktywny, ponowne uzycie PID startuje czysto
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00333333;
+        bws_gui_odswiez_pulpit();assert(bws_gui_cien_warstwy(2,bytes_of()));
+        bws_gui_usun_stan_procesu(2);
+        assert(!bws_gui_cien_warstwy(2,bytes_of()));
+        bws_gui_odswiez();
+        // (d) wymiana powierzchni i wielokrotna zmiana rozmiaru podczas transakcji: cien zawsze o rozmiarze warstwy
+        const int rozmiary[][2]={{120,90},{300,200},{80,60},{300,200},{1000,40},{100,100}};
+        uint32_t* oryginal=layer.bufor_pikseli;const int ow=layer.szerokosc,oh=layer.wysokosc;
+        for(auto& r:rozmiary){
+            uint32_t* stary=layer.bufor_pikseli;
+            layer.bufor_pikseli=static_cast<uint32_t*>(calloc(size_t(r[0])*r[1],4));assert(layer.bufor_pikseli);
+            layer.szerokosc=r[0];layer.wysokosc=r[1];
+            for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00444444+uint32_t(r[0]);
+            bws_gui_odswiez_pulpit();
+            const uint32_t* c=bws_gui_cien_warstwy(2,bytes_of());
+            assert(c&&c!=layer.bufor_pikseli&&c[0]==0x00444444+uint32_t(r[0]));          // cien = ostatnia klatka w NOWYM rozmiarze
+            assert(!bws_gui_cien_warstwy(2,bytes_of()+4)&&!bws_gui_cien_warstwy(2,bytes_of()-4));   // zadnego bufora o zlym rozmiarze
+            bws_gui_odswiez();
+            if(stary!=oryginal)free(stary);
+        }
+        free(layer.bufor_pikseli);layer.bufor_pikseli=oryginal;layer.szerokosc=ow;layer.wysokosc=oh;
+        bws_gui_usun_stan_procesu(2);
+        assert(!bws_gui_cien_warstwy(2,bytes_of()));
+    }
     // The real dirty-region replacement copies transparency without clearing
     // or publishing the layer between preparation and the one BWS17 commit.
     const uint32_t replacement[]={0,0x123456,0,0x654321};
@@ -172,7 +219,7 @@ int main() {
         // A cursor-sized first dirty rect still publishes a complete frame once.
         PrzeniesFragmentNaEkran(0,0,1,1);
         assert(presents==before+1&&powitanie_pierwsza_klatka_gotowa());
-        const auto g=Powitanie::geometria(1280,720,100,sekwencja.postep,sekwencja.wagi());
+        const auto g=Powitanie::geometria(1280,720,100);
         auto ink=[&](Powitanie::Obszar r){
             for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x)
                 if(display.scanout[y*1280+x]!=Powitanie::TLO)return true;

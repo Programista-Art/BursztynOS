@@ -59,6 +59,7 @@
 
 #include "pzb.h"
 #include "uruchamianie_polityka.h"
+#include "popup_autoryzacja.h"
 #include "tapety_format.h"
 #include "ustawienia_aplikacji.h"
 #include "polityka_alokacji.h"
@@ -2993,10 +2994,15 @@ void bws_zakoncz_biezacy_proces() {
     }
 }
 
+extern "C" int okna_podrzedne_wlasciciel(int pid) __attribute__((weak));
+// arg3 = sciezka programu (filtr), arg4 = BWS_OKNA_TOZSAMOSC_APLIKACJI: okno
+// podrzedne (BWS 101) liczy sie jako okno programu swojego wlasciciela (ikona
+// na pasku zadan). Okno osierocone nie ma wlasciciela, wiec ponowne uzycie
+// pid-u wlasciciela nie przypisze go innemu programowi.
 __attribute__((noinline)) uint64_t bws_snapshot_okien(
     proces_t& proces,
     uint64_t arg1,
-    uint64_t arg2, uint64_t arg3=0
+    uint64_t arg2, uint64_t arg3=0, uint64_t arg4=0
 ) {
     char test_arg[32] = {};
     const char* test_path = "/programy/test.cebula/test.bur";
@@ -3020,6 +3026,7 @@ __attribute__((noinline)) uint64_t bws_snapshot_okien(
     if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(
             reinterpret_cast<void*>(arg1), bytes)) return 0;
     char executable[MAX_SCIEZKA_PLIKU_BWS] = {};
+    if(arg4 > BWS_OKNA_TOZSAMOSC_APLIKACJI || (arg4 && !arg3))return 0;
     if(arg3 && !pobierz_sciezke_pliku(arg3,executable))return 0;
     GuiOknoInfo snapshot[SKLADACZ_MAKS_WARSTW] = {};
     uint32_t count = skladacz_obrazu_snapshot_okien(
@@ -3027,6 +3034,10 @@ __attribute__((noinline)) uint64_t bws_snapshot_okien(
     if(arg3){
         uint32_t kept=0;
         for(uint32_t i=0;i<count;++i){int pid=snapshot[i].pid;
+            if(pid>0 && pid<MAKS_PROCESOW && arg4==BWS_OKNA_TOZSAMOSC_APLIKACJI && okna_podrzedne_wlasciciel){
+                const int wlasciciel=okna_podrzedne_wlasciciel(pid);
+                if(wlasciciel!=0)pid=wlasciciel;          // -1: osierocone (zadnego programu)
+            }
             if(pid>0 && pid<MAKS_PROCESOW && AppIdentity::equal(tablica_procesow[pid].sciezka_pliku,executable))snapshot[kept++]=snapshot[i];
         }
         count=kept>max?max:kept;
@@ -4034,15 +4045,32 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                 }
                 switch (arg1) {
                     case 2:   /* zamknij powierzchnie paska */
-                        skladacz_obrazu_ustaw_pasek(aktualny_pid, false, 0, 0, 0, 0);
-                        return 1;
+                        return skladacz_obrazu_ustaw_pasek(aktualny_pid, false, 0, 0, 0, 0) == SKLADACZ_PASEK_OK
+                            ? 1ULL : 0ULL;
                     case 3: { /* zarejestruj prostokat paska (warstwa WM) */
-                        skladacz_obrazu_ustaw_pasek(aktualny_pid, true, gorne_i32(arg2), dolne_i32(arg2),
-                                                    gorne_i32(arg3), dolne_i32(arg3));
-                        int pp = -1, px = 0, py = 0, pw = 0, ph = 0;
-                        const bool ok = skladacz_obrazu_pasek_info(&pp, &px, &py, &pw, &ph) && pp == aktualny_pid;
-                        if (!ok) wypisz_log("[GUI] Pasek zadan: rejestracja odrzucona przez kompozytor (warstwa/rozmiar).");
-                        return ok ? 1ULL : 0ULL;
+                        const int x = gorne_i32(arg2), y = dolne_i32(arg2);
+                        const int w = gorne_i32(arg3), h = dolne_i32(arg3);
+                        const int wynik = skladacz_obrazu_ustaw_pasek(aktualny_pid, true, x, y, w, h);
+                        if (wynik != SKLADACZ_PASEK_OK) {
+                            // Dokladna przyczyna + zadana geometria i pid (bez danych wrazliwych).
+                            char linia[200] = {};
+                            size_t n = 0;
+                            auto tekst = [&](const char* t) { while (*t && n + 1 < sizeof(linia)) linia[n++] = *t++; };
+                            auto liczba = [&](int64_t v) {
+                                char c[24]; int k = 0; const bool minus = v < 0; uint64_t u = minus ? uint64_t(-v) : uint64_t(v);
+                                do { c[k++] = char('0' + u % 10); u /= 10; } while (u && k < 22);
+                                if (minus) c[k++] = '-';
+                                while (k && n + 1 < sizeof(linia)) linia[n++] = c[--k];
+                            };
+                            tekst("[GUI] Pasek zadan: kompozytor odrzucil rejestracje: ");
+                            tekst(skladacz_obrazu_pasek_opis(wynik));
+                            tekst(" pid="); liczba(aktualny_pid);
+                            tekst(" x="); liczba(x); tekst(" y="); liczba(y);
+                            tekst(" w="); liczba(w); tekst(" h="); liczba(h);
+                            tekst(" ekran="); liczba(grafika_pobierz_szerokosc()); tekst("x"); liczba(grafika_pobierz_wysokosc());
+                            wypisz_log(linia);
+                        }
+                        return wynik == SKLADACZ_PASEK_OK ? 1ULL : 0ULL;
                     }
                     case 4:   /* cofnij zezwolenie "nad paskiem" okna arg2 (window_id) */
                     case 5:   /* przyznaj zezwolenie "nad paskiem" oknu arg2 (window_id) */
@@ -4061,7 +4089,7 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             return bws_gui_minimalizuj_warstwe(aktualny_pid) ? 1ULL : 0ULL;
 
         case 42:
-            return bws_snapshot_okien(proces, arg1, arg2, arg3);
+            return bws_snapshot_okien(proces, arg1, arg2, arg3, arg4);
 
         case 43:
             if (!operacja_systemowa_dozwolona(proces) || arg1 == 0) return 0;
@@ -4103,12 +4131,15 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         case 55:
             return bws_kopiuj_twor(proces, arg1, arg2);
 
-        case 56:
-            if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
-            if (arg1 != 0 && bws_gui_aktywny_pid() != aktualny_pid) return 0;
-            return skladacz_obrazu_ustaw_popup_aplikacji(
-                aktualny_pid, arg1 != 0, gorne_i32(arg2), dolne_i32(arg2),
-                gorne_i32(arg3), dolne_i32(arg3)) ? 1ULL : 0ULL;
+        case 56: {
+            // Autoryzacja (w tym BWS_POPUP_BEZ_WEJSCIA tylko dla Menedzera
+            // Okien) i dekodowanie: popup_autoryzacja.h, wspolne z testami hosta.
+            const PopupAutoryzacja::Wywolujacy wywolujacy{
+                znane_prawa(proces), proces.poziom_zaufania, proces.sciezka_pliku,
+                sizeof(proces.sciezka_pliku), bws_gui_aktywny_pid() == aktualny_pid};
+            return PopupAutoryzacja::wykonaj(wywolujacy, aktualny_pid, arg1, arg2, arg3, arg4,
+                                             skladacz_obrazu_ustaw_popup_aplikacji);
+        }
 
         case 57: {
             if (!proces_ma_prawo(proces, PRAWO_GUI)) return 0;
@@ -4227,6 +4258,7 @@ extern "C" uint64_t obsluga_wywolan_systemowych(
     uint64_t arg4
 ) {
     hda_wykonaj_zaplanowana_prace_odroczona();
+    scheduler_punkt_zwrotu_syscalla();
     uint64_t rsp_in = 0;
     asm volatile("mov %%rsp, %0" : "=r"(rsp_in));
 

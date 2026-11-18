@@ -23,6 +23,18 @@ bool czytaj_fragment_pliku(const char* sciezka, uint64_t offset, char* out, uint
     *got = static_cast<uint32_t>(n);
     return true;
 }
+#include "../jadro/bws/okna_podrzedne.h"
+// Okna podrzedne (BWS 101): rejestrator wywolan w miejsce jadra - test sprawdza, CO aplikacja zleca (rodzaj/tytul/tresc).
+static uint32_t g_okno_pod_wywolan = 0, g_okno_pod_rodzaj = 0, g_okno_pod_wynik = 1;
+static char g_okno_pod_tytul[80], g_okno_pod_tresc[4200];
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dl) {
+    ++g_okno_pod_wywolan; g_okno_pod_rodzaj = rodzaj;
+    snprintf(g_okno_pod_tytul, sizeof(g_okno_pod_tytul), "%s", tytul);
+    if (dl > 4096) dl = 4096;
+    memcpy(g_okno_pod_tresc, tresc, dl); g_okno_pod_tresc[dl] = '\0';
+    return g_okno_pod_wynik;
+}
+uint32_t gui_okno_podrzedne_tresc(char*, uint32_t) { return 0; }
 static std::string g_argument;
 bool pobierz_argument_startowy(char* b, uint32_t cap) {
     if (g_argument.empty() || g_argument.size() + 1 > cap) return false;
@@ -324,7 +336,7 @@ static void ui() {
     klawisz(74); CHECK(s.gal.biezacy == 0);                                // Home
     klawisz(77); CHECK(s.gal.biezacy == 6);                                // End
     // otwarty dialog/menu blokuje nawigacje klawiszami
-    s.pokaz_pomoc("Sterowanie", "x");
+    s.pokaz_pomoc("Widok 100% niedostępny", "x");                        // pozostaly modal: wciaz blokuje klawisze obrazu
     const int przed = s.gal.biezacy;
     klawisz(79); CHECK(s.gal.biezacy == przed);
     okno.zarzadca_popupow().zamknij(PowodZamknieciaPopup::Anulowanie);
@@ -334,6 +346,30 @@ static void ui() {
     const int64_t ox0 = s.wd.ox;
     klawisz(79); CHECK(s.wd.ox == ox0 || s.gal.biezacy != 1);
 
+    // Okna podrzedne Przegladarki: O programie / Informacje o obrazie / Sterowanie (osobne okna, modeless)
+    {
+        g_okno_pod_wywolan = 0;
+        AplikacjaObrazow::pokaz_okno(OknoPodrzedne::Rodzaj::SterowanieObrazy, "Sterowanie", TEKST_STEROWANIE);
+        CHECK(g_okno_pod_wywolan == 1 && g_okno_pod_rodzaj == 3 && !okno.zarzadca_popupow().czy_otwarty());
+        CHECK(OknaPodrzedne::tresc_poprawna(TEKST_STEROWANIE, strlen(TEKST_STEROWANIE)) && OknaPodrzedne::tresc_poprawna(TEKST_O_PROGRAMIE, strlen(TEKST_O_PROGRAMIE)));
+        for (const char* fraza : {"Strzałka w lewo, PgUp", "PgDn", "Home", "End", "Ctrl + kółko myszy", "0 lub 1", "F lub D", "Kółko myszy", "W, A, S, D", "Przeciąganie myszą"})
+            CHECK(strstr(TEKST_STEROWANIE, fraza));
+        for (const char* fraza : {"BMP, PNG, JPEG, BTP (BTP1 i BTP2)", "/dane/zdjecia", "Wersja", "Pełna rozdzielczość"})
+            CHECK(strstr(TEKST_O_PROGRAMIE, fraza));
+        // Informacje o obrazie: wszystkie dotychczasowe pola diagnostyczne w dwoch kolumnach, w limicie jadra
+        s.otworz_z_galerii(0); tykaj(s);
+        g_okno_pod_wywolan = 0; s.pokaz_informacje();
+        CHECK(g_okno_pod_wywolan == 1 && g_okno_pod_rodzaj == 2 && !strcmp(g_okno_pod_tytul, "Informacje o obrazie"));
+        CHECK(OknaPodrzedne::tresc_poprawna(g_okno_pod_tresc, strlen(g_okno_pod_tresc)) && !okno.zarzadca_popupow().czy_otwarty());
+        for (const char* pole : {"Nazwa pliku\t", "Format\t", "Wymiary pliku\t", "Tryb dekodowania\t", "Powierzchnia obrazu\t", "Szczyt pamięci obrazu\t",
+                                 "Aktualnie zajęte\t", "Czas wczytania\t", "Ostatnie rysowanie\t", "Liczba alokacji\t", "Nieudane alokacje\t"})
+            CHECK(strstr(g_okno_pod_tresc, pole));
+        // brak otwartego obrazu: bezpieczny komunikat, bez awarii
+        s.zamknij_obraz(); tykaj(s); g_okno_pod_wywolan = 0; s.pokaz_informacje();
+        CHECK(g_okno_pod_wywolan == 1 && strstr(g_okno_pod_tresc, "Brak otwartego obrazu."));
+        // odmowa jadra nie psuje aplikacji
+        g_okno_pod_wynik = 0; s.pokaz_informacje(); g_okno_pod_wynik = 1; CHECK(s.zrodlo == Zrodlo::Brak);
+    }
     // zdjecie spoza galerii: indeks i model nietkniete
     s.otworz_z_galerii(2);
     g_pliki["/tmp/obcy.bmp"] = wczytaj_fixture("cwiartki.bmp");

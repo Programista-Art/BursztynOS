@@ -270,8 +270,10 @@ extern "C" __attribute__((noreturn)) void _start() {
         str(wm_o), "bursztyn_gui.o", "-o", str(wm_elf),
     ])
     run_cmd(["x86_64-linux-gnu-objcopy", "-O", "binary", str(wm_elf), str(wm_bin)])
+    # Jadro oczekuje blobow SKOMPRESOWANYCH (symbole _binary_*_bin_bz_*), jak w produkcyjnym Makefile.
+    run_cmd(["python3", str(ROOT / "narzedzia" / "kompresuj_blob.py"), str(BWS_DIR / "menedzer_okien.bin"), str(BWS_DIR / "menedzer_okien.bin.bz")])
     run_cmd(
-        ["x86_64-linux-gnu-ld", "-r", "-b", "binary", "menedzer_okien.bin", "-o", "menedzer_okien_blob.o"],
+        ["x86_64-linux-gnu-ld", "-r", "-b", "binary", "menedzer_okien.bin.bz", "-o", "menedzer_okien_blob.o"],
         cwd=BWS_DIR,
     )
 
@@ -288,13 +290,17 @@ extern "C" __attribute__((noreturn)) void _start() {
         str(ab_o), "bursztyn_gui.o", "-o", str(ab_elf),
     ])
     run_cmd(["x86_64-linux-gnu-objcopy", "-O", "binary", str(ab_elf), str(ab_bin)])
+    # Jadro oczekuje blobow SKOMPRESOWANYCH (symbole _binary_*_bin_bz_*), jak w produkcyjnym Makefile.
+    run_cmd(["python3", str(ROOT / "narzedzia" / "kompresuj_blob.py"), str(BWS_DIR / "test.bin"), str(BWS_DIR / "test.bin.bz")])
     run_cmd(
-        ["x86_64-linux-gnu-ld", "-r", "-b", "binary", "test.bin", "-o", "test_blob.o"],
+        ["x86_64-linux-gnu-ld", "-r", "-b", "binary", "test.bin.bz", "-o", "test_blob.o"],
         cwd=BWS_DIR,
     )
 
     kernel_elf = BWS_DIR / "kernel_bws_abuse.bin"
     objs = []
+    if "fpu_probe_blob.o" not in base_objs:   # wymagany przez kernel.o (sonda FPU)
+        base_objs = [*base_objs, "fpu_probe_blob.o"]
     for o in base_objs:
         if o == "menedzer_okien_blob.o":
             objs.append(str(wm_blob_o))

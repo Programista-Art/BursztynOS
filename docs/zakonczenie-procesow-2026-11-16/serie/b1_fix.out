@@ -1,0 +1,7 @@
+[run 1/1] STALL-HOSTA stalle_hosta=[(9, 59), (70, 5), (75, 88), (164, 22), (192, 25), (218, 69), (288, 108)] powod=timeout czas=402s przerw>1s=10 maks_przerwa=108.0s min_tick_hz=0.0 pass=0 fail=0 zwolnien=60 maks_latencja_ms=209.0 maks_latencja_irq=15 aktywne_koniec=1 ramki=469891->469891
+   OKNO-BEZ-POSTEPU: brak postepu logu 31s od t=186s: CPU QEMU=100% steal=0 loadavg=0.19
+   OKNO-BEZ-POSTEPU: brak postepu logu 69s od t=217s: CPU QEMU=100% steal=0 loadavg=0.09
+   OKNO-BEZ-POSTEPU: brak postepu logu 108s od t=288s: CPU QEMU=100% steal=0 loadavg=0.01
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+[PODSUMOWANIE] uruchomien=1 PASS=0 FAIL/TIMEOUT=0 STALL-HOSTA(niewiazace)=1 maks_latencja_sprzatania_ms=209.0
+WYNIK NIEKOMPLETNY: czesc przebiegow niewiazaca (zatrzymania hosta) - powtorz do pelnej liczby wiazacych

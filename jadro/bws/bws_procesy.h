@@ -37,3 +37,6 @@ struct BwsProcesInfo {
 inline constexpr uint64_t BWS_ZABIJ_OK = 1U;
 inline constexpr uint64_t BWS_ZABIJ_BRAK_PROCESU = 0U;
 inline constexpr uint64_t BWS_ZABIJ_NIE_WOLNO = 0U;
+/* BWS_ZABIJ_OK (1) = zadanie zaakceptowane (takze ponowne dla procesu juz konczonego - idempotentnie); zasoby zwalnia
+ * odroczone sprzatanie schedulera w kolejnych tickach, nie sam syscall. 0 = odmowa (brak procesu, PID 0, wlasny PID,
+ * bardziej zaufany cel, menedzer okien, rezerwacja loadera). Zob. docs/zakonczenie-procesow.md. */

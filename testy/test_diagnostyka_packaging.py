@@ -31,7 +31,10 @@ assert not re.search(r'\bU\b|_GLOBAL__sub_I|__cxa_throw|__gxx_personality',symbo
 assembly=subprocess.check_output(['objdump','-d',str(root/'diagnostyka_tmp.o'),str(root/'bursztyn_gui.o')],text=True)
 assert not re.search(r'\t(?:cli|sti|cpuid|rdmsr|wrmsr|in[bwl]?|out[bwl]?)\s',assembly),'Ring 3 utility must not access hardware'
 assert 'diag_publish' not in symbols and 'pci_odczytaj' not in symbols and 'hda_transport_' not in symbols
-api=(root/'jadro/bws/bws_api.h').read_text();assert 'BWS_DIAGNOSTYKA_SYSTEMU = 91' in api and 'BWS_PIERWSZY_WOLNY = 98' in api
+import sys;sys.path.insert(0,str(root/'testy'))
+from bws_numeracja import wczytaj_numeracje,zwaliduj_numeracje
+_bledy=zwaliduj_numeracje(wczytaj_numeracje(root),{'BWS_DIAGNOSTYKA_SYSTEMU':91})
+assert not _bledy,_bledy
 path='/programy/diagnostyka.cebula/diagnostyka.bur'
 assert path in (root/'jadro/gui/desktop_entries.h').read_text()
 assert '"/programy/diagnostyka.cebula"' in (root/'jadro/fs/psf_bootstrap.h').read_text()

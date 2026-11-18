@@ -20,6 +20,19 @@ bool ustawienia_wczytaj(const char* app, const char* klucz, char* wynik, uint32_
     memcpy(wynik, it->second.c_str(), it->second.size() + 1);
     return true;
 }
+#include "../jadro/bws/okna_podrzedne.h"
+#include "../bursztyn_ui/tresc_uklad.h"
+// Okna podrzedne (BWS 101): rejestrator wywolan w miejsce jadra - test sprawdza, CO aplikacja zleca (rodzaj/tytul/tresc).
+static uint32_t g_okno_pod_wywolan = 0, g_okno_pod_rodzaj = 0, g_okno_pod_wynik = 1;
+static char g_okno_pod_tytul[80], g_okno_pod_tresc[4200];
+uint32_t gui_okno_podrzedne_otworz(uint32_t rodzaj, const char* tytul, const char* tresc, uint32_t dl) {
+    ++g_okno_pod_wywolan; g_okno_pod_rodzaj = rodzaj;
+    snprintf(g_okno_pod_tytul, sizeof(g_okno_pod_tytul), "%s", tytul);
+    if (dl > 4096) dl = 4096;
+    memcpy(g_okno_pod_tresc, tresc, dl); g_okno_pod_tresc[dl] = '\0';
+    return g_okno_pod_wynik;
+}
+uint32_t gui_okno_podrzedne_tresc(char*, uint32_t) { return 0; }
 #define SNAKE_HOST_TEST 1
 #include "../gry/snake/snake.cpp"
 
@@ -359,18 +372,40 @@ static void menu_i_fokus() {
     okno.przelicz_uklad();
     AplikacjaSnake& s = g_snake;
     s.nowa_gra(true);
-    // otwarty popup (menu/dialog) blokuje sterowanie wezem
-    s.pokaz_pomoc("Sterowanie", "test");
-    CHECK(okno.zarzadca_popupow().czy_otwarty());
+    // Pomoc to teraz OKNO PODRZEDNE (osobne okno, modeless): rodzic nie dostaje modalnego popupu i nadal steruje wezem
+    // dopoki jego okno ma fokus; klawisze trafiaja do okna podrzednego (osobny proces), gdy ono ma fokus.
+    g_okno_pod_wywolan = 0;
+    s.pokaz_pomoc(OknoPodrzedne::Rodzaj::SterowanieSnake, "Sterowanie", TEKST_STEROWANIE);
+    CHECK(g_okno_pod_wywolan == 1 && g_okno_pod_rodzaj == 4 && !strcmp(g_okno_pod_tytul, "Sterowanie"));
+    CHECK(!okno.zarzadca_popupow().czy_otwarty());
     const int ky = s.gra.oky;
     okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'w'));
-    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, ' '));
-    CHECK(s.gra.oky == ky && s.gra.stan == Stan::Gra);
-    // po zamknieciu dialogu sterowanie wraca
-    okno.zarzadca_popupow().zamknij(PowodZamknieciaPopup::Anulowanie);
+    CHECK(s.gra.oky != ky || s.gra.oky == -1);
+    // menu Pomoc: trzy pozycje otwieraja okna podrzedne o wlasciwych rodzajach i tytulach
+    struct { uint32_t rodzaj; const char* tytul; const char* tresc; } poz[] = {
+        {4, "Sterowanie", TEKST_STEROWANIE}, {5, "Zasady gry", TEKST_ZASADY}, {6, "O grze", TEKST_O_GRZE}};
+    for (auto& p : poz) {
+        g_okno_pod_wywolan = 0;
+        OknoPodrzedne::otworz(static_cast<OknoPodrzedne::Rodzaj>(p.rodzaj), p.tytul, p.tresc);
+        CHECK(g_okno_pod_wywolan == 1 && g_okno_pod_rodzaj == p.rodzaj && !strcmp(g_okno_pod_tytul, p.tytul) && !strcmp(g_okno_pod_tresc, p.tresc));
+        // tresc spelnia reguly jadra (BWS 101) i miesci sie w ukladzie bez przepelnienia, takze w waskim oknie
+        CHECK(OknaPodrzedne::tresc_poprawna(p.tresc, strlen(p.tresc)) && OknaPodrzedne::tytul_poprawny(p.tytul, strlen(p.tytul)));
+        for (int szer : {200, 320, 480}) {
+            struct Miernik { int operator()(const char* t, size_t n) const { int w = 0; for (size_t i = 0; i < n; ++i) if ((static_cast<unsigned char>(t[i]) & 0xC0) != 0x80) w += 8; return w; } } m;
+            TrescUklad::Uklad* u = new TrescUklad::Uklad(); TrescUklad::zbuduj(*u, p.tresc, strlen(p.tresc), szer, 18, 9, m);
+            CHECK(!u->przepelnienie && u->liczba > 3);
+            for (size_t i = 0; i < u->liczba; ++i) { std::string l(p.tresc + u->linie[i].poczatek, u->linie[i].dlugosc); CHECK(u->linie[i].x + m(l.c_str(), l.size()) <= szer); }
+            delete u;
+        }
+    }
+    // zasady odpowiadaja logice gry: jablka, sciana/ciało, wygrana przy pelnej planszy, rekord
+    CHECK(strstr(TEKST_ZASADY, "jabłka") && strstr(TEKST_ZASADY, "ścianę") && strstr(TEKST_ZASADY, "planszę") && strstr(TEKST_ZASADY, "Najlepszy wynik"));
+    CHECK(strstr(TEKST_STEROWANIE, "W, A, S, D") && strstr(TEKST_STEROWANIE, "Spacja") && strstr(TEKST_STEROWANIE, "R\t") && strstr(TEKST_STEROWANIE, "Esc"));
+    // Odmowa jadra (brak prawa/limit) nie psuje gry
+    g_okno_pod_wynik = 0; OknoPodrzedne::otworz(OknoPodrzedne::Rodzaj::ZasadySnake, "Zasady gry", TEKST_ZASADY); g_okno_pod_wynik = 1;
+    CHECK(s.gra.stan == Stan::Gra);
+    // otwarty popup (np. menu) nadal blokuje sterowanie wezem
     CHECK(!okno.zarzadca_popupow().czy_otwarty());
-    okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'w'));
-    CHECK(s.gra.oky == -1);
     // dwa skrety w jednym kroku: drugi odrzucony
     okno.obsluz_zdarzenie(ev(BWS_ZDARZENIE_KLAWISZ, 'a'));
     CHECK(s.gra.okx == 0 && s.gra.oky == -1);

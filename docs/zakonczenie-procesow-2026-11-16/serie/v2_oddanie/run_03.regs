@@ -1,0 +1,17 @@
+8.2 rip=0x19e2e9 rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=0.0
+12.2 rip=0x200940 rfl=0x200216 if=1 cpl=0 cr3=0x89c000 guest_t=9.9
+17.2 rip=0x100100a rfl=0x202 if=1 cpl=3 cr3=0xd345000 guest_t=13.3
+21.5 rip=0x100100a rfl=0x202 if=1 cpl=3 cr3=0xd212000 guest_t=13.3
+25.7 rip=0x15758b rfl=0x2 if=0 cpl=0 cr3=0xd212000 guest_t=23.5
+28.7 rip=0x11b352 rfl=0x2 if=0 cpl=0 cr3=0xd0e1000 guest_t=25.2
+33.7 rip=0x203fff rfl=0x200216 if=1 cpl=0 cr3=0x89c000 guest_t=31.5
+36.2 rip=0x16ad24 rfl=0x202 if=1 cpl=0 cr3=0xce7c000 guest_t=33.1
+99.9 rip=0x100100a rfl=0x202 if=1 cpl=3 cr3=0xd0e0000 guest_t=36.2
+100.4 rip=0x19e2e9 rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=97.8
+100.9 rip=0x100100a rfl=0x202 if=1 cpl=3 cr3=0xd0e0000 guest_t=97.8
+167.8 rip=0x204cd0 rfl=0x200246 if=1 cpl=0 cr3=0x89c000 guest_t=97.8
+168.4 rip=0x19e2e9 rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=165.8
+234.5 rip=0x157599 rfl=0x200002 if=0 cpl=0 cr3=0x89c000 guest_t=232.3
+235.0 rip=0x19e2e9 rfl=0x200206 if=1 cpl=0 cr3=0x89c000 guest_t=232.4
+250.6 rip=0x11b352 rfl=0x200002 if=0 cpl=0 cr3=0x89c000 guest_t=232.4
+437.5 rip=0x204e48 rfl=0x200212 if=1 cpl=0 cr3=0x89c000 guest_t=248.5

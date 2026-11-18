@@ -138,7 +138,12 @@ enum BwsNumer : uint64_t {
     /* 99 jest zarezerwowany jako trwale nieprawidlowy (historyczna regresja Bug #1:
      * BWS 99 + 0xDEADBEEFCAFE); dispatcher zawsze zwraca dla niego UINT64_MAX. */
     BWS_OSTATNI_BLAD_URUCHOMIENIA = 100,
-    BWS_PIERWSZY_WOLNY = 101
+    /* Okna podrzedne (modeless, wlasnosc wlasciciela): wymagaja PRAWO_OKNO_PODRZEDNE (jadro/bws/okna_podrzedne.h).
+     * 101: (rodzaj, tresc*, dlugosc, tytul*) otwiera/aktywuje okno informacyjne; zwraca 1 = utworzono, 2 = aktywowano
+     *      istniejace, 0 = odmowa. 102: (bufor*, pojemnosc) - tylko dla procesu okna podrzednego: pobiera tresc/tytul. */
+    BWS_OKNO_PODRZEDNE_OTWORZ = 101,
+    BWS_OKNO_PODRZEDNE_TRESC = 102,
+    BWS_PIERWSZY_WOLNY = 103
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

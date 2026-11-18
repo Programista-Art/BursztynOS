@@ -1,0 +1,5 @@
+g++ -std=c++17 -O1 -g -I. -Isterowniki/pci -Isterowniki/virtio -Isterowniki/magazyn -Isterowniki/siec -Isterowniki/wejscie -Isterowniki/czas -Isterowniki/platforma -Isterowniki/grafika -Isterowniki -Ijadro/arch -Ijadro/mm -Ijadro/fs -Ijadro/bws -Ijadro/gui -Ijadro/siec -Ijadro/aktualizacja -Ijadro/diag -Ijadro/rdzen -ffunction-sections -fdata-sections -fsanitize=address,undefined testy/test_gpu_quiesce_host.cpp -Wl,--gc-sections -o .wm-test/gpu-quiesce
+ASAN_OPTIONS=detect_leaks=1 .wm-test/gpu-quiesce
+GPU quiesce: held lock, unavailable monotonic clock
+GPU quiesce: invalid completion after disabling scanout
+GPU reboot quiesce clock/lock/pending: 41/41 PASS

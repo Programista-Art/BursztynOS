@@ -1,0 +1,10 @@
+   20.01 s  puls hosta 20 s bez przestojow, start QEMU (konfiguracja runuefi, dysk snapshot=on, SDL)
+   69.22 s  pulpit po 49.2 s
+   73.23 s  instalacja Notatnika: OK
+   73.27 s  okno X aktywne: WM_NAME(STRING) = "QEMU (bursztyn-xtest-9383-0)"
+   92.22 s  zgodnosc z wzorcem Notatnika: srednia roznica [26.6, 26.4, 26.7]
+   92.22 s  to nie jest Notatnik - zamykam okno przez [X] i ponawiam
+  114.44 s  zgodnosc z wzorcem Notatnika: srednia roznica [26.6, 26.4, 26.7]
+  114.44 s  to nie jest Notatnik - zamykam okno przez [X] i ponawiam
+  118.21 s  BLAD: RuntimeError: nie udalo sie uruchomic Notatnika - przerwano przed testem klawiatury
+  118.36 s  przestoje hosta (start s, dlugosc s): []

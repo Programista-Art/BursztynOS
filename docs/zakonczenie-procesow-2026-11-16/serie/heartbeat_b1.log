@@ -1,0 +1,9 @@
+# start realtime=1794834500.104 prog=1.5s czas=580.0s
+przerwa 58.6s monotonic_t=71.3s realtime=1794834571.372 dr=58.6s loadavg=0.25
+przerwa 5.2s monotonic_t=79.5s realtime=1794834579.615 dr=5.2s loadavg=0.36
+przerwa 88.4s monotonic_t=167.9s realtime=1794834668.005 dr=88.4s loadavg=0.08
+przerwa 21.6s monotonic_t=190.0s realtime=1794834690.096 dr=21.6s loadavg=0.06
+przerwa 3.3s monotonic_t=195.7s realtime=1794834695.780 dr=3.3s loadavg=0.29
+przerwa 25.2s monotonic_t=220.9s realtime=1794834720.969 dr=25.2s loadavg=0.19
+przerwa 68.4s monotonic_t=290.5s realtime=1794834790.608 dr=68.4s loadavg=0.09
+przerwa 107.6s monotonic_t=399.9s realtime=1794834900.040 dr=107.6s loadavg=0.01

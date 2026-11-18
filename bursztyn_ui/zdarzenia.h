@@ -140,9 +140,12 @@ struct ZdarzenieKlawiatury {
         return kod_klawisza==10?13:kod_klawisza==127?0x53:kod_klawisza;
     }
 
+    // AltGr (prawy Alt, takze jako Ctrl+AltGr) sluzy do wpisywania znakow:
+    // czy_ctrl()/czy_alt() opisuja wylacznie modyfikatory skrotow.
     constexpr bool czy_shift() const { return (modyfikatory & BWS_MOD_SHIFT) != 0; }
-    constexpr bool czy_ctrl() const { return (modyfikatory & BWS_MOD_CTRL) != 0; }
-    constexpr bool czy_alt() const { return (modyfikatory & BWS_MOD_ALT) != 0; }
+    constexpr bool czy_ctrl() const { return bws_mod_ctrl_skrotu(modyfikatory); }
+    constexpr bool czy_alt() const { return bws_mod_alt_skrotu(modyfikatory); }
+    constexpr bool czy_altgr() const { return (modyfikatory & BWS_MOD_ALTGR) != 0; }
 };
 
 struct ZdarzenieWprowadzaniaTekstu {
@@ -152,8 +155,9 @@ struct ZdarzenieWprowadzaniaTekstu {
     bool obsluzone{false};
 
     constexpr bool czy_shift() const { return (modyfikatory & BWS_MOD_SHIFT) != 0; }
-    constexpr bool czy_ctrl() const { return (modyfikatory & BWS_MOD_CTRL) != 0; }
-    constexpr bool czy_alt() const { return (modyfikatory & BWS_MOD_ALT) != 0; }
+    constexpr bool czy_ctrl() const { return bws_mod_ctrl_skrotu(modyfikatory); }
+    constexpr bool czy_alt() const { return bws_mod_alt_skrotu(modyfikatory); }
+    constexpr bool czy_altgr() const { return (modyfikatory & BWS_MOD_ALTGR) != 0; }
     constexpr bool czy_super() const { return (modyfikatory & BWS_MOD_SUPER) != 0; }
 };
 

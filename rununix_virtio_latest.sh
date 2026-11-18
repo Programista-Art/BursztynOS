@@ -8,19 +8,36 @@
 #   - VirtIO-NET      -> NetworkDevice
 #   - VirtIO-RNG
 #   - VirtIO-GPU 2D   -> Graphics HAL
-#   - VirtIO-INPUT    -> klawiatura + mysz
+#   - VirtIO-INPUT    -> klawiatura + mysz wzgledna + tablet bezwzgledny
+#                        (jak QEMU_VIRTIO_COMMON_ARGS w Makefile; tablet ostatni, BDF 00:09.0)
 #   - MSI/MSI-X obslugiwane przez Bursztyn OS
 #   - Intel HDA pozostaje aktualnym backendem audio
 #
 # Wymagane pliki w katalogu launchera:
-#   BursztynOS.iso
-#   wirtualny_dysk.img        (tworzony automatycznie, domyslnie 4 GiB)
+#   BursztynOS.iso            (wynik `make -j1 iso`; brak = blad, bez cichego fallbacku)
+#   wirtualny_dysk.img        (TRWALY dysk uzytkownika; tworzony pusty tylko, gdy nie istnieje,
+#                              nigdy nie jest nadpisywany ani formatowany przez launcher)
 #
 # Opcjonalnie:
 #   .bursztyn_ci_test.iso
 #
 # Skrypt NIE kompiluje systemu.
 # Uruchamia istniejace ISO lub zainstalowany system z wirtualny_dysk.img.
+#
+# Uzycie:
+#   ./rununix_virtio_latest.sh                 menu interaktywne (jak dotad)
+#   ./rununix_virtio_latest.sh --mode 2        bez menu: tryb 2 (UEFI + VirtIO Full); kod wyjscia = kod QEMU
+#   ./rununix_virtio_latest.sh --dry-run --mode 2
+#                                              tylko wypisuje polecenie QEMU (nie tworzy dysku, nie uruchamia)
+#   ./rununix_virtio_latest.sh --help
+#
+# Klawiatura (AltGr / polskie znaki): przy -display sdl SDL2 oddaje klawisze tekstowe IBus; dla
+# AltGr+litera IBus zatwierdza gotowy znak i SDL nie wysyla klawisza litery, wiec QEMU dostaje sam
+# AltGr (zmierzone: docs/notatnik-2026-11-17/sdl-ibus-probe.txt). Na Linuksie launcher ustawia
+# IBUS_ADDRESS na nieistniejacy adres WYLACZNIE w srodowisku procesu QEMU - jak Makefile, dla kazdego
+# frontendu (dla GTK zachowanie z IBus nie zostalo zmierzone; obejscie jest tam nieszkodliwe, bo
+# okno goscia QEMU nie korzysta z IME). Pulpit hosta nadal uzywa IBus. Wylaczenie: QEMU_SDL_BEZ_IME=0.
+# Diagnoza: narzedzia/sdl_ime_probe.py, narzedzia/qemu_ui_ime_probe.py.
 
 set -u
 set -o pipefail
@@ -86,18 +103,69 @@ QEMU_EXTRA_ARGS="${QEMU_EXTRA_ARGS:-}"
 # Firmware mozna nadpisac recznie:
 #
 # Linux:
-#   OVMF_MONO=/usr/share/ovmf/OVMF.fd ./rununix.sh
+#   OVMF_MONO=/usr/share/ovmf/OVMF.fd ./rununix_virtio_latest.sh
 #
 # lub:
 #   OVMF_CODE=/.../OVMF_CODE.fd \
 #   OVMF_VARS=/.../OVMF_VARS.fd \
-#   ./rununix.sh
+#   ./rununix_virtio_latest.sh
 #
 # macOS/Homebrew:
 # detekcja jest automatyczna, ale zmienne powyzej tez maja pierwszenstwo.
 OVMF_MONO="${OVMF_MONO:-}"
 OVMF_CODE="${OVMF_CODE:-}"
 OVMF_VARS="${OVMF_VARS:-}"
+
+# SDL2 + IBus (AltGr): patrz naglowek. 1 = QEMU bez IBus (domyslnie, tylko proces QEMU), 0 = bez zmian.
+QEMU_SDL_BEZ_IME="${QEMU_SDL_BEZ_IME:-1}"
+IBUS_ADDRESS_BEZ_IME="unix:path=/nonexistent/bursztyn-qemu-bez-ibus"
+
+DRY_RUN=false
+MODE=""
+
+usage() {
+    cat <<'EOF'
+Bursztyn OS - launcher QEMU (Linux/macOS)
+
+  --mode N, -m N      uruchom tryb N z menu (0-18) bez menu interaktywnego
+  --dry-run, -n       wypisz polecenie QEMU bez uruchamiania (bez tworzenia dysku i NVRAM)
+  --print-argv        to samo co --dry-run
+  --help, -h          ta pomoc
+
+Zmienne: QEMU, QEMU_IMG, QEMU_DISPLAY_ARGS, QEMU_EXTRA_ARGS, AUDIO_BACKEND, GUEST_WIDTH,
+GUEST_HEIGHT, DISK_SIZE, OVMF_MONO, OVMF_CODE, OVMF_VARS, QEMU_SDL_BEZ_IME (1/0).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--dry-run|--print-argv) DRY_RUN=true ;;
+        -m|--mode)
+            if [[ $# -lt 2 ]]; then
+                echo "BLAD: --mode wymaga numeru trybu." >&2
+                exit 2
+            fi
+            MODE="$2"
+            shift
+            ;;
+        --mode=*) MODE="${1#--mode=}" ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo "BLAD: nieznana opcja: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [[ -n "$MODE" && ! "$MODE" =~ ^([0-9]|1[0-8])$ ]]; then
+    echo "BLAD: nieprawidlowy tryb: $MODE (dozwolone 0-18)." >&2
+    exit 2
+fi
+if [[ "$DRY_RUN" == "true" && -z "$MODE" ]]; then
+    MODE="2"
+fi
 
 show_error() {
     echo
@@ -236,8 +304,34 @@ detect_ovmf() {
     fi
 }
 
+# Opcje QEMU (file=...) dziela sie na przecinkach: przecinek w sciezce musi byc podwojony.
+qemu_opt_path() {
+    printf '%s' "${1//,/,,}"
+}
+
+# Dysk musi byc zwyklym plikiem (lub dowiazaniem do zwyklego pliku). Urzadzenie blokowe, katalog
+# albo zerwane dowiazanie oznaczaja blad konfiguracji: launcher nic wtedy nie tworzy ani nie zapisuje.
+assert_disk_path_safe() {
+    if [[ -L "$DISK" && ! -e "$DISK" ]]; then
+        show_error "wirtualny_dysk.img jest zerwanym dowiazaniem - odmowa (nic nie utworzono):"
+        echo "$DISK" >&2
+        exit 1
+    fi
+    if [[ -e "$DISK" && ! -f "$DISK" ]]; then
+        show_error "wirtualny_dysk.img nie jest zwyklym plikiem (urzadzenie/katalog) - odmowa:"
+        echo "$DISK" >&2
+        exit 1
+    fi
+}
+
 prepare_disk() {
-    if [[ ! -f "$DISK" ]]; then
+    assert_disk_path_safe
+    if [[ ! -e "$DISK" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "(dry-run) brak $DISK - zwykly start utworzylby pusty dysk $DISK_SIZE" >&2
+            return 0
+        fi
+        require_command "$QEMU_IMG"
         echo
         echo "Tworzenie pustego dysku wirtualnego: $DISK_SIZE..."
         "$QEMU_IMG" create -f raw "$DISK" "$DISK_SIZE" || {
@@ -245,6 +339,45 @@ prepare_disk() {
             exit 1
         }
     fi
+}
+
+# Ostrzezenie (bez zmiany zachowania), gdy w drzewie budowania jadro jest nowsze niz ISO.
+check_iso_fresh() {
+    local iso="$1"
+    local kernel="$SCRIPT_DIR/system_operacyjny.bin"
+    if [[ -f "$kernel" && "$kernel" -nt "$iso" ]]; then
+        warn "$(basename "$iso") jest starszy niz system_operacyjny.bin - obraz moze byc nieaktualny (make -j1 iso)."
+    fi
+}
+
+sdl_ime_fix_active() {
+    [[ "$HOST_NAME" == "Linux" && "$QEMU_SDL_BEZ_IME" == "1" ]]
+}
+
+# Uruchamia QEMU; obejscie IBus trafia tylko do srodowiska tego procesu potomnego.
+exec_qemu() {
+    if sdl_ime_fix_active; then
+        IBUS_ADDRESS="$IBUS_ADDRESS_BEZ_IME" "$QEMU" "$@"
+    else
+        "$QEMU" "$@"
+    fi
+}
+
+print_dry_run() {
+    echo "# Bursztyn OS: polecenie QEMU (dry-run, nic nie uruchomiono)"
+    if sdl_ime_fix_active; then
+        printf 'IBUS_ADDRESS=%q ' "$IBUS_ADDRESS_BEZ_IME"
+    fi
+    local arg out
+    out=""
+    for arg in "$QEMU" "$@"; do
+        if [[ "$arg" =~ ^[A-Za-z0-9_./,=:@+-]+$ ]]; then
+            out+="$arg "
+        else
+            out+="$(printf '%q' "$arg") "
+        fi
+    done
+    printf '%s\n' "${out% }"
 }
 
 append_common_machine_args() {
@@ -297,6 +430,7 @@ build_virtio_args() {
     local gpu_dev="virtio-vga,disable-legacy=on,xres=$GUEST_WIDTH,yres=$GUEST_HEIGHT"
     local kbd_dev="virtio-keyboard-pci"
     local mouse_dev="virtio-mouse-pci"
+    local tablet_dev="virtio-tablet-pci"
 
     QEMU_ARGS=()
     append_common_machine_args
@@ -318,13 +452,13 @@ build_virtio_args() {
     # Ten blok celowo odpowiada QEMU_VIRTIO_INSTALLED_ARGS z Makefile,
     # bez dynamicznego zmieniania transportu INPUT zależnie od wersji QEMU.
     QEMU_ARGS+=(
-        -drive "id=disk,file=$DISK,format=raw,if=none"
+        -drive "id=disk,file=$(qemu_opt_path "$DISK"),format=raw,if=none"
         -device "$blk_dev"
 
         -netdev user,id=n1
         -device "$net_dev"
 
-        -object rng-random,id=rng0,filename=/dev/urandom
+        -object rng-builtin,id=rng0
         -device "$rng_dev"
 
         -vga none
@@ -332,12 +466,16 @@ build_virtio_args() {
 
         -device "$kbd_dev"
         -device "$mouse_dev"
+        # Jak Makefile (docs/virtio-gpu-mouse-reliability-2026-11-11.md): bezwzgledny tablet jako
+        # OSTATNIE urzadzenie; mysz wzgledna zostaje jako fallback.
+        -device "$tablet_dev"
     )
 
     append_optional_cli_args
 
     if [[ -n "$iso" ]]; then
-        QEMU_ARGS+=( -cdrom "$iso" )
+        # Jak Makefile/Windows: ISO ma pierwszenstwo przed zainstalowanym systemem na dysku.
+        QEMU_ARGS+=( -boot order=d,menu=on -cdrom "$iso" )
     fi
 }
 
@@ -359,7 +497,7 @@ build_legacy_args() {
     fi
 
     QEMU_ARGS+=(
-        -drive "id=disk,file=$DISK,format=raw,if=none"
+        -drive "id=disk,file=$(qemu_opt_path "$DISK"),format=raw,if=none"
         -device ich9-ahci,id=ahci
         -device "$ahci_disk"
 
@@ -377,7 +515,7 @@ build_legacy_args() {
     append_optional_cli_args
 
     if [[ -n "$iso" ]]; then
-        QEMU_ARGS+=( -cdrom "$iso" )
+        QEMU_ARGS+=( -boot order=d,menu=on -cdrom "$iso" )
     fi
 }
 
@@ -391,12 +529,16 @@ uefi_args() {
     fi
 
     if [[ -n "$OVMF_CODE" && -f "$OVMF_CODE" && -n "$OVMF_VARS" && -f "$OVMF_VARS" ]]; then
-        rm -f "$OVMF_VARS_RUNTIME"
-        cp "$OVMF_VARS" "$OVMF_VARS_RUNTIME"
+        # Kopia robocza NVRAM launchera (wlasny plik .bursztyn_ovmf_vars_unix.fd); oryginal VARS
+        # z pakietu systemowego nie jest modyfikowany.
+        if [[ "$DRY_RUN" != "true" ]]; then
+            rm -f "$OVMF_VARS_RUNTIME"
+            cp "$OVMF_VARS" "$OVMF_VARS_RUNTIME"
+        fi
 
         UEFI_ARGS=(
-            -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
-            -drive "if=pflash,format=raw,file=$OVMF_VARS_RUNTIME"
+            -drive "if=pflash,format=raw,readonly=on,file=$(qemu_opt_path "$OVMF_CODE")"
+            -drive "if=pflash,format=raw,file=$(qemu_opt_path "$OVMF_VARS_RUNTIME")"
         )
         return 0
     fi
@@ -404,7 +546,7 @@ uefi_args() {
     if [[ -n "$OVMF_CODE" && -f "$OVMF_CODE" ]]; then
         warn "Znaleziono CODE UEFI bez VARS. NVRAM firmware nie bedzie trwale zapisywany."
         UEFI_ARGS=(
-            -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
+            -drive "if=pflash,format=raw,readonly=on,file=$(qemu_opt_path "$OVMF_CODE")"
         )
         return 0
     fi
@@ -419,13 +561,18 @@ validate_virtio_environment() {
     local missing=0
     local dev
 
+    if [[ "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+
     for dev in \
         virtio-blk-pci \
         virtio-net-pci \
         virtio-rng-pci \
         virtio-vga \
         virtio-keyboard-pci \
-        virtio-mouse-pci
+        virtio-mouse-pci \
+        virtio-tablet-pci
     do
         if ! qemu_has_device "$dev"; then
             echo "BRAK QEMU device: $dev" >&2
@@ -440,8 +587,11 @@ validate_virtio_environment() {
     fi
 }
 
+LAST_QEMU_CODE=0
+
 print_qemu_result() {
     local code="$1"
+    LAST_QEMU_CODE="$code"
     echo
 
     if [[ "$code" -eq 0 ]]; then
@@ -459,6 +609,7 @@ run_qemu() {
     local profile="${5:-virtio}"
 
     require_file "$iso" "obrazu ISO"
+    check_iso_fresh "$iso"
     prepare_disk
 
     if [[ "$profile" == "virtio" ]]; then
@@ -479,14 +630,19 @@ run_qemu() {
 
     final_args+=( -name "Bursztyn OS - $mode_name" )
 
+    if [[ "$DRY_RUN" == "true" ]]; then
+        print_dry_run "${final_args[@]}"
+        return 0
+    fi
+
     echo
     echo "============================================================"
     echo "Uruchamianie: $mode_name"
     echo "Host:         $HOST_NAME / $HOST_ARCH"
     echo "Firmware:     $firmware"
     echo "Profil:       $profile"
-    echo "ISO:          $(basename "$iso")"
-    echo "Dysk:         $(basename "$DISK")"
+    echo "ISO:          $iso"
+    echo "Dysk:         $DISK (trwaly, zapis wlaczony)"
     echo "RAM:          2 GiB"
     echo "CPU:          TCG / 1 vCPU"
 
@@ -495,7 +651,7 @@ run_qemu() {
         echo "Network:      VirtIO-NET"
         echo "RNG:          VirtIO-RNG"
         echo "GPU:          VirtIO-GPU 2D / virtio-vga"
-        echo "Input:        VirtIO keyboard + mouse"
+        echo "Input:        VirtIO keyboard + mouse + tablet"
     else
         echo "Storage:      AHCI"
         echo "Network:      E1000"
@@ -504,6 +660,10 @@ run_qemu() {
     fi
 
     echo "Audio:        $AUDIO_BACKEND"
+    echo "Display:      ${QEMU_DISPLAY_ARGS:-(domyslny QEMU)}"
+    if sdl_ime_fix_active; then
+        echo "Klawiatura:   QEMU bez IBus (tylko ten proces; AltGr/polskie znaki); QEMU_SDL_BEZ_IME=0 wylacza"
+    fi
     echo "============================================================"
     echo
 
@@ -521,10 +681,10 @@ run_qemu() {
         echo "$log_file"
         echo
 
-        "$QEMU" "${final_args[@]}" 2>&1 | tee "$log_file"
+        exec_qemu "${final_args[@]}" 2>&1 | tee "$log_file"
         code=${PIPESTATUS[0]}
     else
-        "$QEMU" "${final_args[@]}"
+        exec_qemu "${final_args[@]}"
         code=$?
     fi
 
@@ -535,6 +695,7 @@ run_installed() {
     local profile="${1:-virtio}"
 
     # Nie tworzymy pustego dysku dla trybu "zainstalowany".
+    assert_disk_path_safe
     require_file "$DISK" "zainstalowanego wirtualny_dysk.img"
 
     if [[ "$profile" == "virtio" ]]; then
@@ -552,6 +713,11 @@ run_installed() {
         -boot order=c
         -name "Bursztyn OS - Zainstalowany UEFI"
     )
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        print_dry_run "${final_args[@]}"
+        return 0
+    fi
 
     echo
     echo "============================================================"
@@ -580,7 +746,7 @@ run_installed() {
     echo
 
     local code=0
-    "$QEMU" "${final_args[@]}"
+    exec_qemu "${final_args[@]}"
     code=$?
     print_qemu_result "$code"
 }
@@ -632,8 +798,126 @@ info_installer() {
     echo "UWAGA: instalator moze usunac zawartosc wirtualnego dysku."
 }
 
-require_command "$QEMU"
-require_command "$QEMU_IMG"
+# Usuwanie dysku tylko po jawnym potwierdzeniu (dysk jest TRWALY: zainstalowany system, pliki uzytkownika).
+delete_disk() {
+    if [[ ! -e "$DISK" && ! -L "$DISK" ]]; then
+        echo
+        echo "wirtualny_dysk.img juz nie istnieje."
+        return 0
+    fi
+    if [[ -e "$DISK" && ! -f "$DISK" ]]; then
+        show_error "wirtualny_dysk.img nie jest zwyklym plikiem - odmowa usuniecia:"
+        echo "$DISK" >&2
+        return 1
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "(dry-run) usunieto by: $DISK"
+        return 0
+    fi
+    echo
+    echo "UWAGA: zostanie trwale usuniety dysk (zainstalowany system i dane):"
+    echo "  $DISK"
+    local answer=""
+    read -r -p "Wpisz USUN, aby potwierdzic: " answer || answer=""
+    if [[ "$answer" != "USUN" ]]; then
+        echo "Anulowano - dysk nie zostal usuniety."
+        return 1
+    fi
+    rm -f -- "$DISK"
+    echo "Usunieto: $DISK"
+}
+
+run_choice() {
+    local choice="$1"
+    case "$choice" in
+        1)
+            run_qemu "BIOS" "$ISO_NORMAL" "Normalny BIOS VirtIO Full" "false" "virtio"
+            ;;
+        2)
+            run_qemu "UEFI" "$ISO_NORMAL" "Normalny UEFI VirtIO Full" "false" "virtio"
+            ;;
+        3)
+            info_tests_canonical
+            run_qemu "BIOS" "$ISO_NORMAL" "Testy GRUB BIOS VirtIO" "true" "virtio"
+            ;;
+        4)
+            info_tests_canonical
+            run_qemu "UEFI" "$ISO_NORMAL" "Testy GRUB UEFI VirtIO" "true" "virtio"
+            ;;
+        5)
+            require_file "$ISO_CI_TEST" ".bursztyn_ci_test.iso"
+            run_qemu "BIOS" "$ISO_CI_TEST" "CI BIOS VirtIO" "true" "virtio"
+            ;;
+        6)
+            require_file "$ISO_CI_TEST" ".bursztyn_ci_test.iso"
+            run_qemu "UEFI" "$ISO_CI_TEST" "CI UEFI VirtIO" "true" "virtio"
+            ;;
+        7)
+            info_tests_interactive
+            run_qemu "BIOS" "$ISO_NORMAL" "Interaktywne BIOS VirtIO" "true" "virtio"
+            ;;
+        8)
+            info_tests_interactive
+            run_qemu "UEFI" "$ISO_NORMAL" "Interaktywne UEFI VirtIO" "true" "virtio"
+            ;;
+        9)
+            info_display
+            run_qemu "BIOS" "$ISO_NORMAL" "Ekran BIOS VirtIO-GPU" "true" "virtio"
+            ;;
+        10)
+            info_display
+            run_qemu "UEFI" "$ISO_NORMAL" "Ekran UEFI VirtIO-GPU" "true" "virtio"
+            ;;
+        11)
+            info_geom_trace
+            run_qemu "BIOS" "$ISO_NORMAL" "GEOM-TRACE BIOS VirtIO" "true" "virtio"
+            ;;
+        12)
+            info_geom_trace
+            run_qemu "UEFI" "$ISO_NORMAL" "GEOM-TRACE UEFI VirtIO" "true" "virtio"
+            ;;
+        13)
+            delete_disk
+            ;;
+        14)
+            run_installed "virtio"
+            ;;
+        15)
+            info_installer
+            run_qemu "UEFI" "$ISO_NORMAL" "Instalator UEFI VirtIO Full" "true" "virtio"
+            ;;
+        16)
+            run_qemu "BIOS" "$ISO_NORMAL" "BIOS Legacy" "false" "legacy"
+            ;;
+        17)
+            run_qemu "UEFI" "$ISO_NORMAL" "UEFI Legacy" "false" "legacy"
+            ;;
+        18)
+            run_installed "legacy"
+            ;;
+        0)
+            exit 0
+            ;;
+        *)
+            show_error "Nieprawidlowy wybor."
+            return 1
+            ;;
+    esac
+}
+
+if [[ "$DRY_RUN" != "true" ]]; then
+    require_command "$QEMU"
+fi
+
+if [[ -n "$MODE" ]]; then
+    LAST_QEMU_CODE=0
+    run_choice "$MODE"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        exit "$rc"
+    fi
+    exit "$LAST_QEMU_CODE"
+fi
 
 while true; do
     echo
@@ -683,86 +967,7 @@ while true; do
     echo "  0  - Wyjscie"
     echo
 
-    read -r -p "Wybierz tryb [0-18]: " choice
+    read -r -p "Wybierz tryb [0-18]: " choice || exit 0
 
-    case "$choice" in
-        1)
-            run_qemu "BIOS" "$ISO_NORMAL" "Normalny BIOS VirtIO Full" "false" "virtio"
-            ;;
-        2)
-            run_qemu "UEFI" "$ISO_NORMAL" "Normalny UEFI VirtIO Full" "false" "virtio"
-            ;;
-        3)
-            info_tests_canonical
-            run_qemu "BIOS" "$ISO_NORMAL" "Testy GRUB BIOS VirtIO" "true" "virtio"
-            ;;
-        4)
-            info_tests_canonical
-            run_qemu "UEFI" "$ISO_NORMAL" "Testy GRUB UEFI VirtIO" "true" "virtio"
-            ;;
-        5)
-            require_file "$ISO_CI_TEST" ".bursztyn_ci_test.iso"
-            run_qemu "BIOS" "$ISO_CI_TEST" "CI BIOS VirtIO" "true" "virtio"
-            ;;
-        6)
-            require_file "$ISO_CI_TEST" ".bursztyn_ci_test.iso"
-            run_qemu "UEFI" "$ISO_CI_TEST" "CI UEFI VirtIO" "true" "virtio"
-            ;;
-        7)
-            info_tests_interactive
-            run_qemu "BIOS" "$ISO_NORMAL" "Interaktywne BIOS VirtIO" "true" "virtio"
-            ;;
-        8)
-            info_tests_interactive
-            run_qemu "UEFI" "$ISO_NORMAL" "Interaktywne UEFI VirtIO" "true" "virtio"
-            ;;
-        9)
-            info_display
-            run_qemu "BIOS" "$ISO_NORMAL" "Ekran BIOS VirtIO-GPU" "true" "virtio"
-            ;;
-        10)
-            info_display
-            run_qemu "UEFI" "$ISO_NORMAL" "Ekran UEFI VirtIO-GPU" "true" "virtio"
-            ;;
-        11)
-            info_geom_trace
-            run_qemu "BIOS" "$ISO_NORMAL" "GEOM-TRACE BIOS VirtIO" "true" "virtio"
-            ;;
-        12)
-            info_geom_trace
-            run_qemu "UEFI" "$ISO_NORMAL" "GEOM-TRACE UEFI VirtIO" "true" "virtio"
-            ;;
-        13)
-            if [[ -f "$DISK" ]]; then
-                rm -f "$DISK"
-                echo
-                echo "Usunieto: $DISK"
-            else
-                echo
-                echo "wirtualny_dysk.img juz nie istnieje."
-            fi
-            ;;
-        14)
-            run_installed "virtio"
-            ;;
-        15)
-            info_installer
-            run_qemu "UEFI" "$ISO_NORMAL" "Instalator UEFI VirtIO Full" "true" "virtio"
-            ;;
-        16)
-            run_qemu "BIOS" "$ISO_NORMAL" "BIOS Legacy" "false" "legacy"
-            ;;
-        17)
-            run_qemu "UEFI" "$ISO_NORMAL" "UEFI Legacy" "false" "legacy"
-            ;;
-        18)
-            run_installed "legacy"
-            ;;
-        0)
-            exit 0
-            ;;
-        *)
-            show_error "Nieprawidlowy wybor."
-            ;;
-    esac
+    run_choice "$choice" || true
 done

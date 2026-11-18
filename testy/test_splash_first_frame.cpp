@@ -33,14 +33,14 @@ static void validate(const Published& p,unsigned dpi,uint64_t czas) {
     // Logotyp ma atrament od pierwszej klatki (alfa startowa > 0).
     assert(atrament(p.pixels,p.w,p.h,g.logo));
     // Komunikaty sa niewidoczne na starcie animacji.
-    if(czas< Powitanie::LINIA1_IN_US) {
-        for(int y=g.linia1.y;y<p.h;++y)
+    if(czas<Powitanie::nominalny_start(Powitanie::ETAP_LINIA1)) {
+        for(int y=g.linia1.r.y;y<p.h;++y)
             for(int x=0;x<p.w;++x)
                 assert(p.pixels[size_t(y)*p.w+x]==Powitanie::TLO);
     }
     // Klatka jest kompletna i zgodna z rendererem dla tego samego stanu.
     std::vector<uint32_t> expected(p.pixels.size(),0);
-    Powitanie::Sekwencja s;s.rozpocznij(true,0);s.przelicz(czas);
+    const Powitanie::Sekwencja s=Powitanie::sekwencja_idealna(czas);
     Powitanie::rysuj(expected.data(),p.w,p.h,p.w,dpi,s,true);
     assert(expected==p.pixels);
 }

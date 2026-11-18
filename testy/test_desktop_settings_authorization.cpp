@@ -1,6 +1,7 @@
 // Actual BWS authorization/file operations and actual PSF, backed by RAM.
 #include "../jadro/bws/syscalls.cpp"
 #include "desktop_layout_settings.h"
+#include "katalogi_uzytkownika.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,9 +26,13 @@ proces_t tablica_procesow[MAKS_PROCESOW]{};
 int aktualny_pid=1;
 int bws_gui_aktywny_pid(){return 2;}
 extern "C" bool loader_pobierz_argument_startowy(int,char*,size_t){return false;}
+static int test_ostatni_pid=3;
 uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out,uint32_t max,int){
-    uint32_t count=0;for(int pid=2;pid<=3 && count<max;++pid){out[count]={};out[count].pid=pid;out[count].window_id=100+pid;++count;}return count;
+    uint32_t count=0;for(int pid=2;pid<=test_ostatni_pid && count<max;++pid){out[count]={};out[count].pid=pid;out[count].window_id=100+pid;++count;}return count;
 }
+// Rejestr okien podrzednych (BWS 101): pid 4 -> wlasciciel 3, pid 5 osierocony (-1).
+static int test_wlasciciel[8]={};
+extern "C" int okna_podrzedne_wlasciciel(int pid){return pid>0&&pid<8?test_wlasciciel[pid]:0;}
 static unsigned checks=0;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);abort();}}while(0)
 // Minimal layout adapter: the serializer and storage below are production code.
@@ -49,6 +54,23 @@ int main(){
     CHECK(snapshot("/programy/ustawienia.cebula/ustawienia.bur.extra")==0);
     CHECK(snapshot("/programy/ustawienia")==0);CHECK(snapshot(AppIdentity::Settings,0)==0);CHECK(snapshot(AppIdentity::Settings,17)==0);
     wm.uprawnienia=0;CHECK(snapshot(AppIdentity::Settings)==0);wm.uprawnienia=PRAWO_SYSTEM_CONFIG;
+    {   // Tozsamosc aplikacji dla paska zadan: okno podrzedne liczy sie jako okno wlasciciela.
+        strcpy(tablica_procesow[4].sciezka_pliku,"/programy/okno-informacyjne.cebula/okno-informacyjne.bur");
+        strcpy(tablica_procesow[5].sciezka_pliku,"/programy/okno-informacyjne.cebula/okno-informacyjne.bur");
+        test_ostatni_pid=5;test_wlasciciel[4]=3;test_wlasciciel[5]=-1;
+        auto app=[&](const char* path,uint64_t mode){return bws_snapshot_okien(wm,(uint64_t)windows,16,(uint64_t)path,mode);};
+        CHECK(app(AppIdentity::Settings,BWS_OKNA_TOZSAMOSC_APLIKACJI)==2&&windows[0].pid==3&&windows[1].pid==4);
+        CHECK(snapshot(AppIdentity::Settings)==1&&windows[0].pid==3);           // aktywacja/uruchamianie bez zmian
+        CHECK(app("/programy/okno-informacyjne.cebula/okno-informacyjne.bur",BWS_OKNA_TOZSAMOSC_APLIKACJI)==0); // sierota: zaden program
+        CHECK(app(AppIdentity::DisplaySettings,BWS_OKNA_TOZSAMOSC_APLIKACJI)==1&&windows[0].pid==2);
+        // Wlasciciel zakonczony, pid ponownie uzyty przez inny program: okno juz osierocone.
+        test_wlasciciel[4]=-1;strcpy(tablica_procesow[3].sciezka_pliku,AppIdentity::DisplaySettings);
+        CHECK(app(AppIdentity::DisplaySettings,BWS_OKNA_TOZSAMOSC_APLIKACJI)==2&&windows[0].pid==2&&windows[1].pid==3);
+        strcpy(tablica_procesow[3].sciezka_pliku,AppIdentity::Settings);
+        CHECK(app(AppIdentity::Settings,2)==0&&app(nullptr,BWS_OKNA_TOZSAMOSC_APLIKACJI)==0);   // zle argumenty
+        wm.uprawnienia=0;CHECK(app(AppIdentity::Settings,BWS_OKNA_TOZSAMOSC_APLIKACJI)==0);wm.uprawnienia=PRAWO_SYSTEM_CONFIG;
+        test_ostatni_pid=3;
+    }
     std::vector<uint8_t> ram(16*1024*1024);inicjalizuj_psf(ram.data(),ram.size());
     proces_t p{};p.poziom_zaufania=PZB_USLUGI;p.uprawnienia=PRAWO_PLIKI_CZYTAJ|PRAWO_PLIKI_ZAPISZ;
     auto io=[&](uint64_t n,uint64_t a,uint64_t b,uint64_t c)->uint64_t {
@@ -123,5 +145,24 @@ int main(){
     CHECK(bws_wylistuj_katalog(gui,(uint64_t)"/czcionki/ttf",(uint64_t)listing.get(),BSF::DirectoryBytes));
     CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));
     gui.uprawnienia|=PRAWO_PLIKI_ZAPISZ;CHECK(!bws_utworz_plik(gui,(uint64_t)"/czcionki/ttf/new.ttf"));
+    {   // Dialog plikow Notatnika: Nowy katalog w prawdziwym PSF/PZB (poziomy jak przy starcie jadra).
+        for(const char* d:{"/uzytkownicy","/system"})if(!czy_katalog_istnieje(d))CHECK(utworz_katalog_z_pzb(d,PZB_JADRO));
+        for(const char* d:{KatalogiUzytkownika::Domowy,KatalogiUzytkownika::Dokumenty})
+            if(!czy_katalog_istnieje(d))CHECK(utworz_katalog_z_pzb(d,PZB_UZYTKOWNIK));
+        proces_t n{};n.poziom_zaufania=PZB_UZYTKOWNIK;n.uprawnienia=PRAWO_GUI|PRAWO_PLIKI_CZYTAJ|PRAWO_PLIKI_ZAPISZ;
+        auto mkdir=[&](const std::string& d){return WynikPlikowy(bws_utworz_katalog(n,(uint64_t)d.c_str(),BWS_STATUS_PLIKOWY));};
+        const std::string DOK=KatalogiUzytkownika::Dokumenty,ZG=DOK+"/Zażółć gęślą jaźń";
+        CHECK(mkdir("/uzytkownicy/Nowy katalog")==WynikPlikowy::BrakUprawnien);      // katalog systemowy
+        CHECK(mkdir("/system/Nowy katalog")==WynikPlikowy::BrakUprawnien);
+        CHECK(!czy_katalog_istnieje("/uzytkownicy/Nowy katalog")&&!czy_katalog_istnieje("/system/Nowy katalog"));
+        CHECK(mkdir(ZG)==WynikPlikowy::Ok&&czy_katalog_istnieje(ZG.c_str()));
+        CHECK(mkdir(ZG)==WynikPlikowy::Istnieje);
+        CHECK(mkdir(DOK+"/brak/x")!=WynikPlikowy::Ok&&!czy_katalog_istnieje((DOK+"/brak").c_str()));
+        CHECK(mkdir(ZG+"/Nowy katalog")==WynikPlikowy::Ok);
+        const std::string plik=ZG+"/Nowy katalog/Łódź.txt",dane="zażółć";
+        CHECK(bws_utworz_plik(n,(uint64_t)plik.c_str())&&bws_zapisz_plik(n,(uint64_t)plik.c_str(),(uint64_t)dane.data(),dane.size()));
+        CHECK(bws_rozmiar_pliku(n,(uint64_t)plik.c_str())==dane.size()+1);
+        CHECK(!bws_utworz_plik(n,(uint64_t)"/system/x.txt"));                         // chroniony nadal chroniony
+    }
     printf("Desktop settings/overflow production BWS/PZB: %u/%u PASS (RAM PSF)\n",checks,checks);
 }

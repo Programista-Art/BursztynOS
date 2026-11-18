@@ -23,10 +23,12 @@
 
 #pragma once
 
+#include "jadro/mm/zarezerwowane_va.h"
 #include <stdint.h>
 #include <stddef.h>
 
 constexpr uint64_t BAZA_STOSOW_JADRA = 0xFFFF940000000000ULL;
+static_assert(BAZA_STOSOW_JADRA==ZarezerwowaneVA::STOSY_JADRA_BAZA,"baza stosow jadra musi zgadzac sie z zarezerwowane_va.h");
 constexpr size_t ROZMIAR_STRONY_STOSU = 4096ULL;
 #ifdef BURSZTYN_DIAG_STOS16K
 // Diagnostyczna reprodukcja historycznego 16 KiB stosu (wylacznie do

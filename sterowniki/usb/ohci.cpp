@@ -1,3 +1,4 @@
+#include "jadro/mm/zarezerwowane_va.h"
 #include "diagnostyka_systemu.h"
 // OHCI 1.0 root-port HID driver. Polled schedules, no IRQ callbacks. DMA
 // objects have controller lifetime, including failed enumeration and unplug.
@@ -15,6 +16,7 @@ void wypisz_log(const char*);
 namespace {
 constexpr unsigned MAX_DEVICES=16, MAX_PORTS=15;
 constexpr uint64_t MMIO=0x144000000ULL, TIMEOUT=1000000000ULL;
+static_assert(MMIO == ZarezerwowaneVA::OHCI_MMIO_START, "MMIO OHCI musi zgadzac sie z zarezerwowane_va.h");
 struct alignas(16) ED { volatile uint32_t info,tail,head,next; };
 struct alignas(16) TD { volatile uint32_t info,cbp,next,end; };
 struct alignas(256) HCCA { volatile uint32_t table[32];volatile uint16_t frame,pad;volatile uint32_t done;uint8_t reserved[120]; };

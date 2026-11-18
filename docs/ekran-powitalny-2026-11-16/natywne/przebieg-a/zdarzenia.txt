@@ -1,0 +1,2 @@
+pulpit gotowy (log) przy t=20.6 s
+koniec po 33.0 s, unikalnych klatek: 24, QEMU rc=0

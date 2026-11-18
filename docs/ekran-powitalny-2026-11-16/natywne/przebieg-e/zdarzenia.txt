@@ -1,0 +1,4 @@
+STALL hosta/petli: 2.7 s przy t=5.3 s
+STALL hosta/petli: 3.1 s przy t=16.5 s
+pulpit gotowy (log) przy t=21.7 s
+koniec po 34.0 s, unikalnych klatek: 34, QEMU rc=0

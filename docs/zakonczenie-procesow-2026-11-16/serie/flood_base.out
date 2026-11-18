@@ -1,0 +1,14 @@
+[run 1/4] STALL-HOSTA stalle_hosta=[(9, 27)] powod=timeout czas=492s przerw>1s=0 maks_przerwa=0.0s min_tick_hz=None pass=0 fail=0 zwolnien=1 maks_latencja_ms=9.5 maks_latencja_irq=1 aktywne_koniec=2 ramki=469585->469585
+   REJESTRY: probek=2 cpl0=2 cpl0_if0=0
+   HARNESS: scenariusz nie dobiegl konca (timeout)
+[run 2/4] PASS stalle_hosta=[(16, 164)] powod=koniec czas=183s przerw>1s=5 maks_przerwa=165.2s min_tick_hz=0.1 pass=1 fail=0 zwolnien=9 maks_latencja_ms=7.9 maks_latencja_irq=1 aktywne_koniec=1 ramki=469585->469891
+   OKNO-BEZ-POSTEPU: brak postepu logu 165s od t=15s: CPU QEMU=100% steal=0 loadavg=11.26
+   REJESTRY: probek=7 cpl0=7 cpl0_if0=0
+[run 3/4] PASS stalle_hosta=[(10, 43), (53, 81)] powod=koniec czas=144s przerw>1s=3 maks_przerwa=82.2s min_tick_hz=0.2 pass=1 fail=0 zwolnien=9 maks_latencja_ms=5.4 maks_latencja_irq=1 aktywne_koniec=1 ramki=469584->469891
+   OKNO-BEZ-POSTEPU: brak postepu logu 43s od t=10s: CPU QEMU=100% steal=0 loadavg=8.88
+   REJESTRY: probek=15 cpl0=15 cpl0_if0=1
+[run 4/4] PASS stalle_hosta=[(8, 37), (45, 28)] powod=koniec czas=81s przerw>1s=3 maks_przerwa=66.2s min_tick_hz=0.2 pass=1 fail=0 zwolnien=9 maks_latencja_ms=5.8 maks_latencja_irq=1 aktywne_koniec=1 ramki=469585->469891
+   REJESTRY: probek=18 cpl0=18 cpl0_if0=1
+[PODSUMOWANIE] uruchomien=4 PASS=3 FAIL/TIMEOUT=0 STALL-HOSTA(niewiazace)=1 maks_latencja_sprzatania_ms=9.5
+WYNIK NIEKOMPLETNY: czesc przebiegow niewiazaca (zatrzymania hosta) - powtorz do pelnej liczby wiazacych
+done

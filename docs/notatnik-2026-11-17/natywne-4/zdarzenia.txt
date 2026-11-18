@@ -1,0 +1,13 @@
+   20.19 s  puls hosta 20 s bez przestojow, start QEMU (konfiguracja runuefi, dysk snapshot=on, SDL)
+   75.49 s  pulpit po 55.3 s
+   79.52 s  instalacja Notatnika: OK
+   80.14 s  fokus wejscia X11 w oknie QEMU, ekran odblokowany: WM_NAME(STRING) = "QEMU (bursztyn-xtest-10896-0)"
+  102.69 s  zgodnosc belki i menu z wzorcem Notatnika: 0.0 (prog 12)
+  102.69 s  PASS? Notatnik uruchomiony (zrzut 01: pasek menu, edytor bezposrednio pod nim)
+  182.56 s  wpisano: "Abc 123 ąćęłńóśźż" / "ĄĆĘŁŃÓŚŹŻ" / "Zażółć gęślą jaźń" / (LCtrl+AltGr) "ąćęłńóśźż"
+  200.23 s  po kazdym menu (klik, Esc) wpisano 1/2/3, na koncu AltGr+z
+  210.33 s  Pomoc > Sterowanie: nowych okien=1 ([OKNA-PODRZEDNE] utworzono a=3 b=8 c=4 wolne_ramki=459577)
+  238.82 s  Pomoc > O Notatniku: nowych okien=1 ([OKNA-PODRZEDNE] utworzono a=3 b=7 c=4 wolne_ramki=459576)
+  259.73 s  log okien podrzednych: [OKNA-PODRZEDNE] utworzono a=3 b=8 c=4 | [OKNA-PODRZEDNE] zamknieto-dziecko a=4 b=3 c=0 | [OKNA-PODRZEDNE] utworzono a=3 b=7 c=4 | [OKNA-PODRZEDNE] zamknieto-dziecko a=4 b=3 c=0
+  316.00 s  roznica obszaru tekstu: zapisany vs ponownie otwarty = 0.06, przed zapisem vs ponownie = 0.06
+  338.28 s  przestoje hosta (start s, dlugosc s): []

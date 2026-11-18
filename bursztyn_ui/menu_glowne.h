@@ -29,6 +29,7 @@ public:
     Menu& menu() { return menu_; }
     const Menu& menu() const { return menu_; }
     bool czy_otwarte() const { return widoki_[0].czy_otwarta(); }
+    bool czy_pasek_menu() const override { return true; }
 
     Kontrolka* kontrolka_aktywacji_alt() override {
         aktywny_glowny_ = nastepny_glowny(-1, 1); uniewaznij(); return this;

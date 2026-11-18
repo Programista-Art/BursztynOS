@@ -53,8 +53,24 @@ public:
     uint32_t ikona() const { return ikona_; }
     void ustaw_ikone(uint32_t i) { ikona_ = i; }
 
+    // Ikona z bufora pikseli AARRGGBB (bok x bok, np. IkonyEksplorator). Element
+    // z taka ikona pokazuje na pasku sama ikone; tekst zostaje dla menu nadmiaru
+    // i jako podpowiedz/nazwa dostepna.
+    void ustaw_piksele_ikony(const uint32_t* piksele, int bok) {
+        piksele_ikony_ = (piksele && bok > 0 && bok <= 64) ? piksele : nullptr;
+        bok_ikony_ = piksele_ikony_ ? bok : 0;
+        powiadom();
+    }
+    const uint32_t* piksele_ikony() const { return piksele_ikony_; }
+    int bok_ikony() const { return bok_ikony_; }
+
     bool czy_wlaczony() const { return wlaczony_; }
-    void ustaw_wlaczony(bool w) { wlaczony_ = w; }
+    void ustaw_wlaczony(bool w) {
+        if (wlaczony_ != w) { wlaczony_ = w; powiadom(); }
+    }
+    Prostokat prostokat() const { return prostokat_; }
+    bool czy_na_pasku() const { return na_pasku_; }
+
     bool czy_widoczny() const { return widoczny_; }
     void ustaw_widoczny(bool w) {
         if (polecenie_) polecenie_->ustaw_widoczna(w);
@@ -113,6 +129,8 @@ private:
     char tekst_[48]{};
     char podpowiedz_[64]{};
     uint32_t ikona_{0};
+    const uint32_t* piksele_ikony_{nullptr};
+    int bok_ikony_{0};
     bool wlaczony_{true};
     bool widoczny_{true};
     bool wcisniety_{false};
@@ -134,6 +152,7 @@ private:
         if (polecenie_) polecenie_->odlacz(this);
         polecenie_ = nullptr; typ_ = TypElementuPaskaNarzedzi::PrzyciskAkcji;
         tekst_[0] = '\0'; podpowiedz_[0] = '\0'; ikona_ = 0;
+        piksele_ikony_ = nullptr; bok_ikony_ = 0;
         wlaczony_ = true; widoczny_ = true; wcisniety_ = false;
         najechany_ = false; na_pasku_ = false; kontrolka_ = nullptr; prostokat_ = Prostokat();
         cb_akcja_ = nullptr; dane_akcji_ = nullptr; cb_przelacznik_ = nullptr;
@@ -371,7 +390,12 @@ public:
                 if (tlo != 0) ctx.rysuj_prostokat(r, tlo);
                 if (ramka != 0) ctx.rysuj_ramke(r, ramka, 1);
 
-                if (el.ikona() == 0) {
+                if (el.piksele_ikony()) {
+                    const int bok = el.bok_ikony();
+                    rysuj_piksele_ikony(ctx, Prostokat(r.x + (r.szerokosc - bok) / 2,
+                                                       r.y + (r.wysokosc - bok) / 2, bok, bok),
+                                        el.piksele_ikony(), bok, wlaczony);
+                } else if (el.ikona() == 0) {
                     ctx.rysuj_tekst_wysrodkowany(r, el.tekst(), tekst_k, skala_dpi_);
                 } else {
                     int iw = 16 * skala_dpi_;
@@ -396,6 +420,24 @@ public:
     }
 
 private:
+    // Przezroczystosc z kanalu alfa; wylaczony element jest przygaszony.
+    static void rysuj_piksele_ikony(KontekstRysowania& ctx, Prostokat r, const uint32_t* px,
+                                    int bok, bool wlaczony) {
+        const Punkt off = ctx.pobierz_przesuniecie();
+        const Prostokat clip = Prostokat(off.x + r.x, off.y + r.y, bok, bok).przeciecie(ctx.pobierz_przyciecie());
+        if (clip.szerokosc <= 0 || clip.wysokosc <= 0) return;
+        uint32_t wiersz[64];
+        for (int y = clip.y; y < clip.dolny(); ++y) {
+            for (int x = clip.x; x < clip.prawy(); ++x) {
+                const uint32_t c = px[size_t(y - off.y - r.y) * size_t(bok) + size_t(x - off.x - r.x)];
+                uint32_t a = c >> 24;
+                if (!wlaczony) a = (a * 96U + 127U) / 255U;
+                wiersz[x - clip.x] = (c & 0xFFFFFFU) | (a << 24);
+            }
+            ctx.rysuj_wiersz_alfa_ekranu(clip.x, y, clip.szerokosc, wiersz);
+        }
+    }
+
     ElementPaskaNarzedzi& dodaj_pusty_element(TypElementuPaskaNarzedzi typ) {
         if (liczba_elementow_ >= MAKS_ELEMENTOW) return elementy_[MAKS_ELEMENTOW - 1];
         ElementPaskaNarzedzi& el = elementy_[liczba_elementow_++];
@@ -439,6 +481,9 @@ private:
                 item_w = 8;
             } else if (el.typ() == TypElementuPaskaNarzedzi::KontrolkaWlasna) {
                 item_w = el.kontrolka() ? el.kontrolka()->preferowany_rozmiar().szerokosc : 60;
+            } else if (el.piksele_ikony()) {
+                item_w = el.bok_ikony() + 12 * skala_dpi_;
+                if (item_w < 28) item_w = 28;
             } else {
                 int tekst_w = pokazuj_tekst_ ? CzcionkaUI::zmierz_tekst(el.tekst(), skala_dpi_) : 0;
                 item_w = tekst_w + 16;

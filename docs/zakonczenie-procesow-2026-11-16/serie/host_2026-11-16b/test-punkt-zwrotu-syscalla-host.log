@@ -1,0 +1,3 @@
+g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_punkt_zwrotu_syscalla_host.cpp -o .bsf-test/punkt_zwrotu_syscalla_host
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/punkt_zwrotu_syscalla_host
+PASS punkt zwrotu syscallu: 34 sprawdzen, 0 bledow

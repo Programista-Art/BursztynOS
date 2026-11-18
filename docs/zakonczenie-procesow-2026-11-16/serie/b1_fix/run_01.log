@@ -1,0 +1,328 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x4,0x0)
+BdsDxe: starting Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x4,0x0)
+[HAL] Aktywacja sterownika UEFI GOP.
+[MOUSE BOUNDS] source=cursor screen=1920x1080 max=1919x1079 gen=1
+[EKRAN] Backend UEFI GOP (framebuffer).
+[SYSTEM] Bursztyn OS HAL gotowy!
+==================================================
+ Bursztyn OS v1.0.1.9 (x86-64)
+ Polski System Operacyjny
+ Github: Programista-Art/BursztynOS 
+ Autor: Dymitr Wygowski 
+==================================================
+[PMM] Skan pamieci fizycznej. Wykryto: 2046 MB RAM
+[VMM] Paging 4-poziomowy aktywowany.
+[HEAP] Sterta jadra 16 MiB gotowa.
+[STACK] Podsystem chronionych stosow Ring 0 zainicjalizowany.
+[ACPI] Multiboot2 ACPI new RSDP znaleziony.
+[ACPI] SDT FACP
+[ACPI] FADT bez obslugi RESET_REG.
+[ACPI] DSDT _S5 gotowy.
+[ACPI] SDT APIC
+[ACPI] SDT HPET
+[ACPI] SDT WAET
+[ACPI] SDT BGRT
+[ACPI] Uzywam XSDT.
+[HPET] ACPI HPET znaleziony.
+[HPET] MMIO=0xFED00000
+[HPET] period=10000000 fs
+[HPET] frequency=100000000 Hz
+[HPET-TEST] 32-bit wrap monotonic: OK
+[SCHED] PID 0 (idle) przygotowany.
+[KRYPTO] Pula mbedTLS gotowa.
+[PCI] Rozpoczynam skanowanie PCI...
+[TIMER] LAPIC measured=62748650 Hz
+[TIMER] Scheduler=250 Hz
+[TIMER] LAPIC initial_count=250995
+[APIC] LAPIC/IOAPIC uruchomiony.
+[USB] Inicjalizacja podsystemu USB.
+[USB] Brak aktywnego kontrolera xHCI.
+[PS/2] controller detected
+[INPUT REGISTER] dev='ps2-keyboard' bus=PS2 id=0 kinds=0x1 prio=10
+[PS/2] keyboard detected, streaming enabled
+[INPUT REGISTER] dev='ps2-mouse' bus=PS2 id=3 kinds=0x2 prio=10
+[INPUT OWNER] Preferred pointer source: 'ps2-mouse' bus=PS2 id=3 prio=10
+[PS/2] auxiliary mouse detected, streaming enabled
+[BWS] API Wywolan Systemowych gotowe.
+[AHCI] Szukam kontrolera SATA AHCI...
+[AHCI] Nie znaleziono kontrolera AHCI.
+[VIRTIO-PCI] device=VirtIO-GPU (Karta graficzna) modern transport found (BDF 00:03.0)
+[VIRTIO-PCI] common cfg BAR=2 offset=0x1000 len=0x800
+[VIRTIO-PCI] notify cfg BAR=2 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130000002 driver=0x100000000
+[VIRTIO-PCI] device=VirtIO-BLK (Urzadzenie blokowe) modern transport found (BDF 00:04.0)
+[VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130006E74 driver=0x100000000
+[VIRTIO-PCI] device=VirtIO-RNG (Generator losowy) modern transport found (BDF 00:05.0)
+[VIRTIO-PCI] common cfg BAR=4 offset=0x0 len=0x1000
+[VIRTIO-PCI] notify cfg BAR=4 offset=0x3000 len=0x1000 multiplier=4
+[VIRTIO-PCI] features device=0x10130000000 driver=0x100000000
+[NORMAL BOOT] VirtIO self-tests skipped.
+[VIRTIO-RNG] MSI-X configured successfully for queue 0
+[VIRTIO-RNG] Device initialized successfully (queue 0, DRIVER_OK)
+[VIRTIO-RNG] Sanity check: OK (16B entropy read).
+[VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[VIRTIO-BLK] Sanity check: OK (read LBA 0).
+[VIRTIO-GPU] Wykryto urzadzenie VirtIO-GPU na magistrali PCI (BDF 0:3.0)
+[VIRTIO-GPU] MSI-X configured successfully (entry 0)
+[VIRTIO-GPU] Sprzetowa plaszczyzna kursora aktywna.
+[VIRTIO-GPU] GETDISPLAYINFO scanout0=1280x800 (enabled=1)
+[VIRTIO-GPU] boot mode=1920x1080
+[VIRTIO-GPU] mode source=guest-policy
+[VIRTIO-GPU] selected initial mode=1280x720
+[VIRTIO-GPU] Framebuffer gotowy: 1280x720 (stron=900, wpisow_sg=3, format=B8G8R8X8)
+[VIRTIO-GPU] Karta graficzna gotowa do pracy w trybie 2D.
+[VIRTIO-GPU] SETSCANOUT 1280x720 result=OK
+[HAL] Aktywacja sterownika VirtIO-GPU 2D jako backend graficzny.
+[E1000] Szukam Intel 82540EM (8086:100E)...
+[E1000] MAC: 52:54:00:12:34:56
+[E1000] Karta gotowa; link aktywny.
+[E1000] Zarejestrowano jako NetworkDevice (eth0).
+[DHCP] Wysylam DHCPDISCOVER...
+[DHCP] DHCPOFFER odebrany, wysylam DHCPREQUEST...
+[DHCP] IPv4: 10.0.2.15
+[DHCP] Brama: 10.0.2.2
+[DHCP] Maska: 255.255.255.0
+[DHCP] DNS: 10.0.2.3
+[ROUTE] local subnet
+[ROUTE] next_hop=10.0.2.2
+[ARP] cache miss ip=10.0.2.2
+[ARP] request ip=10.0.2.2
+[ARP] reply/cache ip=10.0.2.2
+[ARP] resolved ip=10.0.2.2
+[SIEC] Brama domyslna (ARP) rozwiazana pomyslnie.
+[SIEC] Inicjalizacja stosu sieciowego zakonczona.
+[HDA] Brak dostepnego urzadzenia HDA.
+[BSP] Sprawdzanie nosnika blokowego w poszukiwaniu BSP2...
+[BSP] Brak zamontowanej partycji. System plikow tylko w RAM; zero zapisow dysku.
+[PSF] total_blocks=32768
+[PSF] bitmap_start=1 count=1
+[PSF] inode_start=2 count=1024
+[PSF] data_start=1026 count=31742
+[ROZRUCH] Srodowisko instalacyjne / Live ISO. Pominiecie walidacji partycji A/B LBA 2046/2047.
+[PCI] Rozpoczynam skanowanie PCI...
+[PCI] Skan zakonczony; raport zapisany do /logi/pci.txt.
+[BSP] Drzewiasty system plikow PSF gotowy.
+[BSF] Settings payload unavailable; desktop bitmap fallback remains available.
+[BSP] Wbudowana Powloka zainstalowana.
+[BSP] /cytaty.txt zainstalowany.
+[BSP] Brak modulu obrazu pulpitu: pulpit/test.bmp
+[BSP] Brak modulu obrazu pulpitu: pulpit/test1.bmp
+[BSP] /obrazy/logo.png dodany do planu instalacji.
+[BSP] Przegladarka Husarz zainstalowana jako .cebula.
+[BSP] Notatnik zainstalowany jako .cebula.
+[BSP] Eksplorator Plikow zainstalowany jako .cebula.
+[BSP] Aplikacja Testowa zainstalowana jako .cebula.
+[BSP] Gra snake zainstalowana jako .cebula.
+[BSP] Przegladarka Obrazow zainstalowana jako .cebula.
+[BSP] BursztynUI Demo zainstalowane jako .cebula.
+[BSP] Kontrolki 2 zainstalowane jako .cebula.
+[EKRAN] Aplikacja zainstalowana.
+[TAPETA] Aplikacja Tapety zainstalowana.
+[BSP] Kontrolki 3 zainstalowane jako .cebula.
+[BSP] Kontrolki 4 zainstalowane jako .cebula.
+[BSP] Aktualizacje Systemu zainstalowane jako .cebula.
+[BSP] Test dzwieku zainstalowany jako .cebula.
+[BSP] Kalkulator zainstalowany jako .cebula.
+[BSP] Menedzer Okien zainstalowany.
+[TAPETA] Ostrzezenie: brak prawidlowego modulu Multiboot2 tapety.pak; zachowuje istniejace tapety.
+[TAPETA] Brak poprawnej tapety w manifescie; uzywam awaryjnego jednolitego koloru.
+[EKRAN INIT] boot=1280x720x32
+[EKRAN INIT] backend=virtio-gpu-runtime
+[EKRAN INIT] cfg=missing; active=boot
+[DIAG] Boot report saved: /logi/BOOTLOG.TXT
+[SCHED] Wielozadaniowosc Round-Robin aktywna.
+--------------------------------------------------
+[KERNEL] Jadro i scheduler gotowe.
+[ZK] start
+[PROC-REQ] pid=2 t_ns=6201804100 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=387 irq=387 przelaczen=98 odroczonych=124
+[PROC-REQ] pid=2 t_ns=6202541430 wynik=2 z_timera=0 stan=6 pid_biezacy=1 tick=387 irq=387 przelaczen=98 odroczonych=124
+[PROC-CLEANUP] pid=2 t_ns=6208804660 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=387 irq=388 przelaczen=98 odroczonych=124
+[ZK] s1 kill spin pid=2 r1=1 r2=1
+[ZK] s1 kill spin PASS
+[ZK] s5 kill po sprzataniu = odmowa PASS
+[PROC-REQ] pid=2 t_ns=6542382220 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=472 irq=472 przelaczen=127 odroczonych=133
+[PROC-REQ] pid=2 t_ns=6543459990 wynik=2 z_timera=0 stan=6 pid_biezacy=1 tick=472 irq=472 przelaczen=127 odroczonych=133
+[PROC-CLEANUP] pid=2 t_ns=6548382740 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=472 irq=473 przelaczen=127 odroczonych=133
+[ZK] s2 kill event-wait pid=2 r1=1 r2=1
+[ZK] s2 kill event-wait PASS
+[ZK] s5 kill po sprzataniu = odmowa PASS
+[PROC-REQ] pid=2 t_ns=65497106420 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=562 irq=562 przelaczen=212 odroczonych=140
+[PROC-REQ] pid=2 t_ns=65498152210 wynik=2 z_timera=0 stan=6 pid_biezacy=1 tick=562 irq=562 przelaczen=212 odroczonych=140
+[PROC-CLEANUP] pid=2 t_ns=65505110810 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=562 irq=563 przelaczen=212 odroczonych=140
+[ZK] s3 kill heap pid=2 r1=1 r2=1
+[ZK] s3 kill heap PASS
+[ZK] s5 kill po sprzataniu = odmowa PASS
+[BSF] No usable TTF; bitmap fallback remains active.
+[PROC-REQ] pid=2 t_ns=65846825800 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=648 irq=648 przelaczen=296 odroczonych=177
+[PROC-REQ] pid=2 t_ns=65847375700 wynik=2 z_timera=0 stan=6 pid_biezacy=1 tick=648 irq=648 przelaczen=296 odroczonych=177
+[PROC-CLEANUP] pid=2 t_ns=65853049450 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=648 irq=649 przelaczen=296 odroczonych=177
+[ZK] s4 kill rendering pid=2 r1=1 r2=1
+[ZK] s4 kill rendering PASS
+[ZK] s5 kill po sprzataniu = odmowa PASS
+[ZK] invalid pid=0 r=0
+[ZK] invalid pid=99 r=0
+[ZK] invalid pid=100 r=0
+[ZK] invalid pid=1000 r=0
+[ZK] invalid pid=16 r=0
+[ZK] invalid pid=17 r=0
+[ZK] invalid pid=4294967295 r=0
+[ZK] invalid pid=-1 r=0
+[ZK] invalid pid=4294967297 r=0
+[ZK] self r=0
+[ZK] s6 niepoprawne/chronione PID PASS
+[ZK] cycles begin
+[PROC-REQ] pid=2 t_ns=65902694300 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=662 irq=662 przelaczen=309 odroczonych=181
+[PROC-CLEANUP] pid=2 t_ns=65906987700 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=662 irq=663 przelaczen=309 odroczonych=181
+[PROC-REQ] pid=2 t_ns=65966465270 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=678 irq=678 przelaczen=321 odroczonych=187
+[PROC-CLEANUP] pid=2 t_ns=65972952240 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=678 irq=679 przelaczen=321 odroczonych=187
+[PROC-REQ] pid=2 t_ns=66047476610 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=698 irq=698 przelaczen=333 odroczonych=197
+[PROC-CLEANUP] pid=2 t_ns=66052718650 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=698 irq=699 przelaczen=333 odroczonych=197
+[PROC-REQ] pid=2 t_ns=66111404090 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=714 irq=714 przelaczen=345 odroczonych=203
+[PROC-CLEANUP] pid=2 t_ns=66117389310 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=714 irq=715 przelaczen=345 odroczonych=203
+[PROC-REQ] pid=2 t_ns=66147640220 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=723 irq=723 przelaczen=354 odroczonych=204
+[PROC-CLEANUP] pid=2 t_ns=66151904700 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=723 irq=724 przelaczen=354 odroczonych=204
+[PROC-REQ] pid=2 t_ns=66216358430 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=740 irq=740 przelaczen=366 odroczonych=211
+[PROC-CLEANUP] pid=2 t_ns=66221806750 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=740 irq=741 przelaczen=366 odroczonych=211
+[PROC-REQ] pid=2 t_ns=66251751600 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=749 irq=749 przelaczen=375 odroczonych=212
+[PROC-CLEANUP] pid=2 t_ns=66256731770 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=749 irq=750 przelaczen=375 odroczonych=212
+[PROC-REQ] pid=2 t_ns=66280920010 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=755 irq=755 przelaczen=381 odroczonych=212
+[PROC-CLEANUP] pid=2 t_ns=66284620990 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=756 irq=757 przelaczen=381 odroczonych=213
+[PROC-REQ] pid=2 t_ns=66324314720 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=767 irq=767 przelaczen=392 odroczonych=215
+[PROC-CLEANUP] pid=2 t_ns=66329151630 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=767 irq=768 przelaczen=392 odroczonych=215
+[PROC-REQ] pid=2 t_ns=66360672440 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=776 irq=776 przelaczen=401 odroczonych=216
+[PROC-CLEANUP] pid=2 t_ns=66365786480 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=776 irq=777 przelaczen=401 odroczonych=216
+[PROC-REQ] pid=2 t_ns=66396461270 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=785 irq=785 przelaczen=410 odroczonych=217
+[PROC-CLEANUP] pid=2 t_ns=66400805990 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=785 irq=786 przelaczen=410 odroczonych=217
+[PROC-REQ] pid=2 t_ns=66456833630 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=800 irq=800 przelaczen=422 odroczonych=222
+[PROC-CLEANUP] pid=2 t_ns=66462775860 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=800 irq=801 przelaczen=422 odroczonych=222
+[PROC-REQ] pid=2 t_ns=66493067300 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=809 irq=809 przelaczen=431 odroczonych=223
+[PROC-CLEANUP] pid=2 t_ns=66498209680 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=809 irq=810 przelaczen=431 odroczonych=223
+[PROC-REQ] pid=2 t_ns=66553647460 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=824 irq=824 przelaczen=443 odroczonych=228
+[PROC-CLEANUP] pid=2 t_ns=66559613540 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=824 irq=825 przelaczen=443 odroczonych=228
+[PROC-REQ] pid=2 t_ns=66589604040 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=833 irq=833 przelaczen=452 odroczonych=230
+[PROC-CLEANUP] pid=2 t_ns=66594147880 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=833 irq=834 przelaczen=452 odroczonych=230
+[PROC-REQ] pid=2 t_ns=66625120830 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=842 irq=842 przelaczen=461 odroczonych=231
+[PROC-CLEANUP] pid=2 t_ns=66630679150 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=842 irq=843 przelaczen=461 odroczonych=231
+[PROC-REQ] pid=2 t_ns=66662349550 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=851 irq=851 przelaczen=470 odroczonych=232
+[PROC-CLEANUP] pid=2 t_ns=66666046290 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=851 irq=852 przelaczen=470 odroczonych=232
+[PROC-REQ] pid=2 t_ns=66725672340 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=867 irq=867 przelaczen=482 odroczonych=238
+[PROC-CLEANUP] pid=2 t_ns=66731632640 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=867 irq=868 przelaczen=482 odroczonych=238
+[PROC-REQ] pid=2 t_ns=66762487190 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=876 irq=876 przelaczen=491 odroczonych=239
+[PROC-CLEANUP] pid=2 t_ns=66766971880 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=876 irq=877 przelaczen=491 odroczonych=239
+[PROC-REQ] pid=2 t_ns=66822152850 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=891 irq=891 przelaczen=503 odroczonych=244
+[PROC-CLEANUP] pid=2 t_ns=66829107300 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=891 irq=892 przelaczen=503 odroczonych=244
+[PROC-REQ] pid=2 t_ns=66863334160 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=900 irq=900 przelaczen=512 odroczonych=245
+[PROC-CLEANUP] pid=2 t_ns=66867230360 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=900 irq=901 przelaczen=512 odroczonych=245
+[PROC-REQ] pid=2 t_ns=66934707550 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=918 irq=918 przelaczen=524 odroczonych=253
+[PROC-CLEANUP] pid=2 t_ns=66940355220 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=918 irq=919 przelaczen=524 odroczonych=253
+[PROC-REQ] pid=2 t_ns=66975703820 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=928 irq=928 przelaczen=533 odroczonych=256
+[PROC-CLEANUP] pid=2 t_ns=66979759220 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=928 irq=929 przelaczen=533 odroczonych=256
+[PROC-REQ] pid=2 t_ns=67075213940 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=953 irq=953 przelaczen=547 odroczonych=270
+[PROC-CLEANUP] pid=2 t_ns=67080560740 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=953 irq=954 przelaczen=547 odroczonych=270
+[PROC-REQ] pid=2 t_ns=67115363050 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=963 irq=963 przelaczen=556 odroczonych=272
+[PROC-CLEANUP] pid=2 t_ns=67120901740 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=963 irq=964 przelaczen=556 odroczonych=272
+[PROC-REQ] pid=2 t_ns=67175464310 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=978 irq=978 przelaczen=568 odroczonych=277
+[PROC-CLEANUP] pid=2 t_ns=67184526590 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=978 irq=979 przelaczen=568 odroczonych=277
+[PROC-REQ] pid=2 t_ns=67211677070 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=987 irq=987 przelaczen=577 odroczonych=278
+[PROC-CLEANUP] pid=2 t_ns=67216227050 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=987 irq=988 przelaczen=577 odroczonych=278
+[PROC-REQ] pid=2 t_ns=67271718210 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1002 irq=1002 przelaczen=589 odroczonych=283
+[PROC-CLEANUP] pid=2 t_ns=67278068530 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1002 irq=1003 przelaczen=589 odroczonych=283
+[PROC-REQ] pid=2 t_ns=67307784360 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1011 irq=1011 przelaczen=598 odroczonych=284
+[PROC-CLEANUP] pid=2 t_ns=67313046390 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1011 irq=1012 przelaczen=598 odroczonych=284
+[PROC-REQ] pid=2 t_ns=67368836060 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1026 irq=1026 przelaczen=610 odroczonych=289
+[PROC-CLEANUP] pid=2 t_ns=67374358380 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1026 irq=1027 przelaczen=610 odroczonych=289
+[PROC-REQ] pid=2 t_ns=67408269180 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1036 irq=1036 przelaczen=619 odroczonych=291
+[PROC-CLEANUP] pid=2 t_ns=67412839180 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1036 irq=1037 przelaczen=619 odroczonych=291
+[PROC-REQ] pid=2 t_ns=67468403470 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1051 irq=1051 przelaczen=631 odroczonych=296
+[PROC-CLEANUP] pid=2 t_ns=67474964840 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1051 irq=1052 przelaczen=631 odroczonych=296
+[PROC-REQ] pid=2 t_ns=67504647520 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1060 irq=1060 przelaczen=640 odroczonych=297
+[PROC-CLEANUP] pid=2 t_ns=67510327270 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1060 irq=1061 przelaczen=640 odroczonych=297
+[PROC-REQ] pid=2 t_ns=67564765980 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1075 irq=1075 przelaczen=652 odroczonych=302
+[PROC-CLEANUP] pid=2 t_ns=67571309360 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1075 irq=1076 przelaczen=652 odroczonych=302
+[PROC-REQ] pid=2 t_ns=67601373420 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1084 irq=1084 przelaczen=661 odroczonych=303
+[PROC-CLEANUP] pid=2 t_ns=67606022840 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1084 irq=1085 przelaczen=661 odroczonych=303
+[PROC-REQ] pid=2 t_ns=67665351210 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1100 irq=1100 przelaczen=673 odroczonych=309
+[PROC-CLEANUP] pid=2 t_ns=67671717850 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1100 irq=1101 przelaczen=673 odroczonych=309
+[PROC-REQ] pid=2 t_ns=67701931720 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1109 irq=1109 przelaczen=682 odroczonych=310
+[PROC-CLEANUP] pid=2 t_ns=67707004910 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1109 irq=1110 przelaczen=682 odroczonych=310
+[PROC-REQ] pid=2 t_ns=67774141650 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1127 irq=1127 przelaczen=694 odroczonych=318
+[PROC-CLEANUP] pid=2 t_ns=67779621000 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1127 irq=1128 przelaczen=694 odroczonych=318
+[PROC-REQ] pid=2 t_ns=67809624750 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1136 irq=1136 przelaczen=703 odroczonych=319
+[PROC-CLEANUP] pid=2 t_ns=67815258470 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1136 irq=1137 przelaczen=703 odroczonych=319
+[PROC-REQ] pid=2 t_ns=67848887450 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1145 irq=1145 przelaczen=712 odroczonych=320
+[PROC-CLEANUP] pid=2 t_ns=67852929720 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1146 irq=1146 przelaczen=712 odroczonych=321
+[ZK] cycles end reuse=39
+[ZK] s7 40 cykli uruchom/zabij (PID reuse) PASS
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469279
+[OKNA-PODRZEDNE] aktywowano a=2 b=1 c=3 wolne_ramki=469279
+[PROC-REQ] pid=3 t_ns=73304638720 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1218 irq=1218 przelaczen=772 odroczonych=338
+[OKNA-PODRZEDNE] zamknieto-dziecko a=3 b=2 c=0 wolne_ramki=469279
+[PROC-CLEANUP] pid=3 t_ns=73312877930 wolne_ramki=469585 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1218 irq=1219 przelaczen=772 odroczonych=338
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469278
+[ZK] child kill r=1 old=3 new=3
+[ZK] s8 zabicie dziecka, wlasciciel zyje, nowe dziecko PASS
+[PROC-REQ] pid=2 t_ns=73373298250 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1235 irq=1235 przelaczen=784 odroczonych=344
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=1 c=0 wolne_ramki=469278
+[PROC-CLEANUP] pid=2 t_ns=73377083830 wolne_ramki=469584 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1235 irq=1236 przelaczen=784 odroczonych=344
+[PROC-REQ] pid=3 t_ns=161636594210 wynik=1 z_timera=1 stan=6 pid_biezacy=3 tick=1237 irq=1237 przelaczen=785 odroczonych=344
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=469584
+[PROC-CLEANUP] pid=3 t_ns=161659469090 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=1237 irq=1238 przelaczen=786 odroczonych=344
+[ZK] owner kill r=1 ms=88345
+[ZK] s9 zabicie wlasciciela -> zawieszone dziecko wymuszone PASS
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469278
+[OKNA-PODRZEDNE] utworzono a=2 b=2 c=4 wolne_ramki=468972
+[OKNA-PODRZEDNE] utworzono a=2 b=3 c=5 wolne_ramki=468666
+[PROC-REQ] pid=2 t_ns=214652460280 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=1536 irq=1536 przelaczen=943 odroczonych=396
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=3 c=0 wolne_ramki=468666
+[PROC-CLEANUP] pid=2 t_ns=214656119050 wolne_ramki=468972 aktywne=4 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=1536 irq=1536 przelaczen=943 odroczonych=396
+[PROC-REQ] pid=3 t_ns=284229086800 wynik=1 z_timera=1 stan=6 pid_biezacy=5 tick=1837 irq=1837 przelaczen=1236 odroczonych=405
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=468972
+[PROC-REQ] pid=4 t_ns=284229917460 wynik=1 z_timera=1 stan=6 pid_biezacy=5 tick=1837 irq=1837 przelaczen=1236 odroczonych=405
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=4 b=1 c=0 wolne_ramki=468972
+[PROC-REQ] pid=5 t_ns=284230883180 wynik=1 z_timera=1 stan=6 pid_biezacy=5 tick=1837 irq=1837 przelaczen=1236 odroczonych=405
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=5 b=1 c=0 wolne_ramki=468972
+[PROC-CLEANUP] pid=3 t_ns=284234218730 wolne_ramki=469279 aktywne=3 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=1837 irq=1838 przelaczen=1237 odroczonych=405
+[PROC-CLEANUP] pid=4 t_ns=284235707930 wolne_ramki=469585 aktywne=2 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=1837 irq=1838 przelaczen=1237 odroczonych=405
+[PROC-CLEANUP] pid=5 t_ns=284237950360 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=1837 irq=1838 przelaczen=1237 odroczonych=405
+[ZK] multi children=3
+[ZK] s10 wiele dzieci, zabicie wlasciciela PASS
+[ZK] unpriv kill r=0
+[ZK] s11 proces bez prawa nie zabije launchera PASS
+[PROC-REQ] pid=2 t_ns=285615758900 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=2171 irq=2171 przelaczen=1307 odroczonych=418
+[PROC-CLEANUP] pid=2 t_ns=285619143910 wolne_ramki=469891 aktywne=1 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=2171 irq=2172 przelaczen=1307 odroczonych=418
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469279
+[PROC-REQ] pid=2 t_ns=285662299640 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=2182 irq=2182 przelaczen=1317 odroczonych=420
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=1 c=0 wolne_ramki=469279
+[PROC-CLEANUP] pid=2 t_ns=285668377240 wolne_ramki=469585 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=2182 irq=2183 przelaczen=1317 odroczonych=420
+[PROC-REQ] pid=3 t_ns=393675079220 wynik=1 z_timera=1 stan=6 pid_biezacy=3 tick=2259 irq=2259 przelaczen=1393 odroczonych=420
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=469585
+[PROC-CLEANUP] pid=3 t_ns=393740009490 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=2273 irq=2274 przelaczen=1394 odroczonych=434
+[ZK] s12 iter=0 o=2 d=3 rk=1 z1=1 z2=1
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469278
+[PROC-REQ] pid=2 t_ns=393779191500 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=2284 irq=2284 przelaczen=1401 odroczonych=441
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=1 c=0 wolne_ramki=469278
+[PROC-CLEANUP] pid=2 t_ns=393786265020 wolne_ramki=469584 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=2284 irq=2285 przelaczen=1401 odroczonych=441
+[PROC-REQ] pid=3 t_ns=395571598340 wynik=1 z_timera=1 stan=6 pid_biezacy=3 tick=2548 irq=2548 przelaczen=1657 odroczonych=449
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=469584
+[PROC-CLEANUP] pid=3 t_ns=395575576750 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=2548 irq=2549 przelaczen=1658 odroczonych=449
+[ZK] s12 iter=1 o=2 d=3 rk=1 z1=1 z2=1
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469279
+[PROC-REQ] pid=2 t_ns=395614486750 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=2559 irq=2559 przelaczen=1663 odroczonych=457
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=1 c=0 wolne_ramki=469279
+[PROC-CLEANUP] pid=2 t_ns=395621216770 wolne_ramki=469585 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=2559 irq=2560 przelaczen=1663 odroczonych=457
+[PROC-REQ] pid=3 t_ns=397140481410 wynik=1 z_timera=1 stan=6 pid_biezacy=3 tick=2824 irq=2824 przelaczen=1910 odroczonych=487
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=469585
+[PROC-CLEANUP] pid=3 t_ns=397145052810 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=2824 irq=2825 przelaczen=1911 odroczonych=487
+[ZK] s12 iter=2 o=2 d=3 rk=1 z1=1 z2=1
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469279
+[PROC-REQ] pid=2 t_ns=397184953870 wynik=1 z_timera=0 stan=6 pid_biezacy=1 tick=2836 irq=2836 przelaczen=1918 odroczonych=495
+[OKNA-PODRZEDNE] zamykanie-dzieci-wlasciciela a=2 b=1 c=0 wolne_ramki=469279
+[PROC-CLEANUP] pid=2 t_ns=397190244760 wolne_ramki=469585 aktywne=2 cr3_biezacy=216514560 pid_biezacy=1 sprzatanie_tick=2836 irq=2837 przelaczen=1918 odroczonych=495
+[PROC-REQ] pid=3 t_ns=398761677540 wynik=1 z_timera=1 stan=6 pid_biezacy=3 tick=3070 irq=3070 przelaczen=2150 odroczonych=497
+[OKNA-PODRZEDNE] wymuszone-zakonczenie-dziecka a=3 b=1 c=0 wolne_ramki=469585
+[PROC-CLEANUP] pid=3 t_ns=398970640320 wolne_ramki=469891 aktywne=1 cr3_biezacy=9027584 pid_biezacy=0 sprzatanie_tick=3071 irq=3072 przelaczen=2151 odroczonych=498
+[ZK] s12 iter=3 o=2 d=3 rk=1 z1=1 z2=1
+[OKNA-PODRZEDNE] utworzono a=2 b=1 c=3 wolne_ramki=469279

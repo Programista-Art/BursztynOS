@@ -241,9 +241,26 @@ BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE ?=
 ifneq ($(strip $(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE=$(BURSZTYN_DIAG_FORCE_TAPETY_PIE_BASE)ULL
 endif
+BURSZTYN_DIAG_LATE_KMAP ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_LATE_KMAP)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_LATE_KMAP=1
+endif
+BURSZTYN_DIAG_VMM_SELFTEST ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_VMM_SELFTEST)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_VMM_SELFTEST=1
+endif
+BURSZTYN_DIAG_VMM_NO_SYNC ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_VMM_NO_SYNC)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_VMM_NO_SYNC=1
+endif
 BURSZTYN_DIAG_RESIZE_LATENCY ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_RESIZE_LATENCY)),)
 KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_RESIZE_LATENCY=1
+endif
+# Log cyklu zycia procesow (wolne ramki PMM przy zwolnieniu slotu) - pomiar wyciekow w testach natywnych. Domyslnie wylaczone.
+BURSZTYN_DIAG_PROC_LIFECYCLE ?= 0
+ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_PROC_LIFECYCLE)),)
+KERNEL_CXXFLAGS += -DBURSZTYN_DIAG_PROC_LIFECYCLE=1
 endif
 BURSZTYN_DIAG_GEOM_TRACE ?= 0
 ifneq ($(filter 1 yes true,$(BURSZTYN_DIAG_GEOM_TRACE) $(GEOM_TRACE)),)
@@ -547,6 +564,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_diagnostyka_blob.o \
 	ikona_app_shell_blob.o \
 	ikona_app_tapety_blob.o \
+	ikona_app_ustawienia_ekranu_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -562,6 +580,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	kontrolki4blob.o \
 	repro_blob.o \
 	snake_blob.o \
+	okno_informacyjne_blob.o \
 	przegladarka_obrazow_blob.o \
 	aktualizacje_blob.o \
 	motyw.o \
@@ -1079,8 +1098,30 @@ LOGO_MASKA_H := jadro/gui/logo_maska_dane.h
 $(LOGO_MASKA_H): obrazy/logo.png narzedzia/generuj_maske_logo.py
 	$(PYTHON) narzedzia/generuj_maske_logo.py --zrodlo obrazy/logo.png --wyjscie $@
 
+# Maski napisow ekranu powitalnego. Jadro nie parsuje TTF/OTF w Ring 0, a ekran
+# startuje przed systemem plikow: kontury Noto Sans sa rasteryzowane podczas
+# budowania rasteryzatorem BSF (stb_truetype); naglowek jest wersjonowany.
+NAPISY_POWITANIA_H := jadro/gui/napisy_powitania_dane.h
+NAPISY_POWITANIA_CZCIONKA := czcionki/otf/NotoSans-Regular.otf
+$(NAPISY_POWITANIA_H): $(NAPISY_POWITANIA_CZCIONKA) narzedzia/generuj_napisy_powitania.cpp bsf/vendor/stb_truetype.h
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O2 -I. -Wno-unused-function narzedzia/generuj_napisy_powitania.cpp -o .wm-test/generuj-napisy-powitania
+	.wm-test/generuj-napisy-powitania --czcionka $(NAPISY_POWITANIA_CZCIONKA) --wyjscie $@
 
 
+
+
+# Okno informacyjne (okna podrzedne BursztynUI; uruchamiane wylacznie przez BWS 101)
+OKNO_INFORMACYJNE_LINKER := programy/okno_informacyjne/okno_informacyjne_linker.ld
+okno_informacyjne_tmp.o: programy/okno_informacyjne/okno_informacyjne.cpp bursztyn_ui/okno_podrzedne.h bursztyn_ui/tresc_uklad.h jadro/gui/bursztyn_gui.h $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -I. -Os -ffunction-sections -fdata-sections -c $< -o $@
+
+okno_informacyjne_blob.o: okno_informacyjne_tmp.o $(BSF_APP_GUI) $(OKNO_INFORMACYJNE_LINKER)
+	$(LD) --gc-sections -T $(call bur_linker,$(OKNO_INFORMACYJNE_LINKER)) $(RING3_LDFLAGS) \
+		okno_informacyjne_tmp.o $(BSF_APP_GUI) -o okno_informacyjne.elf
+	$(BUR_CONVERT) okno_informacyjne.elf okno_informacyjne.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py okno_informacyjne.bin okno_informacyjne.bin.bz
+	$(LD) -r -b binary okno_informacyjne.bin.bz -o okno_informacyjne_blob.o
 
 # Snake (BursztynUI)
 SNAKE_LINKER := gry/snake/snake_linker.ld
@@ -1315,6 +1356,7 @@ test-virtio-pci:
 	$(PYTHON) testy/test_input_boot_order.py
 	@mkdir -p .virtiotest
 	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic $(HOST_INCLUDES) -DBURSZTYN_VIRTIO_HOST_TEST -DBURSZTYN_PMM_HOST_TEST $(if $(filter 1 yes true,$(BURSZTYNDIAGVIRTIOINPUTINIT)),-DBURSZTYNDIAGVIRTIOINPUTINIT=1) $(if $(filter 1,$(BURSZTYNDIAGVIRTIOINPUTQEMU)),-DBURSZTYNDIAGVIRTIOINPUTQEMU=1) -fsanitize=address,undefined -pthread sterowniki/pci/pci.cpp jadro/mm/pmm.cpp sterowniki/virtio/virtio_pci.cpp sterowniki/virtio/virtqueue.cpp sterowniki/virtio/virtio_rng.cpp sterowniki/virtio/virtio_blk.cpp sterowniki/siec/network_device.cpp sterowniki/virtio/virtio_net.cpp sterowniki/virtio/virtio_gpu.cpp sterowniki/wejscie/input_device.cpp sterowniki/virtio/virtio_input.cpp sterowniki/usb/usb_hid.cpp sterowniki/wejscie/klawiatura.cpp testy/test_virtio_pci.cpp -o .virtiotest/test-virtio-pci
+	$(PYTHON) narzedzia/skan_instrukcji_uprzywilejowanych.py .virtiotest/test-virtio-pci
 	ASAN_OPTIONS=$(STARTUP_ASAN_OPTIONS) UBSAN_OPTIONS=halt_on_error=1 .virtiotest/test-virtio-pci
 
 .PHONY: test-input-init-locks
@@ -1596,6 +1638,15 @@ QEMU_ACCEL ?= $(QEMUACCEL)
 QEMU_RAM ?= 2G
 QEMU_SMP ?= 1
 QEMUDISPLAYARGS ?= $(if $(strip $(QEMU_DISPLAY_ARGS)),$(QEMU_DISPLAY_ARGS),-display sdl)
+# SDL2 (-display sdl) przy aktywnym IBus (XMODIFIERS=@im=ibus) oddaje klawisze tekstowe metodzie wprowadzania:
+# dla AltGr+litera IBus zatwierdza gotowy znak (SDL_TEXTINPUT), a SDL NIE wysyla SDL_KEYDOWN litery. QEMU
+# przekazuje gosciowi wylacznie KEYDOWN/KEYUP, wiec system dostawal sam AltGr bez litery (brak ą ć ę ł ń ó ś ź ż).
+# Odciecie IBus tylko dla procesow uruchamianych przez make (nieistniejacy adres) przywraca surowe klawisze;
+# pulpit hosta nadal uzywa IBus. Diagnoza: narzedzia/sdl_ime_probe.py. Wylaczenie: make QEMU_SDL_BEZ_IME=0 ...
+QEMU_SDL_BEZ_IME ?= 1
+ifeq ($(QEMU_SDL_BEZ_IME),1)
+export IBUS_ADDRESS := unix:path=/nonexistent/bursztyn-qemu-bez-ibus
+endif
 QEMU_VIRTIO_XRES ?= 1280
 QEMU_VIRTIO_YRES ?= 720
 
@@ -2181,7 +2232,7 @@ test-startup-visibility:
 	$(PYTHON) testy/test_startup_policy.py
 
 # Welcome layer dependencies and deterministic host regression suite.
-ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h bursztyn_ui/czcionka.h jadro/gui/ui_skala.h $(LOGO_MASKA_H)
+ekran_powitalny.o: jadro/gui/ekran_powitalny.h jadro/gui/ekran_powitalny_api.h jadro/gui/ui_skala.h $(LOGO_MASKA_H) $(NAPISY_POWITANIA_H)
 grafika.o skladacz_obrazu.o kernel.o: jadro/gui/ekran_powitalny_api.h
 kernel.o: jadro/rdzen/opcje_startowe.h
 
@@ -2195,7 +2246,17 @@ test-powitanie:
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_powitanie.cpp -o .wm-test/powitanie
 	ASAN_OPTIONS=detect_leaks=0 .wm-test/powitanie
 	$(PYTHON) testy/test_logo_maska.py
+	$(PYTHON) testy/test_napisy_powitania.py
 	$(PYTHON) testy/test_powitanie_policy.py
+	$(MAKE) --no-print-directory test-splash-sekwencja
+
+# Sekwencjonowanie etapow zalezne od prezentacji (przestoje, odrzucone klatki,
+# zawiniecie zegara). SPLASH_KLATKI=katalog zapisuje klatki PPM scenariusza z przestojem.
+.PHONY: test-splash-sekwencja
+test-splash-sekwencja:
+	@mkdir -p .wm-test
+	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -fsanitize=address,undefined testy/test_splash_sekwencja.cpp -o .wm-test/splash-sekwencja
+	ASAN_OPTIONS=detect_leaks=0 .wm-test/splash-sekwencja $(SPLASH_KLATKI)
 
 BURSZTYNDIAGSTARTUPREBOOT ?= 0
 ifeq ($(BURSZTYNDIAGSTARTUPREBOOT),1)
@@ -2414,6 +2475,10 @@ endif
 .PHONY: test-launcher-parity
 test-launcher-parity:
 	$(PYTHON) testy/test_launcher_parity.py
+
+.PHONY: test-unix-launcher
+test-unix-launcher:
+	$(PYTHON) testy/test_unix_launcher.py
 
 .PHONY: test-virtio-input-qemu-parity-host
 test-virtio-input-qemu-parity-host:
@@ -2742,6 +2807,9 @@ ikona_app_diagnostyka_blob.o: ikonki/app_diagnostyka.png
 ikona_app_shell_blob.o: ikonki/app_shell.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_app_ustawienia_ekranu_blob.o: ikonki/app_ustawienia_ekranu.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_app_tapety_blob.o: ikonki/app_tapety.png
 	$(LD) -r -b binary $< -o $@
 
@@ -2823,7 +2891,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
@@ -2846,6 +2914,12 @@ test-notepad-unicode-host:
 	@mkdir -p .bsf-test
 	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. narzedzia/test_notepad_unicode.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notepad-unicode
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notepad-unicode
+
+.PHONY: test-notatnik-polski-host
+test-notatnik-polski-host:
+	@mkdir -p .bsf-test
+	g++ $(HOST_INCLUDES) -std=c++17 -fcoroutines -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections -I. testy/test_notatnik_polski_host.cpp sterowniki/wejscie/klawiatura.cpp bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -Wl,--gc-sections -o .bsf-test/notatnik-polski
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/notatnik-polski
 
 .PHONY: test-notepad-bidi-host
 test-notepad-bidi-host:
@@ -3084,7 +3158,7 @@ test-window-geometry-host:
 
 # Tozsamosc aplikacji systemowych: SHA-256 plikow .bur zbudowanych razem z jadrem.
 SKROTY_SYSTEMOWE_H := jadro/fs/skroty_systemowe.generated.h
-SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o
+SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o okno_informacyjne_blob.o
 $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemowe.py
 	$(PYTHON) narzedzia/generuj_skroty_systemowe.py $@ \
 		/programy/ustawienia.cebula/ustawienia.bur=ustawienia.bin \
@@ -3092,7 +3166,8 @@ $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemo
 		/programy/test_dzwieku.cebula/test_dzwieku.bur=test_dzwieku.bin \
 		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
 		/programy/ekran.cebula/ekran.bur=ekran.bin \
-		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin
+		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin \
+		/programy/okno-informacyjne.cebula/okno-informacyjne.bur=okno_informacyjne.bin
 # Kursor zmiany rozmiaru: opcjonalne ikonki/kursor_rozciagania.png (brak pliku nie psuje budowania).
 KURSOR_ROZCIAGANIA_H := jadro/gui/kursor_rozciagania.generated.h
 KURSOR_ROZCIAGANIA_PNG := ikonki/kursor.png ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
@@ -3123,6 +3198,46 @@ test-kernel-blobz-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/blobz
 
 # Centralny kursor zmiany rozmiaru: generator (Python) + wybor/zasob (C++, ASan/UBSan).
+.PHONY: test-okna-podrzedne-host
+test-okna-podrzedne-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_okna_podrzedne_host.cpp -o .bsf-test/okna_podrzedne_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/okna_podrzedne_host
+
+.PHONY: test-zakonczenie-procesu-host
+test-zakonczenie-procesu-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_zakonczenie_procesu_host.cpp -o .bsf-test/zakonczenie_procesu_host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/zakonczenie_procesu_host
+
+.PHONY: test-punkt-zwrotu-syscalla-host
+test-punkt-zwrotu-syscalla-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_punkt_zwrotu_syscalla_host.cpp -o .bsf-test/punkt_zwrotu_syscalla_host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/punkt_zwrotu_syscalla_host
+
+.PHONY: test-zakonczenie-harness-host
+test-zakonczenie-harness-host:
+	$(PYTHON) testy/test_zakonczenie_klasyfikacja.py
+
+.PHONY: test-tresc-uklad-host
+test-tresc-uklad-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_tresc_uklad_host.cpp -o .bsf-test/tresc_uklad_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/tresc_uklad_host
+
+.PHONY: test-vmm-synchronizacja-host
+test-vmm-synchronizacja-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_vmm_synchronizacja_host.cpp -o .bsf-test/vmm_synchronizacja_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/vmm_synchronizacja_host
+
+.PHONY: test-vmm-zakres-host
+test-vmm-zakres-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_vmm_zakres_host.cpp -o .bsf-test/vmm_zakres_host
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/vmm_zakres_host
+
 .PHONY: test-rozszerzenie-powierzchni-host
 test-rozszerzenie-powierzchni-host:
 	@mkdir -p .bsf-test

@@ -9,7 +9,18 @@ extern "C" {
 #endif
 
 #define IDT_PIERWSZY_WEKTOR_DYNAMICZNY 48
-#define IDT_OSTATNI_WEKTOR_DYNAMICZNY  254
+#define IDT_OSTATNI_WEKTOR_DYNAMICZNY  252
+/* Wektor 253: programowe oddanie CPU z punktu zwrotu syscallu (int $253, DPL 0) - poza pulą dynamiczną. */
+#define IDT_WEKTOR_ODDANIA_CPU         253
+
+/*
+ * Wektor 253: czy obsluga ma przelaczyc kontekst (PrzelaczKontekstProgramowy)? Tylko gdy przerwano Ring 0 procesu
+ * uzytkownika (1..maks-1), ktory jawnie na to zezwolil (scheduler_czeka_w_sieci). W kazdym innym przypadku
+ * obsluga wraca do przerwanego kodu bez zmian. Z Ring 3 wektor i tak nie jest osiagalny (DPL 0 -> #GP).
+ */
+static inline bool idt_oddanie_cpu_przelacz(bool przerwano_ring0, int pid, int maks_procesow, bool zezwolenie) {
+    return przerwano_ring0 && pid > 0 && pid < maks_procesow && zezwolenie;
+}
 
 typedef void (*IrqHandlerFn)(void* context);
 
@@ -17,7 +28,7 @@ void InicjalizujIDT(void);
 
 /**
  * Dynamic IRQ vector allocator for PCI MSI / MSI-X and other devices.
- * Allocates from the pool [48..254]. Returns allocated vector number, or -1 on exhaustion.
+ * Allocates from the pool [48..252]. Returns allocated vector number, or -1 on exhaustion.
  */
 int idt_alokuj_wektor_irq(void);
 

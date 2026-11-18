@@ -1,8 +1,10 @@
 #pragma once
+#include "jadro/mm/zarezerwowane_va.h"
 #include <stddef.h>
 #include <stdint.h>
 // Wspolna galaz PML4, supervisor-only. Inicjalizacja przed pierwszym Ring3.
 constexpr uint64_t BUFORY_GRAFIKI_BAZA=0xffff900000000000ULL;
+static_assert(BUFORY_GRAFIKI_BAZA==ZarezerwowaneVA::GRAFIKA_BUFORY_BAZA,"baza buforow grafiki musi zgadzac sie z zarezerwowane_va.h");
 constexpr size_t BUFORY_GRAFIKI_SLOT=64ULL*1024*1024;
 constexpr unsigned BUFORY_GRAFIKI_SLOTOW=48;
 bool bufory_grafiki_inicjalizuj();
