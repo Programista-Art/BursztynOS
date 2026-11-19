@@ -1,0 +1,35 @@
+---
+description: Szczegółowe opisy commitów — co zrobiono i których elementów dotyczyły zmiany
+alwaysApply: true
+---
+
+# Opisy commitów
+
+Gdy użytkownik prosi o commit, **nie wystarczy krótki one-liner**. Opis ma jasno mówić, co zostało zrobione i których elementów dotyczyły zmiany.
+
+## Wymagana treść
+
+- **Subject (1. linia)**: zwięzły tytuł w stylu repo (`fix`/`feat`/`chore` + zakres), po polsku lub z polskim sensem jak w historii.
+- **Body**: 2–8 zdań / punktów opisujących:
+  1. **Co** zrobiono (naprawa, feature, aktualizacja metryk, hardening…).
+  2. **Dlaczego** (przyczyna, ryzyko, regresja, wynik testu/fuzzu).
+  3. **Które elementy** objęły zmiany — konkretne obszary, np. kernel, BWS, PZB, PSF/BSP, loader `.bur`, sterowniki, POSIX/VFS, testy host/QEMU, docs, fuzz, build.
+  4. Ewentualnie **jak zweryfikowano** (`test-smoke`, `test-security`, fuzz, lokalny przebieg), gdy to istotne.
+
+## Czego unikać
+
+- Samych ogólników typu „update”, „fix bugs”, „odśwież metryki” bez wskazania zakresu.
+- Listy wszystkich ścieżek plików — zamiast tego nazwij **moduły / podsystemy** i ewentualnie kluczowe pliki.
+
+## Przykład
+
+```
+chore(fuzz): odśwież metryki fuzzingu po ponownym przebiegu
+
+Zaktualizowano zsumowane execution/edges oraz wyniki per-target
+(fuzz_bur_v2, fuzz_bws, fuzz_bur_loader, fuzz_bsp2_*) w
+docs/security-hardening-2026-11-04/fuzzing-metrics.json
+oraz odpowiadających plikach .fuzz-build/*_metrics.json.
+Przebieg bez nowych crashy (total_crashes: 0); liczby corpus/edges
+odzwierciedlają aktualny smoke fuzz.
+```
