@@ -143,7 +143,12 @@ enum BwsNumer : uint64_t {
      *      istniejace, 0 = odmowa. 102: (bufor*, pojemnosc) - tylko dla procesu okna podrzednego: pobiera tresc/tytul. */
     BWS_OKNO_PODRZEDNE_OTWORZ = 101,
     BWS_OKNO_PODRZEDNE_TRESC = 102,
-    BWS_PIERWSZY_WOLNY = 103
+    /* Menedzer zadan (jadro/bws/procesy_migawka.h, docs/menedzer-zadan.md): wymagaja PRAWO_ZARZADZANIE_PROCESAMI.
+     * 103: (bufor*, rozmiar, wersja) migawka procesow z generacja, czasem CPU i pamiecia; 104: (pid, generacja)
+     * zadanie zakonczenia procesu o dokladnie tej tozsamosci. */
+    BWS_PROCESY_MIGAWKA = 103,
+    BWS_PROCES_ZAKONCZ = 104,
+    BWS_PIERWSZY_WOLNY = 105
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

@@ -10,8 +10,12 @@
 
 static void desktop_display_shortcut_cases() {
     using namespace DesktopSettings;
-    const int NOWY=DesktopEntries::Count-1;
+    // Skrot wyszukiwany po id: za nim dopisano "menedzer-zadan" (tez na koncu listy).
+    int NOWY=-1;
+    for(int i=0;i<DesktopEntries::Count;++i)if(!strcmp(DesktopEntries::Launchers[i].id,"ustawienia-ekranu"))NOWY=i;
+    CHECK(NOWY>=0);
     CHECK(!strcmp(DesktopEntries::Launchers[NOWY].id,"ustawienia-ekranu"));
+    for(int i=NOWY+1;i<DesktopEntries::Count;++i)CHECK(!strcmp(DesktopEntries::Launchers[i].id,"menedzer-zadan"));
     CHECK(!strcmp(DesktopEntries::Launchers[NOWY].path,AppIdentity::DisplaySettings));
     int ustawienia_id=-1;
     for(int i=0;i<DesktopEntries::Count;++i)if(!strcmp(DesktopEntries::Launchers[i].id,"ustawienia"))ustawienia_id=i;
@@ -120,6 +124,13 @@ static void desktop_display_shortcut_cases() {
     int n=indeks('L',"ustawienia-ekranu");
     CHECK(n>=0 && desktop_layout.items[n].placed);
     for(auto& kv:stare)CHECK(!rowne_kom(komorka(n),w_siatce(kv.second.first,kv.second.second)));
+    {   // Menedzer zadan (rowniez nowszy niz zapisany plik): wolna komorka, nie nachodzi na stare ani na Ustawienia ekranu.
+        const int t=indeks('L',"menedzer-zadan");
+        CHECK(t>=0 && t!=n && desktop_layout.items[t].placed);
+        for(auto& kv:stare)CHECK(!rowne_kom(komorka(t),w_siatce(kv.second.first,kv.second.second)));
+        CHECK(!rowne_kom(komorka(t),komorka(n)));
+        CHECK(!strcmp(wpisy_pulpitu[t].nazwa,"Menedżer zadań"));
+    }
     spojny();
     // Nowy plik bez rekordu tez dostaje wolna komorke, a stare pozostaja.
     CHECK(desktop_layout.items[indeks('F',"notatki-żółte.txt")].placed);
@@ -259,8 +270,9 @@ static void desktop_display_shortcut_cases() {
         const std::string doc=dokument(rr);
         CHECK(doc.size()<BufferCapacity);memcpy(state->buffer,doc.data(),doc.size());CHECK(state->parse(doc.size()));
         przygotuj();(void)state->apply(*layout,key);
-        const int nowy=liczba-1;
+        const int nowy=liczba-DesktopEntries::Count+NOWY;            // "ustawienia-ekranu" (za nim "menedzer-zadan")
         CHECK(!layout->items[nowy].placed);
+        for(int i=nowy+1;i<liczba;++i)CHECK(!layout->items[i].placed);   // nowszy skrot tez czeka na wolna komorke
         int umieszczone=0;
         for(int i=0;i<liczba;++i)if(layout->items[i].placed){++umieszczone;CHECK(layout->visible(i));
             for(int j=0;j<i;++j)if(layout->items[j].placed)CHECK(!Desktop::intersects(layout->placement_bounds(i),layout->placement_bounds(j)));}
@@ -276,5 +288,6 @@ static void desktop_display_shortcut_cases() {
         CHECK(layout->items[nowy].placed && layout->visible(nowy));
         const auto cz=layout->cell(nowy);
         CHECK(cz.x==layout->x0+((komorek-1)/r)*layout->cw && cz.y==layout->y0+((komorek-1)%r)*layout->ch);
+        for(int i=nowy+1;i<liczba;++i)CHECK(!layout->items[i].placed);   // jedna wolna komorka: dostaje ja starszy skrot
     }
 }

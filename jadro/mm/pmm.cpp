@@ -1905,6 +1905,15 @@ void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek) {
     if (start < ostatnia_alokacja) ostatnia_alokacja = start;
 }
 
+extern "C" uint64_t pmm_pobierz_dostepne_ramki() {
+    const uint64_t* b = reinterpret_cast<const uint64_t*>(mapa_dostepnosci);
+    uint64_t sum = 0;
+    for (size_t i = 0; i < ROZMIAR_MAPY_BITOWEJ / sizeof(uint64_t); ++i) {
+        sum += static_cast<uint64_t>(__builtin_popcountll(b[i]));
+    }
+    return sum;
+}
+
 extern "C" uint64_t pmm_pobierz_wolne_ramki() {
     const uint64_t* b = reinterpret_cast<const uint64_t*>(mapa_bitowa);
     uint64_t sum = 0;

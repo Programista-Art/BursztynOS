@@ -26,6 +26,8 @@
 #include "idt.h"
 #include "punkt_zwrotu_syscalla.h"
 #include "zakonczenie_procesu.h"
+#include "rozliczanie_cpu.h"
+#include "procesy_migawka.h"
 #include "fpu.h"
 #include "gui_runtime_diag.h"
 #include "pzb.h"
@@ -33,9 +35,9 @@
 #include "heap.h"
 #include "stos_jadra.h"
 #include "grafika.h"
+#include "hpet.h"
 
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
-#include "hpet.h"
 extern void klog_serial(const char*);
 extern "C" uint64_t pmm_pobierz_wolne_ramki();
 #endif
@@ -89,6 +91,20 @@ static uint64_t g_liczba_ticktow_odroczonych = 0;   // tiki, ktore trafily w Rin
 static uint64_t licznik_przelaczen_kontekstu = 0;
 static uint64_t licznik_wybudzen_event = 0;
 static bool jawne_czekanie_sieci[MAKS_PROCESOW]{};
+
+/*
+ * Menedzer zadan: rozliczanie czasu CPU (rozliczanie_cpu.h) i tozsamosc slotu.
+ * Generacja jest globalnie monotoniczna (64 bity - nie zawija sie w praktyce)
+ * i nadawana przy KAZDEJ rezerwacji slotu przez loader, wiec para
+ * (pid, generacja) jednoznacznie wskazuje jeden proces takze po ponownym
+ * uzyciu PID. Stan zmieniany wylacznie z wylaczonymi przerwaniami.
+ */
+static_assert(RozliczanieCpu::MAKS == MAKS_PROCESOW, "rozliczanie CPU: rozmiar tablicy procesow");
+static RozliczanieCpu::Stan g_rozliczanie_cpu;
+static uint64_t g_generacja_procesu[MAKS_PROCESOW] = {};
+static uint64_t g_czas_startu_procesu[MAKS_PROCESOW] = {};
+static uint64_t g_nastepna_generacja = 1;
+extern "C" uint32_t timer_scheduler_hz();
 
 /*
  * Stary kod wybudzal wszystkie procesy myszy co 20 tickow.
@@ -145,7 +161,20 @@ extern "C" void bws_nowoczesne_posprzataj_proces(
     bool aktywny_cr3
 ) __attribute__((weak));
 
-extern "C" void usun_warstwe(
+/*
+ * Kompozytor eksportuje usun_warstwe z linkowaniem C++ (skladacz_obrazu.h). Dawna deklaracja extern "C" nigdy sie
+ * nie rozwiazywala (slaby symbol = nullptr), wiec proces zakonczony z zewnatrz (BWS 97/104, eskalacja okien
+ * podrzednych) zostawial warstwe okna: zamrozone, niezamykalne okno na pasku zadan i niezwolniony bufor warstwy.
+ */
+void usun_warstwe(
+    int pid
+) __attribute__((weak));
+
+uint64_t skladacz_obrazu_bajty_warstwy(int pid) __attribute__((weak));
+
+/* Powiadomienie Menedzera Okien o zamknieciu okna (jak przy zwyklym wyjsciu BWS 32); kolejka zdarzen jest bezpieczna z IRQ. */
+extern "C" void bws_gui_powiadom_lifecycle(
+    uint32_t typ,
     int pid
 ) __attribute__((weak));
 
@@ -547,12 +576,20 @@ static void posprzataj_zakonczone_procesy(
 
         if (okna_podrzedne_przed_sprzataniem)
             okna_podrzedne_przed_sprzataniem(pid);
+        /* Kolejnosc jak w bws_zakoncz_biezacy_proces(): warstwa, powiadomienie WM, stan GUI (fokus nie wraca
+         * do warstwy zakonczonego procesu). Timer wchodzi tu tylko z Ring 3, z bezczynnego PID 0 przy wolnej
+         * blokadzie ekranu albo z jawnych punktow oczekiwania (idt.cpp), wiec blokada ekranu nie jest trzymana. */
+        /* Zwykle wyjscie (BWS 32) usunelo juz warstwe i powiadomilo WM - wtedy usun_warstwe nic nie robi
+         * (idempotentne), a powiadomienie nie jest powtarzane. */
+        const bool mial_warstwe = skladacz_obrazu_bajty_warstwy && skladacz_obrazu_bajty_warstwy(pid) != 0;
+        if (usun_warstwe)
+            usun_warstwe(pid);
+        if (mial_warstwe && bws_gui_powiadom_lifecycle)
+            bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_ZAMKNIETE, pid);
         if (bws_gui_usun_stan_procesu)
             bws_gui_usun_stan_procesu(pid);
         if (bws_gui_zwolnij_mysz_procesu)
             bws_gui_zwolnij_mysz_procesu(pid);
-        if (usun_warstwe)
-            usun_warstwe(pid);
         if (bws_nowoczesne_posprzataj_proces)
             bws_nowoczesne_posprzataj_proces(pid, false);
 
@@ -705,12 +742,26 @@ extern "C" uint64_t g_ostatni_bws;
  * Zob. docs/zakonczenie-procesow.md. Wolane z kontekstu IRQ timera (IF=0, jeden rdzen).
  */
 static volatile bool g_tick_odroczony = false;
+
+/* Zegar rozliczania: HPET (ns) albo brak (0) - wtedy tryb tickow. */
+static uint64_t zegar_rozliczania() { return hpet_dostepny() ? czas_monotoniczny_ns() : 0; }
+
+/* Wolane z wylaczonymi przerwaniami. Wlacza rozliczanie przy pierwszej okazji po starcie wielozadaniowosci. */
+static void rozliczanie_zapewnij(int biezacy) {
+    if (g_rozliczanie_cpu.zrodlo != RozliczanieCpu::ZRODLO_BRAK) return;
+    if (hpet_dostepny()) {
+        g_rozliczanie_cpu.wlacz(RozliczanieCpu::ZRODLO_HPET, czas_monotoniczny_ns(), biezacy);
+    } else if (const uint32_t hz = timer_scheduler_hz()) {
+        g_rozliczanie_cpu.wlacz(RozliczanieCpu::ZRODLO_TICKI, 0, biezacy, 1000000000ULL / hz);
+    }
+}
 extern "C" bool okna_podrzedne_oczekuja() __attribute__((weak));
 
 void scheduler_zarejestruj_odroczony_tick() {
 #if !defined(BURSZTYN_DIAG_BASELINE_SCHED)         // BASELINE: zachowanie sprzed poprawki (tylko pomiary A/B)
     ++licznik_tykniec_zegara;                       // czas tickowy plynie takze podczas syscallu
     ++g_liczba_ticktow_odroczonych;
+    g_rozliczanie_cpu.tick();                       // tryb tickow: tick w syscallu nalezy do biezacego procesu
     __atomic_store_n(&g_tick_odroczony, true, __ATOMIC_RELEASE);
 #endif
     gui_perf_deferred_tick(scheduler_czy_inny_gotowy(), g_ostatni_bws);
@@ -1311,6 +1362,8 @@ static uint64_t przelacz_kontekst_impl(uint64_t stary_rsp, bool tick_zegara) {
     );
 
     if (tick_zegara) ++licznik_tykniec_zegara;    // tylko prawdziwy tick timera (programowe oddanie CPU nie liczy czasu)
+    rozliczanie_zapewnij(stary_pid);
+    if (tick_zegara) g_rozliczanie_cpu.tick();     // tryb tickow (bez HPET); przy HPET nic nie robi
 
     if (okna_podrzedne_tick) okna_podrzedne_tick();   // eskalacja: wymuszone zakonczenie niezamknietych okien podrzednych
 
@@ -1440,6 +1493,7 @@ static uint64_t przelacz_kontekst_impl(uint64_t stary_rsp, bool tick_zegara) {
 #endif
     fpu_switch_process(stary_pid, nastepny_pid);
     gui_perf_switch(nastepny_pid);
+    g_rozliczanie_cpu.przelacz(zegar_rozliczania(), nastepny_pid);   // koniec odcinka stary_pid
     aktualny_pid =
         nastepny_pid;
 
@@ -1652,4 +1706,66 @@ extern "C" bool czy_proces_uruchomiony(
     }
 
     return false;
+}
+
+
+/* =========================================================================
+ * MENEDZER ZADAN: TOZSAMOSC SLOTU, BEZCZYNNOSC PID 0, MIGAWKA (BWS 103/104)
+ * ========================================================================= */
+
+/* Loader: slot zarezerwowany dla nowego procesu (pod blokada loadera, IF=0). */
+extern "C" void scheduler_nowy_proces_w_slocie(int pid) {
+    if (pid <= 0 || pid >= MAKS_PROCESOW) return;
+    const StanPrzerwan stan_irq = zapisz_i_wylacz_przerwania();
+    g_generacja_procesu[pid] = g_nastepna_generacja++;
+    g_czas_startu_procesu[pid] = zegar_rozliczania();
+    g_rozliczanie_cpu.nowy_proces(pid);
+    przywroc_przerwania(stan_irq);
+}
+
+extern "C" uint64_t scheduler_generacja_procesu(int pid) {
+    if (pid <= 0 || pid >= MAKS_PROCESOW) return 0;
+    return __atomic_load_n(&g_generacja_procesu[pid], __ATOMIC_ACQUIRE);
+}
+
+/* Petla PID 0: wolane z IF=0 tuz przed "sti; hlt" oraz po przebudzeniu. */
+extern "C" void scheduler_bezczynnosc_poczatek() {
+    if (aktualny_pid != 0) return;
+    g_rozliczanie_cpu.bezczynnosc_poczatek(zegar_rozliczania());
+}
+extern "C" void scheduler_bezczynnosc_koniec() {
+    const StanPrzerwan stan_irq = zapisz_i_wylacz_przerwania();
+    g_rozliczanie_cpu.bezczynnosc_koniec(zegar_rozliczania());
+    przywroc_przerwania(stan_irq);
+}
+
+/* Spojna migawka wszystkich slotow: krotka sekcja bez przerwan, bez alokacji i bez kopiowania do Ring 3. */
+extern "C" void scheduler_migawka_procesow(SchedulerMigawka* out) {
+    if (!out) return;
+    const StanPrzerwan stan_irq = zapisz_i_wylacz_przerwania();
+    const RozliczanieCpu::Migawka m = g_rozliczanie_cpu.migawka(zegar_rozliczania());
+    out->teraz_ns = m.teraz_ns;
+    out->rozliczony_ns = m.rozliczony_ns;
+    out->bezczynnosc_ns = m.bezczynnosc_ns;
+    out->okres_ticku_ns = g_rozliczanie_cpu.okres_ticku_ns;
+    out->zrodlo = g_rozliczanie_cpu.zrodlo;
+    out->pid_biezacy = aktualny_pid;
+    for (int pid = 0; pid < MAKS_PROCESOW; ++pid) {
+        const proces_t& q = tablica_procesow[pid];
+        SchedulerSlotMigawki& w = out->sloty[pid];
+        w = {};
+        w.stan = odczytaj_stan_procesu(q);
+        w.poziom = q.poziom_zaufania;
+        w.uprawnienia = q.uprawnienia;
+        w.generacja = pid == 0 ? 0 : g_generacja_procesu[pid];
+        w.czas_startu_ns = g_czas_startu_procesu[pid];
+        w.cpu_ns = m.cpu_ns[pid];
+        w.przestrzen = q.przestrzen_adresowa;
+        w.granica_sterty = q.granica_sterty;
+        size_t i = 0;
+        for (; i + 1 < sizeof(w.sciezka) && i < sizeof(q.sciezka_pliku) && q.sciezka_pliku[i]; ++i)
+            w.sciezka[i] = q.sciezka_pliku[i];
+        w.sciezka[i] = '\0';
+    }
+    przywroc_przerwania(stan_irq);
 }

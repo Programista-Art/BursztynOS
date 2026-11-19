@@ -2597,6 +2597,15 @@ void rysuj_ikone_aplikacji(const AplikacjaPulpitu& aplikacja) {
             rysuj_fragment_ikony(x,y,20,36,8,5,motyw_kolor(MOTYW_KOLOR_RAMKA));
             rysuj_fragment_ikony(x,y,14,41,20,3,motyw_kolor(MOTYW_KOLOR_RAMKA));
             break;
+        case TypIkonyAplikacji::MenedzerZadan:
+            // Zapas na brak PNG: okno z wykresem aktywnosci i slupkami pamieci w kolorach motywu.
+            rysuj_fragment_ikony(x,y,3,6,42,36,motyw_kolor(MOTYW_KOLOR_RAMKA));
+            rysuj_fragment_ikony(x,y,6,9,36,30,motyw_kolor(MOTYW_KOLOR_PANEL));
+            rysuj_fragment_ikony(x,y,10,26,4,9,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,17,20,4,15,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,24,14,4,21,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            rysuj_fragment_ikony(x,y,31,23,4,12,motyw_kolor(MOTYW_KOLOR_AKCENT));
+            break;
         case TypIkonyAplikacji::Diagnostyka:
             // A themed monitor with a diagnostic pulse, using native icon primitives.
             rysuj_fragment_ikony(x,y,3,6,42,30,motyw_kolor(MOTYW_KOLOR_RAMKA));
@@ -2920,6 +2929,9 @@ void obsluz_element_menu(int item_index) {
             break;
         case 21:
             uruchom_lub_aktywuj(SCIEZKA_SNAKE,"Snake");
+            break;
+        case 22:
+            uruchom_lub_aktywuj(AppIdentity::TaskManager, "Menedżer zadań");
             break;
         case 18:
             wykonaj_restart();

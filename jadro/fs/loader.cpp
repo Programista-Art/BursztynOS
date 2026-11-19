@@ -595,6 +595,8 @@ static int zarezerwuj_slot_procesu(
             PROCES_ZABLOKOWANY,
             __ATOMIC_RELEASE
         );
+        /* Nowa tozsamosc (pid, generacja) i licznik CPU od zera - Menedzer zadan (BWS 103/104). */
+        scheduler_nowy_proces_w_slocie(pid);
     }
 
     odblokuj_loader();

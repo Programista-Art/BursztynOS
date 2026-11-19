@@ -20,7 +20,8 @@ enum class TypIkonyAplikacji : uint8_t {
     Motywy,
     TestDzwieku,
     Diagnostyka,
-    UstawieniaEkranu
+    UstawieniaEkranu,
+    MenedzerZadan
 };
 
 struct Launcher {
@@ -51,6 +52,8 @@ inline constexpr Launcher Launchers[]={
     // Na koncu: istniejace indeksy i zapisane pozycje skrotow (klucz = id) bez zmian;
     // nowy skrot bez zapisanej pozycji trafia do wolnej komorki siatki.
     {"Ustawienia ekranu","/programy/ekran.cebula/ekran.bur","Ustawienia ekranu",TypIkonyAplikacji::UstawieniaEkranu,"ustawienia-ekranu","/ikonki/app_ustawienia_ekranu.png"},
+    // Dopisany za "ustawienia-ekranu" z tego samego powodu: zapisane pozycje pozostalych skrotow sie nie zmieniaja.
+    {"Menedżer zadań","/programy/menedzer_zadan.cebula/menedzer_zadan.bur","Menedżer zadań",TypIkonyAplikacji::MenedzerZadan,"menedzer-zadan","/ikonki/app_menedzer_zadan.png"},
 };
 inline constexpr int Count=sizeof(Launchers)/sizeof(Launchers[0]);
 // Logical UI budget, independent of grid capacity and filesystem limits.

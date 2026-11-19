@@ -2435,6 +2435,12 @@ bool skladacz_obrazu_ustaw_tytul(int pid, const char* tytul) {
     return zmieniony;
 }
 
+/* Menedzer zadan: bajty bufora warstwy okna procesu (pamiec jadra zwalniana razem z procesem). */
+uint64_t skladacz_obrazu_bajty_warstwy(int pid) {
+    if (pid < 0 || pid >= static_cast<int>(MAKS_WARSTW)) return 0;
+    return __atomic_load_n(&rozmiar_alokacji_warstwy[pid], __ATOMIC_ACQUIRE);
+}
+
 uint64_t skladacz_obrazu_id_okna(int pid) {
     if (!pid_poprawny(pid) || !warstwa_bufor_spojny(pid)) return 0;
     return (static_cast<uint64_t>(generacja_okna[pid]) << 32U) |

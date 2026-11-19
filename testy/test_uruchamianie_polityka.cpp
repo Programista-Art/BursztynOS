@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "../jadro/bws/uruchamianie_polityka.h"
 #include "../jadro/gui/desktop_entries.h"
+#include "../jadro/gui/app_identity.h"
 static int fails=0,checks=0;
 #define CHECK(c) do{++checks;if(!(c)){++fails;printf("FAIL %s:%d %s\n",__FILE__,__LINE__,#c);}}while(0)
 using namespace uruchamianie;
@@ -16,9 +17,13 @@ int main(){
     int elevated=0;
     for(const auto& l:DesktopEntries::Launchers){
         const auto* a=znajdz_aplikacje_systemowa(l.path);
-        if(a){++elevated;CHECK(a->poziom<PZB_UZYTKOWNIK);CHECK(!(a->prawa&PRAWA_UPRZYWILEJOWANE&~PRAWO_SYSTEM_CONFIG));}
+        // PRAWO_ZARZADZANIE_PROCESAMI (uprzywilejowane) wolno nadac wylacznie Menedzerowi zadan.
+        const uint64_t dozwolone=PRAWO_SYSTEM_CONFIG|(AppIdentity::equal(AppIdentity::TaskManager,l.path)?PRAWO_ZARZADZANIE_PROCESAMI:0);
+        if(a){++elevated;CHECK(a->poziom<PZB_UZYTKOWNIK);CHECK(!(a->prawa&PRAWA_UPRZYWILEJOWANE&~dozwolone));}
     }
-    CHECK(elevated==4);
+    CHECK(elevated==5);   // Ustawienia, Diagnostyka, Test dzwieku, Aktualizacje, Menedzer zadan
+    for(const auto& a:kAplikacjeSystemowe)
+        CHECK(!(a.prawa&PRAWO_ZARZADZANIE_PROCESAMI)||AppIdentity::equal(AppIdentity::TaskManager,a.sciezka));
     CHECK(znajdz_aplikacje_systemowa("/programy/ustawienia.cebula/ustawienia.bur")!=nullptr);
     CHECK(znajdz_aplikacje_systemowa("/programy/kalkulator.cebula/kalkulator.bur")==nullptr);
     // Hostile lookalikes are NOT recognised (exact match only).

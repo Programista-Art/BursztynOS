@@ -21,7 +21,8 @@ def png_rgba(path):
 
 menu = txt('jadro/gui/start_menu_model.h'); mk = txt('Makefile'); kern = txt('jadro/rdzen/kernel.cpp')
 for nazwa, plik, tytul in (('shell', 'app_shell', 'Powłoka Bursztyna'), ('tapety', 'app_tapety', 'Tapety'),
-                            ('ekran', 'app_ustawienia_ekranu', 'Ustawienia ekranu')):
+                            ('ekran', 'app_ustawienia_ekranu', 'Ustawienia ekranu'),
+                            ('menedzer_zadan', 'app_menedzer_zadan', 'Menedżer zadań')):
     sciezka = '/ikonki/%s.png' % plik
     png = ROOT / 'ikonki' / (plik + '.png')
     assert png.is_file(), png

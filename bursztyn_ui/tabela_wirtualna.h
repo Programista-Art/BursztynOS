@@ -79,6 +79,12 @@ public:
         }
     }
 
+    // Brak zaznaczenia (np. wybrany element zniknal z modelu): zaden wiersz nie jest podswietlony.
+    void wyczysc_wybor() {
+        if (wybrany_wiersz_ != SIZE_MAX) { wybrany_wiersz_ = SIZE_MAX; uniewaznij(); }
+    }
+    bool ma_wybor() const { return wybrany_wiersz_ < liczba_wierszy(); }
+
     void przy_zmianie_wyboru(FunkcjaWyboruWiersza cb, void* dane = nullptr) {
         cb_wybor_ = cb;
         dane_wyboru_ = dane;

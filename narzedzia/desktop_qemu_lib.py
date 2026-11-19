@@ -29,6 +29,8 @@ class Guest:
         self.bios, self.timeout = bios, timeout
         self.w, self.h = (int(v) for v in resolution.split('x'))
         self.tablet = tablet
+        # [USER FAULT] = jadro zakonczylo aplikacje Ring 3 (system dziala dalej); scenariusze moga to tolerowac.
+        self.faults = FAULTS
         self.requests = []
         self.https_requests = []
         self.https_server = None
@@ -98,7 +100,7 @@ class Guest:
     def log(self):
         text = self.serial_path.read_text(errors='replace')
         complete = text[:text.rfind('\n') + 1]
-        if self.vm.poll() is not None or any(f in complete for f in FAULTS):
+        if self.vm.poll() is not None or any(f in complete for f in self.faults):
             raise RuntimeError('Guest stopped or faulted\n' + text[-3000:])
         if time.monotonic() > self.deadline:
             raise TimeoutError('deadline\n' + text[-2000:])

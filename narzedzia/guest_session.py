@@ -241,8 +241,12 @@ def main():
     ap.add_argument('--https', action='store_true', help='also serve the pages over local TLS (10.0.2.100:443)')
     ap.add_argument('--build', type=Path, default=ROOT)
     ap.add_argument('--timeout', type=int, default=7200)
+    ap.add_argument('--tolerate-user-fault', action='store_true',
+                    help='nie przerywaj sesji, gdy jadro zakonczy aplikacje Ring 3 bledem ([USER FAULT])')
     a = ap.parse_args()
     G = Guest(a.iso, a.out, a.build, a.bios, a.resolution, a.pages, a.timeout, https=a.https, tablet=a.tablet)
+    if a.tolerate_user_fault:
+        G.faults = tuple(f for f in G.faults if f != '[USER FAULT]')
     try:
         G.boot_to_desktop()
         print('READY', G.w, G.h, G.desktop_seconds, flush=True)
