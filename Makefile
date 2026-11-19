@@ -566,6 +566,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_tapety_blob.o \
 	ikona_app_ustawienia_ekranu_blob.o \
 	ikona_app_menedzer_zadan_blob.o \
+	ikona_app_kalendarz_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -588,6 +589,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	test_dzwieku_blob.o \
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	menedzer_zadan_blob.o \
+	kalendarz_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
@@ -2530,6 +2532,25 @@ menedzer_zadan_blob.o: menedzer_zadan_tmp.o bursztyn_gui.o programy/menedzer_zad
 	$(PYTHON) narzedzia/kompresuj_blob.py menedzer_zadan.bin menedzer_zadan.bin.bz
 	$(LD) -r -b binary menedzer_zadan.bin.bz -o menedzer_zadan_blob.o
 
+# Kalendarz (.cebula / BUR): siatka BursztynUI::Kalendarz, data z BWS 9 (czas lokalny V1), tylko prawo "okna".
+KALENDARZ_ZRODLA := programy/kalendarz/kalendarz.cpp programy/kalendarz/okno.h programy/kalendarz/model.h bursztyn_ui/data_systemowa.h jadro/bws/czas_lokalny.h
+kalendarz_tmp.o: $(KALENDARZ_ZRODLA) $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+kalendarz_blob.o: kalendarz_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) kalendarz_tmp.o bursztyn_gui.o -o kalendarz.elf
+	$(BUR_CONVERT) kalendarz.elf kalendarz.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py kalendarz.bin kalendarz.bin.bz
+	$(LD) -r -b binary kalendarz.bin.bz -o kalendarz_blob.o
+
+# Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
+# aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).
+.PHONY: test-kalendarz-host
+test-kalendarz-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_kalendarz_host.cpp -o .bsf-test/kalendarz
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/kalendarz
+
 # Testy hosta Menedzera zadan: czysta logika jadra (rozliczanie CPU, pamiec z tablic stron, polityka zakonczenia,
 # ABI BWS 103/104), model aplikacji, rejestracja (pulpit/Start/ikony) i okno BursztynUI z ASan/UBSan.
 .PHONY: test-menedzer-zadan-host
@@ -2763,6 +2784,8 @@ test-settings-themes-power-host:
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
 
 menedzer_okien_tmp.o: jadro/gui/start_menu_ui.h obrazy/dekoder_obrazu.h
+# Kalendarz paska zadan (klik zegara) i data z BWS 9.
+menedzer_okien_tmp.o: jadro/gui/kalendarz_paska.h jadro/gui/taskbar_clock.h jadro/gui/start_menu_model.h jadro/gui/app_icons.h jadro/gui/app_identity.h jadro/bws/czas_lokalny.h
 
 ikona_zasilania_blob.o: ikonki/przyciskzasilania.png
 	$(LD) -r -b binary $< -o $@
@@ -2848,6 +2871,9 @@ ikona_app_ustawienia_ekranu_blob.o: ikonki/app_ustawienia_ekranu.png
 ikona_app_menedzer_zadan_blob.o: ikonki/app_menedzer_zadan.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_app_kalendarz_blob.o: ikonki/app_kalendarz.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_app_tapety_blob.o: ikonki/app_tapety.png
 	$(LD) -r -b binary $< -o $@
 
@@ -2929,7 +2955,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:

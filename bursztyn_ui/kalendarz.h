@@ -38,6 +38,54 @@ struct DataKalendarza {
         return true;
     }
 
+    /* Polskie nazwy (wspolne dla komponentu, kalendarza paska zadan i aplikacji Kalendarz). */
+    static const char* nazwa_miesiaca(int m) {
+        static const char* const N[] = {"Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
+                                        "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"};
+        return m >= 1 && m <= 12 ? N[m - 1] : "";
+    }
+    static const char* nazwa_miesiaca_dopelniacz(int m) {   // "19 listopada"
+        static const char* const N[] = {"stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+                                        "lipca", "sierpnia", "września", "października", "listopada", "grudnia"};
+        return m >= 1 && m <= 12 ? N[m - 1] : "";
+    }
+    static const char* nazwa_dnia_tygodnia(int dow) {       // 0 = poniedzialek
+        static const char* const N[] = {"poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"};
+        return dow >= 0 && dow < 7 ? N[dow] : "";
+    }
+    /* "czwartek, 19 listopada 2026"; niepoprawna data -> pusty tekst. Zwraca dlugosc. */
+    size_t formatuj(char* buf, size_t cap, bool z_dniem_tygodnia = true) const {
+        if (!buf || !cap) return 0;
+        size_t n = 0;
+        auto dodaj = [&](const char* t) { while (t && *t && n + 1 < cap) buf[n++] = *t++; };
+        auto liczba = [&](int v) { char t[8]; int k = 0; do { t[k++] = char('0' + v % 10); v /= 10; } while (v && k < 8);
+                                   while (k && n + 1 < cap) buf[n++] = t[--k]; };
+        if (czy_poprawna()) {
+            if (z_dniem_tygodnia) { dodaj(nazwa_dnia_tygodnia(dzien_tygodnia(rok, miesiac, dzien))); dodaj(", "); }
+            liczba(dzien); dodaj(" "); dodaj(nazwa_miesiaca_dopelniacz(miesiac)); dodaj(" "); liczba(rok);
+        }
+        buf[n] = '\0';
+        return n;
+    }
+    /* Numer dnia w roku (1..366) i tydzien ISO 8601 (1..53); 0 dla niepoprawnej daty. */
+    int dzien_roku() const {
+        if (!czy_poprawna()) return 0;
+        int d = dzien;
+        for (int m = 1; m < miesiac; ++m) d += dni_w_miesiacu(rok, m);
+        return d;
+    }
+    int tydzien_iso() const {
+        if (!czy_poprawna()) return 0;
+        const int dow = dzien_tygodnia(rok, miesiac, dzien);               // 0 = poniedzialek
+        int w = (dzien_roku() - dow + 9) / 7;                              // tydzien z czwartkiem
+        if (w < 1) {                                                       // ostatni tydzien poprzedniego roku
+            DataKalendarza g{rok - 1, 12, 31};
+            return g.czy_poprawna() ? g.tydzien_iso() : 0;
+        }
+        if (w == 53 && dzien_tygodnia(rok, 12, 31) < 3) w = 1;            // 53 tylko gdy 31.12 to czw-nd
+        return w;
+    }
+
     bool operator==(const DataKalendarza& o) const {
         return rok == o.rok && miesiac == o.miesiac && dzien == o.dzien;
     }
@@ -107,6 +155,7 @@ public:
             aktualizuj_model_miesiaca();
             najechana_komorka_ = -1;
             uniewaznij();
+            if (cb_widok_) cb_widok_(this, DataKalendarza{widok_rok_, widok_miesiac_, 1}, dane_widoku_);
         }
         if (powiadom && cb_zmiana_daty_) {
             cb_zmiana_daty_(this, wybrana_data_, dane_zmiany_daty_);
@@ -118,14 +167,69 @@ public:
         dane_zmiany_daty_ = dane;
     }
 
+    /* Widoczny miesiac (nawigacja nie zmienia wyboru). Wywolanie zwrotne dostaje 1. dzien widocznego miesiaca. */
+    int widok_rok() const { return widok_rok_; }
+    int widok_miesiac() const { return widok_miesiac_; }
+    void ustaw_widok(int rok, int miesiac) {
+        if (miesiac < 1 || miesiac > 12 || rok < 1900 || rok > 2100) return;
+        if (rok == widok_rok_ && miesiac == widok_miesiac_) return;
+        widok_rok_ = rok; widok_miesiac_ = miesiac;
+        zmieniono_widok();
+    }
+    void przy_zmianie_widoku(FunkcjaKalendarza cb, void* dane = nullptr) { cb_widok_ = cb; dane_widoku_ = dane; }
+
+    /* Wewnetrzny pasek nawigacji (<< < tytul > >>). Domyslnie widoczny - dotychczasowi uzytkownicy bez zmian.
+     * Ukryty: wlasciciel ma wlasna nawigacje (np. aplikacja Kalendarz); siatka zajmuje zwolnione miejsce, przyciski
+     * nie reaguja na mysz, klawiatura (strzalki, Page Up/Down, Home) dziala jak dotad. */
+    void ustaw_pasek_nawigacji(bool widoczny) {
+        if (widoczny == pasek_nawigacji_) return;
+        pasek_nawigacji_ = widoczny;
+        najechany_przycisk_ = wcisniety_przycisk_ = -1;
+        najechana_komorka_ = -1;
+        uniewaznij();
+    }
+    bool czy_pasek_nawigacji() const { return pasek_nawigacji_; }
+    /* Czy wybrana data lezy w widocznym miesiacu (dla opisu "wybrana data poza widokiem"). */
+    bool wybrana_w_widoku() const { return wybrana_data_.rok == widok_rok_ && wybrana_data_.miesiac == widok_miesiac_; }
+
+    /* Dzien dzisiejszy z zegara systemowego (wyrozniony niezaleznie od wyboru). Niepoprawna data = brak
+     * wyroznienia. Przerysowuje tylko dwie komorki, gdy dzien zmienia sie w obrebie widocznego miesiaca. */
+    void ustaw_dzisiaj(DataKalendarza d) {
+        if (!d.czy_poprawna()) d = DataKalendarza{0, 0, 0};
+        if (d == dzisiaj_) return;
+        const DataKalendarza stary = dzisiaj_;
+        dzisiaj_ = d;
+        if (stary.rok == widok_rok_ && stary.miesiac == widok_miesiac_) uniewaznij_komorke(komorka_dnia(stary.dzien));
+        if (d.rok == widok_rok_ && d.miesiac == widok_miesiac_) uniewaznij_komorke(komorka_dnia(d.dzien));
+    }
+    DataKalendarza dzisiaj() const { return dzisiaj_; }
+    bool ma_dzisiaj() const { return dzisiaj_.czy_poprawna(); }
+    /* Akcja "Dzisiaj": wybor i widok na dzisiejsza date (bez zmian, gdy brak daty systemowej). */
+    bool pokaz_dzisiaj() {
+        if (!ma_dzisiaj()) return false;
+        if (wybrana_data_ == dzisiaj_) { ustaw_widok(dzisiaj_.rok, dzisiaj_.miesiac); return true; }
+        ustaw_wybrana_data(dzisiaj_);
+        return true;
+    }
+    bool czy_dzisiaj_w_komorce(int indeks) const {
+        return ma_dzisiaj() && dzisiaj_.rok == widok_rok_ && dzisiaj_.miesiac == widok_miesiac_ &&
+               indeks == komorka_dnia(dzisiaj_.dzien);
+    }
+    /* Geometria siatki widocznego miesiaca (kolumna 0 = poniedzialek): komorka 0..41 dla dnia albo -1. */
+    int komorka_dla_dnia(int dzien) const { return komorka_dnia(dzien); }
+    int pierwszy_dzien_tygodnia() const { return pierwszy_dow_; }
+    int dni_widocznego_miesiaca() const { return dni_w_widoku_; }
+    int komorka_wybranej() const {
+        return widok_rok_ == wybrana_data_.rok && widok_miesiac_ == wybrana_data_.miesiac ? komorka_dnia(wybrana_data_.dzien) : -1;
+    }
+
     void poprzedni_miesiac() {
         if (widok_rok_ <= 1900 && widok_miesiac_ <= 1) return;
         if (--widok_miesiac_ < 1) {
             widok_miesiac_ = 12;
             --widok_rok_;
         }
-        aktualizuj_model_miesiaca();
-        uniewaznij();
+        zmieniono_widok();
     }
 
     void nastepny_miesiac() {
@@ -134,22 +238,19 @@ public:
             widok_miesiac_ = 1;
             ++widok_rok_;
         }
-        aktualizuj_model_miesiaca();
-        uniewaznij();
+        zmieniono_widok();
     }
 
     void poprzedni_rok() {
         if (widok_rok_ <= 1900) return;
         --widok_rok_;
-        aktualizuj_model_miesiaca();
-        uniewaznij();
+        zmieniono_widok();
     }
 
     void nastepny_rok() {
         if (widok_rok_ >= 2100) return;
         ++widok_rok_;
-        aktualizuj_model_miesiaca();
-        uniewaznij();
+        zmieniono_widok();
     }
 
     Rozmiar oblicz_naturalny_rozmiar() const override {
@@ -173,6 +274,7 @@ public:
         btn_next_month_ = g.przyciski[2];
         btn_next_year_ = g.przyciski[3];
 
+        if (pasek_nawigacji_) {
         ctx.rysuj_zaokraglony_prostokat(btn_prev_year_, kolor_przycisku(0), 2);
         ctx.rysuj_tekst_wysrodkowany(btn_prev_year_, "<<", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
@@ -186,15 +288,13 @@ public:
         ctx.rysuj_tekst_wysrodkowany(btn_next_year_, ">>", motyw_kolor(MOTYW_KOLOR_TEKST), skala);
 
         // Tytuł miesiąca i roku
-        static const char* const NAZWY_MIESIECY[] = {
-            "Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec",
-            "Lipiec", "Sierpień", "Wrzesień", "Październik", "Listopad", "Grudzień"
-        };
         char tytul[64];
-        sformatuj_tytul(tytul, sizeof(tytul), NAZWY_MIESIECY[widok_miesiac_ - 1], widok_rok_);
+        sformatuj_tytul(tytul, sizeof(tytul), DataKalendarza::nazwa_miesiaca(widok_miesiac_), widok_rok_);
 
-        Prostokat rect_tytul(46 * skala, 4 * skala, obszar_.szerokosc - 92 * skala, 18 * skala);
+        const int tytul_x = g.przyciski[1].prawy() + 2 * skala;
+        Prostokat rect_tytul(tytul_x, g.przyciski[1].y, g.przyciski[2].x - 2 * skala - tytul_x, g.przyciski[1].wysokosc);
         ctx.rysuj_tekst_wysrodkowany(rect_tytul, tytul, motyw_kolor(MOTYW_KOLOR_AKCENT), skala);
+        }
 
         // 2. Dni tygodnia (Pn .. Nd)
         static const char* const DNI_TYG[] = {"Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"};
@@ -247,6 +347,9 @@ public:
                     int d = prev_dni + day_num;
                     formatuj_liczbe(buf_dzien, sizeof(buf_dzien), d);
                     col_txt = kolor_nieaktywnego_dnia();
+                    // wybrana data w sasiednim miesiacu widocznym na szarej komorce: ramka zaznaczenia
+                    if (wybrana_data_ == data_sasiednia(-1, d))
+                        ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), 3, skala);
                 } else if (day_num <= ile_dni) {
                     formatuj_liczbe(buf_dzien, sizeof(buf_dzien), day_num);
 
@@ -255,9 +358,14 @@ public:
                                 day_num == wybrana_data_.dzien);
                     bool hov = (cell_idx == najechana_komorka_ && czy_wlaczona_);
 
+                    const bool dzis = czy_dzisiaj_w_komorce(cell_idx);
                     if (sel) {
                         ctx.rysuj_zaokraglony_prostokat(rect_cell, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), 3);
                         ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), 3, 1);
+                        col_txt = motyw_kolor_tekstu_zaznaczenia();   // kontrast z tlem zaznaczenia w kazdym motywie
+                    } else if (dzis) {
+                        // dzisiaj: wypelnienie akcentem (bursztyn), czytelne w motywie jasnym i ciemnym
+                        ctx.rysuj_zaokraglony_prostokat(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT), 3);
                         col_txt = motyw_kolor(MOTYW_KOLOR_TEKST_AKCENTU);
                     } else if (hov) {
                         ctx.rysuj_zaokraglony_prostokat(rect_cell, motyw_kolor(MOTYW_KOLOR_PODNIESIONY), 3);
@@ -268,12 +376,17 @@ public:
                 } else {
                     formatuj_liczbe(buf_dzien, sizeof(buf_dzien), day_num - ile_dni);
                     col_txt = kolor_nieaktywnego_dnia();
+                    if (wybrana_data_ == data_sasiednia(1, day_num - ile_dni))
+                        ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), 3, skala);
                 }
 
                 if (!czy_wlaczona_ && !sel_dla_komorki(cell_idx))
                     col_txt = kolor_nieaktywnego_dnia();
 
                 ctx.rysuj_tekst_wysrodkowany(rect_cell, buf_dzien, col_txt, skala);
+                // dzisiaj zaznaczone: dodatkowa ramka akcentu - dzisiaj widoczne takze przy wyborze
+                if (day_num >= 1 && day_num <= ile_dni && czy_dzisiaj_w_komorce(cell_idx) && sel_dla_komorki(cell_idx))
+                    ctx.rysuj_zaokraglona_ramke(rect_cell, motyw_kolor(MOTYW_KOLOR_AKCENT), 3, 2 * skala);
             }
         }
     }
@@ -365,6 +478,9 @@ public:
         } else if (kod == 0x49U) { // Page Up
             przesun_miesiac_wybranej(-1);
             e.obsluzone = true;
+        } else if (kod == 0x47U && ma_dzisiaj()) { // Home: dzisiaj
+            pokaz_dzisiaj();
+            e.obsluzone = true;
         }
     }
 
@@ -388,6 +504,37 @@ private:
 
     FunkcjaKalendarza cb_zmiana_daty_{nullptr};
     void* dane_zmiany_daty_{nullptr};
+    FunkcjaKalendarza cb_widok_{nullptr};
+    void* dane_widoku_{nullptr};
+    DataKalendarza dzisiaj_{0, 0, 0};
+
+    bool pasek_nawigacji_{true};
+    /* Data komorki sasiedniego miesiaca (kierunek -1 = poprzedni, 1 = nastepny) widocznej w szarych polach siatki. */
+    DataKalendarza data_sasiednia(int kierunek, int dzien) const {
+        int r = widok_rok_, m = widok_miesiac_ + kierunek;
+        if (m < 1) { m = 12; --r; } else if (m > 12) { m = 1; ++r; }
+        return DataKalendarza{r, m, dzien};
+    }
+    mutable uint64_t klucz_metryk_{0};
+    mutable int szer_podwojnego_{0}, szer_pojedynczego_{0}, wys_przycisku_{0};
+    void odswiez_metryki_przyciskow() const {
+        const SkalaUI s = skala_dpi_;
+        const int fh = CzcionkaUI::pobierz_wysokosc(s);
+        const uint64_t klucz = (uint64_t(s.procent()) << 32) | uint32_t(fh) | (1ULL << 63);
+        if (klucz == klucz_metryk_) return;
+        klucz_metryk_ = klucz;
+        const int m2 = CzcionkaUI::zmierz_tekst("<<", s) + 8 * s, m1 = CzcionkaUI::zmierz_tekst("<", s) + 8 * s;
+        szer_podwojnego_ = m2 > 20 * s ? m2 : 20 * s;
+        szer_pojedynczego_ = m1 > 18 * s ? m1 : 18 * s;
+        wys_przycisku_ = fh + 2 * s > 18 * s ? fh + 2 * s : 18 * s;
+    }
+
+    void zmieniono_widok() {
+        aktualizuj_model_miesiaca();
+        najechana_komorka_ = -1;
+        uniewaznij();
+        if (cb_widok_) cb_widok_(this, DataKalendarza{widok_rok_, widok_miesiac_, 1}, dane_widoku_);
+    }
 
     void przesun_wybrana_date(int dni) {
         DataKalendarza d = wybrana_data_;
@@ -448,12 +595,23 @@ private:
         g.grid_y = g.nav_h + g.dows_h + 4 * s;
         g.cell_w = (obszar_.szerokosc - 8 * s) / 7;
         g.cell_h = (obszar_.wysokosc - g.grid_y - 6 * s) / 6;
-        g.przyciski[0] = Prostokat(4 * s, 4 * s, 20 * s, 18 * s);
-        g.przyciski[1] = Prostokat(26 * s, 4 * s, 18 * s, 18 * s);
-        g.przyciski[2] = Prostokat(obszar_.szerokosc - 44 * s, 4 * s,
-                                   18 * s, 18 * s);
-        g.przyciski[3] = Prostokat(obszar_.szerokosc - 24 * s, 4 * s,
-                                   20 * s, 18 * s);
+        // Przyciski nawigacji: nie wezsze niz ich tekst w aktywnej czcionce (+ odstep), z przerwa 3 DIP - przy
+        // szerszej czcionce systemowej "<<" i "<" nie zlewaja sie w "<<<". Pomiar raz na skale/rozmiar czcionki.
+        odswiez_metryki_przyciskow();
+        const int w2 = szer_podwojnego_, w1 = szer_pojedynczego_, h = wys_przycisku_, gap = 3 * s;
+        g.nav_h = h + 6 * s > g.nav_h ? h + 6 * s : g.nav_h;
+        g.grid_y = g.nav_h + g.dows_h + 4 * s;
+        g.cell_h = (obszar_.wysokosc - g.grid_y - 6 * s) / 6;
+        if (!pasek_nawigacji_) {               // bez paska: dni tygodnia od gory, przyciski puste (bez trafien)
+            g.nav_h = 2 * s;
+            g.grid_y = g.nav_h + g.dows_h + 4 * s;
+            g.cell_h = (obszar_.wysokosc - g.grid_y - 6 * s) / 6;
+            return g;
+        }
+        g.przyciski[0] = Prostokat(4 * s, 4 * s, w2, h);
+        g.przyciski[1] = Prostokat(4 * s + w2 + gap, 4 * s, w1, h);
+        g.przyciski[3] = Prostokat(obszar_.szerokosc - 4 * s - w2, 4 * s, w2, h);
+        g.przyciski[2] = Prostokat(obszar_.szerokosc - 4 * s - w2 - gap - w1, 4 * s, w1, h);
         return g;
     }
 

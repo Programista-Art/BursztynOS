@@ -73,6 +73,7 @@
 #include "bws_pliki.h"
 #include "bws_api.h"
 #include "rozliczanie_io.h"
+#include "czas_lokalny.h"
 #include "../siec/http_origin.h"
 #include "bws_gui_batch.h"
 #include "bws_czcionka.h"
@@ -1738,9 +1739,36 @@ __attribute__((noinline)) uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t ar
  * RTC
  * ========================================================================= */
 
+#ifndef BURSZTYN_RTC_CMOS_JEST_UTC
+#define BURSZTYN_RTC_CMOS_JEST_UTC 1   // ta sama wartosc domyslna co w zegar-rtc.cpp (tylko do flagi strefy)
+#endif
+
+/* BWS 9 z arg2 == BWS_CZAS_LOKALNY_V1: data i czas lokalny jako struktura (czas_lokalny.h). Bez prawa, jak tekstowy
+ * BWS 9; brak prawdziwej probki RTC = 0 (zadnej zastepczej daty). */
+__attribute__((noinline)) uint64_t bws_czas_lokalny(uint64_t arg1) {
+    // Caly bufor sprawdzany PRZED kopiowaniem (zakres Ring 3 + mapowanie do zapisu na kazdej stronie): kopia jest
+    // stronicowana, wiec struktura na granicy stron z niezmapowana druga strona bylaby inaczej zapisana czesciowo.
+    if (arg1 == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(arg1), sizeof(BwsCzasLokalny)) ||
+        !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(arg1), sizeof(BwsCzasLokalny), true))
+        return 0;
+    czas_rtc czas{};
+    if (!pobierz_czas_rtc_bezpiecznie(&czas)) return 0;
+    BwsCzasLokalny wynik{};
+    if (!CzasLokalny::wypelnij(wynik, czas.rok, czas.miesiac, czas.dzien, czas.godziny, czas.minuty, czas.sekundy,
+                               BURSZTYN_RTC_CMOS_JEST_UTC ? BWS_CZAS_STREFA_CET : BWS_CZAS_CMOS_LOKALNY))
+        return 0;
+    return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg1), &wynik, sizeof(wynik)) ? 1ULL : 0ULL;
+}
+
 __attribute__((noinline)) uint64_t bws_rtc(
-    uint64_t arg1
+    uint64_t arg1,
+    uint64_t arg2 = 0
 ) {
+    if (arg2 == BWS_CZAS_LOKALNY_V1) return bws_czas_lokalny(arg1);
+    // arg2 == 0: historyczny tekst "HH:MM:SS". Kazda inna wartosc (np. przyszla wersja struktury) = blad bez zapisu:
+    // nie wolno wpisac 32-bajtowego tekstu do bufora, ktory wywolujacy przygotowal na inna strukture.
+    if (!czas_lokalny_tryb_tekstowy(arg2)) return 0;
     if (arg1 == 0) {
         return 0;
     }
@@ -3400,7 +3428,8 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         case 9:
             return
                 bws_rtc(
-                    arg1
+                    arg1,
+                    arg2
                 );
 
         case 10:

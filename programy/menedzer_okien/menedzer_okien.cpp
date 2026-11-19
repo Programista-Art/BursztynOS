@@ -19,6 +19,8 @@
 #include "plik_popup_ui.h"
 #include "start_menu_ui.h"
 #include "taskbar_clock.h"
+#include "kalendarz_paska.h"
+#include "bursztyn_ui/data_systemowa.h"
 
 // Opt-in native repaint profiling. No clock reads or extra paints in release.
 #ifndef BSF_PROFILE
@@ -1901,9 +1903,10 @@ bool dymek_zarejestrowany = false;
 char tekst_dymka[PasekZadan::MAKS_OKIEN * 2] = {};
 PasekZadan::Prostokat prostokat_dymka;
 
+bool kalendarz_paska_otwarty();
 bool inny_popup_wm_otwarty() {
     return menu_start_otwarte || pulpit_context_open || pulpit_modal_typ != PulpitModalTyp::BRAK ||
-           menu_przepelnienia_otwarte();
+           menu_przepelnienia_otwarte() || kalendarz_paska_otwarty();
 }
 
 void ukryj_dymek_paska() {
@@ -2104,8 +2107,10 @@ struct MenuPrzepelnienia final : BursztynUI::ObslugaWidokuMenu {
 MenuPrzepelnienia* menu_przepelnienia = nullptr;
 bool menu_przepelnienia_otwarte() { return menu_przepelnienia && menu_przepelnienia->otwarte(); }
 
+void zamknij_kalendarz_paska();
 void przelacz_menu_przepelnienia() {
     anuluj_dymek_paska();
+    zamknij_kalendarz_paska();
     if (menu_przepelnienia_otwarte()) { menu_przepelnienia->zamknij(); RysujTaskbar(); wm_gui_odswiez(); return; }
     if (!menu_przepelnienia) menu_przepelnienia = new MenuPrzepelnienia;
     if (!menu_przepelnienia) return;
@@ -2160,6 +2165,73 @@ bool obsluz_menu_przepelnienia(const bws_zdarzenie& e) {
         return true;
     }
     if (menu_przepelnienia->events.wymaga_odswiezenia()) wm_gui_odswiez();
+    return wynik;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Kalendarz paska zadan (klik zegara): interaktywny popup WM - ten sam mechanizm co menu Start/przepelnienia,
+// bez nowego procesu i bez dymka BWS 56. Data z BWS 9 (czas lokalny V1). Zob. jadro/gui/kalendarz_paska.h.
+// ---------------------------------------------------------------------------------------------------------------
+void zamknij_menu_i_odtworz_pulpit();
+KalendarzPaska::Surface* kalendarz_paska = nullptr;
+bool kalendarz_paska_otwarty() { return kalendarz_paska && kalendarz_paska->czy_otwarta(); }
+BursztynUI::DataKalendarza kalendarz_dzisiaj{0, 0, 0};
+
+void odswiez_stan_zegara(bool najechany) {
+    if (taskbar_clock && taskbar_clock->set_active(najechany || kalendarz_paska_otwarty())) {
+        if (RysujZegar()) wm_gui_odswiez();
+    }
+}
+bool zegar_pod(int mx, int my) { return taskbar_clock && taskbar_clock->contains(mx, my); }
+
+void zamknij_kalendarz_paska() {
+    if (!kalendarz_paska_otwarty()) return;
+    kalendarz_paska->zamknij();
+    odswiez_stan_zegara(false);
+    wm_gui_odswiez();
+}
+
+void przelacz_kalendarz_paska() {
+    anuluj_dymek_paska();
+    if (kalendarz_paska_otwarty()) { zamknij_kalendarz_paska(); return; }
+    if (menu_start_otwarte) zamknij_menu_i_odtworz_pulpit();
+    if (menu_przepelnienia_otwarte()) { menu_przepelnienia->zamknij(); RysujTaskbar(); }
+    if (!kalendarz_paska) kalendarz_paska = new KalendarzPaska::Surface;
+    if (!kalendarz_paska || !taskbar_clock) return;
+    BursztynUI::DataKalendarza dzis{};
+    const bool ok = BursztynUI::pobierz_date_systemowa(&dzis);
+    if (ok) kalendarz_dzisiaj = dzis;
+    const int pasek_y = desktop_geometry.taskbar_y > 0 ? desktop_geometry.taskbar_y : screen_h - PASEK_WYS;
+    (void)kalendarz_paska->otworz(dzis, ok, taskbar_clock->bounds, screen_w, screen_h, pasek_y);
+    odswiez_stan_zegara(true);
+    wm_gui_odswiez();
+}
+
+// Co sekunde z petli (tylko przy otwartym panelu): zmiana daty systemowej przesuwa wyroznienie "dzisiaj".
+void sprawdz_date_kalendarza_paska() {
+    if (!kalendarz_paska_otwarty()) return;
+    BursztynUI::DataKalendarza dzis{};
+    const bool ok = BursztynUI::pobierz_date_systemowa(&dzis);
+    if (ok == kalendarz_dzisiaj.czy_poprawna() && (!ok || dzis == kalendarz_dzisiaj)) return;
+    kalendarz_dzisiaj = ok ? dzis : BursztynUI::DataKalendarza{0, 0, 0};
+    kalendarz_paska->ustaw_dzisiaj(dzis, ok);
+    wm_gui_odswiez();
+}
+
+// Zdarzenia przy otwartym panelu. Klik poza panelem zamyka go; klik w zegar jest przy tym pochloniety (drugi klik
+// zegara = zamkniecie, nie ponowne otwarcie), a klik w inne miejsce (przycisk Start, przycisk okna) dziala dalej.
+bool obsluz_kalendarz_paska(const bws_zdarzenie& e) {
+    if (!kalendarz_paska_otwarty()) return false;
+    if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN && !kalendarz_paska->obszar().zawiera(e.x, e.y)) {
+        const bool w_zegar = zegar_pod(e.x, e.y);
+        zamknij_kalendarz_paska();
+        return w_zegar;
+    }
+    const bool wynik = kalendarz_paska->obsluz(e);
+    // TIMER nigdy nie jest pochlaniany: dalsza czesc petli aktualizuje zegar (natywnie zegar stal przy otwartym panelu).
+    if (e.typ == BWS_ZDARZENIE_TIMER) return false;
+    if (!kalendarz_paska->czy_otwarta()) { odswiez_stan_zegara(zegar_pod(e.x, e.y)); wm_gui_odswiez(); return true; }   // Escape
+    if (kalendarz_paska->events.wymaga_odswiezenia()) wm_gui_odswiez();
     return wynik;
 }
 
@@ -2819,6 +2891,10 @@ void wykonaj_pulpit_context(PulpitContextAction action) {
     wm_gui_odswiez();
 }
 
+// Czy obsluga zdarzenia przez popup konczy iteracje petli WM. TIMER - nigdy: po nim petla musi dojsc do aktualizacji
+// zegara paska i terminow dymkow, niezaleznie od tego, ktory popup WM jest otwarty.
+inline bool popup_konczy_obsluge(bool obsluzone, uint32_t typ) { return obsluzone && typ != BWS_ZDARZENIE_TIMER; }
+
 bool obsluz_popupy_pulpitu(const bws_zdarzenie& zdarzenie) {
     if(pulpit_modal_typ==PulpitModalTyp::MOVE && pulpit_wybor->events.zdarzenie(zdarzenie)) {
         if(pulpit_wybor->wynik_pliku()==BursztynUI::WynikDialoguPliku::Wybrano){zatwierdz_pulpit_modal();return true;}
@@ -2933,6 +3009,9 @@ void obsluz_element_menu(int item_index) {
         case 22:
             uruchom_lub_aktywuj(AppIdentity::TaskManager, "Menedżer zadań");
             break;
+        case 23:
+            uruchom_lub_aktywuj(AppIdentity::Calendar, "Kalendarz");
+            break;
         case 18:
             wykonaj_restart();
             break;
@@ -2951,6 +3030,7 @@ void obsluz_klikniecie(int mx, int my) {
     if (punkt_w_prostokacie(mx,my,PRZYCISK_MENU_X,przycisk_menu_y(),PRZYCISK_MENU_W,PRZYCISK_MENU_H)) {
         if(menu_start_otwarte)zamknij_menu_i_odtworz_pulpit();
         else {
+            zamknij_kalendarz_paska();
             if(!start_menu)start_menu=new StartMenu::Surface();
             if(start_menu){DisplayGeometry g{};
                 BursztynUI::Prostokat work{0,0,screen_w,screen_h-PASEK_WYS};
@@ -2962,6 +3042,7 @@ void obsluz_klikniecie(int mx, int my) {
         return;
     }
 
+    if (zegar_pod(mx, my)) { przelacz_kalendarz_paska(); return; }
     if (przycisk_przepelnienia_pod(mx, my)) { przelacz_menu_przepelnienia(); return; }
     // Aktywacja okna (takze przywrocenie zminimalizowanego) przez jadro.
     const int przycisk = przycisk_paska_pod(mx, my);
@@ -3166,6 +3247,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         if(zdarzenie.typ==BWS_ZDARZENIE_BLUR)obsluz_gest_pulpitu(zdarzenie);
         if(zdarzenie.typ==BWS_ZDARZENIE_EKRAN){
             anuluj_dymek_paska();if(menu_przepelnienia_otwarte())menu_przepelnienia->zamknij();
+            if(kalendarz_paska_otwarty()){kalendarz_paska->zamknij();if(taskbar_clock)taskbar_clock->set_active(false);}
             zamknij_pulpit_context();zamknij_pulpit_modal();
             if(start_menu)start_menu->close();
             menu_start_otwarte=false;menu_gry_otwarte=false;anuluj_gest_pulpitu();
@@ -3203,6 +3285,7 @@ extern "C" __attribute__((noreturn)) void _start() {
             metryki_ekranu();
             aktualizuj_layout_pulpitu();
             if(start_menu)start_menu->refresh();
+            if(kalendarz_paska)kalendarz_paska->odswiez_motyw();
             pulpit_menu->events.popups.zaktualizuj_motyw();
             pulpit_dialog->events.popups.zaktualizuj_motyw();
             if(pulpit_wybor)pulpit_wybor->events.popups.zaktualizuj_motyw();
@@ -3249,6 +3332,7 @@ extern "C" __attribute__((noreturn)) void _start() {
                 RysujTaskbar();
                 wm_gui_odswiez();
             }
+            odswiez_stan_zegara(zegar_pod(mx, my));   // przerysowanie zegara tylko przy wejsciu/wyjsciu kursora
         } else if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_DOWN) {
             if (punkt_w_prostokacie(mx, my,
                                     PRZYCISK_MENU_X, przycisk_menu_y(),
@@ -3269,6 +3353,7 @@ extern "C" __attribute__((noreturn)) void _start() {
 
         if (zdarzenie.typ == BWS_ZDARZENIE_BLUR) {
             anuluj_dymek_paska();
+            zamknij_kalendarz_paska();
             if (menu_przepelnienia_otwarte()) { menu_przepelnienia->zamknij(); RysujTaskbar(); wm_gui_odswiez(); }
             zamknij_menu_i_odtworz_pulpit();
             zamknij_pulpit_context();
@@ -3285,8 +3370,12 @@ extern "C" __attribute__((noreturn)) void _start() {
             else {RysujPrzyciskMenu();wm_gui_odswiez();}
             if(zdarzenie.typ!=BWS_ZDARZENIE_TIMER)continue;
         }
-        if(obsluz_menu_przepelnienia(zdarzenie))continue;
-        if(obsluz_popupy_pulpitu(zdarzenie))continue;
+        // Popupy WM (menu przepelnienia, kalendarz paska, menu kontekstowe i dialogi pulpitu) dostaja kazde
+        // zdarzenie, ale TIMER nie konczy iteracji - jak przy menu Start: PlikiUI::ObslugaPopup zwraca "obsluzone"
+        // dla kazdego zdarzenia przy otwartym popupie, co natywnie zatrzymywalo zegar paska.
+        if(popup_konczy_obsluge(obsluz_menu_przepelnienia(zdarzenie),zdarzenie.typ))continue;
+        if(popup_konczy_obsluge(obsluz_kalendarz_paska(zdarzenie),zdarzenie.typ))continue;
+        if(popup_konczy_obsluge(obsluz_popupy_pulpitu(zdarzenie),zdarzenie.typ))continue;
 
         if (zdarzenie.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) {
             if (menu_start_otwarte) zamknij_menu_i_odtworz_pulpit();
@@ -3337,6 +3426,7 @@ extern "C" __attribute__((noreturn)) void _start() {
         if(clock_changed || (taskbar_clock && taskbar_clock->needs_repaint())) {
             if(RysujZegar())wm_gui_odswiez();
         }
+        if(clock_changed)sprawdz_date_kalendarza_paska();
 
         if (klik) {
             if (menu_start_otwarte || punkt_w_prostokacie(mx, my,

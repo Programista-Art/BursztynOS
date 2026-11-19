@@ -21,7 +21,12 @@ static std::vector<char> plik_ikony(const char* p) {
     std::vector<char> d;if(!test_czytaj_ikony||!p||strncmp(p,"/ikonki/",8)||test_brak_ikony==p)return d;
     FILE* f=fopen(p+1,"rb");if(!f)return d;char b[4096];size_t n;while((n=fread(b,1,sizeof b,f))>0)d.insert(d.end(),b,b+n);fclose(f);return d;
 }
+// BWS 9 w trybie czasu lokalnego V1 (kalendarz paska): data testowa albo brak probki RTC.
+static BwsCzasLokalny test_czas{};
+static bool test_czas_ok=true;
+static unsigned test_wywolan_daty=0;
 static uint64_t launch_hook(uint64_t nr,uint64_t a,uint64_t a2,uint64_t,uint64_t) {
+    if(nr==9&&a2==BWS_CZAS_LOKALNY_V1){++test_wywolan_daty;if(!test_czas_ok)return 0;*reinterpret_cast<BwsCzasLokalny*>(a)=test_czas;return 1;}
     if(nr==4&&test_czytaj_ikony){auto d=plik_ikony(reinterpret_cast<const char*>(a));if(d.empty())return 0;
         *reinterpret_cast<uint32_t*>(a2)=uint32_t(d.size());return 1;}
     if(nr==25 || nr==26)throw PowerIntercept{nr};
@@ -511,10 +516,107 @@ int main() {
             assert(menu_przepelnienia_otwarte()&&menu_przepelnienia->strona==1&&menu_przepelnienia->menu.element(0)->czy_wlaczony());
             auto r=menu_przepelnienia->widok.obszar();assert(r.y>=0&&r.y+r.wysokosc<=desktop_geometry.taskbar_y);
          }
-         klawisz(41);assert(!menu_przepelnienia_otwarte());ui_skala_procent=100;}
+         {bws_zdarzenie t{};t.typ=BWS_ZDARZENIE_TIMER;const bool obsl=obsluz_menu_przepelnienia(t);
+         assert(menu_przepelnienia_otwarte()&&!popup_konczy_obsluge(obsl,t.typ));}   // zegar paska chodzi przy otwartym menu
+        klawisz(41);assert(!menu_przepelnienia_otwarte());ui_skala_procent=100;}
         screen_w=1280;screen_h=720;ui_skala_procent=100;metryki_ekranu();
         liczba_okien_taskbara=0;test_okna_aplikacji.clear();przelicz_uklad_paska();po_zmianie_okien_paska();
         test_surface_width=test_surface_height=0;test_surface.clear();hover_okna_paska=0;
+    }
+    {   // ---- Kalendarz paska zadan (klik zegara)
+        g_test_bws_hook=launch_hook;
+        screen_w=1280;screen_h=720;ui_skala_procent=100;metryki_ekranu();
+        CzasLokalny::wypelnij(test_czas,2026,11,19,10,15,0,BWS_CZAS_STREFA_CET);test_czas_ok=true;
+        assert(taskbar_clock && !kalendarz_paska_otwarty());
+        const auto zb=taskbar_clock->bounds;
+        const int pasek_y=desktop_geometry.taskbar_y>0?desktop_geometry.taskbar_y:screen_h-PASEK_WYS;
+        auto zdarz=[](uint32_t typ,int x,int y){bws_zdarzenie e{};e.typ=typ;e.x=x;e.y=y;return obsluz_kalendarz_paska(e);};
+        auto klucz=[](uint32_t usb){bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;e.kod=BWS_KEY_SOURCE_USB|usb;e.x=1;return obsluz_kalendarz_paska(e);};
+        // najechanie zegara: tylko zegar do przerysowania (stan aktywny), ten sam stan nic nie robi
+        RysujZegar(true);assert(!taskbar_clock->needs_repaint());
+        odswiez_stan_zegara(true);assert(taskbar_clock->active()&&!taskbar_clock->needs_repaint());   // przerysowany od razu
+        odswiez_stan_zegara(true);assert(!taskbar_clock->needs_repaint());
+        odswiez_stan_zegara(false);assert(!taskbar_clock->active());
+        // klik zegara: panel nad paskiem, przy zegarze, w granicach ekranu, z data systemowa
+        obsluz_klikniecie(zb.x+zb.szerokosc/2,zb.y+zb.wysokosc/2);
+        assert(kalendarz_paska_otwarty()&&taskbar_clock->active()&&!menu_start_otwarte);
+        auto r=kalendarz_paska->obszar();
+        assert(r.x>=0&&r.prawy()<=screen_w&&r.y>=0&&r.dolny()<=pasek_y&&!r.przecina(zb));
+        assert(r.prawy()<=zb.prawy()&&r.prawy()>=zb.x);                       // przy zegarze
+        auto* k=kalendarz_paska->kalendarz();
+        assert(k->dzisiaj()==(BursztynUI::DataKalendarza{2026,11,19})&&k->wybrana_data()==k->dzisiaj());
+        assert(k->widok_rok()==2026&&k->widok_miesiac()==11&&k->pierwszy_dzien_tygodnia()==6);   // 1.11.2026 = niedziela
+        assert(!strcmp(kalendarz_paska->naglowek()->tekst(),"czwartek, 19 listopada 2026"));
+        assert(kalendarz_paska->events.popups.fokus_popupu()==k);              // klawiatura trafia do siatki
+        assert(inny_popup_wm_otwarty());                                        // dymki paska wstrzymane
+        // nawigacja: miesiac zachowany, przelom roku
+        k->nastepny_miesiac();k->nastepny_miesiac();assert(k->widok_rok()==2027&&k->widok_miesiac()==1);
+        klucz(0x4F);assert(k->wybrana_data()==(BursztynUI::DataKalendarza{2026,11,20}));      // strzalka w prawo
+        klucz(0x4A);assert(k->wybrana_data()==(BursztynUI::DataKalendarza{2026,11,19}));      // Home = dzisiaj
+        // TIMER nie konczy iteracji petli WM przy zadnym popupie (natywnie zegar stal przy otwartym kalendarzu)
+        assert(!zdarz(BWS_ZDARZENIE_TIMER,0,0)&&kalendarz_paska_otwarty());
+        assert(!popup_konczy_obsluge(true,BWS_ZDARZENIE_TIMER)&&popup_konczy_obsluge(true,BWS_ZDARZENIE_MYSZ_DOWN)&&!popup_konczy_obsluge(false,BWS_ZDARZENIE_KLAWISZ));
+        // ruch myszy w panelu: zdarzenie obsluzone przez popup, panel otwarty
+        assert(zdarz(BWS_ZDARZENIE_MYSZ_RUCH,r.x+r.szerokosc/2,r.y+r.wysokosc/2)&&kalendarz_paska_otwarty());
+        // przycisk "Dzisiaj" (klik w panelu)
+        k->ustaw_wybrana_data({2026,3,3});
+        {auto b=kalendarz_paska->przycisk_dzisiaj()->obszar_ekranu();
+         assert(zdarz(BWS_ZDARZENIE_MYSZ_DOWN,b.x+3,b.y+3));zdarz(BWS_ZDARZENIE_MYSZ_UP,b.x+3,b.y+3);
+         assert(k->wybrana_data()==k->dzisiaj()&&k->widok_miesiac()==11&&kalendarz_paska_otwarty());}
+        // ponowny klik zegara zamyka (zdarzenie pochloniete - bez ponownego otwarcia)
+        assert(zdarz(BWS_ZDARZENIE_MYSZ_DOWN,zb.x+5,zb.y+5));
+        assert(!kalendarz_paska_otwarty()&&!taskbar_clock->active());
+        // ponowne otwarcie: znowu biezacy miesiac
+        obsluz_klikniecie(zb.x+5,zb.y+5);assert(kalendarz_paska_otwarty()&&kalendarz_paska->kalendarz()->widok_miesiac()==11);
+        // Escape zamyka
+        assert(klucz(41)&&!kalendarz_paska_otwarty()&&!taskbar_clock->active());
+        // klik poza panelem (pulpit): zamyka i NIE jest pochloniety - WM obsluguje klik normalnie
+        obsluz_klikniecie(zb.x+5,zb.y+5);assert(kalendarz_paska_otwarty());
+        assert(!zdarz(BWS_ZDARZENIE_MYSZ_DOWN,400,300)&&!kalendarz_paska_otwarty());
+        // przycisk Start przy otwartym kalendarzu: kalendarz zamkniety, menu Start otwarte jednym klikiem
+        obsluz_klikniecie(zb.x+5,zb.y+5);assert(kalendarz_paska_otwarty());
+        assert(!zdarz(BWS_ZDARZENIE_MYSZ_DOWN,PRZYCISK_MENU_X+2,przycisk_menu_y()+2));
+        obsluz_klikniecie(PRZYCISK_MENU_X+2,przycisk_menu_y()+2);
+        assert(menu_start_otwarte&&!kalendarz_paska_otwarty());
+        // zegar przy otwartym menu Start: menu zamkniete, kalendarz otwarty (jeden popup WM naraz)
+        przelacz_kalendarz_paska();assert(kalendarz_paska_otwarty()&&!menu_start_otwarte);
+        // utrata fokusu (BLUR) zamyka
+        zamknij_kalendarz_paska();assert(!kalendarz_paska_otwarty());
+        // zmiana daty przy otwartym panelu (polnoc): wyroznienie przesuniete, wybor i widok bez zmian
+        obsluz_klikniecie(zb.x+5,zb.y+5);k=kalendarz_paska->kalendarz();k->nastepny_miesiac();
+        CzasLokalny::wypelnij(test_czas,2026,11,20,0,0,1,BWS_CZAS_STREFA_CET);
+        sprawdz_date_kalendarza_paska();
+        assert(k->dzisiaj()==(BursztynUI::DataKalendarza{2026,11,20})&&k->widok_miesiac()==12&&k->wybrana_data()==(BursztynUI::DataKalendarza{2026,11,19}));
+        const unsigned w0=test_wywolan_daty;zamknij_kalendarz_paska();sprawdz_date_kalendarza_paska();
+        assert(test_wywolan_daty==w0);                                          // zamkniety panel: zadnych odczytow daty
+        // brak daty systemowej: komunikat, "Dzisiaj" wylaczony
+        test_czas_ok=false;obsluz_klikniecie(zb.x+5,zb.y+5);
+        assert(kalendarz_paska_otwarty()&&!kalendarz_paska->kalendarz()->ma_dzisiaj()&&!kalendarz_paska->przycisk_dzisiaj()->czy_wlaczona());
+        assert(!strcmp(kalendarz_paska->naglowek()->tekst(),"Data systemowa niedostępna"));
+        zamknij_kalendarz_paska();test_czas_ok=true;CzasLokalny::wypelnij(test_czas,2026,11,19,10,15,0,BWS_CZAS_STREFA_CET);
+        // rozdzielczosci i skale: panel w granicach ekranu, nad paskiem, nie zaslania zegara
+        struct E{int w,h;uint32_t s;};
+        for(E e:{E{800,600,100},E{1024,768,100},E{1366,768,125},E{1920,1080,150},E{1920,1080,200},E{1280,720,200}}){
+            screen_w=e.w;screen_h=e.h;ui_skala_procent=e.s;metryki_ekranu();
+            const auto zc=taskbar_clock->bounds;const int py=desktop_geometry.taskbar_y>0?desktop_geometry.taskbar_y:screen_h-PASEK_WYS;
+            obsluz_klikniecie(zc.x+zc.szerokosc/2,zc.y+zc.wysokosc/2);assert(kalendarz_paska_otwarty());
+            auto q=kalendarz_paska->obszar();
+            assert(q.x>=0&&q.prawy()<=screen_w&&q.y>=0&&q.dolny()<=py&&!q.przecina(zc));
+            auto kk=kalendarz_paska->kalendarz()->obszar();assert(kk.szerokosc>0&&kk.wysokosc>0&&kk.prawy()<=q.szerokosc&&kk.dolny()<=q.wysokosc);
+            auto bb=kalendarz_paska->przycisk_dzisiaj()->obszar();assert(bb.prawy()<=q.szerokosc&&bb.dolny()<=q.wysokosc&&bb.y>=kk.dolny());
+            zamknij_kalendarz_paska();
+        }
+        screen_w=1280;screen_h=720;ui_skala_procent=100;metryki_ekranu();
+        // menu Start: Kalendarz z wlasna ikona, uruchamia zainstalowana aplikacje, druga proba aktywuje okno
+        bool w_menu=false;for(const auto& a:StartMenu::apps)if(!strcmp(a.name,"Kalendarz")){w_menu=true;assert(!strcmp(a.icon_png,"/ikonki/app_kalendarz.png")&&a.action==23);}
+        assert(w_menu);
+        assert(AppIcons::icon_for_executable(AppIdentity::Calendar)&&!strcmp(AppIcons::icon_for_executable(AppIdentity::Calendar),"/ikonki/app_kalendarz.png"));
+        {FILE* f=fopen("ikonki/app_kalendarz.png","rb");assert(f);fclose(f);}
+        for(const auto& l:DesktopEntries::Launchers)assert(strcmp(l.path,AppIdentity::Calendar));   // bez skrotu na pulpicie
+        launched.clear();test_running_executable=nullptr;menu_click("kalend");assert(launched==AppIdentity::Calendar);
+        launched.clear();test_activated_window=0;test_running_executable=AppIdentity::Calendar;test_running_title="Kalendarz";
+        obsluz_element_menu(23);assert(launched.empty()&&test_activated_window==42);   // jedna instancja: aktywacja
+        test_running_executable=nullptr;
     }
     printf("WM routing %u/%u PASS: ",checks,checks);puts("WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw");
 }

@@ -186,6 +186,7 @@ extern "C" uint8_t _binary_ikonki_app_ustawienia_png_start[], _binary_ikonki_app
 extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_app_test_dzwieku_png_end[];
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_menedzer_zadan_png_start[], _binary_ikonki_app_menedzer_zadan_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kalendarz_png_start[], _binary_ikonki_app_kalendarz_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
@@ -244,6 +245,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 
 extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
 extern "C" uint8_t _binary_menedzer_zadan_bin_bz_start[],_binary_menedzer_zadan_bin_bz_end[];
+extern "C" uint8_t _binary_kalendarz_bin_bz_start[],_binary_kalendarz_bin_bz_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
@@ -1517,6 +1519,15 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"menedzer_zadan.bur\"\n"
         "uprawnienia = [\"okna\", \"pliki_czytaj\"]\n";
 
+    /* Kalendarz: zwykla aplikacja uzytkownika (PZB 4), tylko GUI. Date czyta BWS 9 - bez dodatkowych praw. */
+    static const char MANIFEST_KALENDARZ[] =
+        "nazwa = \"Kalendarz\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kalendarz.bur\"\n"
+        "uprawnienia = [\"okna\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1601,6 +1612,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
         {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
         {"/ikonki/app_menedzer_zadan.png",_binary_ikonki_app_menedzer_zadan_png_start,_binary_ikonki_app_menedzer_zadan_png_end},
+        {"/ikonki/app_kalendarz.png",_binary_ikonki_app_kalendarz_png_start,_binary_ikonki_app_kalendarz_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -2121,6 +2133,12 @@ void instaluj_wbudowane_programy() {
     if (!instaluj_paczke("/programy/menedzer_zadan.cebula/opis.aplikacji",MANIFEST_MENEDZER_ZADAN,
             AppIdentity::TaskManager,_binary_menedzer_zadan_bin_bz_start,_binary_menedzer_zadan_bin_bz_end)) {
         wypisz_log("[MENEDZER-ZADAN] Nie udalo sie zainstalowac Menedzera zadan.");
+        if (scisla_instalacja) pliki_instalacja_ok = false;
+    }
+
+    if (!instaluj_paczke("/programy/kalendarz.cebula/opis.aplikacji",MANIFEST_KALENDARZ,
+            AppIdentity::Calendar,_binary_kalendarz_bin_bz_start,_binary_kalendarz_bin_bz_end)) {
+        wypisz_log("[KALENDARZ] Nie udalo sie zainstalowac Kalendarza.");
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
