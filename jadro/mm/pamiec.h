@@ -426,6 +426,8 @@ void* ZaalokujCiagleRamki(size_t liczba_ramek);
 void ZwolnijRamke(void* adres_fizyczny);
 void ZwolnijCiagleRamki(void* adres_fizyczny, size_t liczba_ramek);
 extern "C" uint64_t pmm_pobierz_wolne_ramki();
+/* Ramki RAM zarzadzane przez PMM (MEMORY_AVAILABLE w pierwszych 4 GiB, bez obrazu jadra i rezerwacji stalych). */
+extern "C" uint64_t pmm_pobierz_dostepne_ramki();
 
 /*
  * Buduje stan PMM na podstawie tagu Memory Map z Multiboot2 i zabezpiecza

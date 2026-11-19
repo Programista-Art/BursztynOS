@@ -185,6 +185,7 @@ extern "C" uint8_t _binary_ikonki_app_aktualizacje_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_ustawienia_png_start[], _binary_ikonki_app_ustawienia_png_end[];
 extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_app_test_dzwieku_png_end[];
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
+extern "C" uint8_t _binary_ikonki_app_menedzer_zadan_png_start[], _binary_ikonki_app_menedzer_zadan_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
@@ -242,6 +243,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_bz_start[];
 extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 
 extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
+extern "C" uint8_t _binary_menedzer_zadan_bin_bz_start[],_binary_menedzer_zadan_bin_bz_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
@@ -611,13 +613,13 @@ bool scisla_instalacja=false,pliki_instalacja_ok=true;
 bool ekran_aplikacja_instalacja_ok=false;
 bool tapety_aplikacja_instalacja_ok=false;
 struct PlikKontrolny{char path[128];uint32_t size,crc;};
-constexpr unsigned MAKS_PLIKOW_KONTROLNYCH = 112;   // = MAKS_PLANOWANYCH_PLIKOW (limit 96 zostal osiagniety)
+constexpr unsigned MAKS_PLIKOW_KONTROLNYCH = 128;   // = MAKS_PLANOWANYCH_PLIKOW (96 -> 112 -> 128: Menedzer zadan)
 PlikKontrolny pliki_kontrolne[MAKS_PLIKOW_KONTROLNYCH]{};
 unsigned liczba_plikow_kontrolnych=0;
 // Kompresja blobow (2.2): data/koniec wskazuja skompresowany blob, a size
 // to rozmiar surowy; dane sa rozpakowywane dopiero przy zapisie pliku.
 struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;};
-constexpr unsigned MAKS_PLANOWANYCH_PLIKOW = 112;   // plik .bur + manifest na aplikacje, ikony, dane; bylo 96 (limit osiagniety)
+constexpr unsigned MAKS_PLANOWANYCH_PLIKOW = 128;   // plik .bur + manifest na aplikacje, ikony, dane; bylo 96, potem 112
 PlanowanyPlik planowane_pliki[MAKS_PLANOWANYCH_PLIKOW]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
 size_t planowane_katalog_indeks=0;
@@ -1505,6 +1507,16 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"diagnostyka.bur\"\n"
         "uprawnienia = [\"okna\", \"pliki_czytaj\", \"pliki_zapisz\"]\n";
 
+    /* Prawa NIE pochodza z manifestu: jadro nadaje je z tabeli aplikacji systemowych (uruchamianie_polityka.h)
+     * po weryfikacji wbudowanej sumy SHA-256; manifest opisuje tylko paczke. */
+    static const char MANIFEST_MENEDZER_ZADAN[] =
+        "nazwa = \"Menedżer zadań\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 3\n"
+        "plik_startowy = \"menedzer_zadan.bur\"\n"
+        "uprawnienia = [\"okna\", \"pliki_czytaj\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1588,6 +1600,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_shell.png",_binary_ikonki_app_shell_png_start,_binary_ikonki_app_shell_png_end},
         {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
         {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
+        {"/ikonki/app_menedzer_zadan.png",_binary_ikonki_app_menedzer_zadan_png_start,_binary_ikonki_app_menedzer_zadan_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -2104,6 +2117,12 @@ void instaluj_wbudowane_programy() {
     if (!instaluj_paczke("/programy/diagnostyka.cebula/opis.aplikacji",MANIFEST_DIAGNOSTYKA,
             DIAG_APP_PATH,_binary_diagnostyka_bin_bz_start,_binary_diagnostyka_bin_bz_end))
         wypisz_log("[DIAG] Nie udało się zainstalować Diagnostyki systemu");
+
+    if (!instaluj_paczke("/programy/menedzer_zadan.cebula/opis.aplikacji",MANIFEST_MENEDZER_ZADAN,
+            AppIdentity::TaskManager,_binary_menedzer_zadan_bin_bz_start,_binary_menedzer_zadan_bin_bz_end)) {
+        wypisz_log("[MENEDZER-ZADAN] Nie udalo sie zainstalowac Menedzera zadan.");
+        if (scisla_instalacja) pliki_instalacja_ok = false;
+    }
 
     if (!instaluj_paczke(
             "/programy/test_dzwieku.cebula/opis.aplikacji",
@@ -3250,11 +3269,13 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
          */
         asm volatile("cli" ::: "memory");
         gui_perf_idle_begin();
+        scheduler_bezczynnosc_poczatek();   // Menedzer zadan: HLT to bezczynnosc, nie praca PID 0
         asm volatile(
             "sti; hlt"
             :
             :
             : "memory");
+        scheduler_bezczynnosc_koniec();
         gui_perf_idle_end();
     }
 }

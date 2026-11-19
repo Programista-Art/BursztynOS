@@ -23,6 +23,7 @@
 #include "vmm_synchronizacja.h"
 #include "zarezerwowane_va.h"
 #include "pamiec.h"
+#include "pamiec_procesu.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -2508,6 +2509,28 @@ extern "C" void ZniszczPrzestrzenAdresowaProcesu(
         do_zniszczenia,
         4
     );
+}
+
+/*
+ * Menedzer zadan (BWS 103): pamiec fizyczna przypisana przestrzeni procesu.
+ * Regula liczenia = regula zwalniania (pamiec_procesu.h). Tylko zarejestrowane
+ * klony (zywe przestrzenie procesow), nigdy baza jadra ani przestrzen nieznana;
+ * odczyt pod blokada VMM z wylaczonymi przerwaniami (krotkie przejscie po
+ * prywatnej polowie, bez alokacji i bez dotykania danych procesu).
+ */
+extern "C" bool VmmPoliczPamiecProcesu(void* pml4, PamiecProcesu::Wynik* wynik) {
+    if (!pml4 || !wynik) return false;
+    *wynik = PamiecProcesu::Wynik{};
+    uint64_t* przestrzen = static_cast<uint64_t*>(pml4);
+    BlokadaVMM blokada;
+    if (!vmm_zainicjalizowany || !bazowe_pml4_jadra || przestrzen == bazowe_pml4_jadra) return false;
+    bool zarejestrowana = false;
+    for (uint64_t* p : g_rejestr_przestrzeni.wpisy) if (p == przestrzen) { zarejestrowana = true; break; }
+    if (!zarejestrowana) return false;
+    *wynik = PamiecProcesu::policz(przestrzen,
+        [](uint64_t wpis) -> const uint64_t* { return tabela_z_wpisu(wpis); },
+        [](size_t indeks) { return pml4_wpis_jadra(indeks); });
+    return true;
 }
 
 /* =========================================================================

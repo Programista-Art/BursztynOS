@@ -1,0 +1,5 @@
+[AHCI] IDENTIFY SATA port 0.
+[VIRTIO-BLK] MSI-X configured successfully (entry 0)
+[VIRTIO-BLK] Successfully initialized and registered VirtIO-BLK device
+[VIRTIO-BLK] Sanity check: OK (read LBA 0).
+[VIRTIO-NET] Zarejestrowano jako NetworkDevice (virtio-net0).

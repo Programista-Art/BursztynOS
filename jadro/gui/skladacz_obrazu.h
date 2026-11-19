@@ -408,6 +408,9 @@ bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int pid);
 bool skladacz_obrazu_czy_widoczna(int pid);
 bool skladacz_obrazu_ksztalt_w_punkcie(int pid,int x,int y);
 uint64_t skladacz_obrazu_id_okna(int pid);
+uint64_t skladacz_obrazu_bajty_warstwy(int pid);
+/* Suma buforow warstw wszystkich okien (telemetria BWS 105). */
+uint64_t skladacz_obrazu_bajty_warstw_razem();
 uint32_t skladacz_obrazu_snapshot_okien(GuiOknoInfo* out, uint32_t max,
                                         int aktywny_pid);
 

@@ -70,6 +70,50 @@ inline constexpr bool block_range_valid(uint64_t start, uint64_t count, uint64_t
 struct BlockDevice;
 
 /*
+ * Liczniki telemetrii I/O (Menedzer zadan, BWS 105; docs/menedzer-zadan-monitorowanie.md).
+ *
+ * Semantyka: liczone WYLACZNIE na urzadzeniu sprzetowym (filtr rejestru blokowego ma licz_io=false),
+ * raz na polecenie wyslane do sterownika (porcja max_transfer_sectors). Bajty i operacje udane =
+ * polecenia zakonczone BlockError::Ok; polecenie zakonczone bledem zwieksza tylko licznik bledow
+ * (bez bajtow). Transfer dzielony na porcje, ktory zawiodl w srodku, liczy porcje udane jako udane.
+ * Sterowniki sa synchroniczne i nie ponawiaja polecen, wiec ponowien nie ma; pamiec podreczna PSF
+ * nie wola BlockDevice - odczyt z pamieci podrecznej nigdy nie jest liczony jako transfer.
+ * Czas = od wyslania do zakonczenia polecenia (zegar monotoniczny), tylko gdy zegar jest dostepny.
+ */
+struct BlockIoStats {
+    uint64_t read_bytes, write_bytes;
+    uint64_t read_ops, write_ops;
+    uint64_t read_errors, write_errors;
+    uint64_t read_ns, write_ns;
+    uint64_t timed_read_ops, timed_write_ops;   // polecenia (udane i nie) z pomiarem czasu
+    uint64_t flushes, flush_errors;
+};
+
+/* Zegar ns dla pomiaru czasu operacji; nullptr albo 0 = brak pomiaru (testy hosta, przed HPET). */
+inline uint64_t (*g_block_io_clock_ns)() = nullptr;
+
+inline void block_io_add(uint64_t* c, uint64_t v) noexcept {
+    const uint64_t old = __atomic_load_n(c, __ATOMIC_RELAXED);
+    __atomic_store_n(c, old > UINT64_MAX - v ? UINT64_MAX : old + v, __ATOMIC_RELAXED);   // nasycenie, bez zawijania
+}
+
+inline uint64_t block_io_now() noexcept { return g_block_io_clock_ns ? g_block_io_clock_ns() : 0; }
+
+inline void block_io_account(BlockIoStats& st, bool write, uint64_t bytes, bool ok, uint64_t t0) noexcept {
+    const uint64_t t1 = t0 ? block_io_now() : 0;
+    if (ok) {
+        block_io_add(write ? &st.write_bytes : &st.read_bytes, bytes);
+        block_io_add(write ? &st.write_ops : &st.read_ops, 1);
+    } else {
+        block_io_add(write ? &st.write_errors : &st.read_errors, 1);
+    }
+    if (t0 && t1 >= t0) {
+        block_io_add(write ? &st.write_ns : &st.read_ns, t1 - t0);
+        block_io_add(write ? &st.timed_write_ops : &st.timed_read_ops, 1);
+    }
+}
+
+/*
  * Tabela operacji niskopoziomowych sterownika urzadzenia blokowego.
  */
 struct BlockOperations {
@@ -117,6 +161,10 @@ struct BlockDevice {
     bool (*legacy_write)(void* ctx, uint64_t lba, uint32_t count, const void* buf);
     bool (*legacy_flush)(void* ctx);
 
+    /* Telemetria (patrz BlockIoStats). licz_io=false dla urzadzen-filtrow, aby nie liczyc podwojnie. */
+    BlockIoStats io;
+    bool licz_io;
+
     constexpr BlockDevice()
         : driver_data(nullptr), ops(nullptr),
           total_sectors(0),
@@ -126,7 +174,8 @@ struct BlockDevice {
           device_type(BlockDeviceType::Unknown),
           model{0}, serial{0}, write_count(0),
           writable(true),
-          legacy_read(nullptr), legacy_write(nullptr), legacy_flush(nullptr) {}
+          legacy_read(nullptr), legacy_write(nullptr), legacy_flush(nullptr),
+          io{}, licz_io(true) {}
 
     BlockDevice(void* c, uint64_t s, uint32_t sz, bool w,
                 bool (*rd)(void*, uint64_t, uint32_t, void*),
@@ -140,7 +189,8 @@ struct BlockDevice {
           device_type(BlockDeviceType::Unknown),
           model{0}, serial{0}, write_count(0),
           writable(w),
-          legacy_read(rd), legacy_write(wr), legacy_flush(fl) {}
+          legacy_read(rd), legacy_write(wr), legacy_flush(fl),
+          io{}, licz_io(true) {}
 
     void sync_state() {
         if (!writable && !read_only) read_only = true;
@@ -159,6 +209,20 @@ struct BlockDevice {
     BlockError write(uint64_t lba, uint32_t count, const void* buf);
     BlockError flush();
     BlockError revalidate();
+
+private:
+    BlockError op_read(uint64_t lba, uint32_t count, void* buf, uint32_t sec_sz) {
+        const uint64_t t0 = licz_io ? block_io_now() : 0;
+        const BlockError err = ops->read(this, lba, count, buf);
+        if (licz_io) block_io_account(io, false, static_cast<uint64_t>(count) * sec_sz, err == BlockError::Ok, t0);
+        return err;
+    }
+    BlockError op_write(uint64_t lba, uint32_t count, const void* buf, uint32_t sec_sz) {
+        const uint64_t t0 = licz_io ? block_io_now() : 0;
+        const BlockError err = ops->write(this, lba, count, buf);
+        if (licz_io) block_io_account(io, true, static_cast<uint64_t>(count) * sec_sz, err == BlockError::Ok, t0);
+        return err;
+    }
 };
 
 inline BlockError BlockDevice::read(uint64_t lba, uint32_t count, void* buf) {
@@ -182,21 +246,24 @@ inline BlockError BlockDevice::read(uint64_t lba, uint32_t count, void* buf) {
     if (ops && ops->read) {
         uint32_t limit = max_transfer_sectors;
         if (limit == 0 || count <= limit) {
-            return ops->read(this, lba, count, buf);
+            return op_read(lba, count, buf, sec_sz);
         }
         uint8_t* ptr = static_cast<uint8_t*>(buf);
         uint32_t done = 0;
         while (done < count) {
             uint32_t chunk = (count - done > limit) ? limit : (count - done);
             size_t byte_offset = static_cast<size_t>(done) * sec_sz;
-            BlockError err = ops->read(this, lba + done, chunk, ptr + byte_offset);
+            BlockError err = op_read(lba + done, chunk, ptr + byte_offset, sec_sz);
             if (err != BlockError::Ok) return err;
             done += chunk;
         }
         return BlockError::Ok;
     }
     if (legacy_read) {
-        return legacy_read(driver_data, lba, count, buf) ? BlockError::Ok : BlockError::IOError;
+        const uint64_t t0 = licz_io ? block_io_now() : 0;
+        const bool ok = legacy_read(driver_data, lba, count, buf);
+        if (licz_io) block_io_account(io, false, static_cast<uint64_t>(count) * sec_sz, ok, t0);
+        return ok ? BlockError::Ok : BlockError::IOError;
     }
     return BlockError::Unsupported;
 }
@@ -223,7 +290,7 @@ inline BlockError BlockDevice::write(uint64_t lba, uint32_t count, const void* b
     if (ops && ops->write) {
         uint32_t limit = max_transfer_sectors;
         if (limit == 0 || count <= limit) {
-            BlockError err = ops->write(this, lba, count, buf);
+            BlockError err = op_write(lba, count, buf, sec_sz);
             if (err == BlockError::Ok) {
                 if (write_count <= UINT64_MAX - count) write_count += count;
                 else write_count = UINT64_MAX;
@@ -235,7 +302,7 @@ inline BlockError BlockDevice::write(uint64_t lba, uint32_t count, const void* b
         while (done < count) {
             uint32_t chunk = (count - done > limit) ? limit : (count - done);
             size_t byte_offset = static_cast<size_t>(done) * sec_sz;
-            BlockError err = ops->write(this, lba + done, chunk, ptr + byte_offset);
+            BlockError err = op_write(lba + done, chunk, ptr + byte_offset, sec_sz);
             if (err != BlockError::Ok) return err;
             if (write_count <= UINT64_MAX - chunk) write_count += chunk;
             else write_count = UINT64_MAX;
@@ -244,7 +311,9 @@ inline BlockError BlockDevice::write(uint64_t lba, uint32_t count, const void* b
         return BlockError::Ok;
     }
     if (legacy_write) {
+        const uint64_t t0 = licz_io ? block_io_now() : 0;
         bool ok = legacy_write(driver_data, lba, count, buf);
+        if (licz_io) block_io_account(io, true, static_cast<uint64_t>(count) * sec_sz, ok, t0);
         if (ok) {
             if (write_count <= UINT64_MAX - count) write_count += count;
             else write_count = UINT64_MAX;
@@ -256,10 +325,14 @@ inline BlockError BlockDevice::write(uint64_t lba, uint32_t count, const void* b
 
 inline BlockError BlockDevice::flush() {
     if (ops && ops->flush) {
-        return ops->flush(this);
+        const BlockError err = ops->flush(this);
+        if (licz_io) block_io_add(err == BlockError::Ok ? &io.flushes : &io.flush_errors, 1);
+        return err;
     }
     if (legacy_flush) {
-        return legacy_flush(driver_data) ? BlockError::Ok : BlockError::IOError;
+        const bool ok = legacy_flush(driver_data);
+        if (licz_io) block_io_add(ok ? &io.flushes : &io.flush_errors, 1);
+        return ok ? BlockError::Ok : BlockError::IOError;
     }
     return BlockError::Unsupported;
 }

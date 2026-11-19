@@ -7,6 +7,7 @@
  */
 #include "bursztyn_gui.h"
 #include "bursztyn_ui/bursztyn_ui.h"
+#include "procesy_migawka.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -648,6 +649,61 @@ static void wykonaj_testy_bws_61_83() {
         bws_sprawdz_rowne(alokacje_po_50, alokacje_przed_50, "MOTYW stres: aktywne alokacje sterty");
         (void)bledy_motywow_przed;
         bws_log_sekcja("[TEST 9/9] Podsystem motywów BWS 86..87, accessors, 50x stres-test i brak wycieków: OK\n");
+    }
+
+    // Menedzer zadan (BWS 103/104): Testy systemu nie maja PRAWO_ZARZADZANIE_PROCESAMI, wiec prawdziwe jadro musi
+    // odmowic migawki i zakonczenia (nawet z poprawnym buforem i istniejacym PID), bez zapisu do bufora.
+    {
+        bws_log("[MENEDZER ZADAN] Odmowa BWS 103/104 dla aplikacji bez prawa zarzadzania procesami...\n");
+        static struct { BwsProcesyNaglowek n; BwsProcesInfoV2 w[BWS_PROCESY_V2_MAKS]; } bufor;
+        bufor.n.wersja = 0xA5A5A5A5U;
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCESY_MIGAWKA, reinterpret_cast<uint64_t>(&bufor), sizeof(bufor), BWS_PROCESY_V2_ABI, 0),
+                          BWS_MIGAWKA_BRAK_UPRAWNIEN, "BWS 103 bez prawa");
+        bws_sprawdz_rowne(bufor.n.wersja, 0xA5A5A5A5U, "BWS 103 odmowa nie zapisuje bufora");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCES_ZAKONCZ, 1, 1, 0, 0), BWS_ZAKONCZ_BRAK_UPRAWNIEN, "BWS 104 bez prawa (PID 1)");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCES_ZAKONCZ, 0, 0, 0, 0), BWS_ZAKONCZ_BRAK_UPRAWNIEN, "BWS 104 bez prawa (PID 0)");
+        // Prawo jest sprawdzane PRZED walidacja argumentow: zly bufor, zla wersja, PID poza tablica i dowolna generacja
+        // daja ta sama odmowe (brak wyroczni istnienia procesu/generacji dla nieuprawnionych).
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCESY_MIGAWKA, 0, sizeof(bufor), BWS_PROCESY_V2_ABI, 0),
+                          BWS_MIGAWKA_BRAK_UPRAWNIEN, "BWS 103 bez prawa (bufor NULL)");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCESY_MIGAWKA, reinterpret_cast<uint64_t>(&bufor), 8, BWS_PROCESY_V2_ABI, 0),
+                          BWS_MIGAWKA_BRAK_UPRAWNIEN, "BWS 103 bez prawa (za maly bufor)");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCESY_MIGAWKA, reinterpret_cast<uint64_t>(&bufor), sizeof(bufor), 1, 0),
+                          BWS_MIGAWKA_BRAK_UPRAWNIEN, "BWS 103 bez prawa (zla wersja)");
+        bws_sprawdz_rowne(bufor.n.wersja, 0xA5A5A5A5U, "BWS 103 odmowy nie zapisuja bufora");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCES_ZAKONCZ, 0xFFFFFFFFULL, 1, 0, 0), BWS_ZAKONCZ_BRAK_UPRAWNIEN,
+                          "BWS 104 bez prawa (PID poza tablica)");
+        bws_sprawdz_rowne(bws_wywolaj(BWS_PROCES_ZAKONCZ, 1, 0xFFFFFFFFFFFFFFFFULL, 0, 0), BWS_ZAKONCZ_BRAK_UPRAWNIEN,
+                          "BWS 104 bez prawa (nieaktualna generacja)");
+        // Brak skutkow ubocznych: odmowa nie moze zmienic stanu zadnego procesu. Okna (w tym Menedzera okien i
+        // wlasne) musza przetrwac z ta sama tozsamoscia; probujemy kazdego PID 0..15 z generacjami 0..15.
+        static GuiOknoInfo okna_przed[SKLADACZ_MAKS_WARSTW], okna_po[SKLADACZ_MAKS_WARSTW];
+        const uint32_t n_przed = gui_pobierz_okna(okna_przed, SKLADACZ_MAKS_WARSTW);
+        uint32_t odmowy = 0;
+        for (uint64_t pid = 0; pid < BWS_PROCESY_V2_MAKS; ++pid)
+            for (uint64_t gen = 0; gen < 16; ++gen)
+                if (bws_wywolaj(BWS_PROCES_ZAKONCZ, pid, gen, 0, 0) == BWS_ZAKONCZ_BRAK_UPRAWNIEN) ++odmowy;
+        bws_sprawdz_rowne(odmowy, BWS_PROCESY_V2_MAKS * 16U, "BWS 104 bez prawa: odmowa dla kazdego PID/generacji");
+        {   // ~60 ms w Ring 3 (wywlaszczalny): timer wykonalby ewentualne (bledne) odroczone sprzatanie
+            const uint64_t t0 = gui_czas_monotoniczny_ns();
+            while (t0 != 0 && gui_czas_monotoniczny_ns() - t0 < 60000000ULL) asm volatile("pause");
+        }
+        const uint32_t n_po = gui_pobierz_okna(okna_po, SKLADACZ_MAKS_WARSTW);
+        if (n_przed == 0) {
+            // Lista okien (BWS 42) nie jest dostepna dla Testow systemu - tego warunku nie da sie tu sprawdzic.
+            // Wlasny proces przetrwal jednak 256 odmow (jego PID byl w petli), a stan innych procesow sprawdza
+            // natywnie Menedzer zadan (te same PID i generacje po odmowach).
+            bws_log("[MENEDZER ZADAN] lista okien niedostepna: brak skutkow ubocznych NIE zweryfikowany tutaj\n");
+        } else {
+            bws_sprawdz_rowne(n_po, n_przed, "BWS 104 odmowa: liczba okien bez zmian");
+            uint32_t zgodne = 0;
+            for (uint32_t i = 0; i < n_przed; ++i)
+                for (uint32_t j = 0; j < n_po; ++j)
+                    if (okna_przed[i].window_id == okna_po[j].window_id) { ++zgodne; break; }
+            bws_sprawdz_rowne(zgodne, n_przed, "BWS 104 odmowa: te same tozsamosci okien");
+            bws_log_u64("[MENEDZER ZADAN] okna przed/po odmowach: ", n_przed);
+        }
+        bws_log_sekcja("[MENEDZER ZADAN] BWS 103/104 bez prawa: odmowa jadra: OK\n");
     }
 
     if (bws_test_blad == 0) {

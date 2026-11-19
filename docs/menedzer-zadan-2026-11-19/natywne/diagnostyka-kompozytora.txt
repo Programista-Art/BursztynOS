@@ -1,0 +1,44 @@
+Sesja natywna QEMU 2026-11-19 (jedna, Live ISO tylko do odczytu, TCG, 1280x720, VirtIO tablet)
+Odczyty pamieci jadra przez guest_session "peek" (adresy z system_operacyjny.bin tego samego builda).
+
+Symbole:
+  rozmiar_alokacji_warstwy  0xac0560  (uint64 na PID)   - bajty bufora warstwy okna w kompozytorze
+  zajete_bajty_warstw       0xac0090  (uint64)          - suma bajtow wszystkich warstw
+  generacja_okna            0xac04e0  (uint32 na PID)   - generacja okna (tozsamosc okna na pasku = gen<<32|pid)
+  widocznosc_warstwy        0xac0550  (bool na PID)
+  g_generacja_procesu       0xab9960  (uint64 na PID)   - generacja procesu (BWS 103/104)
+  zasoby_do_zwolnienia      0xaa5540  (24 B na PID: przestrzen_adresowa, baza_stosu_jadra, oczekuje)
+
+1) Po BWS 104 na Kalkulatorze (PID 3, generacja 5, wynik=1) i odroczonym sprzataniu:
+   rozmiar_alokacji_warstwy[0..4] = 0, 3686400 (WM), 2088000 (Menedzer zadan), 0 (Kalkulator), 0
+   zajete_bajty_warstw            = 5774400 = 3686400 + 2088000  -> bufor warstwy Kalkulatora zwolniony
+   widocznosc_warstwy[0..3]       = 0,1,1,0                     -> warstwa PID 3 nieaktywna
+   generacja_okna[0..4]           = 0,1,2,1,0
+   zasoby_do_zwolnienia[3]        = przestrzen=0, stos=0, oczekuje=0 -> PML4/strony i stos jadra zwolnione
+   Zrzut 09: brak okna Kalkulatora na pulpicie, brak ikony na pasku.
+
+2) Ponowne uruchomienie Kalkulatora (ten sam PID 3):
+   g_generacja_procesu[3] = 6 (bylo 5), generacja_okna[3] = 2 (bylo 1), rozmiar_alokacji_warstwy[3] = 456000
+   Menedzer zadan: "Kalkulator · PID 3, generacja 6" (zrzut 10). Na pasku jedna ikona Kalkulatora.
+
+3) Zwykle zamkniecie Notatnika (PID 4, przycisk X, BWS 32):
+   rozmiar_alokacji_warstwy[0..5] = 0, 3686400, 2088000, 456000, 0, 0
+   zajete_bajty_warstw            = 6230400 = 3686400 + 2088000 + 456000
+   zasoby_do_zwolnienia[4]        = 0,0,0 ; g_generacja_procesu[4] = 7 ; brak wpisu BWS104 w logu
+   RAM w uzyciu: 234,9 MiB przed uruchomieniem -> 245,0 z Notatnikiem -> 234,9 MiB po zamknieciu.
+
+4) Testy systemu (test.bur, bez PRAWO_ZARZADZANIE_PROCESAMI), sekcja [MENEDZER ZADAN]:
+   260 wywolan BWS 104 od PID 4 -> wszystkie wynik=4 (BRAK_UPRAWNIEN), 0 innych wynikow;
+   BWS 103: odmowa (poprawny bufor, NULL, za maly, zla wersja), bufor nietkniety.
+   "[MENEDZER ZADAN] BWS 103/104 bez prawa: odmowa jadra: OK", "BWS 61..83: PASS".
+   Po odmowach wszystkie procesy zyly z tymi samymi PID/czasem dzialania (zrzut 17).
+   Uwaga: sprawdzenie listy okien w test.bur bylo puste (BWS 42 zwraca 0 okien dla test.bur) - poprawione
+   po sesji tak, by jawnie zglaszalo "NIE zweryfikowany"; native rerun nie byl wykonany.
+
+5) Sesja zakonczyla sie, gdy test.bur ulegl awarii w tescie BursztynUI MEMO:
+   [USER FAULT] pid=4 vector=14 rva=0x6047E -> BSF::face_directory, instrukcja "call" tuz po "sub $0x458,%rsp"
+   = przepelnienie stosu Ring 3 (256 KiB; ramka wykonaj_testy_bursztyn_ui = 0xD168 B, identyczna przed i po
+   zmianach). Problem istniejacy, niezwiazany z Menedzerem zadan. Jadro poprawnie zakonczylo proces; to
+   harness (desktop_qemu_lib.FAULTS) przerwal sesje - dodano opcje guest_session --tolerate-user-fault.
+
+Puls hosta (heartbeat.log): przerwy 29,8 s i 23,5 s (zamrozenia VirtualBox) w czasie testow systemu.

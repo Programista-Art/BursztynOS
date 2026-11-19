@@ -21,6 +21,8 @@ bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void* p,size_t) {return p!=null
 bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void* p,size_t) {return p!=nullptr;}
 bool bws_vmm_sprawdz_zakres_uzytkownika(const void*,size_t,bool) {return true;}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*) {return true;}
+// syscalls.cpp liczy I/O plikow procesu (rozliczanie_io.h, BWS 106); -O0 nie usuwa wywolania.
+extern "C" uint64_t scheduler_generacja_procesu(int pid){return pid>0?1:0;}
 uint64_t scheduler_pobierz_tick() {return 1;}
 extern "C" void bws_powiadom_zmiane_pliku(const char*,uint32_t) {}
 // ---- loader stubs: record what the syscall would hand to the real loader

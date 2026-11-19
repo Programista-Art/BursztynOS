@@ -15,6 +15,7 @@ constexpr uint32_t MAX_NET_DEVICES = 8;
 NetworkDevice* s_devices[MAX_NET_DEVICES] = {nullptr};
 uint32_t s_device_count = 0;
 NetworkDevice* s_primary_device = nullptr;
+uint32_t s_next_registration_id = 0;
 
 bool str_equals(const char* a, const char* b) {
     if (!a || !b) return false;
@@ -50,6 +51,8 @@ extern "C" bool net_register_device(NetworkDevice* dev) {
     if (s_device_count >= MAX_NET_DEVICES) return false;
 
     dev->active = true;
+    if (++s_next_registration_id == 0) ++s_next_registration_id;
+    dev->registration_id = s_next_registration_id;
     net_diag(dev,true);
     s_devices[s_device_count++] = dev;
 
