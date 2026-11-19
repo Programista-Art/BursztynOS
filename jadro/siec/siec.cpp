@@ -55,6 +55,7 @@
 #include "scheduler.h"
 #include "network_lease.h"
 #include "network_device.h"
+#include "rozliczanie_io.h"
 #include "sterowniki/czas/hpet.h"
 
 #include <stdint.h>
@@ -3236,6 +3237,11 @@ bool tcp_tryb_gniazda =
 bool tcp_sesja_zajeta =
     false;
 
+/* Wlasciciel sesji TCP dla licznikow I/O procesow (rozliczanie_io.h): proces, ktory w swoim syscallu zarezerwowal
+ * sesje (gniazdo BWS 80 albo HTTP/HTTPS). Pakiety odebrane pozniej - w przerwaniu albo podczas odpytywania z innego
+ * kontekstu - sa liczone wlascicielowi sesji, nie procesowi akurat wykonywanemu. */
+RozliczanieIo::Wlasciciel tcp_wlasciciel{};
+
 bool tcp_przepelnienie_odbioru =
     false;
 
@@ -3333,6 +3339,7 @@ void tcp_resetuj_sesje(
     if (zwolnij_wlasciciela) {
         tcp_sesja_zajeta =
             false;
+        tcp_wlasciciel = {};
     }
 }
 
@@ -3346,6 +3353,8 @@ bool tcp_rezerwuj_sesje() {
 
     tcp_sesja_zajeta =
         true;
+    tcp_wlasciciel.pid = aktualny_pid;
+    tcp_wlasciciel.generacja = aktualny_pid > 0 ? scheduler_generacja_procesu(aktualny_pid) : 0;
 
     return true;
 }
@@ -3503,12 +3512,15 @@ bool tcp_wyslij_internal(
             )
         );
 
-    return
+    const bool wyslano =
         wyslij_ethernet(
             ramka,
             ETH_LEN +
                 ip_len
         );
+    if (wyslano && payload_len > 0)
+        rozliczanie_io_dodaj(tcp_wlasciciel.pid, tcp_wlasciciel.generacja, RozliczanieIo::SiecWyslane, payload_len);
+    return wyslano;
 }
 
 bool tcp_przygotuj_polaczenie(
@@ -3780,6 +3792,8 @@ void tcp_przyjmij_payload(
         tcp_nasz_ack +=
             payload_len;
 
+        rozliczanie_io_dodaj(tcp_wlasciciel.pid, tcp_wlasciciel.generacja, RozliczanieIo::SiecOdebrane, payload_len);
+
         (void)tcp_wyslij_internal(
             TCP_FLAG_ACK,
             nullptr,
@@ -3834,6 +3848,8 @@ void tcp_przyjmij_payload(
 
     tcp_nasz_ack +=
         payload_len;
+
+    rozliczanie_io_dodaj(tcp_wlasciciel.pid, tcp_wlasciciel.generacja, RozliczanieIo::SiecOdebrane, payload_len);
 
     (void)tcp_wyslij_internal(
         TCP_FLAG_ACK,

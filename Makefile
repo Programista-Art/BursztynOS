@@ -2520,7 +2520,7 @@ diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagno
 	$(LD) -r -b binary diagnostyka.bin.bz -o diagnostyka_blob.o
 
 # Menedzer zadan (.cebula / BUR): telemetria procesow BWS 103, zakonczenie BWS 104 (docs/menedzer-zadan.md).
-MENEDZER_ZADAN_ZRODLA := programy/menedzer_zadan/menedzer_zadan.cpp programy/menedzer_zadan/okno.h programy/menedzer_zadan/model.h jadro/bws/procesy_migawka.h jadro/gui/desktop_entries.h
+MENEDZER_ZADAN_ZRODLA := programy/menedzer_zadan/menedzer_zadan.cpp programy/menedzer_zadan/okno.h programy/menedzer_zadan/model.h programy/menedzer_zadan/urzadzenia.h jadro/bws/procesy_migawka.h jadro/bws/urzadzenia_telemetria.h jadro/bws/bws_api.h jadro/gui/desktop_entries.h
 menedzer_zadan_tmp.o: $(MENEDZER_ZADAN_ZRODLA) $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
 
@@ -2537,6 +2537,14 @@ test-menedzer-zadan-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_menedzer_zadan_host.cpp -o .bsf-test/menedzer-zadan
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/menedzer-zadan
+
+# Telemetria urzadzen (BWS 105, docs/menedzer-zadan-monitorowanie.md): liczniki BlockDevice, rejestr NetworkDevice,
+# budowa odpowiedzi jadra i model urzadzen Menedzera zadan (ASan/UBSan).
+.PHONY: test-telemetria-urzadzen-host
+test-telemetria-urzadzen-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_NET_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer sterowniki/siec/network_device.cpp testy/test_telemetria_urzadzen_host.cpp -o .bsf-test/telemetria-urzadzen
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/telemetria-urzadzen
 
 # Kazda slaba referencja w obiektach jadra musi trafic w definicje w obrazie (regresja zlego linkage hooka
 # usun_warstwe, ktory zostawial okna-duchy po BWS 97/104).

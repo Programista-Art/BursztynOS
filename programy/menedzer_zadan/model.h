@@ -9,7 +9,8 @@
  *    nie zeruje); procesy dopasowuje para (PID, generacja), wiec ponownie uzyty
  *    PID nigdy nie dziedziczy cudzej historii,
  *  - utrzymuje wybor jako tozsamosc procesu (nie indeks wiersza),
- *  - sortuje (Nazwa, PID, Stan, Procesor, Pamiec),
+ *  - laczy liczniki I/O (BWS 106) po (PID, generacja) i liczy tempo plikow i sieci w przedziale,
+ *  - sortuje (Nazwa, PID, Stan, Procesor, Pamiec, Dysk, Siec, Czas dzialania),
  *  - prowadzi przeplyw "Zakoncz zadanie": potwierdzenie, anulowanie, wynik
  *    jadra, oczekiwanie na faktyczne zwolnienie zasobow,
  *  - przechowuje ograniczona historie (bufor kolowy) do wykresow.
@@ -17,6 +18,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "procesy_migawka.h"
+#include "urzadzenia_telemetria.h"
 #include "desktop_entries.h"
 
 namespace MenedzerZadan {
@@ -219,6 +221,11 @@ struct Wiersz {
     uint64_t generacja, cpu_ns, start_ns, uprawnienia;
     uint64_t prywatna, tablice, wspoldzielona, stos, okno, sterta;
     int cpu_promile;                 // NIEDOSTEPNE, gdy brak przedzialu pomiaru
+    /* I/O (BWS 106). Tempa w B/s; -1 = niedostepne (brak przedzialu, brak licznika, licznik nie dotyczy). */
+    bool io_znane;                   // liczniki skumulowane ponizej pochodza z jadra
+    uint32_t io_flagi;               // BWS_IO_PLIKI / BWS_IO_SIEC
+    uint64_t pliki_odczyt, pliki_zapis, siec_wyslane, siec_odebrane;
+    int64_t dysk_bps, siec_bps, pliki_odczyt_bps, pliki_zapis_bps, siec_wyslane_bps, siec_odebrane_bps;
     char sciezka[BWS_PROCES_SCIEZKA_MAKS];
     char nazwa[64];
     Tozsamosc id() const { return {pid, generacja}; }
@@ -245,8 +252,16 @@ struct System {
     bool obcieta = false;
 };
 
-enum class Kolumna : uint8_t { Nazwa = 0, Pid = 1, Stan = 2, Procesor = 3, Pamiec = 4 };
-inline constexpr int LICZBA_KOLUMN = 5;
+enum class Kolumna : uint8_t { Nazwa = 0, Pid = 1, Stan = 2, Procesor = 3, Pamiec = 4, Dysk = 5, Siec = 6, Czas = 7 };
+inline constexpr int LICZBA_KOLUMN = 8;
+
+/* Tempo I/O jednej generacji procesu w ostatnim przedziale BWS 106. */
+struct ProcesIo {
+    Tozsamosc id;
+    uint32_t flagi = 0;
+    uint64_t v[4]{};                 // pliki odczyt, pliki zapis, siec wyslane, siec odebrane (skumulowane)
+    int64_t bps[4] = {-1, -1, -1, -1};
+};
 
 /* Przeplyw zakonczenia */
 enum class Etap : uint8_t { Brak, Potwierdzanie, Oczekiwanie };
@@ -255,6 +270,52 @@ enum class Zdarzenie : uint8_t { Nic, Zakonczony, NadalKonczony, PrzekroczonyCza
 
 class Model {
 public:
+    /*
+     * Liczniki I/O (BWS 106) - wolac PRZED zastosuj() tej samej probki: zastosuj() wpisuje tempa do wierszy
+     * przed sortowaniem. Tempo = roznica licznikow tej samej (PID, generacja) / roznica czas_ns. Generacja,
+     * ktorej nie bylo w poprzedniej migawce, powstala w tym przedziale i zaczela od zera: tempo = licznik / przedzial.
+     * false = odpowiedz odrzucona (tempa niedostepne, nic nie jest zgadywane).
+     */
+    bool zastosuj_io(const BwsProcesyIoOdpowiedz& o) {
+        const auto& n = o.naglowek;
+        bool ok = n.wersja == BWS_PROCESY_IO_V1_ABI && n.rozmiar_naglowka == sizeof(BwsProcesyIoNaglowek) &&
+                  n.rozmiar_wpisu == sizeof(BwsProcesIoV1) && n.liczba_wpisow <= BWS_IO_MAKS_PROCESOW;
+        for (uint32_t i = 0; ok && i < n.liczba_wpisow; ++i) {
+            if (o.wpisy[i].pid >= MAKS) ok = false;
+            for (uint32_t j = 0; ok && j < i; ++j) if (o.wpisy[j].pid == o.wpisy[i].pid) ok = false;
+        }
+        if (!ok) { io_liczba_ = 0; io_poprz_ = false; return false; }
+        const bool zegar = (n.flagi & BWS_IO_ZEGAR) && n.czas_ns;
+        const uint64_t dt = zegar && io_poprz_ && n.czas_ns > io_poprz_ns_ ? n.czas_ns - io_poprz_ns_ : 0;
+        ProcesIo nowe[BWS_IO_MAKS_PROCESOW];
+        for (uint32_t i = 0; i < n.liczba_wpisow; ++i) {
+            const BwsProcesIoV1& w = o.wpisy[i];
+            ProcesIo& r = nowe[i];
+            r.id = {w.pid, w.generacja}; r.flagi = w.flagi;
+            r.v[0] = w.pliki_odczyt_bajtow; r.v[1] = w.pliki_zapis_bajtow;
+            r.v[2] = w.siec_wyslane_bajtow; r.v[3] = w.siec_odebrane_bajtow;
+            if (!dt) continue;
+            const ProcesIo* s = nullptr;
+            for (uint32_t j = 0; j < io_liczba_; ++j) if (io_[j].id == r.id) s = &io_[j];
+            for (int k = 0; k < 4; ++k) {
+                const uint64_t przed = s ? s->v[k] : 0;
+                if (r.v[k] < przed) continue;                   // spadek = niespojnosc: niedostepne
+                const uint64_t d = r.v[k] - przed;
+                // bajty * 1e9 / dt bez przepelnienia: d < 2^34 B w 1 s jest zawsze bezpieczne
+                r.bps[k] = d <= UINT64_MAX / 1000000000ULL ? static_cast<int64_t>((d * 1000000000ULL + dt / 2) / dt)
+                                                           : static_cast<int64_t>(d / (dt / 1000000000ULL + 1));
+            }
+        }
+        for (uint32_t i = 0; i < n.liczba_wpisow; ++i) io_[i] = nowe[i];
+        io_liczba_ = n.liczba_wpisow;
+        io_naglowek_ = n;
+        io_poprz_ = zegar;
+        io_poprz_ns_ = zegar ? n.czas_ns : 0;
+        return true;
+    }
+    void blad_io() { io_liczba_ = 0; io_poprz_ = false; }
+    const BwsProcesyIoNaglowek& naglowek_io() const { return io_naglowek_; }
+
     /* Zastosuj migawke. false = odpowiedz niepoprawna (dane poprzednie pozostaja, nic nie jest wymyslane). */
     bool zastosuj(const BwsProcesyNaglowek& n, const BwsProcesInfoV2* wpisy, uint64_t teraz_monotoniczny_ns = 0) {
         if (n.wersja != BWS_PROCESY_V2_ABI || n.rozmiar_naglowka != sizeof(BwsProcesyNaglowek) ||
@@ -285,6 +346,7 @@ public:
             for (; k + 1 < sizeof(r.sciezka) && w.sciezka[k]; ++k) r.sciezka[k] = w.sciezka[k];
             r.sciezka[k] = '\0';
             nazwa_procesu(r.pid, r.sciezka, r.nazwa, sizeof(r.nazwa));
+            wpisz_io(r);
             r.cpu_promile = NIEDOSTEPNE;
             if (!przedzial) continue;
             const Wiersz* stary = znajdz_w(poprz_, poprz_liczba_, r.id());
@@ -406,6 +468,27 @@ public:
     }
 
 private:
+    /* Wiersz dostaje liczniki tylko z wpisu tej samej (PID, generacja). PID 0 nie uzywa wywolan plikowych. */
+    void wpisz_io(Wiersz& r) const {
+        r.io_znane = false; r.io_flagi = 0;
+        r.pliki_odczyt = r.pliki_zapis = r.siec_wyslane = r.siec_odebrane = 0;
+        r.dysk_bps = r.siec_bps = r.pliki_odczyt_bps = r.pliki_zapis_bps = r.siec_wyslane_bps = r.siec_odebrane_bps = -1;
+        for (uint32_t i = 0; i < io_liczba_; ++i) {
+            const ProcesIo& p = io_[i];
+            if (!(p.id == r.id())) continue;
+            r.io_znane = true; r.io_flagi = p.flagi;
+            r.pliki_odczyt = p.v[0]; r.pliki_zapis = p.v[1]; r.siec_wyslane = p.v[2]; r.siec_odebrane = p.v[3];
+            if (p.flagi & BWS_IO_PLIKI) {
+                r.pliki_odczyt_bps = p.bps[0]; r.pliki_zapis_bps = p.bps[1];
+                if (p.bps[0] >= 0 && p.bps[1] >= 0) r.dysk_bps = p.bps[0] + p.bps[1];
+            }
+            if (p.flagi & BWS_IO_SIEC) {
+                r.siec_wyslane_bps = p.bps[2]; r.siec_odebrane_bps = p.bps[3];
+                if (p.bps[2] >= 0 && p.bps[3] >= 0) r.siec_bps = p.bps[2] + p.bps[3];
+            }
+            return;
+        }
+    }
     static const Wiersz* znajdz_w(const Wiersz* t, uint32_t n, const Tozsamosc& id) {
         for (uint32_t i = 0; i < n; ++i) if (t[i].id() == id) return &t[i];
         return nullptr;
@@ -418,6 +501,13 @@ private:
             case Kolumna::Stan: c = a.stan < b.stan ? -1 : a.stan > b.stan ? 1 : 0; break;
             case Kolumna::Procesor: c = a.cpu_promile < b.cpu_promile ? -1 : a.cpu_promile > b.cpu_promile ? 1 : 0; break;
             case Kolumna::Pamiec: c = a.pamiec() < b.pamiec() ? -1 : a.pamiec() > b.pamiec() ? 1 : 0; break;
+            case Kolumna::Dysk: c = a.dysk_bps < b.dysk_bps ? -1 : a.dysk_bps > b.dysk_bps ? 1 : 0; break;
+            case Kolumna::Siec: c = a.siec_bps < b.siec_bps ? -1 : a.siec_bps > b.siec_bps ? 1 : 0; break;
+            // Dluzej dzialajacy = wczesniejszy start; PID 0 (bez czasu startu) na koncu rosnaco
+            case Kolumna::Czas: {
+                const uint64_t sa = a.start_ns ? a.start_ns : UINT64_MAX, sb = b.start_ns ? b.start_ns : UINT64_MAX;
+                c = sa > sb ? -1 : sa < sb ? 1 : 0; break;
+            }
         }
         if (c == 0) c = a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0;   // deterministycznie: PID
         return rosnaco_ ? c : -c;
@@ -460,6 +550,11 @@ private:
     uint64_t od_ns_ = 0;
     Zdarzenie ostatnie_zdarzenie_ = Zdarzenie::Nic;
     int hist_cpu_[HISTORIA]{}, hist_ram_[HISTORIA]{};
+    ProcesIo io_[BWS_IO_MAKS_PROCESOW];
+    uint32_t io_liczba_ = 0;
+    bool io_poprz_ = false;
+    uint64_t io_poprz_ns_ = 0;
+    BwsProcesyIoNaglowek io_naglowek_{};
     size_t glowa_historii_ = 0, liczba_historii_ = 0;
 };
 

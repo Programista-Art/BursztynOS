@@ -27,6 +27,12 @@
 #include "bws_hda_diag.h"
 #include "bws_procesy.h"
 #include "procesy_migawka.h"
+#include "urzadzenia_migawka.h"
+#include "rozliczanie_io.h"
+#include "blokowy.h"
+#include "sterowniki/siec/network_device.h"
+#include "sterowniki/virtio/virtio_gpu.h"
+#include "graphics_perf.h"
 #include "popup_autoryzacja.h"
 #include "pamiec_procesu.h"
 #include "stos_jadra.h"
@@ -1192,6 +1198,111 @@ uint64_t procesy_migawka(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t
     return BWS_MIGAWKA_OK;
 }
 
+/*
+ * BWS 105: telemetria urzadzen (dyski, karty sieciowe, grafika) - urzadzenia_telemetria.h,
+ * docs/menedzer-zadan-monitorowanie.md. Tylko odczyt licznikow juz utrzymywanych przez jadro; zadnego I/O,
+ * zadnych sond sprzetu poza odczytem stanu lacza, ktory sterownik i tak udostepnia. Sekcja bez przerwan
+ * obejmuje wylacznie kopiowanie licznikow do bufora BSS (kopia do Ring 3 po niej).
+ */
+uint64_t urzadzenia_telemetria(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!wolno_zarzadzac_procesami_v2(p)) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+    if (wersja != BWS_URZADZENIA_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+    if (!UrzadzeniaTelemetria::bufor_poprawny(bufor, rozmiar, sizeof(BwsUrzadzeniaOdpowiedz)) ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor), sizeof(BwsUrzadzeniaOdpowiedz)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    static BwsUrzadzeniaOdpowiedz odp;
+    odp = {};
+    BwsUrzadzeniaNaglowek& n = odp.naglowek;
+    n.wersja = BWS_URZADZENIA_V1_ABI;
+    n.rozmiar_naglowka = sizeof(BwsUrzadzeniaNaglowek);
+    n.rozmiar_dysku = sizeof(BwsDyskInfoV1);
+    n.rozmiar_sieci = sizeof(BwsSiecInfoV1);
+    n.rozmiar_grafiki = sizeof(BwsGrafikaInfoV1);
+    n.psf_dysk = BWS_URZ_BRAK;
+    const bool zegar = hpet_dostepny();
+    const Storage::Device* psf = psf_urzadzenie_trwale();
+    n.flagi |= psf ? BWS_URZ_PSF_NA_DYSKU : BWS_URZ_PSF_W_RAM;
+    UrzadzeniaMigawka::ZrodloGrafiki g{};
+    {
+        BezPrzerwan bez_przerwan;
+        if (zegar) { n.flagi |= BWS_URZ_ZEGAR; n.czas_ns = czas_monotoniczny_ns(); }
+        const uint32_t dyski = blokowy_liczba_dyskow();
+        n.wszystkich_dyskow = dyski;
+        for (uint32_t i = 0; i < dyski; ++i) {
+            const Storage::Device* f = blokowy_dysk(i);
+            if (!f) continue;
+            if (f == psf) n.psf_dysk = i;
+            if (n.liczba_dyskow >= BWS_URZ_MAKS_DYSKOW) { n.flagi |= BWS_URZ_DYSKI_OBCIETE; continue; }
+            UrzadzeniaMigawka::dysk(odp.dyski[n.liczba_dyskow++], i, *f, blokowy_dysk_sprzetowy(i), f == psf);
+        }
+        const uint32_t sieci = net_get_device_count();
+        n.wszystkich_sieci = sieci;
+        const NetworkDevice* glowna = net_get_primary_device();
+        for (uint32_t i = 0; i < sieci; ++i) {
+            const NetworkDevice* d = net_get_device_by_index(i);
+            if (!d) continue;
+            if (n.liczba_sieci >= BWS_URZ_MAKS_SIECI) { n.flagi |= BWS_URZ_SIECI_OBCIETE; continue; }
+            UrzadzeniaMigawka::siec(odp.sieci[n.liczba_sieci++], *d, d == glowna, d->get_link_state());
+        }
+        const auto& c = GraphicsPerf::graphics_perf.counters;
+        auto lc = [&](GraphicsPerf::Counter k) { return __atomic_load_n(&c[k], __ATOMIC_RELAXED); };
+        const TrybEkranu tryb = grafika_tryb_ekranu();
+        g.backend = grafika_mozliwosci_ekranu().backend;
+        g.szerokosc = tryb.szerokosc; g.wysokosc = tryb.wysokosc; g.bpp = tryb.bpp; g.pitch = tryb.pitch;
+        g.kursor_sprzetowy = grafika_czy_kursor_sprzetowy();
+        g.zegar = zegar;
+        g.klatki = lc(GraphicsPerf::Frames); g.pelne_klatki = lc(GraphicsPerf::FullFrames);
+        g.czas_skladania_ns = lc(GraphicsPerf::ComposeNs); g.czas_prezentacji_ns = lc(GraphicsPerf::PresentNs);
+        g.piksele = lc(GraphicsPerf::Pixels);
+        g.kopie_bajty = lc(GraphicsPerf::CopyBytes); g.czas_kopii_ns = lc(GraphicsPerf::CopyNs);
+        g.polecenia_gpu = lc(GraphicsPerf::GpuCommands); g.czas_oczekiwania_gpu_ns = lc(GraphicsPerf::GpuWaitNs);
+        g.transfery = lc(GraphicsPerf::Transfers); g.piksele_transferu = lc(GraphicsPerf::TransferPixels);
+        g.flush = lc(GraphicsPerf::Flushes); g.piksele_flush = lc(GraphicsPerf::FlushPixels);
+        g.kursor = lc(GraphicsPerf::CursorPresents);
+        g.warstwy_bajtow = skladacz_obrazu_bajty_warstw_razem();
+        g.bufory_bajtow = GraphicsPerf::graphics_resources.live_bytes;
+        if (const VirtioGpuDriver* drv = virtio_gpu_get_driver(0); drv && drv->initialized) {
+            g.virtio = true;
+            g.blad_trwaly = drv->permanent_failure_reason != nullptr;
+            g.format_virtio = drv->fb_format;
+            g.bledy_gpu = drv->error_count;
+            g.spoznione_gpu = drv->recovery.late_completions;
+            if (drv->dev) { g.pci_vendor = drv->dev->pci_vendor_id; g.pci_device = drv->dev->pci_device_id; }
+        }
+    }
+    UrzadzeniaMigawka::grafika(odp.grafika[0], g);
+    n.liczba_grafiki = 1;
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp, sizeof(odp)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    return BWS_TELEMETRIA_OK;
+}
+
+/*
+ * BWS 106: skumulowane liczniki I/O kazdej zywej generacji procesu (rozliczanie_io.h). Migawka tabeli i generacji
+ * slotow w jednej sekcji bez przerwan, wiec wpis zawsze opisuje generacje, ktora w tej chwili zajmuje slot.
+ */
+uint64_t procesy_io(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!wolno_zarzadzac_procesami_v2(p)) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+    if (wersja != BWS_PROCESY_IO_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+    if (!UrzadzeniaTelemetria::bufor_poprawny(bufor, rozmiar, sizeof(BwsProcesyIoOdpowiedz)) ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor), sizeof(BwsProcesyIoOdpowiedz)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    static_assert(BWS_IO_MAKS_PROCESOW == PZB_MAKS_PROCESOW, "BWS 106: wpis na kazdy slot procesu");
+    static BwsProcesyIoOdpowiedz odp;
+    {
+        BezPrzerwan bez_przerwan;
+        uint64_t generacje[BWS_IO_MAKS_PROCESOW] = {};
+        for (int pid = 1; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid)
+            if (__atomic_load_n(&tablica_procesow[pid].stan, __ATOMIC_ACQUIRE) != PROCES_PUSTY)
+                generacje[pid] = scheduler_generacja_procesu(pid);
+        const bool zegar = hpet_dostepny();
+        RozliczanieIo::migawka(RozliczanieIo::g_tabela, generacje, zegar ? czas_monotoniczny_ns() : 0, zegar, odp);
+    }
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp, sizeof(odp)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    return BWS_TELEMETRIA_OK;
+}
+
 void log_zakonczenia_v2(int wywolujacy, uint64_t pid, uint64_t generacja, uint64_t wynik) {
     char buf[128]; size_t k = 0;
     auto txt = [&](const char* t) { while (*t && k + 1 < sizeof(buf)) buf[k++] = *t++; };
@@ -1852,6 +1963,8 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_PROCES_ZABIJ: return proces_zabij(*proces, a1);
         case BWS_PROCESY_MIGAWKA: return procesy_migawka(*proces, a1, a2, a3);
         case BWS_PROCES_ZAKONCZ: return proces_zakoncz_v2(*proces, a1, a2);
+        case BWS_URZADZENIA_TELEMETRIA: return urzadzenia_telemetria(*proces, a1, a2, a3);
+        case BWS_PROCESY_IO: return procesy_io(*proces, a1, a2, a3);
         case BWS_OKNO_PODRZEDNE_OTWORZ: return okno_podrzedne_otworz(*proces, a1, a2, a3, a4);
         case BWS_OKNO_PODRZEDNE_TRESC: return okno_podrzedne_tresc(*proces, a1, a2);
         case BWS_OTA_STATUS:

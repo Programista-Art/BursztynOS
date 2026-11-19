@@ -140,11 +140,16 @@ struct NetworkDevice {
 
     NetDeviceStats stats;
 
+    /* Numer rejestracji (1, 2, ...) nadawany przez net_register_device; staly w obrebie uruchomienia, w odroznieniu
+     * od indeksu rejestru, ktory przesuwa sie po wyrejestrowaniu. Ponowna rejestracja = nowy numer (telemetria
+     * traktuje to jak nowe urzadzenie i nie liczy tempa z poprzednich licznikow). 0 = niezarejestrowane. */
+    uint32_t registration_id;
+
     constexpr NetworkDevice()
         : driver_data(nullptr), ops(nullptr),
           name{0}, device_type(NetDeviceType::Unknown),
           mac{0, 0, 0, 0, 0, 0}, mtu(NET_DEFAULT_MTU),
-          active(false), stats{0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {}
+          active(false), stats{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, registration_id(0) {}
 
     NetError transmit(const void* frame, size_t length);
     void poll_rx();

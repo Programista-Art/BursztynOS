@@ -33,6 +33,9 @@
 #include "plik_status.h"
 
 void psf_ustaw_partycje(const Storage::Partition* partition);
+/* Telemetria (BWS 105): urzadzenie (filtr rejestru blokowego) z trwalym PSF albo nullptr, gdy PSF dziala tylko w RAM.
+ * Bez blokady PSF - odczyt dwoch zmiennych, wynik moze byc o jedna operacje montowania nieaktualny. */
+const Storage::Device* psf_urzadzenie_trwale();
 #ifdef __cplusplus
 extern "C" {
 #endif

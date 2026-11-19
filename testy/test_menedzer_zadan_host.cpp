@@ -24,6 +24,8 @@
 #include "rozliczanie_cpu.h"
 #include "pamiec_procesu.h"
 #include "procesy_migawka.h"
+#define BURSZTYN_ROZLICZANIE_IO_HOST 1
+#include "rozliczanie_io.h"
 #include "uruchamianie_polityka.h"
 #include "scheduler.h"
 #include "app_icons.h"
@@ -224,7 +226,8 @@ static void pamiec_procesu() {
 // =====================================================================================
 static void abi_i_polityka() {
     using namespace ProcesyMigawka;
-    CHECK(BWS_PROCESY_MIGAWKA == 103 && BWS_PROCES_ZAKONCZ == 104 && BWS_PIERWSZY_WOLNY == 105);
+    CHECK(BWS_PROCESY_MIGAWKA == 103 && BWS_PROCES_ZAKONCZ == 104 && BWS_URZADZENIA_TELEMETRIA == 105 &&
+          BWS_PROCESY_IO == 106 && BWS_PIERWSZY_WOLNY == 107);
     uint32_t n = 99;
     CHECK(!pojemnosc_bufora(0, &n));
     CHECK(!pojemnosc_bufora(sizeof(BwsProcesyNaglowek) - 1, &n));
@@ -313,6 +316,16 @@ struct Jadro {
     bool hpet = true, ram = true, prawo = true;
     unsigned c103 = 0, c104 = 0; uint64_t ost_pid = 0, ost_gen = 0;
     uint64_t wymus103 = 0;                   // != 0: zwroc ten kod bledu
+    // BWS 105/106: prawdziwa logika rozliczania (rozliczanie_io.h), czas = teraz
+    RozliczanieIo::Tabela io{};
+    unsigned c105 = 0, c106 = 0; uint64_t wymus106 = 0;
+    uint32_t l_dyskow = 1, l_sieci = 1, backend = 4;     // backend 0 = brak wpisu grafiki
+    uint64_t dysk_odczyt[8]{}, dysk_zapis[8]{}, siec_rx[8]{}, siec_tx[8]{}, klatki = 0, transfer_px = 0;
+    uint32_t id_dysku[8] = {0, 1, 2, 3, 4, 5, 6, 7}, id_sieci[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    void io_procesu(int pid, RozliczanieIo::Rodzaj r, uint64_t n) { RozliczanieIo::dodaj(io, pid, p[pid].gen, p[pid].zywy ? p[pid].gen : 0, r, n); }
+    void io_starej_generacji(int pid, uint64_t gen, RozliczanieIo::Rodzaj r, uint64_t n) {
+        RozliczanieIo::dodaj(io, pid, gen, p[pid].zywy ? p[pid].gen : 0, r, n);
+    }
     int uruchom(int pid, const char* s, uint8_t poziom = PZB_UZYTKOWNIK, int stan = 3) {
         p[pid] = {}; p[pid].zywy = true; p[pid].stan = stan; p[pid].poziom = poziom; p[pid].gen = nast_gen++;
         p[pid].start = teraz; p[pid].sciezka = s; p[pid].priv = 1024 * 1024; return pid;
@@ -364,6 +377,52 @@ struct Jadro {
             auto* n = reinterpret_cast<BwsProcesyNaglowek*>(a1);
             migawka(*n, reinterpret_cast<BwsProcesInfoV2*>(n + 1), poj);
             return BWS_MIGAWKA_OK;
+        }
+        if (nr == BWS_PROCESY_IO) {
+            ++c106;
+            if (wymus106) return wymus106;
+            if (!prawo) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+            if (a3 != BWS_PROCESY_IO_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+            if (!UrzadzeniaTelemetria::bufor_poprawny(a1, a2, sizeof(BwsProcesyIoOdpowiedz))) return BWS_TELEMETRIA_ZLY_BUFOR;
+            uint64_t gen[16] = {};
+            for (int pid = 1; pid < 16; ++pid) if (p[pid].zywy) gen[pid] = p[pid].gen;
+            RozliczanieIo::migawka(io, gen, teraz, hpet, *reinterpret_cast<BwsProcesyIoOdpowiedz*>(a1));
+            return BWS_TELEMETRIA_OK;
+        }
+        if (nr == BWS_URZADZENIA_TELEMETRIA) {
+            ++c105;
+            if (!prawo) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+            if (a3 != BWS_URZADZENIA_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+            if (!UrzadzeniaTelemetria::bufor_poprawny(a1, a2, sizeof(BwsUrzadzeniaOdpowiedz))) return BWS_TELEMETRIA_ZLY_BUFOR;
+            auto& o = *reinterpret_cast<BwsUrzadzeniaOdpowiedz*>(a1);
+            o = {};
+            auto& n = o.naglowek;
+            n.wersja = BWS_URZADZENIA_V1_ABI; n.rozmiar_naglowka = sizeof(n); n.rozmiar_dysku = sizeof(BwsDyskInfoV1);
+            n.rozmiar_sieci = sizeof(BwsSiecInfoV1); n.rozmiar_grafiki = sizeof(BwsGrafikaInfoV1);
+            n.flagi = (hpet ? BWS_URZ_ZEGAR : 0) | BWS_URZ_PSF_W_RAM; n.czas_ns = hpet ? teraz : 0; n.psf_dysk = BWS_URZ_BRAK;
+            n.liczba_dyskow = n.wszystkich_dyskow = l_dyskow; n.liczba_sieci = n.wszystkich_sieci = l_sieci;
+            n.liczba_grafiki = backend ? 1 : 0;
+            for (uint32_t i = 0; i < l_dyskow; ++i) {
+                auto& d = o.dyski[i];
+                d.id = id_dysku[i]; d.typ = i == 1 ? BWS_DYSK_AHCI : BWS_DYSK_VIRTIO; d.flagi = BWS_DYSK_ONLINE | BWS_DYSK_TYLKO_ODCZYT;
+                if (d.typ == BWS_DYSK_AHCI) { d.flagi |= BWS_DYSK_MODEL_URZADZENIA; std::snprintf(d.model, sizeof(d.model), "QEMU HARDDISK"); }
+                d.rozmiar_sektora = 512; d.sektory = 100000; d.bajty_odczytane = dysk_odczyt[i]; d.bajty_zapisane = dysk_zapis[i];
+                d.operacje_odczytu = dysk_odczyt[i] / 4096; d.operacje_zapisu = dysk_zapis[i] / 4096;
+            }
+            for (uint32_t i = 0; i < l_sieci; ++i) {
+                auto& e = o.sieci[i];
+                e.id = id_sieci[i]; e.typ = i ? BWS_SIEC_VIRTIO : BWS_SIEC_E1000;
+                e.flagi = BWS_SIEC_AKTYWNA | BWS_SIEC_MAC | BWS_SIEC_LACZE_ZNANE | BWS_SIEC_LACZE | (i == 0 ? BWS_SIEC_GLOWNA : 0);
+                const uint8_t mac[6] = {0x52, 0x54, 0x00, 0x12, 0x34, uint8_t(0x56 + i)}; std::memcpy(e.mac, mac, 6);
+                std::snprintf(e.nazwa, sizeof(e.nazwa), i ? "virtio-net%u" : "eth0", i); e.mtu = 1500;
+                e.rx_bajty = siec_rx[i]; e.tx_bajty = siec_tx[i];
+            }
+            o.grafika[0].backend = backend; o.grafika[0].szerokosc = 1280; o.grafika[0].wysokosc = 720; o.grafika[0].bpp = 32;
+            o.grafika[0].pitch = 5120; o.grafika[0].flagi = BWS_GRAF_ZEGAR | (backend == 4 ? BWS_GRAF_LICZNIKI_VIRTIO | BWS_GRAF_PCI : 0);
+            if (backend == 4) { o.grafika[0].pci_vendor = 0x1AF4; o.grafika[0].pci_device = 0x1050; o.grafika[0].format_virtio = 2; }
+            o.grafika[0].klatki = klatki; o.grafika[0].piksele_transferu = transfer_px;
+            o.grafika[0].czas_skladania_ns = klatki * 2000000ULL;
+            return BWS_TELEMETRIA_OK;
         }
         if (nr == BWS_PROCES_ZAKONCZ) {
             ++c104; ost_pid = a1; ost_gen = a2;
@@ -708,7 +767,7 @@ static void okno_cases() {
     o->przelicz_uklad();                                      // jak AplikacjaGUI::uruchom przed pierwsza klatka
     CHECK(o->probki() == 1 && j.c103 == 1 && o->model().liczba() == 5);
     CHECK(!o->tabela()->ma_wybor());                          // brak domyslnego zaznaczenia
-    CHECK(o->tabela()->liczba_kolumn() == 6);
+    CHECK(o->tabela()->liczba_kolumn() == 8);
     rysuj(*o);
     w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
     char kom[64];
@@ -721,7 +780,7 @@ static void okno_cases() {
     CHECK(!std::strcmp(o->tabela()->dostawca()->pobierz_komorke(r3, 3, kom, sizeof(kom)), "40,0 %"));
     CHECK(!std::strcmp(o->tabela()->dostawca()->pobierz_komorke(r3, 2, kom, sizeof(kom)), "Oczekujący (mysz)"));
     CHECK(!std::strcmp(o->tabela()->dostawca()->pobierz_komorke(wiersz_pid(*o, 6), 2, kom, sizeof(kom)), "Uruchomiony"));
-    CHECK(!std::strcmp(o->tabela()->dostawca()->pobierz_komorke(r3, 5, kom, sizeof(kom)), "1 s"));
+    CHECK(!std::strcmp(o->tabela()->dostawca()->pobierz_komorke(r3, 7, kom, sizeof(kom)), "1 s"));
 
     // Brak alokacji przy odswiezaniu (staly bufor migawki, model bez alokacji).
     for (int i = 0; i < 3; ++i) { j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o); }
@@ -757,7 +816,7 @@ static void okno_cases() {
         o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 3)));
         CHECK(o->model().wybrany() && o->model().wybrany()->pid == 3);
     }
-    for (size_t k = 0; k < 6; ++k) {
+    for (size_t k = 0; k < 8; ++k) {
         o->tabela()->dostawca()->zazadaj_sortowania(k, k % 2 == 0);
         CHECK(o->tabela()->wybrany_wiersz() == static_cast<size_t>(wiersz_pid(*o, 3)));
     }
@@ -829,12 +888,22 @@ static void okno_cases() {
         bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = s; o->obsluz_zdarzenie(ev); rysuj(*o);
     }
     bws_zdarzenie motyw{}; motyw.typ = BWS_ZDARZENIE_MOTYW_ZMIENIONY; o->obsluz_zdarzenie(motyw); rysuj(*o);
-    CHECK(o->wykres_cpu_->liczba_serii() == 0);                // ukryta karta Wydajnosc nie jest przeliczana
+    CHECK(o->wykres_->liczba_serii() == 0 && o->lista_->liczba_elementow() == 0);   // ukryta karta nie jest przeliczana
     o->karty_->ustaw_aktywna_karte(1); j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
-    CHECK(o->wykres_cpu_->liczba_serii() == 1 && o->wykres_ram_->liczba_serii() == 1);
+    CHECK(o->wykres_->liczba_serii() == 1 && o->lista_->liczba_elementow() == 5);      // CPU, RAM, dysk, eth0, grafika
     { int cpu[HISTORIA]; const size_t n = o->model().historia(cpu, nullptr, HISTORIA); CHECK(n > 0 && n <= HISTORIA); }
-    CHECK(std::strstr(o->info_ram_->tekst(), "RAM zarządzana przez system"));
-    CHECK(std::strstr(o->info_cpu_->tekst(), "HPET"));
+    auto ma_wiersz = [&](const char* k, const char* v) {
+        for (size_t i = 0; i < o->dane_szcz_.dane.n; ++i)
+            if (!std::strcmp(o->dane_szcz_.dane.klucz[i], k) && (!v || std::strstr(o->dane_szcz_.dane.wartosc[i], v))) return true;
+        return false;
+    };
+    CHECK(ma_wiersz("Źródło pomiaru", "HPET") && !std::strcmp(o->naglowek_widoku_->tekst(), "Procesor"));
+    auto wybierz = [&](MenedzerZadan::Widok w, uint32_t id = 0) {
+        const int i = o->kategorie_.indeks(MenedzerZadan::znacznik_widoku(w, id));
+        CHECK(i >= 0); o->lista_->ustaw_wybrany_indeks(i);
+    };
+    wybierz(MenedzerZadan::Widok::Pamiec); rysuj(*o);
+    CHECK(ma_wiersz("Zarządzana przez system", "256") && !std::strcmp(o->naglowek_widoku_->tekst(), "Pamięć"));
 
     // ---- Wydajnosc karty Wydajnosc (natywnie: zacinanie kursora - koszt rysowania raz na sekunde)
     auto przebieg = [&](int i) {                               // zmienne obciazenie CPU, stala pamiec RAM
@@ -845,13 +914,16 @@ static void okno_cases() {
     {   // historia ograniczona; plaska seria RAM nie jest przerysowywana, zmienna seria CPU - tak (raz na probke)
         int cpu[HISTORIA], ram[HISTORIA];
         CHECK(o->model().historia(cpu, ram, HISTORIA) == HISTORIA);
-        CHECK(o->wykres_cpu_->seria(0)->liczba_punktow == HISTORIA && o->wykres_ram_->seria(0)->liczba_punktow == HISTORIA);
+        CHECK(o->wykres_->seria(0)->liczba_punktow == HISTORIA);
         const uint64_t pelne = o->liczba_pelnych_odrysowan();
         przebieg(3);
-        CHECK(o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna());
+        CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna());    // RAM bez zmian: nic do rysowania
+        wybierz(MenedzerZadan::Widok::Procesor); { KontekstRysowania c; o->rysuj(c, false); }
+        przebieg(4);
+        CHECK(o->wykres_->czy_brudna());
         KontekstRysowania c; o->rysuj(c, false);
         CHECK(o->liczba_pelnych_odrysowan() == pelne);         // odswiezenie danych nie przerysowuje calego okna
-        CHECK(!o->wykres_cpu_->czy_brudna() && !o->info_cpu_->czy_brudna());
+        CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna() && !o->lista_->czy_brudna());
     }
     {   // brak alokacji w normalnym cyklu probka -> rysowanie na karcie Wydajnosc
         const size_t a0 = g_alokacje;
@@ -866,18 +938,18 @@ static void okno_cases() {
         }
         CHECK(o->liczba_pelnych_odrysowan() == pelne);
         CHECK(o->liczba_brudnych_pikseli() - px0 < 20000);    // co najwyzej podswietlenie zakladki/przycisku
-        CHECK(!o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna());
-        przebieg(5); CHECK(o->wykres_cpu_->czy_brudna());     // probka w trakcie ruchu myszy nadal aktualizuje wykres
+        CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna());
+        przebieg(5); CHECK(o->wykres_->czy_brudna());         // probka w trakcie ruchu myszy nadal aktualizuje wykres
         KontekstRysowania c; o->rysuj(c, false);
     }
-    {   // ukryta karta: zadnej pracy wykresow ani etykiet Wydajnosci
+    {   // ukryta karta: zadnej pracy wykresu, listy ani szczegolow Wydajnosci
         o->karty_->ustaw_aktywna_karte(0); { KontekstRysowania c; o->rysuj(c, false); }
-        const int ost = o->wykres_cpu_->seria(0)->punkty[HISTORIA - 1];
+        const int ost = o->wykres_->seria(0)->punkty[HISTORIA - 1];
         for (int i = 0; i < 10; ++i) { przebieg(i + 1); KontekstRysowania c; o->rysuj(c, false); }
-        CHECK(!o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna() && !o->info_cpu_->czy_brudna());
-        CHECK(o->wykres_cpu_->seria(0)->punkty[HISTORIA - 1] == ost);   // dane wykresu nie byly przeliczane
+        CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna() && !o->lista_->czy_brudna());
+        CHECK(o->wykres_->seria(0)->punkty[HISTORIA - 1] == ost);   // dane wykresu nie byly przeliczane
         o->karty_->ustaw_aktywna_karte(1);                     // powrot: natychmiast aktualne dane
-        CHECK(o->wykres_cpu_->czy_brudna());
+        CHECK(o->wykres_->czy_brudna());
         { KontekstRysowania c; o->rysuj(c, false); }
     }
     {   // wielokrotne przelaczanie kart: bez alokacji i z poprawna geometria
@@ -889,15 +961,16 @@ static void okno_cases() {
         CHECK(g_alokacje == a0);
         CHECK(o->model().liczba() == 16 && o->tabela()->liczba_wierszy() == 16);
     }
-    {   // rozmiary i skale z widoczna karta Wydajnosc: geometria w obszarze klienta, wykresy i opisy widoczne
+    {   // rozmiary i skale z widoczna karta Wydajnosc: geometria w obszarze klienta, wykres, lista i szczegoly widoczne
         o->karty_->ustaw_aktywna_karte(1);
         for (uint32_t s : {100u, 150u, 200u}) {
             bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = s; o->obsluz_zdarzenie(ev);
             for (auto [w, h] : {std::pair{620, 420}, std::pair{1280, 800}, std::pair{900, 580}}) {
                 o->ustaw_geometrie(0, 0, w * int(s) / 100, h * int(s) / 100); o->przelicz_uklad(); rysuj(*o);
                 w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
-                CHECK(o->wykres_cpu_->obszar_ekranu().szerokosc > 0 && o->wykres_cpu_->obszar_ekranu().wysokosc > 0);
-                CHECK(o->info_cpu_->obszar_ekranu().wysokosc >= CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(s)));
+                CHECK(o->wykres_->obszar_ekranu().szerokosc > 0 && o->wykres_->obszar_ekranu().wysokosc > 0);
+                CHECK(o->naglowek_widoku_->obszar_ekranu().wysokosc >= CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(s)));
+                CHECK(o->lista_->obszar_ekranu().szerokosc > 0 && o->tabela_szcz_->obszar_ekranu().wysokosc > 0);
                 przebieg(1); KontekstRysowania c; o->rysuj(c, false);
             }
         }
@@ -929,14 +1002,293 @@ static void uklad_bez_przeliczenia() {
     const int linia = CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(100));
     for (int i = 0; i < 2; ++i) { j.uplyw(1000000000ULL, {{3, 1000}}); g_zegar += 1000000000ULL; o->odswiez(); rysuj(*o); }
     o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 3))); rysuj(*o);
-    CHECK(o->pamiec_procesu_->tekst()[0] != '\0');
+    CHECK(o->pamiec_procesu_->tekst()[0] != '\0' && o->io_procesu_->tekst()[0] != '\0');
     CHECK(o->etykieta_szczegolow()->obszar_ekranu().wysokosc >= linia);
     CHECK(o->pamiec_procesu_->obszar_ekranu().wysokosc >= 2 * linia);            // dwie linie pamieci
+    CHECK(o->io_procesu_->obszar_ekranu().wysokosc >= 2 * linia);                // dwie linie I/O
+    CHECK(o->io_procesu_->preferowany_rozmiar().wysokosc >= 2 * 20 + 8);         // natywna czcionka ~20 px + wypelnienie
     o->karty_->ustaw_aktywna_karte(1);
     for (int i = 0; i < 2; ++i) { j.uplyw(1000000000ULL, {{3, 1000}}); g_zegar += 1000000000ULL; o->odswiez(); rysuj(*o); }
-    CHECK(o->info_cpu_->obszar_ekranu().wysokosc >= 4 * linia);                 // >= 4 linie opisu CPU
-    CHECK(o->info_ram_->obszar_ekranu().wysokosc >= 4 * linia);
+    CHECK(o->naglowek_widoku_->obszar_ekranu().wysokosc >= linia);
+    CHECK(o->tabela_szcz_->obszar_ekranu().wysokosc >= o->tabela_szcz_->wysokosc_naglowka() + 4 * o->tabela_szcz_->wysokosc_wiersza());
+    CHECK(o->lista_->obszar_ekranu().wysokosc >= 5 * o->lista_->wysokosc_wiersza_piksele());   // wszystkie kategorie widoczne
     w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
+    delete o;
+    g_jadro = nullptr;
+}
+
+
+// =====================================================================================
+// E. Etap 2: kolumny Dysk i Siec (BWS 106), przewijanie w poziomie, ponowne uzycie PID
+// =====================================================================================
+static const char* komorka(OknoMenedzera& o, uint32_t pid, size_t k, char* b, size_t cap) {
+    const int r = wiersz_pid(o, pid);
+    return r < 0 ? "(brak)" : o.tabela()->dostawca()->pobierz_komorke(static_cast<size_t>(r), k, b, cap);
+}
+static void procesy_io_cases() {
+    using RozliczanieIo::PlikOdczyt; using RozliczanieIo::PlikZapis;
+    using RozliczanieIo::SiecWyslane; using RozliczanieIo::SiecOdebrane;
+    Jadro j; g_jadro = &j;
+    j.uruchom(1, "/menedzer_okien.bur", PZB_ZAUFANE);
+    j.uruchom(6, AppIdentity::TaskManager, PZB_ZAUFANE, 1);
+    j.uruchom(3, "/programy/notatnik.cebula/notatnik.bur");
+    j.uruchom(4, "/programy/husarz.cebula/husarz.bur");
+    auto* o = new OknoMenedzera;
+    o->wywolaj = bws_symulowane; o->zegar_ns = zegar_testowy;
+    o->ustaw_geometrie(40, 40, 900, 580);
+    o->init(); o->przelicz_uklad();
+    char b[64];
+    CHECK(j.c105 == 1 && j.c106 == 1 && o->bledy_io() == 0);
+    // pierwsza probka: brak przedzialu - nic nie jest pokazywane jako zero
+    CHECK(!std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "Niedostępne"));
+    CHECK(!std::strcmp(komorka(*o, 4, 6, b, sizeof(b)), "Niedostępne"));
+    CHECK(!std::strcmp(komorka(*o, 0, 5, b, sizeof(b)), "—"));        // jadro nie uzywa wywolan plikowych
+    CHECK(!std::strcmp(o->tabela()->dostawca()->naglowek_kolumny(5), "Dysk") &&
+          !std::strcmp(o->tabela()->dostawca()->naglowek_kolumny(6), "Sieć"));
+    // 1 s: Notatnik czyta 2 KiB i zapisuje 1 KiB, Husarz wysyla 512 B i odbiera 1536 B, jadro 100 B
+    j.io_procesu(3, PlikOdczyt, 2048); j.io_procesu(3, PlikZapis, 1024);
+    j.io_procesu(4, SiecWyslane, 512); j.io_procesu(4, SiecOdebrane, 1536);
+    RozliczanieIo::dodaj(j.io, 0, 0, 0, SiecOdebrane, 100);
+    j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(!std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "3,0 KiB/s"));
+    CHECK(!std::strcmp(komorka(*o, 3, 6, b, sizeof(b)), "0 B/s"));
+    CHECK(!std::strcmp(komorka(*o, 4, 6, b, sizeof(b)), "2,0 KiB/s"));
+    CHECK(!std::strcmp(komorka(*o, 4, 5, b, sizeof(b)), "0 B/s"));
+    CHECK(!std::strcmp(komorka(*o, 0, 6, b, sizeof(b)), "100 B/s"));
+    CHECK(!std::strcmp(komorka(*o, 0, 5, b, sizeof(b)), "—"));
+    // sortowanie po Dysk i Siec (malejaco) przy zachowanym wyborze
+    o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 1)));
+    o->tabela()->dostawca()->zazadaj_sortowania(5, false);
+    CHECK(o->model().wiersz(0)->pid == 3 && o->model().wybrany()->pid == 1);
+    CHECK(o->tabela()->wybrany_wiersz() == static_cast<size_t>(wiersz_pid(*o, 1)));
+    o->tabela()->dostawca()->zazadaj_sortowania(6, false);
+    CHECK(o->model().wiersz(0)->pid == 4 && o->model().wiersz(1)->pid == 0 && o->model().wybrany()->pid == 1);
+    // szczegoly wybranego procesu: skumulowane + tempo
+    o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 4)));
+    CHECK(std::strstr(o->etykieta_io()->tekst(), "Sieć (dane TCP): wysłano 512 B (512 B/s), odebrano 1,5 KiB (1,5 KiB/s)"));
+    o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 3)));
+    CHECK(std::strstr(o->etykieta_io()->tekst(), "Pliki (logicznie): odczyt 2,0 KiB (2,0 KiB/s), zapis 1,0 KiB (1,0 KiB/s)"));
+    // automatyczne odswiezanie: sortowanie i wybor trwaja, wartosci sie zmieniaja
+    for (int i = 0; i < 5; ++i) {
+        j.io_procesu(4, SiecOdebrane, 4096); j.uplyw(1000000000ULL, {}); o->odswiez();
+        CHECK(o->model().wiersz(0)->pid == 4 && o->model().wybrany()->pid == 3);
+        CHECK(!std::strcmp(komorka(*o, 4, 6, b, sizeof(b)), "4,0 KiB/s") && !std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "0 B/s"));
+    }
+    // PID 4 konczy sie, spozniony pakiet starej sesji, PID 4 uzyty ponownie: nowy proces nie dziedziczy ruchu
+    const uint64_t stara = j.p[4].gen;
+    j.zwolnij(4); j.io_starej_generacji(4, stara, SiecOdebrane, 9999); j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(wiersz_pid(*o, 4) < 0);
+    j.uruchom(4, "/programy/kalkulator.cebula/kalkulator.bur");
+    j.io_starej_generacji(4, stara, SiecOdebrane, 8888);
+    j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(j.io.zakonczone[SiecOdebrane] == 9999 + 8888);
+    CHECK(!std::strcmp(komorka(*o, 4, 6, b, sizeof(b)), "0 B/s"));     // nowa generacja zaczela od zera w tym przedziale
+    CHECK(o->model().wiersz(static_cast<uint32_t>(wiersz_pid(*o, 4)))->siec_odebrane == 0);
+    // blad BWS 106: CPU dalej dziala, kolumny I/O niedostepne (nie zero)
+    j.wymus106 = BWS_TELEMETRIA_ZLY_BUFOR; j.uplyw(1000000000ULL, {{3, 200000000ULL}}); o->odswiez();
+    CHECK(o->bledy_io() == 1 && !std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "Niedostępne"));
+    CHECK(!std::strcmp(komorka(*o, 3, 3, b, sizeof(b)), "20,0 %"));
+    CHECK(std::strstr(o->etykieta_io()->tekst(), "niedostępne"));
+    j.wymus106 = 0; j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(!std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "Niedostępne"));   // pierwsza probka po bledzie: brak przedzialu
+    j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(!std::strcmp(komorka(*o, 3, 5, b, sizeof(b)), "0 B/s"));
+
+    // przewijanie w poziomie: 8 kolumn (950 DIP) nie miesci sie przy minimalnym oknie
+    TabelaWirtualna* t = o->tabela();
+    o->ustaw_geometrie(40, 40, 620, 420); o->przelicz_uklad(); rysuj(*o);
+    CHECK(t->czy_przewijanie_poziome() && t->maks_przewiniecie_poziome() > 0 && t->wysokosc_paska_poziomego() > 0);
+    CHECK(t->przewiniecie_poziome() == 0);
+    { ZdarzenieRolki e{}; e.delta_y = -1; e.modyfikatory = BWS_MOD_SHIFT; t->obsluz_rolke(e); CHECK(e.obsluzone); }
+    CHECK(t->przewiniecie_poziome() == 40);
+    { ZdarzenieRolki e{}; e.delta_x = 100; t->obsluz_rolke(e); }
+    CHECK(t->przewiniecie_poziome() == t->maks_przewiniecie_poziome());        // obciete do maksimum
+    { ZdarzenieKlawiatury e{}; e.kod_klawisza = 0x4B; t->obsluz_wcisniecie_klawisza(e); }
+    CHECK(t->przewiniecie_poziome() == t->maks_przewiniecie_poziome() - 40);
+    rysuj(*o);
+    // naglowek przesuniety: klik w miejscu kolumny "Siec" sortuje po Sieci (mapowanie uwzglednia przewiniecie)
+    {
+        t->ustaw_przewiniecie_poziome(t->maks_przewiniecie_poziome());
+        int x = 1 - t->przewiniecie_poziome(); for (size_t k = 0; k < 6; ++k) x += t->dostawca()->szerokosc_kolumny(k);
+        ZdarzenieMyszki e{}; e.typ = TypZdarzenia::WcisniecieMyszy; e.przycisk = 1;
+        e.x = t->obszar_ekranu().x + x + 10; e.y = t->obszar_ekranu().y + 5;
+        t->obsluz_wcisniecie_myszy(e);
+        CHECK(o->model().kolumna() == MenedzerZadan::Kolumna::Siec);
+    }
+    // zwykla rolka nadal przewija w pionie (nie w poziomie)
+    { const int x0 = t->przewiniecie_poziome(); ZdarzenieRolki e{}; e.delta_y = -3; t->obsluz_rolke(e); CHECK(t->przewiniecie_poziome() == x0); }
+    // 1280x800: wszystko sie miesci - brak paska, przewiniecie wyzerowane
+    o->ustaw_geometrie(0, 0, 1280, 800); o->przelicz_uklad(); rysuj(*o);
+    CHECK(t->maks_przewiniecie_poziome() == 0 && t->wysokosc_paska_poziomego() == 0 && t->przewiniecie_poziome() == 0);
+    // skala 200 %: kolumny rosna, znow trzeba przewijac
+    { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 200; o->obsluz_zdarzenie(ev); }
+    o->przelicz_uklad(); rysuj(*o);
+    CHECK(t->maks_przewiniecie_poziome() == 0);                 // okno przeskalowane razem z kolumnami: miesci sie
+    o->ustaw_geometrie(0, 0, 1280, 800); o->przelicz_uklad(); rysuj(*o);
+    CHECK(t->maks_przewiniecie_poziome() > 0);                  // 1280 px fizycznie przy 200 %: kolumny 1900 px
+    { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 100; o->obsluz_zdarzenie(ev); }
+    o->przelicz_uklad();
+    // inna tabela bez wlaczonej opcji: zachowanie jak dotad (bez paska)
+    { TabelaWirtualna inna; inna.ustaw_dostawce(t->dostawca()); inna.ustaw_geometrie(0, 0, 300, 200);
+      CHECK(!inna.czy_przewijanie_poziome() && inna.maks_przewiniecie_poziome() == 0 && inna.wysokosc_paska_poziomego() == 0); }
+    // brak alokacji w cyklu odswiezania z nowymi wywolaniami
+    const size_t a0 = g_alokacje;
+    for (int i = 0; i < 30; ++i) { j.io_procesu(3, PlikOdczyt, 100); j.uplyw(1000000000ULL, {}); o->odswiez(); KontekstRysowania c; o->rysuj(c, false); }
+    CHECK(g_alokacje == a0);
+    CHECK(j.c105 == j.c103 && j.c106 == j.c103);   // jedno wywolanie kazdego rodzaju na probke
+    // bez prawa (tak odpowiada jadro zwyklej aplikacji): brak danych, nic nie jest wymyslane
+    { const uint64_t b0 = o->bledy_io(); j.prawo = false; j.uplyw(1000000000ULL, {}); o->odswiez();
+      CHECK(o->bledy_io() == b0 + 1); j.prawo = true; }
+    delete o;
+    g_jadro = nullptr;
+}
+
+// =====================================================================================
+// F. Etap 3: dynamiczna karta Wydajnosc (dyski, siec, grafika), uklady 1024x768..1920x1080, skale
+// =====================================================================================
+static void wydajnosc_urzadzen_cases() {
+    using MenedzerZadan::Widok; using MenedzerZadan::znacznik_widoku;
+    Jadro j; g_jadro = &j;
+    j.uruchom(1, "/menedzer_okien.bur", PZB_ZAUFANE);
+    j.uruchom(6, AppIdentity::TaskManager, PZB_ZAUFANE, 1);
+    // Live ISO bez dysku i bez sieci, framebuffer UEFI GOP
+    j.l_dyskow = 0; j.l_sieci = 0; j.backend = 2;
+    auto* o = new OknoMenedzera;
+    o->wywolaj = bws_symulowane; o->zegar_ns = zegar_testowy;
+    o->ustaw_geometrie(0, 0, 1280, 720); o->init(); o->przelicz_uklad();
+    o->karty_->ustaw_aktywna_karte(1); rysuj(*o);
+    auto nazwy = [&]() { std::string r; for (size_t i = 0; i < o->lista_->liczba_elementow(); ++i) { r += o->lista_->element(i); r += "|"; } return r; };
+    auto wartosc = [&](const char* k) -> std::string {
+        for (size_t i = 0; i < o->dane_szcz_.dane.n; ++i) if (!std::strcmp(o->dane_szcz_.dane.klucz[i], k)) return o->dane_szcz_.dane.wartosc[i];
+        return "(brak wiersza)";
+    };
+    auto wybierz = [&](uint64_t z) { const int i = o->kategorie_.indeks(z); CHECK(i >= 0); if (i >= 0) o->lista_->ustaw_wybrany_indeks(i); rysuj(*o); };
+    CHECK(nazwy() == "Procesor|Pamięć|Grafika (UEFI GOP)|");               // zadnych wymyslonych dyskow ani Ethernetu
+    wybierz(znacznik_widoku(Widok::Grafika));
+    CHECK(wartosc("Obciążenie GPU") == "Brak licznika sprzętowego");
+    CHECK(wartosc("Urządzenie PCI") == "Niedostępne (framebuffer firmware)");
+    CHECK(wartosc("Polecenia VirtIO-GPU") == "(brak wiersza)");             // licznik nie istnieje w GOP
+    CHECK(wartosc("Kursor") == "Programowy (rysowany przez kompozytor)");
+    CHECK(wartosc("Klatki kompozytora") == "Niedostępne");                  // pierwsza probka
+    j.klatki += 30; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(wartosc("Klatki kompozytora").rfind("30,0 na sekundę", 0) == 0 && std::string(o->wartosci_[2]) == "30,0 klatek/s");
+    CHECK(wartosc("Składanie programowe (CPU)") == "6,0 % czasu");          // 30 x 2 ms / 1 s - czas CPU kompozytora
+    CHECK(wartosc("Obciążenie GPU") == "Brak licznika sprzętowego");        // nadal - zadnego procentu GPU
+    CHECK(o->wykres_->liczba_serii() == 1 && !std::strcmp(o->naglowek_widoku_->tekst(), "Grafika (UEFI GOP)"));
+
+    // pojawiaja sie urzadzenia: 3 dyski, 2 interfejsy, VirtIO-GPU - lista przebudowana, wybor (Grafika) zachowany
+    j.l_dyskow = 3; j.l_sieci = 2; j.backend = 4; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(nazwy() == "Procesor|Pamięć|Dysk 0 (VirtIO Block)|Dysk 1 (SATA/AHCI)|Dysk 2 (VirtIO Block)|Ethernet eth0|"
+                     "Ethernet virtio-net1|Grafika (VirtIO-GPU)|");
+    CHECK(o->lista_->wybrany_indeks() == 7 && !std::strcmp(o->naglowek_widoku_->tekst(), "Grafika (VirtIO-GPU)"));
+    CHECK(wartosc("Urządzenie PCI") == "1AF4:1050" && wartosc("Format pikseli") == "B8G8R8X8");
+    CHECK(wartosc("Polecenia VirtIO-GPU") == "Niedostępne");                 // backend sie zmienil: nowy przedzial
+    // dysk: tempo z roznic licznikow
+    wybierz(znacznik_widoku(Widok::Dysk, 1));
+    CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), "Dysk 1 (SATA/AHCI)") && wartosc("Model") == "QEMU HARDDISK");
+    CHECK(o->wykres_->liczba_serii() == 2);
+    j.dysk_odczyt[1] += 8192; j.dysk_zapis[1] += 4096; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(wartosc("Odczyt") == "8,0 KiB/s" && wartosc("Zapis") == "4,0 KiB/s" && wartosc("Operacje na sekundę") == "2 odczytu, 1 zapisu");
+    CHECK(std::string(o->wartosci_[3]) == "Odcz. 8,0 KiB/s, zap. 4,0 KiB/s" && std::string(o->wartosci_[2]) == "Odcz. 0 B/s, zap. 0 B/s");
+    CHECK(wartosc("Czas I/O") == "Niedostępne");                             // brak pomiaru czasu w liczniku
+    CHECK(wartosc("System plików") == "Działa w RAM (Live): operacje na plikach nie są ruchem dysku");
+    CHECK(wartosc("Pojemność") == "48,8 MiB (512 B/sektor)" && wartosc("Stan") == "Online, tylko do odczytu");
+    // dysk VirtIO: brak modelu urzadzenia - nie zmyslamy
+    wybierz(znacznik_widoku(Widok::Dysk, 0));
+    CHECK(wartosc("Model") == "Niedostępny (sterownik nie podaje modelu)");
+    // siec
+    wybierz(znacznik_widoku(Widok::Siec, 1));
+    j.siec_rx[0] += 3072; j.siec_tx[0] += 1024; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), "Ethernet eth0") && o->wykres_->liczba_serii() == 2);
+    CHECK(wartosc("Odbiór") == "3,0 KiB/s" && wartosc("Wysyłanie") == "1,0 KiB/s" && wartosc("Adres MAC") == "52:54:00:12:34:56");
+    CHECK(wartosc("Prędkość łącza") == "Niedostępna (sterownik nie raportuje)" && wartosc("Rola") == "Interfejs główny stosu IP");
+    CHECK(wartosc("Sterownik") == "Intel E1000" && wartosc("Łącze") == "Aktywne");
+    // bezczynne urzadzenie: kolejne probki bez zmian = brak przerysowania szczegolow i wykresu
+    for (int i = 0; i < HISTORIA + 3; ++i) { j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o); }
+    { const auto* s = o->urzadzenia().znajdz_siec(1); CHECK(s && s->h_rx.n == HISTORIA && s->h_tx.n == HISTORIA); }
+    j.uplyw(1000000000ULL, {}); o->odswiez();
+    CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna());
+    // urzadzenie znika (wybrane): wybor wraca do Procesora, lista bez niego
+    wybierz(znacznik_widoku(Widok::Dysk, 2));
+    j.l_dyskow = 2; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(o->kategorie_.indeks(znacznik_widoku(Widok::Dysk, 2)) < 0 && o->lista_->liczba_elementow() == 7);
+    CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), "Procesor") && o->lista_->wybrany_indeks() == 0);
+    // reinicjalizacja (nowe id interfejsu, liczniki od zera): nowa kategoria, bez tempa z cudzych licznikow
+    j.id_sieci[1] = 42; j.siec_rx[1] = 0; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+    CHECK(o->kategorie_.indeks(znacznik_widoku(Widok::Siec, 42)) >= 0 && o->kategorie_.indeks(znacznik_widoku(Widok::Siec, 2)) < 0);
+    CHECK(std::string(o->wartosci_[o->kategorie_.indeks(znacznik_widoku(Widok::Siec, 42))]) == "Niedostępne");
+
+    // wielokrotne przelaczanie wszystkich kategorii: bez alokacji, poprawne serie i naglowki
+    {
+        for (size_t k = 0; k < o->kategorie_.n; ++k) wybierz(o->kategorie_.z[k]);
+        const size_t a0 = g_alokacje;
+        for (int r = 0; r < 25; ++r)
+            for (size_t k = 0; k < o->kategorie_.n; ++k) {
+                o->lista_->ustaw_wybrany_indeks(int(k));
+                if (k % 3 == 0) { j.klatki += 10; j.uplyw(1000000000ULL, {}); o->odswiez(); }
+                KontekstRysowania c; o->rysuj(c, false);
+                const Widok w = MenedzerZadan::rodzaj_widoku(o->kategorie_.z[k]);
+                CHECK(o->wykres_->liczba_serii() == ((w == Widok::Dysk || w == Widok::Siec) ? 2u : 1u));
+                char t[64]; MenedzerZadan::nazwa_kategorii(o->kategorie_.z[k], o->urzadzenia(), t, sizeof(t));
+                CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), t));
+            }
+        CHECK(g_alokacje == a0);
+    }
+    // klawiatura na liscie kategorii (strzalki) zmienia widok
+    {
+        wybierz(znacznik_widoku(Widok::Procesor));
+        ZdarzenieKlawiatury e{}; e.kod_klawisza = 0x50; o->lista_->obsluz_wcisniecie_klawisza(e); rysuj(*o);
+        CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), "Pamięć"));
+    }
+    // uklady 1024x768, 1280x720, 1366x768, 1920x1080 przy skalach 100-200 %
+    for (uint32_t s : {100u, 125u, 150u, 175u, 200u}) {
+        bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = s; o->obsluz_zdarzenie(ev);
+        for (auto [w, h] : {std::pair{1024, 768}, std::pair{1280, 720}, std::pair{1366, 768}, std::pair{1920, 1080}}) {
+            o->ustaw_geometrie(0, 0, w, h); o->przelicz_uklad(); rysuj(*o);
+            w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
+            const int linia = CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(s));
+            CHECK(o->lista_->obszar_ekranu().szerokosc >= 200 * int(s) / 100 && o->lista_->obszar_ekranu().wysokosc > 0);
+            CHECK(o->wykres_->obszar_ekranu().szerokosc > 0 && o->wykres_->obszar_ekranu().wysokosc > 0);
+            CHECK(o->naglowek_widoku_->obszar_ekranu().wysokosc >= linia);
+            CHECK(o->tabela_szcz_->obszar_ekranu().wysokosc >= o->tabela_szcz_->wysokosc_naglowka() + 3 * o->tabela_szcz_->wysokosc_wiersza());
+            CHECK(o->lista_->wysokosc_wiersza_piksele() >= 2 * linia);            // dwie linie tekstu w wierszu listy
+            if (s == 100 && w >= 1280) CHECK(o->tabela()->maks_przewiniecie_poziome() == 0);   // tabela procesow sie miesci
+            j.uplyw(1000000000ULL, {}); o->odswiez(); KontekstRysowania c; o->rysuj(c, false);
+        }
+    }
+    { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 100; o->obsluz_zdarzenie(ev); }
+    o->ustaw_geometrie(0, 0, 1280, 720); o->przelicz_uklad(); rysuj(*o);
+    // ruch myszy nad lista i wykresem w trakcie probek: bez pelnych przerysowan, wykres tylko z nowa probka
+    {
+        wybierz(znacznik_widoku(Widok::Procesor));
+        const uint64_t pelne = o->liczba_pelnych_odrysowan();
+        uint64_t px_mysz = 0, px_probki_maks = 0;
+        for (int i = 0; i < 300; ++i) {
+            bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_MYSZ_RUCH; e.x = 10 + (i * 17) % 1200; e.y = 120 + (i * 11) % 560;
+            uint64_t p0 = o->liczba_brudnych_pikseli();
+            o->obsluz_zdarzenie(e); { KontekstRysowania c; o->rysuj(c, false); }
+            px_mysz += o->liczba_brudnych_pikseli() - p0;
+            if (i % 30 == 0) {
+                p0 = o->liczba_brudnych_pikseli();
+                j.uplyw(1000000000ULL, {{6, 10000000ULL * (i % 7)}}); o->odswiez(); { KontekstRysowania c; o->rysuj(c, false); }
+                const uint64_t d = o->liczba_brudnych_pikseli() - p0;
+                if (d > px_probki_maks) px_probki_maks = d;
+            }
+        }
+        CHECK(o->liczba_pelnych_odrysowan() == pelne);
+        CHECK(px_mysz < 20000);                                   // sam ruch myszy: co najwyzej podswietlenie zakladki
+        CHECK(px_probki_maks > 0 && px_probki_maks < 1280ULL * 720ULL * 3 / 4);   // probka: wykres+lista+szczegoly, nie cale okno
+    }
+    // ukryta karta: lista i szczegoly nie sa aktualizowane, model zbiera historie dalej
+    {
+        o->karty_->ustaw_aktywna_karte(0); rysuj(*o);
+        const size_t n0 = o->urzadzenia().znajdz_dysk(0)->h_odczyt.n;
+        for (int i = 0; i < 5; ++i) { j.dysk_odczyt[0] += 4096; j.uplyw(1000000000ULL, {}); o->odswiez(); KontekstRysowania c; o->rysuj(c, false); }
+        CHECK(!o->lista_->czy_brudna() && !o->tabela_szcz_->czy_brudna() && !o->wykres_->czy_brudna());
+        CHECK(o->urzadzenia().znajdz_dysk(0)->h_odczyt.n == (n0 + 5 > HISTORIA ? HISTORIA : n0 + 5));
+        o->karty_->ustaw_aktywna_karte(1); rysuj(*o);
+        CHECK(std::string(o->wartosci_[2]) == "Odcz. 4,0 KiB/s, zap. 0 B/s");   // po powrocie od razu aktualne
+    }
     delete o;
     g_jadro = nullptr;
 }
@@ -950,6 +1302,8 @@ int main() {
     rejestracja();
     okno_cases();
     uklad_bez_przeliczenia();
+    procesy_io_cases();
+    wydajnosc_urzadzen_cases();
     std::printf("test-menedzer-zadan-host: %u sprawdzen OK\n", checks);
     return 0;
 }

@@ -166,3 +166,9 @@ Procesy chronione pozostają widoczne na liście; przycisk pokazuje powód, a j�
   sprzęcie.
 * `test.bur` (tryb automatyczny) sprawdza w prawdziwym jądrze, że aplikacja bez prawa dostaje
   odmowę BWS 103/104.
+
+## Monitorowanie dysków, sieci, I/O procesów i grafiki (2026-11-19)
+
+BWS 105 (telemetria urządzeń), BWS 106 (liczniki I/O procesów), kolumny „Dysk” i „Sieć” oraz nowa karta
+„Wydajność” są opisane w `docs/menedzer-zadan-monitorowanie.md` – razem z dokładną semantyką każdego licznika
+i listą metryk niedostępnych (zajętość dysku, prędkość łącza, fizyczne I/O procesu, obciążenie GPU).

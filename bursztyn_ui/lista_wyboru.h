@@ -169,6 +169,9 @@ public:
         uniewaznij();
     }
 
+    /* Przerysowanie jednego wiersza (np. zmienila sie wartosc rysowana przez ustaw_rysowanie_elementu). */
+    void odswiez_element(int indeks) { uniewaznij_wiersz(indeks); }
+
     size_t liczba_ostatnio_narysowanych_wierszy() const { return ostatnio_narysowane_; }
     int pierwszy_widoczny_indeks() const {
         return static_cast<int>(pionowy_->wartosc());

@@ -90,6 +90,20 @@ public:
         dane_wyboru_ = dane;
     }
 
+    /* Przewijanie w poziomie (opcjonalne, domyslnie wylaczone - dotychczasowi uzytkownicy bez zmian): gdy kolumny
+     * sa szersze niz tabela, pod wierszami pojawia sie poziomy pasek; Shift+rolka, rolka pozioma, klik paska
+     * oraz strzalki w lewo/prawo przesuwaja kolumny. */
+    void ustaw_przewijanie_poziome(bool w) { przewijanie_poziome_ = w; if (!w) przewiniecie_x_ = 0; uniewaznij(); }
+    bool czy_przewijanie_poziome() const { return przewijanie_poziome_; }
+    int przewiniecie_poziome() const { return przewiniecie_x_; }
+    void ustaw_przewiniecie_poziome(int x) { const int s = przewiniecie_x_; przewiniecie_x_ = x; normalizuj_poziome(); if (s != przewiniecie_x_) uniewaznij(); }
+    int maks_przewiniecie_poziome() const {
+        if (!przewijanie_poziome_ || zewnetrzne_przewijanie_ || !dostawca_) return 0;
+        const int m = szerokosc_kolumn() - (szerokosc_obszaru_tabeli() - 2);
+        return m > 0 ? m : 0;
+    }
+    int wysokosc_paska_poziomego() const { return maks_przewiniecie_poziome() > 0 ? 12 * skala_dpi_ : 0; }
+
     uint64_t liczba_zapytan_dostawcy() const { return liczba_zapytan_; }
     size_t pierwszy_widoczny_wiersz() const { return pierwszy_widoczny_; }
     size_t ostatni_widoczny_wiersz() const { return ostatni_widoczny_; }
@@ -138,8 +152,11 @@ public:
             total_col_w += dostawca_->szerokosc_kolumny(c) * s;
         }
 
+        normalizuj_poziome();
         int table_w = obszar_.szerokosc - sb_w;
-        int table_h = obszar_.wysokosc - header_h;
+        const int hsb_h = wysokosc_paska_poziomego();
+        int table_h = obszar_.wysokosc - header_h - hsb_h;
+        (void)total_col_w;
 
         // 1. Rysuj nagłówek tabeli
         ctx.rysuj_zaokraglony_prostokat(Prostokat(1, 1, obszar_.szerokosc - 2, header_h),
@@ -168,6 +185,7 @@ public:
         }
 
         // 2. Rysuj widoczne wiersze danych
+        if (hsb_h > 0) rysuj_pasek_poziomy(ctx, sb_w, hsb_h);
         if (rows == 0) return;
 
         int widocznych_wierszy = (table_h / (row_h > 0 ? row_h : 1)) + 2;
@@ -182,9 +200,11 @@ public:
         int start_y = header_h - (przewiniecie_y_ % (row_h > 0 ? row_h : 1));
 
         char bufor[128];
+        if (hsb_h > 0) ctx.dodaj_przyciecie(Prostokat(0, header_h, obszar_.szerokosc, table_h));
         for (size_t r = idx_start; r < idx_koniec; ++r) {
             int y = start_y + static_cast<int>(r - idx_start) * row_h;
             if (y + row_h <= header_h) continue;
+            if (y >= header_h + table_h) break;
 
             if (!ctx.przecina_klip(Prostokat(0,y,table_w,row_h))) continue;
             bool zaznaczony = (r == wybrany_wiersz_);
@@ -231,6 +251,7 @@ public:
             ctx.rysuj_linie_pozioma(1, y + row_h - 1, table_w - 2, motyw_kolor(MOTYW_KOLOR_RAMKA));
         }
 
+        if (hsb_h > 0) ctx.zdejmij_przyciecie();
         // Pasek przewijania pionowy
         if(!zewnetrzne_przewijanie_) rysuj_pasek_pionowy(ctx, rows, row_h, sb_w);
     }
@@ -269,10 +290,21 @@ public:
             return;
         }
 
+        // Kliknięcie w poziomy pasek (tylko gdy kolumny sie nie mieszcza)
+        const int hsb_h = wysokosc_paska_poziomego();
+        if (hsb_h > 0 && ly >= obszar_.wysokosc - hsb_h) {
+            if (e.czy_lewy_przycisk()) {
+                const int tor = szerokosc_obszaru_tabeli() - 4 * s;
+                ustaw_przewiniecie_poziome(tor > 0 ? (lx * maks_przewiniecie_poziome()) / tor : 0);
+                e.obsluzone = true;
+            }
+            return;
+        }
+
         // Kliknięcie w suwak pionowy
         if (lx >= obszar_.szerokosc - sb_w) {
             int total_h = static_cast<int>(liczba_wierszy()) * row_h;
-            int table_h = obszar_.wysokosc - header_h;
+            int table_h = obszar_.wysokosc - header_h - hsb_h;
             if (total_h > table_h) {
                 przewiniecie_y_ = ((ly - header_h) * (total_h - table_h)) / (table_h > 0 ? table_h : 1);
                 normalizuj_przewiniecie();
@@ -293,6 +325,12 @@ public:
 
     void obsluz_rolke(ZdarzenieRolki& e) override {
         if (!czy_wlaczona_) return;
+        if (maks_przewiniecie_poziome() > 0 && (e.czy_shift() || (e.delta_x != 0 && e.delta_y == 0))) {
+            const int d = e.delta_x != 0 ? e.delta_x : -e.delta_y;
+            ustaw_przewiniecie_poziome(przewiniecie_x_ + d * 40 * skala_dpi_);
+            e.obsluzone = true;
+            return;
+        }
         int delta = (e.delta_y != 0) ? -e.delta_y : 3;
         przewiniecie_y_ += delta * wysokosc_wiersza();
         normalizuj_przewiniecie();
@@ -337,16 +375,48 @@ public:
             e.obsluzone = true;
             return;
         }
+        if ((k == 0x4BU || k == 0x4DU) && maks_przewiniecie_poziome() > 0) {   // strzalka w lewo / w prawo
+            ustaw_przewiniecie_poziome(przewiniecie_x_ + (k == 0x4BU ? -40 : 40) * skala_dpi_);
+            e.obsluzone = true;
+            return;
+        }
 
         Kontrolka::obsluz_wcisniecie_klawisza(e);
     }
 
 private:
+    int szerokosc_kolumn() const {
+        if (!dostawca_) return 0;
+        int w = 0;
+        const size_t cols = dostawca_->liczba_kolumn();
+        for (size_t c = 0; c < cols; ++c) w += dostawca_->szerokosc_kolumny(c) * skala_dpi_;
+        return w;
+    }
+    int szerokosc_obszaru_tabeli() const { return obszar_.szerokosc - (zewnetrzne_przewijanie_ ? 0 : 12 * skala_dpi_); }
+    void normalizuj_poziome() {
+        const int m = maks_przewiniecie_poziome();
+        if (przewiniecie_x_ > m) przewiniecie_x_ = m;
+        if (przewiniecie_x_ < 0) przewiniecie_x_ = 0;
+    }
+    void rysuj_pasek_poziomy(KontekstRysowania& ctx, int sb_w, int hsb_h) {
+        SkalaUI s = skala_dpi_;
+        const int y = obszar_.wysokosc - hsb_h;
+        const int tor = obszar_.szerokosc - sb_w - 4 * s;
+        const int calosc = szerokosc_kolumn(), widok = szerokosc_obszaru_tabeli() - 2, m = maks_przewiniecie_poziome();
+        if (tor <= 0 || calosc <= 0) return;
+        ctx.rysuj_prostokat(Prostokat(2 * s, y, tor, hsb_h - 2 * s), motyw_kolor(MOTYW_KOLOR_PANEL));
+        int kciuk = (widok * tor) / calosc;
+        if (kciuk < 16 * s) kciuk = 16 * s;
+        if (kciuk > tor) kciuk = tor;
+        const int x = 2 * s + (m > 0 ? (przewiniecie_x_ * (tor - kciuk)) / m : 0);
+        ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y + 2 * s, kciuk, hsb_h - 6 * s), motyw_kolor(MOTYW_KOLOR_RAMKA), 3 * s);
+    }
+
     void zapewnij_widocznosc_wiersza(size_t w) {
         int row_h = wysokosc_wiersza();
         int y0 = static_cast<int>(w) * row_h;
         int y1 = y0 + row_h;
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
 
         if (y0 < przewiniecie_y_) {
             przewiniecie_y_ = y0;
@@ -358,7 +428,7 @@ private:
 
     void normalizuj_przewiniecie() {
         int total_h = static_cast<int>(liczba_wierszy()) * wysokosc_wiersza();
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
         int max_scroll = total_h - table_h;
         if (max_scroll < 0) max_scroll = 0;
         if (przewiniecie_y_ > max_scroll) przewiniecie_y_ = max_scroll;
@@ -367,7 +437,7 @@ private:
 
     void rysuj_pasek_pionowy(KontekstRysowania& ctx, size_t rows, int row_h, int sb_w) {
         int total_h = static_cast<int>(rows) * row_h;
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
         if (total_h <= table_h || table_h <= 0) return;
 
         SkalaUI s = skala_dpi_;
@@ -388,6 +458,7 @@ private:
     }
 
     bool zewnetrzne_przewijanie_{false};
+    bool przewijanie_poziome_{false};
     int wysokosc_wiersza_px_{0}, wysokosc_naglowka_px_{0};
     int wiersz_najechany_{-1}, wiersz_drop_{-1};
     DostawcaDanychTabeli* dostawca_{nullptr};
