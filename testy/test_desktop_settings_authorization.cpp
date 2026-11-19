@@ -20,6 +20,8 @@ bool skopiuj_z_przestrzeni_uzytkownika(void* d,const void* s,size_t n){memcpy(d,
 bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void* p,size_t){return p!=nullptr;}
 extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(const void* p,uint64_t,bool){return p!=nullptr;}
 bool scheduler_dodaj_zdarzenie(int,const bws_zdarzenie*){return true;}
+// syscalls.cpp liczy I/O plikow procesu (rozliczanie_io.h, BWS 106); -O0 nie usuwa wywolania.
+extern "C" uint64_t scheduler_generacja_procesu(int pid){return pid>0?1:0;}
 uint64_t scheduler_pobierz_tick(){return 1;}
 extern "C" void bws_powiadom_zmiane_pliku(const char*,uint32_t){}
 proces_t tablica_procesow[MAKS_PROCESOW]{};

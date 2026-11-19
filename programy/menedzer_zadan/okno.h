@@ -50,8 +50,12 @@ public:
         return k < KOLUMN ? n[k] : "";
     }
     int szerokosc_kolumny(size_t k) override {
-        // Suma 950 DIP: przy oknie 1280 px miesci sie w calosci, przy mniejszym tabela przewija sie w poziomie.
-        static const int s[KOLUMN] = {210, 50, 170, 90, 100, 105, 105, 120};
+        // Szerokosci z pomiaru czcionka systemowa (DejaVu Sans, 100 %): najdluzsze nazwy ~194 px, "Oczekujący (zdarzenia)"
+        // 185 px, "Niedostępne" 100 px, "Czas działania" 113 px; + 2 x 6 px odstepu (+ strzalka sortowania w naglowku).
+        // Suma 1021 DIP miesci sie w standardowym oknie 1080 px. Tabela dodatkowo nie zweza kolumny ponizej jej
+        // naglowka zmierzonego aktywna czcionka (TabelaWirtualna::ustaw_szerokosc_wg_naglowkow) - przy innej czcionce
+        // albo mniejszym oknie wlacza sie przewijanie poziome zamiast obcinania naglowkow.
+        static const int s[KOLUMN] = {205, 50, 200, 90, 112, 112, 112, 140};
         return k < KOLUMN ? s[k] : 80;
     }
     const char* pobierz_komorke(size_t r, size_t k, char* b, size_t cap) override {
@@ -93,7 +97,8 @@ public:
     size_t liczba_wierszy() override { return dane.n; }
     size_t liczba_kolumn() override { return 2; }
     const char* naglowek_kolumny(size_t k) override { return k == 0 ? "Właściwość" : k == 1 ? "Wartość" : ""; }
-    int szerokosc_kolumny(size_t k) override { return k == 0 ? 220 : 430; }
+    // Najdluzszy klucz "Jądro, bufory, pamięć współdzielona" = 290 px czcionka systemowa (100 %) + odstepy.
+    int szerokosc_kolumny(size_t k) override { return k == 0 ? 304 : 430; }
     const char* pobierz_komorke(size_t r, size_t k, char*, size_t) override {
         if (r >= dane.n) return "";
         return k == 0 ? dane.klucz[r] : dane.wartosc[r];
@@ -103,7 +108,9 @@ public:
 
 class OknoMenedzera : public Okno {
 public:
-    OknoMenedzera() : Okno("Menedżer zadań", 900, 580), dane_(model_) {
+    // Standardowy rozmiar: wszystkie 8 kolumn tabeli procesow w calosci (Okno przycina go do obszaru roboczego mniejszych ekranow).
+    static constexpr int STANDARDOWA_SZEROKOSC = 1080, STANDARDOWA_WYSOKOSC = 600;
+    OknoMenedzera() : Okno("Menedżer zadań", STANDARDOWA_SZEROKOSC, STANDARDOWA_WYSOKOSC), dane_(model_) {
         ustaw_minimalny_rozmiar(620, 420);
     }
     ~OknoMenedzera() override {
@@ -154,6 +161,7 @@ public:
         tabela_ = &procesy->dodaj<TabelaWirtualna>(Dokowanie::Wypelnij);
         tabela_->ustaw_dostawce(&dane_);
         tabela_->ustaw_przewijanie_poziome(true);   // 8 kolumn nie miesci sie w minimalnym oknie
+        tabela_->ustaw_szerokosc_wg_naglowkow(true);
         tabela_->wyczysc_wybor();
         tabela_->przy_zmianie_wyboru([](TabelaWirtualna*, size_t r, void* p) {
             auto* o = static_cast<OknoMenedzera*>(p);
@@ -169,7 +177,8 @@ public:
         auto* wyd = new PanelDokowany(); wyd->ustaw_wypelnienie(Marginesy(4)); wyd->ustaw_odstep(8);
         lista_ = &wyd->dodaj<ListaWyboru>(Dokowanie::Lewo);
         lista_->ustaw_preferowany_rozmiar(Rozmiar(240, -1));
-        lista_->ustaw_wysokosc_wiersza(42);
+        lista_->ustaw_wysokosc_wiersza(48);
+        lista_->ustaw_tryb_nawigacji(true);        // najechanie, Spacja/Enter; wyglad stanow w rysuj_kategorie
         lista_->ustaw_przewijanie_poziome(false);
         lista_->ustaw_rysowanie_elementu([](ListaWyboru* l, KontekstRysowania& c, int i, Prostokat r, bool z, bool f, void* p) {
             static_cast<OknoMenedzera*>(p)->rysuj_kategorie(*l, c, i, r, z, f);
@@ -187,6 +196,8 @@ public:
         tabela_szcz_ = &szcz->dodaj<TabelaWirtualna>(Dokowanie::Dol);
         tabela_szcz_->ustaw_preferowany_rozmiar(Rozmiar(-1, 172));
         tabela_szcz_->ustaw_przewijanie_poziome(true);
+        tabela_szcz_->ustaw_sortowanie_naglowkiem(false);   // szczegoly nie sa sortowane: bez strzalki w naglowku
+        tabela_szcz_->ustaw_szerokosc_wg_naglowkow(true);
         tabela_szcz_->ustaw_dostawce(&dane_szcz_);
         tabela_szcz_->wyczysc_wybor();
         wykres_ = &szcz->dodaj<Wykres>(Dokowanie::Wypelnij, TypWykresu::Linia);
@@ -419,19 +430,37 @@ private:
         pokazany_ = ~0ULL;          // wymus ustawienie serii i wyboru dla biezacej kategorii
     }
 
+    /*
+     * Pozycja nawigacji jako "karta" przycisku: caly wiersz jest polem klikniecia (ListaWyboru::indeks_z_punktu).
+     * Stany sa rozlaczne wizualnie: zwykly = tlo przycisku, najechany = tlo przycisku najechanego, wybrany = tlo
+     * zaznaczenia + pomaranczowy pasek akcentu (widoczny niezaleznie od kursora), fokus klawiatury = ramka akcentu,
+     * wylaczona lista = przygaszony tekst. Strzalka ">" po prawej sygnalizuje przejscie do widoku.
+     */
     void rysuj_kategorie(ListaWyboru& l, KontekstRysowania& c, int i, Prostokat r, bool zaznaczony, bool fokus) {
         const SkalaUI sk = l.skala_dpi();
-        if (zaznaczony) c.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE));
-        else if (fokus) c.rysuj_prostokat(r, motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY));
-        // pasek akcentu: wyroznienie wybranej kategorii w barwach Bursztyna
-        if (zaznaczony) c.rysuj_prostokat(Prostokat(r.x, r.y + 4 * sk, 3 * sk, r.wysokosc - 8 * sk), motyw_kolor(MOTYW_KOLOR_AKCENT));
+        const bool najechany = !zaznaczony && i == l.indeks_najechany();
+        const bool aktywna = l.czy_wlaczona();
+        const Prostokat karta(r.x + 4 * sk, r.y + 2 * sk, r.szerokosc - 8 * sk, r.wysokosc - 4 * sk);
+        const uint32_t tlo = !aktywna ? motyw_kolor(MOTYW_KOLOR_PODNIESIONY)
+                           : zaznaczony ? motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE)
+                           : najechany ? motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY)
+                                       : motyw_kolor(MOTYW_KOLOR_PRZYCISK);
+        c.rysuj_zaokraglony_prostokat(karta, tlo, 4 * sk);
+        if (zaznaczony) c.rysuj_prostokat(Prostokat(karta.x, karta.y + 3 * sk, 4 * sk, karta.wysokosc - 6 * sk), motyw_kolor(MOTYW_KOLOR_AKCENT));
+        if (fokus) c.rysuj_ramke(karta, motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY), sk);
         const int h = CzcionkaUI::pobierz_wysokosc(sk);
-        const uint32_t k1 = zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_TEKST);
-        const uint32_t k2 = zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI);
-        const int x = r.x + 10 * sk, w = r.szerokosc - 14 * sk, y = r.y + (r.wysokosc - 2 * h) / 2;
+        const uint32_t k1 = !aktywna ? motyw_kolor(MOTYW_KOLOR_WYLACZONY)
+                          : zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_TEKST);
+        const uint32_t k2 = !aktywna ? motyw_kolor(MOTYW_KOLOR_WYLACZONY)
+                          : zaznaczony ? motyw_kolor_tekstu_zaznaczenia() : motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI);
+        const int strzalka = CzcionkaUI::zmierz_tekst(">", sk);
+        const int x = karta.x + 12 * sk, w = karta.szerokosc - 12 * sk - strzalka - 10 * sk;
+        const int y = karta.y + (karta.wysokosc - 2 * h) / 2;
         const char* nazwa = l.element(static_cast<size_t>(i));
         c.rysuj_tekst_obciety(Punkt(x, y), nazwa ? nazwa : "", k1, w, sk);
         if (i >= 0 && static_cast<size_t>(i) < kategorie_.n) c.rysuj_tekst_obciety(Punkt(x, y + h), wartosci_[i], k2, w, sk);
+        c.rysuj_tekst(Punkt(karta.prawy() - strzalka - 6 * sk, karta.y + (karta.wysokosc - h) / 2), ">",
+                      zaznaczony ? motyw_kolor(MOTYW_KOLOR_AKCENT) : k2, sk);
     }
 
     void aktualizuj_szczegoly() {

@@ -210,3 +210,56 @@ obciążenie GPU. Transfer do urządzenia to bajty, a nie procent wykorzystania.
 | Proces: dane TCP | dokładne dla sesji z właścicielem; DNS/ICMP/ARP/DHCP – nieprzypisywane |
 | Grafika: klatki, czasy kompozytora, transfery, polecenia VirtIO-GPU, pamięć | dokładne (definicje wyżej) |
 | Grafika: obciążenie GPU | **nieobsługiwane** – brak licznika sprzętowego |
+
+## 4. Poprawki interfejsu (2026-11-19, druga runda)
+
+### Nagłówek „Właściwość / Wartość” zasłaniany przez pierwszy wiersz – `bursztyn_ui/tabela_wirtualna.h`
+
+**Przyczyna (komponent współdzielony):**
+- `TabelaWirtualna::rysuj_siebie` rysował nagłówek pierwszy, a wiersze od `y = wysokość_nagłówka − (przewinięcie % wysokość_wiersza)`.
+- Wiersz częściowo przewinięty był rysowany w całości, a przycięcie do obszaru danych działało tylko przy poziomym pasku.
+- Każde przesunięcie niebędące wielokrotnością wiersza zamazywało nagłówek. Takie przesunięcia dają:
+  - przewinięcie do końca (maksimum = `total_h − table_h`);
+  - klik w suwak;
+  - nieaktualne przesunięcie po podmianie danych (np. przełączenie na kategorię z mniejszą liczbą wierszy);
+  - `zapewnij_widocznosc_wiersza` przed pierwszym układem (wysokość 0 dawała dodatnie przesunięcie).
+
+**Poprawka, centralnie w komponencie:**
+- wiersze są zawsze przycięte do obszaru pod linią nagłówka;
+- przesunięcie jest normalizowane przy każdym rysowaniu;
+- przed układem tabela nie przewija.
+
+**Nowe opcje, domyślnie wyłączone (inne aplikacje bez zmian):**
+- `ustaw_sortowanie_naglowkiem(false)` – brak strzałki i reakcji na klik w tabelach bez sortowania;
+- `ustaw_szerokosc_wg_naglowkow(true)` – kolumna nie węższa niż jej nagłówek zmierzony aktywną czcionką plus odstępy i strzałka. Wynik jest zapamiętywany do zmiany skali, generacji czcionki BSF, rozmiaru UI, kroju (postęp znaku „W”) albo dostawcy danych.
+
+### Nawigacja karty Wydajność – `bursztyn_ui/lista_wyboru.h` + `programy/menedzer_zadan/okno.h`
+
+**`ListaWyboru::ustaw_tryb_nawigacji(true)`** (domyślnie wyłączony):
+- śledzi wiersz pod kursorem (`indeks_najechany()`) i przerysowuje tylko stary i nowy wiersz;
+- gasi najechanie po wyjściu kursora;
+- Spacja/Enter zatwierdzają wiersz z fokusem; Góra/Dół działały wcześniej.
+
+**Wiersz Menedżera to „karta” przycisku na całej szerokości wiersza:**
+
+| Stan | Wygląd |
+|---|---|
+| zwykły | tło przycisku |
+| najechany | tło przycisku najechanego |
+| wybrany | tło zaznaczenia + pomarańczowy pasek akcentu (widoczny od otwarcia karty, niezależnie od kursora) |
+| fokus | ramka akcentu |
+| wyłączony | przygaszony tekst |
+
+Strzałka „>” po prawej sygnalizuje przejście do widoku. Wybór jest trzymany jako stała tożsamość urządzenia. Gdy wybrane urządzenie zniknie, wybór wraca do „Procesor”.
+
+### Kolumna „Czas działania”
+
+**Pomiar czcionką systemową** (DejaVu Sans, 100%):
+- „Czas działania” 113 px; z odstępami 2 × 6 px i strzałką kolumna 120 DIP ucinała nagłówek;
+- ucinały się też „Niedostępne” (100 px) i „Oczekujący (zdarzenia)” (185 px).
+
+**Nowe szerokości:** Nazwa 205, PID 50, Stan 200, Procesor 90, Pamięć 112, Dysk 112, Sieć 112, Czas działania 140, razem 1021 DIP.
+
+**Standardowe okno:** 1080×600. `Okno` przycina je do obszaru roboczego mniejszych ekranów.
+
+**Inna czcionka lub węższe okno:** przy prawdziwym BSF kolumny zajmują 1036 px przy 1062 px tabeli. Szerokość według nagłówków nie pozwala ich obciąć, a do ostatniej kolumny prowadzi przewijanie poziome.

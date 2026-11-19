@@ -493,6 +493,46 @@ int main() {
       }
     }
   }
+  {
+    // TabelaWirtualna z prawdziwa czcionka BSF: kolumna nie wezsza niz naglowek (Menedzer zadan, "Czas działania"),
+    // a przy zmianie rodziny/rozmiaru czcionki systemowej szerokosci sa liczone na nowo. Wiersz przewiniety o pol
+    // wysokosci nie maluje w pasie naglowka (kolor zaznaczenia).
+    struct Dane : DostawcaDanychTabeli {
+      size_t liczba_wierszy() override { return 40; }
+      size_t liczba_kolumn() override { return 2; }
+      const char *naglowek_kolumny(size_t k) override { return k ? "Czas działania" : "Właściwość"; }
+      int szerokosc_kolumny(size_t) override { return 60; }
+      const char *pobierz_komorke(size_t r, size_t, char *b, size_t n) override { snprintf(b, n, "Wiersz %zu", r); return b; }
+    } dane;
+    for (uint32_t proc : {100u, 150u, 200u}) {
+      TabelaWirtualna t; t.ustaw_skale_dpi(SkalaUI::procent(proc)); t.ustaw_dostawce(&dane);
+      t.ustaw_geometrie(0, 0, 500 * int(proc) / 100, 220 * int(proc) / 100);
+      CHECK(t.szerokosc_kolumny_px(1) == 60 * int(proc) / 100);                 // domyslnie: szerokosc dostawcy
+      t.ustaw_szerokosc_wg_naglowkow(true);
+      const SkalaUI sk = SkalaUI::procent(proc);
+      CHECK(t.szerokosc_kolumny_px(1) >= CzcionkaUI::zmierz_tekst("Czas działania", sk) + 12 * sk + 14 * sk);
+      CHECK(t.wysokosc_naglowka() >= CzcionkaUI::pobierz_wysokosc(sk));
+      const int przed = t.szerokosc_kolumny_px(1);
+      BSF::preview(BSF::resolve_family("monospace"), 22);                      // inna czcionka systemowa
+      const int mono = t.szerokosc_kolumny_px(1);
+      CHECK(mono != przed && mono >= CzcionkaUI::zmierz_tekst("Czas działania", sk) + 12 * sk + 14 * sk);
+      CHECK(t.wysokosc_naglowka() >= CzcionkaUI::pobierz_wysokosc(sk));
+      BSF::end_preview();
+      CHECK(t.szerokosc_kolumny_px(1) == przed);
+      const int wh = t.wysokosc_wiersza(), nh = t.wysokosc_naglowka();
+      t.ustaw_wybrany_wiersz(7); t.ustaw_przewiniecie_pionowe(7 * wh + wh / 2);
+      std::vector<uint32_t> px(size_t(t.obszar().szerokosc) * t.obszar().wysokosc, 0);
+      KontekstRysowania c(Prostokat(0, 0, t.obszar().szerokosc, t.obszar().wysokosc));
+      c.ustaw_cel(px.data(), Prostokat(0, 0, t.obszar().szerokosc, t.obszar().wysokosc));
+      t.rysuj_siebie(c);
+      const uint32_t zazn = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) & 0xFFFFFF;
+      int w_naglowku = 0, pod = 0;
+      for (int y = 0; y < t.obszar().wysokosc; ++y)
+        for (int x = 0; x < t.obszar().szerokosc; ++x)
+          if ((px[size_t(y) * t.obszar().szerokosc + x] & 0xFFFFFF) == zazn) (y <= nh ? w_naglowku : pod)++;
+      CHECK(w_naglowku == 0 && pod > 0);
+    }
+  }
   BSF::shutdown();
   printf("BSF UI/browser: %u checks PASS; proportional geometry, clipping/AA, "
          "Polish UTF-8, previews, persistence, font priority, cooperative "

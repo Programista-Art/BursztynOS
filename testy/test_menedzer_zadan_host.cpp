@@ -20,6 +20,7 @@
 #include <new>
 #include <string>
 #include <vector>
+#include <tuple>
 
 #include "rozliczanie_cpu.h"
 #include "pamiec_procesu.h"
@@ -931,13 +932,21 @@ static void okno_cases() {
         CHECK(g_alokacje == a0);
     }
     {   // ruch myszy miedzy probkami: zadnego przerysowania karty ani pelnego okna
-        const uint64_t px0 = o->liczba_brudnych_pikseli(), pelne = o->liczba_pelnych_odrysowan();
+        const uint64_t pelne = o->liczba_pelnych_odrysowan();
+        const Prostokat nav = o->lista_->obszar_ekranu();
+        const uint64_t wiersz = uint64_t(nav.szerokosc) * uint64_t(o->lista_->wysokosc_wiersza_piksele());
+        uint64_t px_poza = 0, px_nad_maks = 0;
         for (int i = 0; i < 300; ++i) {
             bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_MYSZ_RUCH; e.x = 20 + (i * 13) % 880; e.y = 150 + (i * 7) % 420;
+            const uint64_t p0 = o->liczba_brudnych_pikseli();
             o->obsluz_zdarzenie(e); KontekstRysowania c; o->rysuj(c, false);
+            const uint64_t d = o->liczba_brudnych_pikseli() - p0;
+            if (nav.zawiera(e.x, e.y)) { if (d > px_nad_maks) px_nad_maks = d; }
+            else px_poza += d;
         }
         CHECK(o->liczba_pelnych_odrysowan() == pelne);
-        CHECK(o->liczba_brudnych_pikseli() - px0 < 20000);    // co najwyzej podswietlenie zakladki/przycisku
+        CHECK(px_poza < 20000 + 2 * wiersz);                  // poza nawigacja: co najwyzej zakladka/przycisk + zgaszenie najechania
+        CHECK(px_nad_maks <= 2 * wiersz);                     // najechanie nawigacji: tylko stary i nowy wiersz
         CHECK(!o->wykres_->czy_brudna() && !o->tabela_szcz_->czy_brudna());
         przebieg(5); CHECK(o->wykres_->czy_brudna());         // probka w trakcie ruchu myszy nadal aktualizuje wykres
         KontekstRysowania c; o->rysuj(c, false);
@@ -1262,12 +1271,15 @@ static void wydajnosc_urzadzen_cases() {
     {
         wybierz(znacznik_widoku(Widok::Procesor));
         const uint64_t pelne = o->liczba_pelnych_odrysowan();
-        uint64_t px_mysz = 0, px_probki_maks = 0;
+        uint64_t px_mysz = 0, px_probki_maks = 0, px_nad_maks = 0;
+        const uint64_t wiersz = uint64_t(o->lista_->obszar_ekranu().szerokosc) * uint64_t(o->lista_->wysokosc_wiersza_piksele());
         for (int i = 0; i < 300; ++i) {
             bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_MYSZ_RUCH; e.x = 10 + (i * 17) % 1200; e.y = 120 + (i * 11) % 560;
             uint64_t p0 = o->liczba_brudnych_pikseli();
             o->obsluz_zdarzenie(e); { KontekstRysowania c; o->rysuj(c, false); }
-            px_mysz += o->liczba_brudnych_pikseli() - p0;
+            const uint64_t dm = o->liczba_brudnych_pikseli() - p0;
+            if (o->lista_->obszar_ekranu().zawiera(e.x, e.y)) { if (dm > px_nad_maks) px_nad_maks = dm; }
+            else px_mysz += dm;
             if (i % 30 == 0) {
                 p0 = o->liczba_brudnych_pikseli();
                 j.uplyw(1000000000ULL, {{6, 10000000ULL * (i % 7)}}); o->odswiez(); { KontekstRysowania c; o->rysuj(c, false); }
@@ -1276,7 +1288,8 @@ static void wydajnosc_urzadzen_cases() {
             }
         }
         CHECK(o->liczba_pelnych_odrysowan() == pelne);
-        CHECK(px_mysz < 20000);                                   // sam ruch myszy: co najwyzej podswietlenie zakladki
+        CHECK(px_mysz < 20000 + 2 * wiersz);                      // poza nawigacja: zakladka + zgaszenie najechania
+        CHECK(px_nad_maks <= 2 * wiersz);                         // nad nawigacja: tylko stary i nowy wiersz
         CHECK(px_probki_maks > 0 && px_probki_maks < 1280ULL * 720ULL * 3 / 4);   // probka: wykres+lista+szczegoly, nie cale okno
     }
     // ukryta karta: lista i szczegoly nie sa aktualizowane, model zbiera historie dalej
@@ -1293,6 +1306,246 @@ static void wydajnosc_urzadzen_cases() {
     g_jadro = nullptr;
 }
 
+// =====================================================================================
+// G. Poprawki UI: naglowek tabeli "Wlasciwosc/Wartosc", nawigacja Wydajnosci, kolumna "Czas dzialania"
+// =====================================================================================
+struct Bufor { int w = 0, h = 0; std::vector<uint32_t> px; };
+static Bufor narysuj_kontrolke(Kontrolka& k) {
+    Bufor b; b.w = k.obszar().szerokosc; b.h = k.obszar().wysokosc;
+    b.px.assign(size_t(b.w) * size_t(b.h), 0x00123456U);
+    KontekstRysowania c(Prostokat(0, 0, b.w, b.h)); c.ustaw_cel(b.px.data(), Prostokat(0, 0, b.w, b.h));
+    k.rysuj_siebie(c);
+    return b;
+}
+static int ile_koloru(const Bufor& b, Prostokat r, uint32_t kolor) {
+    int n = 0;
+    for (int y = r.y < 0 ? 0 : r.y; y < r.dolny() && y < b.h; ++y)
+        for (int x = r.x < 0 ? 0 : r.x; x < r.prawy() && x < b.w; ++x)
+            if ((b.px[size_t(y) * b.w + x] & 0xFFFFFFU) == (kolor & 0xFFFFFFU)) ++n;
+    return n;
+}
+class DaneProste : public DostawcaDanychTabeli {
+public:
+    size_t wiersze = 30;
+    size_t liczba_wierszy() override { return wiersze; }
+    size_t liczba_kolumn() override { return 2; }
+    const char* naglowek_kolumny(size_t k) override { return k ? "Wartość" : "Właściwość"; }
+    int szerokosc_kolumny(size_t k) override { return k ? 200 : 150; }
+    const char* pobierz_komorke(size_t r, size_t k, char* b, size_t cap) override { std::snprintf(b, cap, "%c%zu", k ? 'w' : 'k', r); return b; }
+};
+// Pierwszy (czesciowo przewiniety) wiersz nie moze malowac w pasie naglowka. Wiersz wybrany ma unikalny kolor
+// zaznaczenia; przed poprawka byl rysowany od y = naglowek - (przewiniecie % wiersz), czyli na naglowku.
+static void tabela_naglowek_cases() {
+    const uint32_t zazn = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE);
+    for (uint32_t skala : {100u, 150u, 200u}) {
+        DaneProste d; TabelaWirtualna t; t.ustaw_skale_dpi(SkalaUI::procent(skala)); t.ustaw_dostawce(&d);
+        t.ustaw_geometrie(0, 0, 420 * int(skala) / 100, 200 * int(skala) / 100);
+        const int nh = t.wysokosc_naglowka(), wh = t.wysokosc_wiersza();
+        CHECK(t.poczatek_wierszy() == nh && nh >= CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(skala)));
+        // poczatkowy uklad: wiersz 0 wybrany, zaczyna sie ponizej naglowka
+        t.ustaw_wybrany_wiersz(1); t.ustaw_wybrany_wiersz(0);
+        Bufor b = narysuj_kontrolke(t);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh), zazn) == 0 && ile_koloru(b, Prostokat(0, nh + 1, b.w, wh - 2), zazn) > 0);
+        // przewiniecie o pol wiersza: wybrany wiersz 3 czesciowo pod naglowkiem
+        t.ustaw_przewiniecie_pionowe(3 * wh + wh / 2); t.ustaw_wybrany_wiersz(3);
+        t.ustaw_przewiniecie_pionowe(3 * wh + wh / 2);
+        CHECK(t.przewiniecie_pionowe() == 3 * wh + wh / 2);
+        b = narysuj_kontrolke(t);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh + 1), zazn) == 0);      // naglowek i jego linia nienaruszone
+        CHECK(ile_koloru(b, Prostokat(0, nh + 1, b.w, wh / 2 - 1), zazn) > 0);   // widoczna polowa wiersza 3
+        // przewiniecie do konca (maksimum nie jest wielokrotnoscia wiersza) - rolka
+        for (int i = 0; i < 20; ++i) { ZdarzenieRolki e{}; e.delta_y = -3; t.obsluz_rolke(e); }
+        t.ustaw_wybrany_wiersz(d.wiersze - 1); t.ustaw_wybrany_wiersz(t.pierwszy_widoczny_wiersz());
+        b = narysuj_kontrolke(t);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh + 1), zazn) == 0);
+        // klik suwaka w dowolnym miejscu (dowolne przesuniecie)
+        { ZdarzenieMyszki e{}; e.typ = TypZdarzenia::WcisniecieMyszy; e.przycisk = 1; e.x = b.w - 3; e.y = nh + 37; t.obsluz_wcisniecie_myszy(e); }
+        t.ustaw_wybrany_wiersz(t.pierwszy_widoczny_wiersz());
+        b = narysuj_kontrolke(t);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh + 1), zazn) == 0);
+        // podmiana danych na mniej wierszy: nieaktualne przewiniecie wyzerowane przy rysowaniu, wiersz 0 pod naglowkiem
+        d.wiersze = 4; t.ustaw_wybrany_wiersz(0);
+        b = narysuj_kontrolke(t);
+        CHECK(t.przewiniecie_pionowe() == 0 && t.pierwszy_widoczny_wiersz() == 0);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh + 1), zazn) == 0 && ile_koloru(b, Prostokat(0, nh + 1, b.w, wh - 2), zazn) > 0);
+        // zmiana wysokosci i szerokosci (takze z paskiem poziomym)
+        d.wiersze = 30;
+        for (auto [w, h] : {std::pair{300, 120}, std::pair{900, 400}, std::pair{200, 90}}) {
+            t.ustaw_przewijanie_poziome(w < 400);
+            t.ustaw_geometrie(0, 0, w * int(skala) / 100, h * int(skala) / 100);
+            t.ustaw_przewiniecie_pionowe(5 * wh + wh / 3); t.ustaw_wybrany_wiersz(5);
+            b = narysuj_kontrolke(t);
+            CHECK(ile_koloru(b, Prostokat(0, 0, b.w, nh + 1), zazn) == 0);
+            const int hsb = t.wysokosc_paska_poziomego();
+            if (hsb) CHECK(ile_koloru(b, Prostokat(0, b.h - hsb, b.w, hsb), zazn) == 0);   // wiersze nie wchodza na pasek
+        }
+        // tabela przed ukladem: wybor wiersza nie ustawia blednego przewiniecia
+        TabelaWirtualna u; u.ustaw_skale_dpi(SkalaUI::procent(skala)); u.ustaw_dostawce(&d);
+        u.ustaw_wybrany_wiersz(25);
+        CHECK(u.przewiniecie_pionowe() == 0);
+    }
+    // naglowek bez sortowania: brak strzalki i brak reakcji na klik
+    {
+        DaneProste d; TabelaWirtualna t; t.ustaw_dostawce(&d); t.ustaw_geometrie(0, 0, 420, 200); t.ustaw_sortowanie_naglowkiem(false);
+        Bufor b = narysuj_kontrolke(t);
+        CHECK(ile_koloru(b, Prostokat(0, 0, b.w, t.wysokosc_naglowka()), motyw_kolor(MOTYW_KOLOR_AKCENT)) == 0);
+        DaneProste e; TabelaWirtualna s2; s2.ustaw_dostawce(&e); s2.ustaw_geometrie(0, 0, 420, 200);
+        Bufor b2 = narysuj_kontrolke(s2);
+        CHECK(ile_koloru(b2, Prostokat(0, 0, b2.w, s2.wysokosc_naglowka()), motyw_kolor(MOTYW_KOLOR_AKCENT)) > 0);   // domyslnie jak dotad
+    }
+}
+
+static void poprawki_ui_cases() {
+    using MenedzerZadan::Widok; using MenedzerZadan::znacznik_widoku;
+    tabela_naglowek_cases();
+    Jadro j; g_jadro = &j;
+    j.uruchom(1, "/menedzer_okien.bur", PZB_ZAUFANE);
+    j.uruchom(6, AppIdentity::TaskManager, PZB_ZAUFANE, 1);
+    j.uruchom(3, "/programy/notatnik.cebula/notatnik.bur");
+    j.l_dyskow = 2; j.l_sieci = 1; j.backend = 4;
+    auto* o = new OknoMenedzera;
+    o->wywolaj = bws_symulowane; o->zegar_ns = zegar_testowy;
+    o->init(); o->przelicz_uklad();                           // standardowy rozmiar z konstruktora
+    char b[64];
+    // ---- Czas dzialania: standardowe okno miesci wszystkie kolumny w calosci
+    {
+        TabelaWirtualna* t = o->tabela(); rysuj(*o);
+        CHECK(o->szerokosc() == OknoMenedzera::STANDARDOWA_SZEROKOSC);
+        CHECK(t->czy_szerokosc_wg_naglowkow() && t->maks_przewiniecie_poziome() == 0);
+        int suma = 0;
+        for (size_t k = 0; k < 8; ++k) {
+            const int cw = t->szerokosc_kolumny_px(k);
+            // pelny naglowek + odstepy 2 x 6 px + strzalka sortowania mieszcza sie w kolumnie
+            CHECK(cw - 12 - 14 >= CzcionkaUI::zmierz_tekst(t->dostawca()->naglowek_kolumny(k), SkalaUI::procent(100)));
+            suma += cw;
+        }
+        CHECK(suma <= t->obszar_ekranu().szerokosc - 12 - 2);   // pasek pionowy + ramka
+        CHECK(!std::strcmp(t->dostawca()->naglowek_kolumny(7), "Czas działania"));
+        // wezsze okno: przewijanie poziome daje dostep do ostatniej kolumny, bez wychodzenia poza tabele
+        o->ustaw_geometrie(0, 0, 620, 420); o->przelicz_uklad(); rysuj(*o);
+        CHECK(t->maks_przewiniecie_poziome() > 0);
+        t->ustaw_przewiniecie_poziome(1 << 20);
+        CHECK(t->przewiniecie_poziome() == t->maks_przewiniecie_poziome());
+        const int start7 = 1 - t->przewiniecie_poziome() + suma - t->szerokosc_kolumny_px(7);
+        CHECK(start7 >= 0 && start7 + t->szerokosc_kolumny_px(7) <= t->obszar_ekranu().szerokosc - 12);
+        t->ustaw_przewiniecie_poziome(-50); CHECK(t->przewiniecie_poziome() == 0);
+        // skala 150 %: kolumny rosna razem z pomiarem naglowkow (cache uniewazniony przez skale)
+        { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 150; o->obsluz_zdarzenie(ev); }
+        o->przelicz_uklad(); rysuj(*o);
+        CHECK(t->szerokosc_kolumny_px(7) - 18 - 21 >= CzcionkaUI::zmierz_tekst("Czas działania", SkalaUI::procent(150)));
+        { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 100; o->obsluz_zdarzenie(ev); }
+        // sortowanie i wybor po zmianie rozmiaru
+        o->ustaw_geometrie(0, 0, OknoMenedzera::STANDARDOWA_SZEROKOSC, OknoMenedzera::STANDARDOWA_WYSOKOSC); o->przelicz_uklad(); rysuj(*o);
+        t->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 3)));
+        t->dostawca()->zazadaj_sortowania(7, true);
+        CHECK(o->model().kolumna() == MenedzerZadan::Kolumna::Czas && o->model().wybrany()->pid == 3);
+        CHECK(t->wybrany_wiersz() == static_cast<size_t>(wiersz_pid(*o, 3)));
+        j.uplyw(1000000000ULL, {}); o->odswiez();
+        CHECK(o->model().wybrany()->pid == 3 && t->wybrany_wiersz() == static_cast<size_t>(wiersz_pid(*o, 3)));
+    }
+    // ---- Nawigacja Wydajnosci
+    o->karty_->ustaw_aktywna_karte(1); rysuj(*o);
+    ListaWyboru* l = o->lista_;
+    const int wh = l->wysokosc_wiersza_piksele();
+    const uint32_t k_zazn = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE), k_hover = motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY),
+                   k_zwykly = motyw_kolor(MOTYW_KOLOR_PRZYCISK), k_akcent = motyw_kolor(MOTYW_KOLOR_AKCENT),
+                   k_fokus = motyw_kolor(MOTYW_KOLOR_AKCENT_NAJECHANY);
+    CHECK(((k_zazn ^ k_hover) & 0xFFFFFF) && ((k_zazn ^ k_zwykly) & 0xFFFFFF) && ((k_hover ^ k_zwykly) & 0xFFFFFF));   // stany rozlaczne
+    {
+        CHECK(l->czy_tryb_nawigacji() && l->wybrany_indeks() == 0);        // wybor od razu po otwarciu karty
+        Bufor bl = narysuj_kontrolke(*l);
+        const Prostokat w0 = l->prostokat_widoku();
+        auto pas = [&](int i) { return Prostokat(w0.x, w0.y + i * wh, w0.szerokosc, wh); };
+        CHECK(ile_koloru(bl, pas(0), k_zazn) > 100 && ile_koloru(bl, Prostokat(w0.x, w0.y, 16, wh), k_akcent) > 10);
+        CHECK(ile_koloru(bl, pas(1), k_zwykly) > 100 && ile_koloru(bl, pas(1), k_zazn) == 0);
+        // najechanie: wiersz 2 podswietlony, wiersz 0 dalej wybrany (kursor gdzie indziej nie gasi wyboru)
+        const Prostokat ek = l->obszar_ekranu();
+        { ZdarzenieMyszki e{}; e.typ = TypZdarzenia::RuchMyszy; e.x = ek.x + w0.x + 30; e.y = ek.y + w0.y + 2 * wh + wh / 2; l->obsluz_ruch_myszy(e); }
+        CHECK(l->indeks_najechany() == 2 && l->wybrany_indeks() == 0);
+        bl = narysuj_kontrolke(*l);
+        CHECK(ile_koloru(bl, pas(2), k_hover) > 100 && ile_koloru(bl, pas(0), k_zazn) > 100 && ile_koloru(bl, pas(1), k_hover) == 0);
+        l->obsluz_opuszczenie_myszy();
+        CHECK(l->indeks_najechany() < 0);
+        bl = narysuj_kontrolke(*l);
+        CHECK(ile_koloru(bl, pas(2), k_hover) == 0 && ile_koloru(bl, pas(0), k_zazn) > 100);
+        // fokus klawiatury: ramka akcentu, inna niz wybor i najechanie
+        o->ustaw_fokus(l);
+        bl = narysuj_kontrolke(*l);
+        CHECK(l->czy_ma_fokus() && ile_koloru(bl, pas(0), k_fokus) > 20);
+        // klik w dowolnym miejscu wiersza (prawa krawedz, dolny odstep miedzy kartami) wybiera kategorie
+        for (auto [i, dx, dy] : {std::tuple{3, w0.szerokosc - 3, wh - 1}, std::tuple{2, 2, 1}, std::tuple{4, w0.szerokosc / 2, wh / 2}}) {
+            ZdarzenieMyszki e{}; e.typ = TypZdarzenia::WcisniecieMyszy; e.przycisk = 1;
+            e.x = ek.x + w0.x + dx; e.y = ek.y + w0.y + i * wh + dy; l->obsluz_wcisniecie_myszy(e); rysuj(*o);
+            CHECK(l->wybrany_indeks() == i && o->widok_ == o->kategorie_.z[size_t(i)]);
+            char t[64]; MenedzerZadan::nazwa_kategorii(o->kategorie_.z[size_t(i)], o->urzadzenia(), t, sizeof(t));
+            CHECK(!std::strcmp(o->naglowek_widoku_->tekst(), t));
+        }
+        // klawiatura: Gora/Dol zmieniaja widok, Spacja i Enter zatwierdzaja wiersz z fokusem
+        { ZdarzenieKlawiatury e{}; e.kod_klawisza = 0x48; l->obsluz_wcisniecie_klawisza(e); CHECK(e.obsluzone && l->wybrany_indeks() == 3); }
+        { ZdarzenieKlawiatury e{}; e.kod_klawisza = 0x50; l->obsluz_wcisniecie_klawisza(e); CHECK(l->wybrany_indeks() == 4); }
+        { ZdarzenieKlawiatury e{}; e.kod_klawisza = ' '; l->obsluz_wcisniecie_klawisza(e); CHECK(e.obsluzone && l->wybrany_indeks() == 4); }
+        { ZdarzenieKlawiatury e{}; e.kod_klawisza = 13; l->obsluz_wcisniecie_klawisza(e); CHECK(e.obsluzone && l->wybrany_indeks() == 4); }
+        rysuj(*o);
+        CHECK(o->widok_ == o->kategorie_.z[4]);
+        // odswiezanie telemetrii nie resetuje wyboru (Dysk 1 = indeks 3)
+        l->ustaw_wybrany_indeks(3); rysuj(*o);
+        const uint64_t z = o->widok_;
+        for (int i = 0; i < 10; ++i) { j.dysk_odczyt[1] += 4096 * i; j.siec_rx[0] += 100; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o); }
+        CHECK(o->widok_ == z && l->wybrany_indeks() == 3 && rodzaj_widoku(z) == Widok::Dysk);
+        // wybrane urzadzenie znika: bezpieczny powrot do Procesora
+        j.l_dyskow = 1; j.uplyw(1000000000ULL, {}); o->odswiez(); rysuj(*o);
+        CHECK(l->wybrany_indeks() == 0 && rodzaj_widoku(o->widok_) == Widok::Procesor && l->indeks_najechany() < 0);
+        // wylaczona lista: przygaszony tekst, brak najechania
+        l->ustaw_wlaczona(false);
+        { ZdarzenieMyszki e{}; e.typ = TypZdarzenia::RuchMyszy; e.x = ek.x + w0.x + 30; e.y = ek.y + w0.y + wh + 5; l->obsluz_ruch_myszy(e); }
+        CHECK(l->indeks_najechany() < 0);
+        bl = narysuj_kontrolke(*l);
+        CHECK(ile_koloru(bl, pas(1), motyw_kolor(MOTYW_KOLOR_PODNIESIONY)) > 100);
+        l->ustaw_wlaczona(true);
+        // inna lista bez trybu nawigacji: najechanie nie jest sledzone (dotychczasowe zachowanie)
+        ListaWyboru zwykla; zwykla.dodaj_element("a"); zwykla.dodaj_element("b"); zwykla.ustaw_geometrie(0, 0, 200, 100);
+        { ZdarzenieMyszki e{}; e.typ = TypZdarzenia::RuchMyszy; e.x = 20; e.y = 10; zwykla.obsluz_ruch_myszy(e); }
+        { ZdarzenieKlawiatury e{}; e.kod_klawisza = ' '; zwykla.obsluz_wcisniecie_klawisza(e); CHECK(!e.obsluzone); }
+        CHECK(zwykla.indeks_najechany() < 0);
+    }
+    // ---- Tabela szczegolow w oknie: naglowek wolny od wierszy przy otwarciu, po przewinieciu i zmianie rozmiaru
+    {
+        auto sprawdz = [&]() {
+            TabelaWirtualna* t = o->tabela_szcz_;
+            Bufor bt = narysuj_kontrolke(*t);
+            const int nh = t->wysokosc_naglowka();
+            CHECK(t->poczatek_wierszy() == nh);
+            CHECK(ile_koloru(bt, Prostokat(0, 0, bt.w, nh + 1), motyw_kolor(MOTYW_KOLOR_PODNIESIONY)) == 0);   // tlo wierszy nieparzystych
+            CHECK(ile_koloru(bt, Prostokat(0, 0, bt.w, nh), motyw_kolor(MOTYW_KOLOR_AKCENT)) == 0);            // brak strzalki sortowania
+        };
+        o->lista_->ustaw_wybrany_indeks(o->kategorie_.indeks(znacznik_widoku(Widok::Dysk, 0))); rysuj(*o);
+        sprawdz();
+        // klucze szczegolow mieszcza sie w kolumnie "Wlasciwosc" (bez obcinania), w kazdej kategorii
+        for (size_t k = 0; k < o->kategorie_.n; ++k) {
+            o->lista_->ustaw_wybrany_indeks(int(k)); rysuj(*o);
+            for (size_t r = 0; r < o->dane_szcz_.dane.n; ++r)
+                CHECK(CzcionkaUI::zmierz_tekst(o->dane_szcz_.dane.klucz[r], SkalaUI::procent(100)) + 12 <= o->tabela_szcz_->szerokosc_kolumny_px(0));
+        }
+        o->lista_->ustaw_wybrany_indeks(o->kategorie_.indeks(znacznik_widoku(Widok::Dysk, 0))); rysuj(*o);
+        for (int i = 0; i < 10; ++i) { ZdarzenieRolki e{}; e.delta_y = -1; o->tabela_szcz_->obsluz_rolke(e); }
+        CHECK(o->tabela_szcz_->przewiniecie_pionowe() > 0);
+        rysuj(*o); sprawdz();
+        o->tabela_szcz_->ustaw_przewiniecie_pionowe(o->tabela_szcz_->wysokosc_wiersza() * 2 + 7); rysuj(*o); sprawdz();
+        // przelaczenie na kategorie z mniejsza liczba wierszy przy przewinietej tabeli
+        o->lista_->ustaw_wybrany_indeks(0); rysuj(*o); sprawdz();
+        CHECK(o->tabela_szcz_->przewiniecie_pionowe() == 0);
+        for (uint32_t s : {100u, 150u, 200u})
+            for (auto [w, h] : {std::pair{620, 420}, std::pair{1080, 600}, std::pair{1920, 1080}}) {
+                bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = s; o->obsluz_zdarzenie(ev);
+                o->ustaw_geometrie(0, 0, w, h); o->przelicz_uklad(); rysuj(*o); sprawdz();
+                o->tabela_szcz_->ustaw_przewiniecie_pionowe(o->tabela_szcz_->wysokosc_wiersza() / 2 + 3); rysuj(*o); sprawdz();
+            }
+    }
+    (void)b;
+    delete o;
+    g_jadro = nullptr;
+}
+
 int main() {
     rozliczanie_cpu();
     pamiec_procesu();
@@ -1304,6 +1557,7 @@ int main() {
     uklad_bez_przeliczenia();
     procesy_io_cases();
     wydajnosc_urzadzen_cases();
+    poprawki_ui_cases();
     std::printf("test-menedzer-zadan-host: %u sprawdzen OK\n", checks);
     return 0;
 }
