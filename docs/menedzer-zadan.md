@@ -145,6 +145,19 @@ Procesy chronione pozostają widoczne na liście; przycisk pokazuje powód, a j�
 4. Słabe hooki schedulera muszą mieć linkowanie zgodne z definicją — `make test-slabe-hooki-jadra` sprawdza, że
    każda słaba referencja w obiektach jądra trafia w definicję w obrazie (regresja okien-duchów).
 
+## Koszt rysowania karty Wydajność (zacinanie kursora, 2026-11-19)
+
+* Przyczyna: `Etykieta::linie()` (BursztynUI) przy zawijaniu mierzyła cały prefiks po każdym znaku — O(n²) pomiarów
+  BSF na każde rysowanie. Dwa opisy pod wykresami (~200 B) zmieniają się co sekundę: host -O2 z prawdziwym BSF
+  ~2,2 ms na etykietę, cała karta 3,3–4,6 ms vs 1,2–2,0 ms na karcie Procesy; wykresy tylko ~0,17 ms. Pod TCG ta
+  seria pracy w Ring 3 opóźniała obiegi PID 0 (round-robin), który rysuje programowy kursor.
+* Poprawka: wyszukiwanie binarne najdłuższego mieszczącego się prefiksu (identyczny wynik — test różnicowy z prawdziwym
+  BSF), brak pomiaru całego tekstu przy zawijaniu, `Wykres::ustaw_punkty` bez unieważnienia przy tych samych danych.
+  Etykieta 0,5–0,7 ms, karta Wydajność ≈ karta Procesy.
+* Natywnie po poprawce: CPU Menedżera 44–60 ms/s na Wydajności i 53–58 ms/s na Procesach; opóźnienie kursora takie
+  samo na obu kartach. Pomiary: `docs/menedzer-zadan-2026-11-19-wydajnosc/`.
+* Opisy pod wykresami rozciągają się na wiersz siatki — wcześniej miały wysokość pustego tekstu do zmiany rozmiaru okna.
+
 ## Testy
 
 * `make -j1 test-menedzer-zadan-host` (ASan/UBSan) — rozliczanie CPU, pamięć z tablic stron,

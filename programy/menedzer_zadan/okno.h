@@ -147,6 +147,10 @@ public:
         }
         info_cpu_ = new Etykieta(""); info_ram_ = new Etykieta("");
         info_cpu_->ustaw_zawijanie(true); info_ram_->ustaw_zawijanie(true);
+        // Tekst trafia do etykiet dopiero po ukladzie (ustaw_tekst nie przelicza ukladu): wypelniaja caly wiersz siatki,
+        // inaczej mialyby wysokosc pustego tekstu (samo wypelnienie) i opis bylby niewidoczny do zmiany rozmiaru okna.
+        info_cpu_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
+        info_ram_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Rozciagnij);
         siatka.dodaj_do_siatki(info_cpu_, 1, 0); siatka.dodaj_do_siatki(info_ram_, 1, 1);
         karty.dodaj_karte("Wydajność", wyd);
         karty.ustaw_aktywna_karte(0);

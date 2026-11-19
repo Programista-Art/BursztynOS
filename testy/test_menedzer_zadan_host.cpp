@@ -835,7 +835,108 @@ static void okno_cases() {
     { int cpu[HISTORIA]; const size_t n = o->model().historia(cpu, nullptr, HISTORIA); CHECK(n > 0 && n <= HISTORIA); }
     CHECK(std::strstr(o->info_ram_->tekst(), "RAM zarządzana przez system"));
     CHECK(std::strstr(o->info_cpu_->tekst(), "HPET"));
+
+    // ---- Wydajnosc karty Wydajnosc (natywnie: zacinanie kursora - koszt rysowania raz na sekunde)
+    auto przebieg = [&](int i) {                               // zmienne obciazenie CPU, stala pamiec RAM
+        j.uplyw(1000000000ULL, {{2, 100000000ULL + uint64_t(i % 7) * 90000000ULL}}); o->odswiez();
+    };
+    o->ustaw_geometrie(10, 10, 900, 580); o->przelicz_uklad(); rysuj(*o);
+    for (int i = 0; i < HISTORIA + 10; ++i) { przebieg(i); KontekstRysowania c; o->rysuj(c, false); }
+    {   // historia ograniczona; plaska seria RAM nie jest przerysowywana, zmienna seria CPU - tak (raz na probke)
+        int cpu[HISTORIA], ram[HISTORIA];
+        CHECK(o->model().historia(cpu, ram, HISTORIA) == HISTORIA);
+        CHECK(o->wykres_cpu_->seria(0)->liczba_punktow == HISTORIA && o->wykres_ram_->seria(0)->liczba_punktow == HISTORIA);
+        const uint64_t pelne = o->liczba_pelnych_odrysowan();
+        przebieg(3);
+        CHECK(o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna());
+        KontekstRysowania c; o->rysuj(c, false);
+        CHECK(o->liczba_pelnych_odrysowan() == pelne);         // odswiezenie danych nie przerysowuje calego okna
+        CHECK(!o->wykres_cpu_->czy_brudna() && !o->info_cpu_->czy_brudna());
+    }
+    {   // brak alokacji w normalnym cyklu probka -> rysowanie na karcie Wydajnosc
+        const size_t a0 = g_alokacje;
+        for (int i = 0; i < 50; ++i) { przebieg(i); KontekstRysowania c; o->rysuj(c, false); }
+        CHECK(g_alokacje == a0);
+    }
+    {   // ruch myszy miedzy probkami: zadnego przerysowania karty ani pelnego okna
+        const uint64_t px0 = o->liczba_brudnych_pikseli(), pelne = o->liczba_pelnych_odrysowan();
+        for (int i = 0; i < 300; ++i) {
+            bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_MYSZ_RUCH; e.x = 20 + (i * 13) % 880; e.y = 150 + (i * 7) % 420;
+            o->obsluz_zdarzenie(e); KontekstRysowania c; o->rysuj(c, false);
+        }
+        CHECK(o->liczba_pelnych_odrysowan() == pelne);
+        CHECK(o->liczba_brudnych_pikseli() - px0 < 20000);    // co najwyzej podswietlenie zakladki/przycisku
+        CHECK(!o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna());
+        przebieg(5); CHECK(o->wykres_cpu_->czy_brudna());     // probka w trakcie ruchu myszy nadal aktualizuje wykres
+        KontekstRysowania c; o->rysuj(c, false);
+    }
+    {   // ukryta karta: zadnej pracy wykresow ani etykiet Wydajnosci
+        o->karty_->ustaw_aktywna_karte(0); { KontekstRysowania c; o->rysuj(c, false); }
+        const int ost = o->wykres_cpu_->seria(0)->punkty[HISTORIA - 1];
+        for (int i = 0; i < 10; ++i) { przebieg(i + 1); KontekstRysowania c; o->rysuj(c, false); }
+        CHECK(!o->wykres_cpu_->czy_brudna() && !o->wykres_ram_->czy_brudna() && !o->info_cpu_->czy_brudna());
+        CHECK(o->wykres_cpu_->seria(0)->punkty[HISTORIA - 1] == ost);   // dane wykresu nie byly przeliczane
+        o->karty_->ustaw_aktywna_karte(1);                     // powrot: natychmiast aktualne dane
+        CHECK(o->wykres_cpu_->czy_brudna());
+        { KontekstRysowania c; o->rysuj(c, false); }
+    }
+    {   // wielokrotne przelaczanie kart: bez alokacji i z poprawna geometria
+        for (int i = 0; i < 4; ++i) { o->karty_->ustaw_aktywna_karte(i & 1); KontekstRysowania c; o->rysuj(c, false); }
+        const size_t a0 = g_alokacje;
+        for (int i = 0; i < 40; ++i) {
+            o->karty_->ustaw_aktywna_karte(i & 1); przebieg(i); KontekstRysowania c; o->rysuj(c, false);
+        }
+        CHECK(g_alokacje == a0);
+        CHECK(o->model().liczba() == 16 && o->tabela()->liczba_wierszy() == 16);
+    }
+    {   // rozmiary i skale z widoczna karta Wydajnosc: geometria w obszarze klienta, wykresy i opisy widoczne
+        o->karty_->ustaw_aktywna_karte(1);
+        for (uint32_t s : {100u, 150u, 200u}) {
+            bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = s; o->obsluz_zdarzenie(ev);
+            for (auto [w, h] : {std::pair{620, 420}, std::pair{1280, 800}, std::pair{900, 580}}) {
+                o->ustaw_geometrie(0, 0, w * int(s) / 100, h * int(s) / 100); o->przelicz_uklad(); rysuj(*o);
+                w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
+                CHECK(o->wykres_cpu_->obszar_ekranu().szerokosc > 0 && o->wykres_cpu_->obszar_ekranu().wysokosc > 0);
+                CHECK(o->info_cpu_->obszar_ekranu().wysokosc >= CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(s)));
+                przebieg(1); KontekstRysowania c; o->rysuj(c, false);
+            }
+        }
+        bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = 100; o->obsluz_zdarzenie(ev);
+        o->ustaw_geometrie(10, 10, 900, 580); o->przelicz_uklad(); rysuj(*o);
+    }
+    {   // po pracy na Wydajnosci sortowanie i wybor na Procesach nadal dzialaja
+        o->karty_->ustaw_aktywna_karte(0); rysuj(*o);
+        o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 5)));
+        o->tabela()->dostawca()->zazadaj_sortowania(4, false);
+        CHECK(o->model().wybrany() && o->model().wybrany()->pid == 5);
+        CHECK(o->tabela()->wybrany_wiersz() == static_cast<size_t>(wiersz_pid(*o, 5)));
+    }
     o->karty_->ustaw_aktywna_karte(0); rysuj(*o);
+    delete o;
+    g_jadro = nullptr;
+}
+
+// Etykiety tworzone z pustym tekstem i wypelniane po ukladzie (ustaw_tekst nie przelicza ukladu) musza miec od razu
+// wysokosc na swoja tresc. Natywnie opisy pod wykresami Wydajnosci byly niewidoczne (4 px) do pierwszej zmiany rozmiaru.
+static void uklad_bez_przeliczenia() {
+    Jadro j; g_jadro = &j;
+    j.uruchom(1, "/menedzer_okien.bur", PZB_ZAUFANE);
+    j.uruchom(6, AppIdentity::TaskManager, PZB_ZAUFANE, 1);
+    j.uruchom(3, "/programy/notatnik.cebula/notatnik.bur");
+    auto* o = new OknoMenedzera;
+    o->wywolaj = bws_symulowane; o->zegar_ns = zegar_testowy;
+    o->ustaw_geometrie(40, 40, 900, 580); o->init(); o->przelicz_uklad();   // jedyny uklad - jak przy starcie
+    const int linia = CzcionkaUI::pobierz_wysokosc(SkalaUI::procent(100));
+    for (int i = 0; i < 2; ++i) { j.uplyw(1000000000ULL, {{3, 1000}}); g_zegar += 1000000000ULL; o->odswiez(); rysuj(*o); }
+    o->tabela()->ustaw_wybrany_wiersz(static_cast<size_t>(wiersz_pid(*o, 3))); rysuj(*o);
+    CHECK(o->pamiec_procesu_->tekst()[0] != '\0');
+    CHECK(o->etykieta_szczegolow()->obszar_ekranu().wysokosc >= linia);
+    CHECK(o->pamiec_procesu_->obszar_ekranu().wysokosc >= 2 * linia);            // dwie linie pamieci
+    o->karty_->ustaw_aktywna_karte(1);
+    for (int i = 0; i < 2; ++i) { j.uplyw(1000000000ULL, {{3, 1000}}); g_zegar += 1000000000ULL; o->odswiez(); rysuj(*o); }
+    CHECK(o->info_cpu_->obszar_ekranu().wysokosc >= 4 * linia);                 // >= 4 linie opisu CPU
+    CHECK(o->info_ram_->obszar_ekranu().wysokosc >= 4 * linia);
+    w_kliencie(o->kontrolka_glowna(), o->obszar_klienta());
     delete o;
     g_jadro = nullptr;
 }
@@ -848,6 +949,7 @@ int main() {
     teksty();
     rejestracja();
     okno_cases();
+    uklad_bez_przeliczenia();
     std::printf("test-menedzer-zadan-host: %u sprawdzen OK\n", checks);
     return 0;
 }

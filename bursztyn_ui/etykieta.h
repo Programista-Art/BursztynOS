@@ -109,7 +109,8 @@ public:
         SkalaUI skala = SkalaUI::procent(skala_dpi_.procent() * uint32_t(skala_czcionki_));
         uint32_t col = s.tekst;
 
-        int txt_w = CzcionkaUI::zmierz_tekst(tekst_, skala);
+        // Szerokosc calego tekstu potrzebna tylko do wyrownania pojedynczej linii (zawijanie mierzy linie osobno).
+        int txt_w = czy_zawijanie_ ? 0 : CzcionkaUI::zmierz_tekst(tekst_, skala);
         int txt_h = CzcionkaUI::pobierz_wysokosc(skala);
 
         int pad_l = wypelnienie_.lewy * skala_dpi_;
@@ -147,21 +148,35 @@ public:
     }
 
 private:
+    // Lamanie wierszy. Szerokosc prefiksu nie maleje wraz z dlugoscia, wiec najdluzszy mieszczacy sie prefiks
+    // (po granicach znakow UTF-8) jest wyszukiwany binarnie: O(n log n) pomiarow zamiast pomiaru po kazdym znaku
+    // (O(n^2) - etykieta 200 B kosztowala ~2 ms na rysowanie z czcionka BSF, zob. docs/menedzer-zadan.md).
+    // Wynik jest identyczny z dawnym skanowaniem liniowym: pierwszy znak zawsze wchodzi, mieszczacy sie
+    // prefiks konczy sie przed pierwszym znakiem, ktory przekroczylby szerokosc, a lamanie cofa sie do ostatniej spacji.
     template<class Line> void linie(int width,SkalaUI scale,Line line)const {
         size_t at=0;
         while(tekst_[at]){
             while(tekst_[at]==' ')++at;
             if(!tekst_[at])break;
             char part[MAKS_DLUGOSC_TEKSTU]{};size_t used=0,start=at,last_space=0;
-            while(tekst_[at] && tekst_[at]!='\n'){
-                uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(tekst_,at,&cp);
-                if(!n || used+n>=sizeof(part))break;
-                for(size_t j=0;j<n;++j)part[used+j]=tekst_[at+j];
-                part[used+n]=0;
-                if(used && CzcionkaUI::zmierz_tekst(part,scale)>width){part[used]=0;break;}
-                if(cp==' ')last_space=used;
-                used+=n;at+=n;
+            uint16_t koniec[MAKS_DLUGOSC_TEKSTU];size_t znaki=0;      // koniec[i] = bajty po i+1 znakach
+            for(size_t p=at;tekst_[p] && tekst_[p]!='\n';){
+                uint32_t cp;size_t n=CzcionkaUI::dekoduj_utf8(tekst_,p,&cp);
+                if(!n || (p-at)+n>=sizeof(part))break;
+                for(size_t j=0;j<n;++j)part[(p-at)+j]=tekst_[p+j];
+                p+=n;koniec[znaki++]=uint16_t(p-at);
             }
+            size_t pasuje=znaki?1:0;                                   // pierwszy znak zawsze
+            if(znaki>1){
+                auto miesci=[&](size_t k){char z=part[koniec[k-1]];part[koniec[k-1]]=0;
+                    const bool ok=CzcionkaUI::zmierz_tekst(part,scale)<=width;part[koniec[k-1]]=z;return ok;};
+                if(miesci(znaki))pasuje=znaki;
+                else{size_t lo=1,hi=znaki;                             // miesci(lo), !miesci(hi)
+                    while(hi-lo>1){size_t mid=lo+(hi-lo)/2;if(miesci(mid))lo=mid;else hi=mid;}
+                    pasuje=lo;}
+            }
+            used=pasuje?koniec[pasuje-1]:0;at=start+used;
+            for(size_t i=0;i<pasuje;++i)if(part[koniec[i]-1]==' ')last_space=i?koniec[i-1]:0;   // bajt kontynuacji UTF-8 nigdy nie jest 0x20
             if(tekst_[at] && tekst_[at]!='\n' && last_space){used=last_space;at=start+used;}
             while(used && part[used-1]==' ')--used;
             part[used]=0;line(part);
