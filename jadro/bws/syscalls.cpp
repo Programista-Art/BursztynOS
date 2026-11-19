@@ -72,6 +72,7 @@
 #include "bws_zdarzenia.h"
 #include "bws_pliki.h"
 #include "bws_api.h"
+#include "rozliczanie_io.h"
 #include "../siec/http_origin.h"
 #include "bws_gui_batch.h"
 #include "bws_czcionka.h"
@@ -1153,9 +1154,13 @@ __attribute__((noinline)) uint64_t bws_zapisz_plik(
         while (off < dlugosc) {
             uint32_t porcja = dlugosc - (uint32_t)off > CHUNK ? CHUNK : dlugosc - (uint32_t)off;
             if (!skopiuj_z_przestrzeni_uzytkownika(chunk.get(), reinterpret_cast<const void*>(arg2 + off), porcja)) return 0;
-            if (!zapisz_fragment_pliku(sciezka, off, static_cast<char*>(chunk.get()), porcja)) return 0;
+            if (!zapisz_fragment_pliku(sciezka, off, static_cast<char*>(chunk.get()), porcja)) {
+                rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikZapis, off);   // przyjete porcje
+                return 0;
+            }
             off += porcja;
         }
+        rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikZapis, dlugosc);
         powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
         return 1ULL;
     }
@@ -1180,7 +1185,10 @@ __attribute__((noinline)) uint64_t bws_zapisz_plik(
     }
 
     const bool wynik = zapisz_do_pliku(sciezka, dane.jako_char(), dlugosc);
-    if (wynik) powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
+    if (wynik) {
+        rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikZapis, dlugosc);
+        powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
+    }
     return wynik ? 1ULL : 0ULL;
 }
 
@@ -1288,6 +1296,7 @@ __attribute__((noinline)) uint64_t bws_czytaj_plik(
         return 0;
     }
 
+    rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikOdczyt, do_odczytu);
     return 1;
 }
 
@@ -3133,6 +3142,7 @@ __attribute__((noinline)) uint64_t bws_zapisz_fragment_pliku(
     if (!bufor) return 0;
     if (!skopiuj_z_przestrzeni_uzytkownika(bufor.get(), reinterpret_cast<const void*>(buf_u), len)) return 0;
     if (!zapisz_fragment_pliku(sciezka, offset, bufor.jako_char(), len)) return 0;
+    rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikZapis, len);
     powiadom_zmiane_systemu_plikow(sciezka, BWS_FILE_MODIFY);
     return 1ULL;
 }
@@ -3185,6 +3195,7 @@ __attribute__((noinline)) uint64_t bws_czytaj_fragment_pliku(
         return 0;
     }
 
+    rozliczanie_io_pliku(static_cast<int>(proces.pid), RozliczanieIo::PlikOdczyt, got);
     return (uint64_t)got + 1ULL;
 }
 

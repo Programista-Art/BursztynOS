@@ -526,3 +526,11 @@ void scheduler_zarejestruj_irq_timera();
 uint64_t scheduler_liczba_irq_timera();
 uint64_t scheduler_liczba_przelaczen();
 uint64_t scheduler_liczba_wybudzen_event();
+
+/* Menedzer zadan (BWS 103/104): tozsamosc slotu, bezczynnosc PID 0, migawka (procesy_migawka.h). */
+struct SchedulerMigawka;
+extern "C" void scheduler_nowy_proces_w_slocie(int pid);
+extern "C" uint64_t scheduler_generacja_procesu(int pid);
+extern "C" void scheduler_bezczynnosc_poczatek();
+extern "C" void scheduler_bezczynnosc_koniec();
+extern "C" void scheduler_migawka_procesow(SchedulerMigawka* out);

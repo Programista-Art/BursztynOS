@@ -79,6 +79,7 @@ narzedzia/probe_test_dzwieku_link.sh
 narzedzia/run_probe_td.sh
 
 # --- Artefakty sesji QEMU / logi prob (2026-11) ---
+.bsf-test/var-wyd-diag
 .qemu-*.err
 .qemu-*.out
 qemu_*.log

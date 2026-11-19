@@ -85,6 +85,7 @@ public:
         if (wybrany_indeks_ == indeks) wybrany_indeks_ = -1;
         else if (wybrany_indeks_ > indeks) --wybrany_indeks_;
         if (indeks_fokusu_ >= static_cast<int>(liczba_)) indeks_fokusu_ = liczba_ ? static_cast<int>(liczba_ - 1) : -1;
+        if (najechany_ >= static_cast<int>(liczba_)) najechany_ = -1;
         przelicz_szerokosc();
         aktualizuj_przewijanie();
         uniewaznij();
@@ -95,6 +96,7 @@ public:
         zwolnij_elementy();
         wybrany_indeks_ = -1;
         indeks_fokusu_ = -1;
+        najechany_ = -1;
         maks_szerokosc_ = 0;
         aktualizuj_przewijanie();
         uniewaznij();
@@ -168,6 +170,20 @@ public:
         cb_rysowanie_elementu_ = cb; dane_rysowania_elementu_ = dane;
         uniewaznij();
     }
+
+    /* Tryb nawigacji (domyslnie wylaczony - dotychczasowe listy bez zmian): lista sledzi wiersz pod kursorem
+     * (indeks_najechany(), przerysowuje tylko dwa zmienione wiersze), a Spacja/Enter wybieraja wiersz z fokusem.
+     * Wyglad stanow (wybrany, najechany, fokus, wylaczony) rysuje wlasciciel w ustaw_rysowanie_elementu(). */
+    void ustaw_tryb_nawigacji(bool w) {
+        tryb_nawigacji_ = w;
+        if (!w && najechany_ >= 0) { const int stary = najechany_; najechany_ = -1; uniewaznij_wiersz(stary); }
+    }
+    bool czy_tryb_nawigacji() const { return tryb_nawigacji_; }
+    int indeks_najechany() const { return najechany_; }
+    bool czy_ma_fokus() const { return czy_ma_fokus_; }
+
+    /* Przerysowanie jednego wiersza (np. zmienila sie wartosc rysowana przez ustaw_rysowanie_elementu). */
+    void odswiez_element(int indeks) { uniewaznij_wiersz(indeks); }
 
     size_t liczba_ostatnio_narysowanych_wierszy() const { return ostatnio_narysowane_; }
     int pierwszy_widoczny_indeks() const {
@@ -245,6 +261,18 @@ public:
         }
     }
 
+    void obsluz_ruch_myszy(ZdarzenieMyszki& e) override {
+        if (tryb_nawigacji_) {
+            const int i = czy_wlaczona_ ? indeks_z_punktu(e.x - obszar_ekranu_.x, e.y - obszar_ekranu_.y) : -1;
+            if (i != najechany_) { const int stary = najechany_; najechany_ = i; uniewaznij_wiersz(stary); uniewaznij_wiersz(i); }
+        }
+        Kontrolka::obsluz_ruch_myszy(e);
+    }
+    void obsluz_opuszczenie_myszy() override {
+        if (tryb_nawigacji_ && najechany_ >= 0) { const int stary = najechany_; najechany_ = -1; uniewaznij_wiersz(stary); }
+        Kontrolka::obsluz_opuszczenie_myszy();
+    }
+
     void obsluz_podwojne_klikniecie(ZdarzenieMyszki& e) override {
         if (!czy_wlaczona_ || !e.czy_lewy_przycisk()) return;
         int indeks = indeks_z_punktu(e.x - obszar_ekranu_.x,
@@ -276,6 +304,14 @@ public:
         else if (kod == 0x4FU) nowy = static_cast<int>(liczba_) - 1;
         else if (kod == 0x49U) nowy -= strona;
         else if (kod == 0x51U) nowy += strona;
+        else if (tryb_nawigacji_ && (kod == 13 || kod == ' ')) {
+            if (indeks_fokusu_ >= 0) {
+                ustaw_wybrany_indeks(indeks_fokusu_);
+                if (cb_aktywacja_) cb_aktywacja_(this, indeks_fokusu_, dane_aktywacji_);
+            }
+            e.obsluzone = true;
+            return;
+        }
         else if (kod == 13) {
             if (indeks_fokusu_ >= 0 && cb_aktywacja_)
                 cb_aktywacja_(this, indeks_fokusu_, dane_aktywacji_);
@@ -468,6 +504,8 @@ private:
     FunkcjaIndeksu cb_podwojne_{nullptr};
     void* dane_podwojnego_{nullptr};
     FunkcjaRysowaniaElementu cb_rysowanie_elementu_{nullptr};
+    bool tryb_nawigacji_{false};
+    int najechany_{-1};
     void* dane_rysowania_elementu_{nullptr};
 };
 

@@ -44,6 +44,7 @@ public:
 
     void ustaw_dostawce(DostawcaDanychTabeli* d) {
         dostawca_ = d;
+        klucz_szerokosci_ = 0;
         wybrany_wiersz_ = 0;
         przewiniecie_x_ = 0;
         przewiniecie_y_ = 0;
@@ -79,10 +80,51 @@ public:
         }
     }
 
+    // Brak zaznaczenia (np. wybrany element zniknal z modelu): zaden wiersz nie jest podswietlony.
+    void wyczysc_wybor() {
+        if (wybrany_wiersz_ != SIZE_MAX) { wybrany_wiersz_ = SIZE_MAX; uniewaznij(); }
+    }
+    bool ma_wybor() const { return wybrany_wiersz_ < liczba_wierszy(); }
+
     void przy_zmianie_wyboru(FunkcjaWyboruWiersza cb, void* dane = nullptr) {
         cb_wybor_ = cb;
         dane_wyboru_ = dane;
     }
+
+    /* Przewijanie w poziomie (opcjonalne, domyslnie wylaczone - dotychczasowi uzytkownicy bez zmian): gdy kolumny
+     * sa szersze niz tabela, pod wierszami pojawia sie poziomy pasek; Shift+rolka, rolka pozioma, klik paska
+     * oraz strzalki w lewo/prawo przesuwaja kolumny. */
+    void ustaw_przewijanie_poziome(bool w) { przewijanie_poziome_ = w; if (!w) przewiniecie_x_ = 0; uniewaznij(); }
+    bool czy_przewijanie_poziome() const { return przewijanie_poziome_; }
+    int przewiniecie_poziome() const { return przewiniecie_x_; }
+    void ustaw_przewiniecie_poziome(int x) { const int s = przewiniecie_x_; przewiniecie_x_ = x; normalizuj_poziome(); if (s != przewiniecie_x_) uniewaznij(); }
+    int maks_przewiniecie_poziome() const {
+        if (!przewijanie_poziome_ || zewnetrzne_przewijanie_ || !dostawca_) return 0;
+        const int m = szerokosc_kolumn() - (szerokosc_obszaru_tabeli() - 2);
+        return m > 0 ? m : 0;
+    }
+    int wysokosc_paska_poziomego() const { return maks_przewiniecie_poziome() > 0 ? 12 * skala_dpi_ : 0; }
+
+    /* Opcjonalnie (domyslnie wylaczone): kolumna nigdy nie jest wezsza niz jej naglowek zmierzony aktywna czcionka
+     * systemowa + odstepy + miejsce na wskaznik sortowania. Szerokosci sa liczone raz i trzymane do zmiany skali,
+     * czcionki (generacja BSF / rozmiar UI), dostawcy albo jawnego uniewaznij_szerokosci() - nie przy kazdym rysowaniu. */
+    void ustaw_szerokosc_wg_naglowkow(bool w) { szerokosc_wg_naglowkow_ = w; uniewaznij_szerokosci(); uniewaznij(); }
+    bool czy_szerokosc_wg_naglowkow() const { return szerokosc_wg_naglowkow_; }
+    void uniewaznij_szerokosci() { klucz_szerokosci_ = 0; }
+    /* Tabela, ktorej dostawca nie sortuje (np. "Wlasciwosc / Wartosc"): bez strzalki i bez reakcji na klik naglowka. */
+    void ustaw_sortowanie_naglowkiem(bool w) { sortowanie_naglowkiem_ = w; uniewaznij(); }
+    /* Szerokosc kolumny w pikselach (DIP * skala, ew. powiekszona do naglowka). Jedno zrodlo dla rysowania i klikniec. */
+    int szerokosc_kolumny_px(size_t c) const {
+        if (!dostawca_) return 0;
+        const int bazowa = dostawca_->szerokosc_kolumny(c) * skala_dpi_;
+        if (!szerokosc_wg_naglowkow_ || c >= MAKS_KOLUMN_SZEROKOSCI) return bazowa;
+        odswiez_szerokosci_naglowkow();
+        return bazowa > min_szerokosc_[c] ? bazowa : min_szerokosc_[c];
+    }
+    /* Pierwszy piksel (y, wspolrzedne kontrolki) obszaru wierszy: zawsze ponizej naglowka. */
+    int poczatek_wierszy() const { return wysokosc_naglowka(); }
+    int przewiniecie_pionowe() const { return przewiniecie_y_; }
+    void ustaw_przewiniecie_pionowe(int y) { przewiniecie_y_ = y; normalizuj_przewiniecie(); uniewaznij(); }
 
     uint64_t liczba_zapytan_dostawcy() const { return liczba_zapytan_; }
     size_t pierwszy_widoczny_wiersz() const { return pierwszy_widoczny_; }
@@ -129,11 +171,15 @@ public:
         // Oblicz całkowitą szerokość kolumn
         int total_col_w = 0;
         for (size_t c = 0; c < cols; ++c) {
-            total_col_w += dostawca_->szerokosc_kolumny(c) * s;
+            total_col_w += szerokosc_kolumny_px(c);
         }
 
+        normalizuj_poziome();
+        normalizuj_przewiniecie();   // dane mogly sie zmienic (mniej wierszy) albo tabela zmienila wysokosc
         int table_w = obszar_.szerokosc - sb_w;
-        int table_h = obszar_.wysokosc - header_h;
+        const int hsb_h = wysokosc_paska_poziomego();
+        int table_h = obszar_.wysokosc - header_h - hsb_h;
+        (void)total_col_w;
 
         // 1. Rysuj nagłówek tabeli
         ctx.rysuj_zaokraglony_prostokat(Prostokat(1, 1, obszar_.szerokosc - 2, header_h),
@@ -142,15 +188,16 @@ public:
 
         int cur_x = 1 - przewiniecie_x_;
         for (size_t c = 0; c < cols; ++c) {
-            int cw = dostawca_->szerokosc_kolumny(c) * s;
+            int cw = szerokosc_kolumny_px(c);
             const char* header = dostawca_->naglowek_kolumny(c);
             if (!header) header = "";
 
             if (cur_x + cw > 0 && cur_x < obszar_.szerokosc) {
+                const int strzalka = sortowanie_naglowkiem_ && szerokosc_wg_naglowkow_ ? SZEROKOSC_STRZALKI * s : 0;
                 ctx.rysuj_tekst_obciety(Punkt(cur_x + pad_text, (header_h - font_h) / 2),
-                                        header, motyw_kolor(MOTYW_KOLOR_TEKST), cw - 2 * pad_text, s);
+                                        header, motyw_kolor(MOTYW_KOLOR_TEKST), cw - 2 * pad_text - strzalka, s);
                 // Wskaźnik sortowania
-                if (c == kolumna_sortowana_) {
+                if (sortowanie_naglowkiem_ && c == kolumna_sortowana_) {
                     int arrow_x = cur_x + cw - 12 * s;
                     int arrow_y = (header_h - 6 * s) / 2;
                     ctx.rysuj_tekst(Punkt(arrow_x, arrow_y), sortowanie_rosnace_ ? "^" : "v",
@@ -162,6 +209,7 @@ public:
         }
 
         // 2. Rysuj widoczne wiersze danych
+        if (hsb_h > 0) rysuj_pasek_poziomy(ctx, sb_w, hsb_h);
         if (rows == 0) return;
 
         int widocznych_wierszy = (table_h / (row_h > 0 ? row_h : 1)) + 2;
@@ -176,9 +224,14 @@ public:
         int start_y = header_h - (przewiniecie_y_ % (row_h > 0 ? row_h : 1));
 
         char bufor[128];
+        // Wiersze wylacznie w obszarze danych: czesciowo przewiniety pierwszy wiersz nie moze zamazac naglowka
+        // (naglowek jest rysowany wczesniej), a ostatni - paska poziomego.
+        if (table_h <= 0) return;
+        ctx.dodaj_przyciecie(Prostokat(0, header_h + 1, obszar_.szerokosc, table_h - 1));
         for (size_t r = idx_start; r < idx_koniec; ++r) {
             int y = start_y + static_cast<int>(r - idx_start) * row_h;
             if (y + row_h <= header_h) continue;
+            if (y >= header_h + table_h) break;
 
             if (!ctx.przecina_klip(Prostokat(0,y,table_w,row_h))) continue;
             bool zaznaczony = (r == wybrany_wiersz_);
@@ -199,7 +252,7 @@ public:
                                         : motyw_kolor(MOTYW_KOLOR_TEKST);
 
             for (size_t c = 0; c < cols; ++c) {
-                int cw = dostawca_->szerokosc_kolumny(c) * s;
+                int cw = szerokosc_kolumny_px(c);
                 if (cur_x + cw > 0 && cur_x < table_w) {
                     ++liczba_zapytan_;
                     const char* cell_txt = dostawca_->pobierz_komorke(r, c, bufor, sizeof(bufor));
@@ -225,6 +278,7 @@ public:
             ctx.rysuj_linie_pozioma(1, y + row_h - 1, table_w - 2, motyw_kolor(MOTYW_KOLOR_RAMKA));
         }
 
+        ctx.zdejmij_przyciecie();
         // Pasek przewijania pionowy
         if(!zewnetrzne_przewijanie_) rysuj_pasek_pionowy(ctx, rows, row_h, sb_w);
     }
@@ -240,11 +294,11 @@ public:
 
         // Kliknięcie w nagłówek kolumny -> zażądaj sortowania
         if (ly < header_h) {
-            if (e.czy_lewy_przycisk() && dostawca_) {
+            if (e.czy_lewy_przycisk() && dostawca_ && sortowanie_naglowkiem_) {
                 int cur_x = 1 - przewiniecie_x_;
                 size_t cols = dostawca_->liczba_kolumn();
                 for (size_t c = 0; c < cols; ++c) {
-                    int cw = dostawca_->szerokosc_kolumny(c) * s;
+                    int cw = szerokosc_kolumny_px(c);
                     if (lx >= cur_x && lx < cur_x + cw) {
                         if (kolumna_sortowana_ == c) {
                             sortowanie_rosnace_ = !sortowanie_rosnace_;
@@ -263,10 +317,21 @@ public:
             return;
         }
 
+        // Kliknięcie w poziomy pasek (tylko gdy kolumny sie nie mieszcza)
+        const int hsb_h = wysokosc_paska_poziomego();
+        if (hsb_h > 0 && ly >= obszar_.wysokosc - hsb_h) {
+            if (e.czy_lewy_przycisk()) {
+                const int tor = szerokosc_obszaru_tabeli() - 4 * s;
+                ustaw_przewiniecie_poziome(tor > 0 ? (lx * maks_przewiniecie_poziome()) / tor : 0);
+                e.obsluzone = true;
+            }
+            return;
+        }
+
         // Kliknięcie w suwak pionowy
         if (lx >= obszar_.szerokosc - sb_w) {
             int total_h = static_cast<int>(liczba_wierszy()) * row_h;
-            int table_h = obszar_.wysokosc - header_h;
+            int table_h = obszar_.wysokosc - header_h - hsb_h;
             if (total_h > table_h) {
                 przewiniecie_y_ = ((ly - header_h) * (total_h - table_h)) / (table_h > 0 ? table_h : 1);
                 normalizuj_przewiniecie();
@@ -287,6 +352,12 @@ public:
 
     void obsluz_rolke(ZdarzenieRolki& e) override {
         if (!czy_wlaczona_) return;
+        if (maks_przewiniecie_poziome() > 0 && (e.czy_shift() || (e.delta_x != 0 && e.delta_y == 0))) {
+            const int d = e.delta_x != 0 ? e.delta_x : -e.delta_y;
+            ustaw_przewiniecie_poziome(przewiniecie_x_ + d * 40 * skala_dpi_);
+            e.obsluzone = true;
+            return;
+        }
         int delta = (e.delta_y != 0) ? -e.delta_y : 3;
         przewiniecie_y_ += delta * wysokosc_wiersza();
         normalizuj_przewiniecie();
@@ -331,16 +402,72 @@ public:
             e.obsluzone = true;
             return;
         }
+        if ((k == 0x4BU || k == 0x4DU) && maks_przewiniecie_poziome() > 0) {   // strzalka w lewo / w prawo
+            ustaw_przewiniecie_poziome(przewiniecie_x_ + (k == 0x4BU ? -40 : 40) * skala_dpi_);
+            e.obsluzone = true;
+            return;
+        }
 
         Kontrolka::obsluz_wcisniecie_klawisza(e);
     }
 
 private:
+    static constexpr size_t MAKS_KOLUMN_SZEROKOSCI = 16;
+    static constexpr int SZEROKOSC_STRZALKI = 14;
+    void odswiez_szerokosci_naglowkow() const {
+        uint32_t gen = 0; int rozmiar = 0;
+#if defined(BSF_NATIVE)
+        // generacja (instalacja/zmiana czcionki), rozmiar UI i postep znaku "W" (podglad innej rodziny w Ustawieniach
+        // nie zmienia generacji) - jeden odczyt z pamieci podrecznej glifow zamiast mierzenia naglowkow co klatke
+        gen = BSF::generation() ^ (uint32_t(CzcionkaUI::postep_znaku('W', SkalaUI::procent(100))) << 20);
+        rozmiar = BSF::ui_size();
+#endif
+        const uint64_t klucz = (uint64_t(skala_dpi_.procent()) << 48) ^ (uint64_t(uint16_t(rozmiar)) << 32) ^ gen ^
+                               (uint64_t(dostawca_ ? dostawca_->liczba_kolumn() : 0) << 40) ^ 1ULL;
+        if (klucz == klucz_szerokosci_ && dostawca_ == dostawca_szerokosci_) return;
+        klucz_szerokosci_ = klucz; dostawca_szerokosci_ = dostawca_;
+        const SkalaUI s = skala_dpi_;
+        const size_t n = dostawca_ ? dostawca_->liczba_kolumn() : 0;
+        for (size_t c = 0; c < MAKS_KOLUMN_SZEROKOSCI; ++c) {
+            const char* h = c < n ? dostawca_->naglowek_kolumny(c) : nullptr;
+            min_szerokosc_[c] = h && h[0] ? CzcionkaUI::zmierz_tekst(h, s) + 2 * 6 * s +
+                                            (sortowanie_naglowkiem_ ? SZEROKOSC_STRZALKI * s : 0) + 2 * s : 0;
+        }
+    }
+
+    int szerokosc_kolumn() const {
+        if (!dostawca_) return 0;
+        int w = 0;
+        const size_t cols = dostawca_->liczba_kolumn();
+        for (size_t c = 0; c < cols; ++c) w += szerokosc_kolumny_px(c);
+        return w;
+    }
+    int szerokosc_obszaru_tabeli() const { return obszar_.szerokosc - (zewnetrzne_przewijanie_ ? 0 : 12 * skala_dpi_); }
+    void normalizuj_poziome() {
+        const int m = maks_przewiniecie_poziome();
+        if (przewiniecie_x_ > m) przewiniecie_x_ = m;
+        if (przewiniecie_x_ < 0) przewiniecie_x_ = 0;
+    }
+    void rysuj_pasek_poziomy(KontekstRysowania& ctx, int sb_w, int hsb_h) {
+        SkalaUI s = skala_dpi_;
+        const int y = obszar_.wysokosc - hsb_h;
+        const int tor = obszar_.szerokosc - sb_w - 4 * s;
+        const int calosc = szerokosc_kolumn(), widok = szerokosc_obszaru_tabeli() - 2, m = maks_przewiniecie_poziome();
+        if (tor <= 0 || calosc <= 0) return;
+        ctx.rysuj_prostokat(Prostokat(2 * s, y, tor, hsb_h - 2 * s), motyw_kolor(MOTYW_KOLOR_PANEL));
+        int kciuk = (widok * tor) / calosc;
+        if (kciuk < 16 * s) kciuk = 16 * s;
+        if (kciuk > tor) kciuk = tor;
+        const int x = 2 * s + (m > 0 ? (przewiniecie_x_ * (tor - kciuk)) / m : 0);
+        ctx.rysuj_zaokraglony_prostokat(Prostokat(x, y + 2 * s, kciuk, hsb_h - 6 * s), motyw_kolor(MOTYW_KOLOR_RAMKA), 3 * s);
+    }
+
     void zapewnij_widocznosc_wiersza(size_t w) {
         int row_h = wysokosc_wiersza();
         int y0 = static_cast<int>(w) * row_h;
         int y1 = y0 + row_h;
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
+        if (table_h <= 0) return;   // brak ukladu: przewiniecie policzone wzgledem 0 px wysokosci bylo bledne
 
         if (y0 < przewiniecie_y_) {
             przewiniecie_y_ = y0;
@@ -352,8 +479,8 @@ private:
 
     void normalizuj_przewiniecie() {
         int total_h = static_cast<int>(liczba_wierszy()) * wysokosc_wiersza();
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
-        int max_scroll = total_h - table_h;
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
+        int max_scroll = table_h > 0 ? total_h - table_h : 0;   // bez ukladu: przewiniecie 0
         if (max_scroll < 0) max_scroll = 0;
         if (przewiniecie_y_ > max_scroll) przewiniecie_y_ = max_scroll;
         if (przewiniecie_y_ < 0) przewiniecie_y_ = 0;
@@ -361,7 +488,7 @@ private:
 
     void rysuj_pasek_pionowy(KontekstRysowania& ctx, size_t rows, int row_h, int sb_w) {
         int total_h = static_cast<int>(rows) * row_h;
-        int table_h = obszar_.wysokosc - wysokosc_naglowka();
+        int table_h = obszar_.wysokosc - wysokosc_naglowka() - wysokosc_paska_poziomego();
         if (total_h <= table_h || table_h <= 0) return;
 
         SkalaUI s = skala_dpi_;
@@ -382,6 +509,12 @@ private:
     }
 
     bool zewnetrzne_przewijanie_{false};
+    bool przewijanie_poziome_{false};
+    bool szerokosc_wg_naglowkow_{false};
+    bool sortowanie_naglowkiem_{true};
+    mutable uint64_t klucz_szerokosci_{0};
+    mutable const DostawcaDanychTabeli* dostawca_szerokosci_{nullptr};
+    mutable int min_szerokosc_[MAKS_KOLUMN_SZEROKOSCI]{};
     int wysokosc_wiersza_px_{0}, wysokosc_naglowka_px_{0};
     int wiersz_najechany_{-1}, wiersz_drop_{-1};
     DostawcaDanychTabeli* dostawca_{nullptr};

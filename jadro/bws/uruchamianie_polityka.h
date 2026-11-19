@@ -38,6 +38,10 @@ inline constexpr AplikacjaSystemowa kAplikacjeSystemowe[] = {
     {"/programy/aktualizacje.cebula/aktualizacje.bur", PZB_USLUGI,
      PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_ZAPISZ |
      PRAWO_SYSTEM_CONFIG | PRAWO_SIEC},
+    /* Menedzer zadan: tylko odczyt telemetrii procesow i konczenie zwyklych aplikacji (BWS 103/104).
+     * Bez SYSTEM_CONFIG, zapisu plikow, sieci i uruchamiania programow. */
+    {"/programy/menedzer_zadan.cebula/menedzer_zadan.bur", PZB_ZAUFANE,
+     PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_ZARZADZANIE_PROCESAMI},
 };
 
 constexpr bool rowne(const char* a, const char* b) {

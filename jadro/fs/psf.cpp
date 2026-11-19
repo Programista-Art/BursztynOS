@@ -3627,6 +3627,7 @@ extern "C" void inicjalizuj_psf(
 }
 
 void psf_ustaw_partycje(const Storage::Partition* p) { bsp_partycja=p?*p:Storage::Partition{}; }
+const Storage::Device* psf_urzadzenie_trwale() { return nosnik_blokowy_dostepny ? bsp_partycja.device : nullptr; }
 
 bool psf_formatuj_instalacje(const Storage::Partition& p) {
     BlokadaPSF guard;

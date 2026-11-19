@@ -76,6 +76,10 @@
 /* Otwieranie WLASNYCH okien podrzednych (informacyjnych) przez BWS 101: tylko staly, wbudowany program okna
  * informacyjnego, tresc <= 4 KiB, limit okien na wlasciciela; nie daje ogolnego uruchamiania programow. */
 #define PRAWO_OKNO_PODRZEDNE       (UINT64_C(1) << 9)
+/* Menedzer zadan: migawka procesow (BWS 103) i konczenie zwyklych aplikacji wskazanych tozsamoscia (BWS 104).
+ * Nadawane WYLACZNIE z tabeli aplikacji systemowych jadra (uruchamianie_polityka.h) wbudowanemu Menedzerowi zadan
+ * o zweryfikowanej sumie SHA-256 - nigdy z manifestu. Nie daje konczenia procesow chronionych (procesy_migawka.h). */
+#define PRAWO_ZARZADZANIE_PROCESAMI (UINT64_C(1) << 10)
 
 /*
  * Brak praw.
@@ -99,7 +103,8 @@
      PRAWO_STEROWNIK       | \
      PRAWO_DEBUG           | \
      PRAWO_USTAWIENIA_APLIKACJI | \
-     PRAWO_OKNO_PODRZEDNE)
+     PRAWO_OKNO_PODRZEDNE | \
+     PRAWO_ZARZADZANIE_PROCESAMI)
 
 /*
  * Prawa o szczegolnie wysokim ryzyku.
@@ -110,7 +115,8 @@
 #define PRAWA_UPRZYWILEJOWANE \
     (PRAWO_SYSTEM_CONFIG | \
      PRAWO_STEROWNIK     | \
-     PRAWO_DEBUG)
+     PRAWO_DEBUG         | \
+     PRAWO_ZARZADZANIE_PROCESAMI)
 
 /* =========================================================================
  * 3. STALE DESKRYPTORA PROCESU

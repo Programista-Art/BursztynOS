@@ -26,6 +26,16 @@
 #include "motyw.h"
 #include "bws_hda_diag.h"
 #include "bws_procesy.h"
+#include "procesy_migawka.h"
+#include "urzadzenia_migawka.h"
+#include "rozliczanie_io.h"
+#include "blokowy.h"
+#include "sterowniki/siec/network_device.h"
+#include "sterowniki/virtio/virtio_gpu.h"
+#include "graphics_perf.h"
+#include "popup_autoryzacja.h"
+#include "pamiec_procesu.h"
+#include "stos_jadra.h"
 #include "okna_podrzedne.h"
 #include "zakonczenie_procesu.h"
 #include "loader.h"
@@ -1066,6 +1076,287 @@ uint64_t proces_zabij(proces_t& p, uint64_t pid64) {
 }
 
 /* =========================================================================
+ * MENEDZER ZADAN (BWS 103/104) - procesy_migawka.h, docs/menedzer-zadan.md
+ * ========================================================================= */
+}  // namespace
+extern "C" bool VmmPoliczPamiecProcesu(void* pml4, PamiecProcesu::Wynik* wynik);
+extern "C" uint64_t pmm_diagnostic_ram_bytes();
+namespace {
+
+bool wolno_zarzadzac_procesami_v2(const proces_t& p) {
+    return ProcesyMigawka::wywolujacy_uprawniony(p.uprawnienia & static_cast<uint64_t>(PRAWA_ZNANE),
+                                                PRAWO_ZARZADZANIE_PROCESAMI, p.poziom_zaufania, PZB_ZAUFANE);
+}
+
+/* Obie lokalizacje Menedzera Okien (te same, co dla BWS 40/56). */
+bool sciezka_menedzera_okien_v2(const char* sciezka, size_t pojemnosc) {
+    for (const char* wzor : PopupAutoryzacja::SCIEZKI_MENEDZERA_OKIEN)
+        if (PopupAutoryzacja::rowna_sciezka(sciezka, pojemnosc, wzor)) return true;
+    return false;
+}
+
+class BezPrzerwan {
+public:
+    BezPrzerwan() { asm volatile("pushfq\n\tpopq %0\n\tcli" : "=r"(flagi_) : : "memory", "cc"); }
+    ~BezPrzerwan() { if (flagi_ & (1ULL << 9)) asm volatile("sti" ::: "memory"); }
+    BezPrzerwan(const BezPrzerwan&) = delete;
+    BezPrzerwan& operator=(const BezPrzerwan&) = delete;
+private:
+    uint64_t flagi_{};
+};
+
+/*
+ * Pamiec procesu z tablic stron, o ile slot nadal opisuje TEN SAM proces
+ * (stan, generacja i przestrzen jak w migawce). Sprzatanie procesow dziala
+ * tylko w kontekscie timera, wiec pod BezPrzerwan przestrzen nie moze zniknac;
+ * VmmPoliczPamiecProcesu dodatkowo wymaga przestrzeni z rejestru zywych klonow.
+ */
+bool zmierz_pamiec(int pid, const SchedulerSlotMigawki& slot, PamiecProcesu::Wynik* w) {
+    if (pid <= 0 || pid >= static_cast<int>(PZB_MAKS_PROCESOW) || !slot.przestrzen) return false;
+    BezPrzerwan bez_przerwan;
+    const proces_t& q = tablica_procesow[pid];
+    if (__atomic_load_n(&q.stan, __ATOMIC_ACQUIRE) == PROCES_PUSTY ||
+        scheduler_generacja_procesu(pid) != slot.generacja || q.przestrzen_adresowa != slot.przestrzen)
+        return false;
+    return VmmPoliczPamiecProcesu(q.przestrzen_adresowa, w);
+}
+
+uint64_t procesy_migawka(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!wolno_zarzadzac_procesami_v2(p)) return BWS_MIGAWKA_BRAK_UPRAWNIEN;
+    if (wersja != BWS_PROCESY_V2_ABI) return BWS_MIGAWKA_ZLA_WERSJA;
+    uint32_t pojemnosc = 0;
+    if (bufor == 0 || !ProcesyMigawka::pojemnosc_bufora(rozmiar, &pojemnosc)) return BWS_MIGAWKA_ZLY_BUFOR;
+    if (!czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor),
+            static_cast<size_t>(ProcesyMigawka::bajtow_odpowiedzi(pojemnosc)))) return BWS_MIGAWKA_ZLY_BUFOR;
+
+    /* Ograniczone bufory BSS (syscall nie jest wywlaszczany w Ring 0): brak duzej ramki stosu. */
+    static SchedulerMigawka m;
+    static struct { BwsProcesyNaglowek n; BwsProcesInfoV2 w[BWS_PROCESY_V2_MAKS]; } odp;
+    static_assert(sizeof(odp) == sizeof(BwsProcesyNaglowek) + BWS_PROCESY_V2_MAKS * sizeof(BwsProcesInfoV2),
+                  "BWS 103: uklad odpowiedzi bez dopelnienia");
+    scheduler_migawka_procesow(&m);                        // krotka sekcja bez przerwan, bez kopii do Ring 3
+    odp = {};
+    BwsProcesyNaglowek& n = odp.n;
+    n.wersja = BWS_PROCESY_V2_ABI;
+    n.rozmiar_naglowka = sizeof(BwsProcesyNaglowek);
+    n.rozmiar_wpisu = sizeof(BwsProcesInfoV2);
+    n.czas_ns = m.teraz_ns;
+    n.czas_rozliczony_ns = m.rozliczony_ns;
+    n.czas_bezczynnosci_ns = m.bezczynnosc_ns;
+    n.okres_ticku_ns = m.okres_ticku_ns;
+    if (m.zrodlo == 1U) n.flagi |= BWS_MIGAWKA_CPU_HPET;
+    else if (m.zrodlo == 2U) n.flagi |= BWS_MIGAWKA_CPU_TICKI;
+    const uint64_t dostepne = pmm_pobierz_dostepne_ramki(), wolne = pmm_pobierz_wolne_ramki();
+    if (dostepne) {
+        n.flagi |= BWS_MIGAWKA_RAM;
+        n.ram_zarzadzana_bajtow = dostepne * ROZMIAR_RAMKI;
+        n.ram_wolna_bajtow = (wolne < dostepne ? wolne : dostepne) * ROZMIAR_RAMKI;
+    }
+    n.ram_firmware_bajtow = pmm_diagnostic_ram_bytes();
+    const int wywolujacy = static_cast<int>(p.pid);
+    n.pid_wywolujacego = static_cast<uint32_t>(wywolujacy);
+    n.generacja_wywolujacego = scheduler_generacja_procesu(wywolujacy);
+
+    for (int pid = 0; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid) {
+        const SchedulerSlotMigawki& s = m.sloty[pid];
+        if (pid != 0 && s.stan == PROCES_PUSTY) continue;
+        ++n.liczba_procesow;
+        if (n.liczba_wpisow >= pojemnosc) { n.flagi |= BWS_MIGAWKA_OBCIETA; continue; }
+        BwsProcesInfoV2& w = odp.w[n.liczba_wpisow++];
+        w.pid = static_cast<uint32_t>(pid);
+        w.stan = static_cast<uint32_t>(s.stan);
+        w.generacja = s.generacja;
+        w.poziom_pzb = s.poziom;
+        w.uprawnienia = s.uprawnienia;
+        w.czas_cpu_ns = s.cpu_ns;
+        w.czas_startu_ns = s.czas_startu_ns;
+        for (size_t i = 0; i + 1 < sizeof(w.sciezka) && s.sciezka[i]; ++i) w.sciezka[i] = s.sciezka[i];
+        const bool wm = sciezka_menedzera_okien_v2(s.sciezka, sizeof(s.sciezka));
+        if (pid == wywolujacy) w.flagi |= BWS_PROC_WYWOLUJACY;
+        if (pid == 0) w.flagi |= BWS_PROC_JADRO;
+        if (wm) w.flagi |= BWS_PROC_MENEDZER_OKIEN;
+        const ProcesyMigawka::Cel cel{pid, s.stan, s.poziom, wm};
+        w.ochrona = ProcesyMigawka::ochrona(wywolujacy, p.poziom_zaufania, cel, PZB_ZAUFANE);
+        if (w.ochrona == BWS_OCHRONA_BRAK) w.flagi |= BWS_PROC_MOZNA_ZAKONCZYC;
+        if (pid == 0) continue;                            // pamiec jadra nie jest przypisywana PID 0
+        PamiecProcesu::Wynik pam{};
+        if (s.stan != PROCES_ZABLOKOWANY && zmierz_pamiec(pid, s, &pam)) {
+            w.flagi |= BWS_PROC_PAMIEC_ZMIERZONA;
+            if (pam.duze_strony || pam.pominiete_tablice) w.flagi |= BWS_PROC_PAMIEC_NIEPELNA;
+            w.pamiec_prywatna_bajtow = pam.prywatna_bajtow;
+            w.pamiec_tablic_stron_bajtow = pam.tablice_bajtow;
+            w.pamiec_wspoldzielona_bajtow = pam.wspoldzielona_bajtow;
+            w.stos_jadra_bajtow = ROZMIAR_STOSU_JADRA;
+        }
+        w.bufor_okna_bajtow = skladacz_obrazu_bajty_warstwy(pid);
+        const uint64_t heap_base = uklady_procesow[pid].wersja == 2 ? uklady_procesow[pid].sterta_baza : RING3_HEAP_BASE;
+        w.sterta_wirtualna_bajtow = s.granica_sterty > heap_base ? s.granica_sterty - heap_base : 0;
+    }
+
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp,
+            static_cast<size_t>(ProcesyMigawka::bajtow_odpowiedzi(n.liczba_wpisow)))) return BWS_MIGAWKA_ZLY_BUFOR;
+    return BWS_MIGAWKA_OK;
+}
+
+/*
+ * BWS 105: telemetria urzadzen (dyski, karty sieciowe, grafika) - urzadzenia_telemetria.h,
+ * docs/menedzer-zadan-monitorowanie.md. Tylko odczyt licznikow juz utrzymywanych przez jadro; zadnego I/O,
+ * zadnych sond sprzetu poza odczytem stanu lacza, ktory sterownik i tak udostepnia. Sekcja bez przerwan
+ * obejmuje wylacznie kopiowanie licznikow do bufora BSS (kopia do Ring 3 po niej).
+ */
+uint64_t urzadzenia_telemetria(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!wolno_zarzadzac_procesami_v2(p)) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+    if (wersja != BWS_URZADZENIA_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+    if (!UrzadzeniaTelemetria::bufor_poprawny(bufor, rozmiar, sizeof(BwsUrzadzeniaOdpowiedz)) ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor), sizeof(BwsUrzadzeniaOdpowiedz)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    static BwsUrzadzeniaOdpowiedz odp;
+    odp = {};
+    BwsUrzadzeniaNaglowek& n = odp.naglowek;
+    n.wersja = BWS_URZADZENIA_V1_ABI;
+    n.rozmiar_naglowka = sizeof(BwsUrzadzeniaNaglowek);
+    n.rozmiar_dysku = sizeof(BwsDyskInfoV1);
+    n.rozmiar_sieci = sizeof(BwsSiecInfoV1);
+    n.rozmiar_grafiki = sizeof(BwsGrafikaInfoV1);
+    n.psf_dysk = BWS_URZ_BRAK;
+    const bool zegar = hpet_dostepny();
+    const Storage::Device* psf = psf_urzadzenie_trwale();
+    n.flagi |= psf ? BWS_URZ_PSF_NA_DYSKU : BWS_URZ_PSF_W_RAM;
+    UrzadzeniaMigawka::ZrodloGrafiki g{};
+    {
+        BezPrzerwan bez_przerwan;
+        if (zegar) { n.flagi |= BWS_URZ_ZEGAR; n.czas_ns = czas_monotoniczny_ns(); }
+        const uint32_t dyski = blokowy_liczba_dyskow();
+        n.wszystkich_dyskow = dyski;
+        for (uint32_t i = 0; i < dyski; ++i) {
+            const Storage::Device* f = blokowy_dysk(i);
+            if (!f) continue;
+            if (f == psf) n.psf_dysk = i;
+            if (n.liczba_dyskow >= BWS_URZ_MAKS_DYSKOW) { n.flagi |= BWS_URZ_DYSKI_OBCIETE; continue; }
+            UrzadzeniaMigawka::dysk(odp.dyski[n.liczba_dyskow++], i, *f, blokowy_dysk_sprzetowy(i), f == psf);
+        }
+        const uint32_t sieci = net_get_device_count();
+        n.wszystkich_sieci = sieci;
+        const NetworkDevice* glowna = net_get_primary_device();
+        for (uint32_t i = 0; i < sieci; ++i) {
+            const NetworkDevice* d = net_get_device_by_index(i);
+            if (!d) continue;
+            if (n.liczba_sieci >= BWS_URZ_MAKS_SIECI) { n.flagi |= BWS_URZ_SIECI_OBCIETE; continue; }
+            UrzadzeniaMigawka::siec(odp.sieci[n.liczba_sieci++], *d, d == glowna, d->get_link_state());
+        }
+        const auto& c = GraphicsPerf::graphics_perf.counters;
+        auto lc = [&](GraphicsPerf::Counter k) { return __atomic_load_n(&c[k], __ATOMIC_RELAXED); };
+        const TrybEkranu tryb = grafika_tryb_ekranu();
+        g.backend = grafika_mozliwosci_ekranu().backend;
+        g.szerokosc = tryb.szerokosc; g.wysokosc = tryb.wysokosc; g.bpp = tryb.bpp; g.pitch = tryb.pitch;
+        g.kursor_sprzetowy = grafika_czy_kursor_sprzetowy();
+        g.zegar = zegar;
+        g.klatki = lc(GraphicsPerf::Frames); g.pelne_klatki = lc(GraphicsPerf::FullFrames);
+        g.czas_skladania_ns = lc(GraphicsPerf::ComposeNs); g.czas_prezentacji_ns = lc(GraphicsPerf::PresentNs);
+        g.piksele = lc(GraphicsPerf::Pixels);
+        g.kopie_bajty = lc(GraphicsPerf::CopyBytes); g.czas_kopii_ns = lc(GraphicsPerf::CopyNs);
+        g.polecenia_gpu = lc(GraphicsPerf::GpuCommands); g.czas_oczekiwania_gpu_ns = lc(GraphicsPerf::GpuWaitNs);
+        g.transfery = lc(GraphicsPerf::Transfers); g.piksele_transferu = lc(GraphicsPerf::TransferPixels);
+        g.flush = lc(GraphicsPerf::Flushes); g.piksele_flush = lc(GraphicsPerf::FlushPixels);
+        g.kursor = lc(GraphicsPerf::CursorPresents);
+        g.warstwy_bajtow = skladacz_obrazu_bajty_warstw_razem();
+        g.bufory_bajtow = GraphicsPerf::graphics_resources.live_bytes;
+        if (const VirtioGpuDriver* drv = virtio_gpu_get_driver(0); drv && drv->initialized) {
+            g.virtio = true;
+            g.blad_trwaly = drv->permanent_failure_reason != nullptr;
+            g.format_virtio = drv->fb_format;
+            g.bledy_gpu = drv->error_count;
+            g.spoznione_gpu = drv->recovery.late_completions;
+            if (drv->dev) { g.pci_vendor = drv->dev->pci_vendor_id; g.pci_device = drv->dev->pci_device_id; }
+        }
+    }
+    UrzadzeniaMigawka::grafika(odp.grafika[0], g);
+    n.liczba_grafiki = 1;
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp, sizeof(odp)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    return BWS_TELEMETRIA_OK;
+}
+
+/*
+ * BWS 106: skumulowane liczniki I/O kazdej zywej generacji procesu (rozliczanie_io.h). Migawka tabeli i generacji
+ * slotow w jednej sekcji bez przerwan, wiec wpis zawsze opisuje generacje, ktora w tej chwili zajmuje slot.
+ */
+uint64_t procesy_io(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!wolno_zarzadzac_procesami_v2(p)) return BWS_TELEMETRIA_BRAK_UPRAWNIEN;
+    if (wersja != BWS_PROCESY_IO_V1_ABI) return BWS_TELEMETRIA_ZLA_WERSJA;
+    if (!UrzadzeniaTelemetria::bufor_poprawny(bufor, rozmiar, sizeof(BwsProcesyIoOdpowiedz)) ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(bufor), sizeof(BwsProcesyIoOdpowiedz)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    static_assert(BWS_IO_MAKS_PROCESOW == PZB_MAKS_PROCESOW, "BWS 106: wpis na kazdy slot procesu");
+    static BwsProcesyIoOdpowiedz odp;
+    {
+        BezPrzerwan bez_przerwan;
+        uint64_t generacje[BWS_IO_MAKS_PROCESOW] = {};
+        for (int pid = 1; pid < static_cast<int>(PZB_MAKS_PROCESOW); ++pid)
+            if (__atomic_load_n(&tablica_procesow[pid].stan, __ATOMIC_ACQUIRE) != PROCES_PUSTY)
+                generacje[pid] = scheduler_generacja_procesu(pid);
+        const bool zegar = hpet_dostepny();
+        RozliczanieIo::migawka(RozliczanieIo::g_tabela, generacje, zegar ? czas_monotoniczny_ns() : 0, zegar, odp);
+    }
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp, sizeof(odp)))
+        return BWS_TELEMETRIA_ZLY_BUFOR;
+    return BWS_TELEMETRIA_OK;
+}
+
+void log_zakonczenia_v2(int wywolujacy, uint64_t pid, uint64_t generacja, uint64_t wynik) {
+    char buf[128]; size_t k = 0;
+    auto txt = [&](const char* t) { while (*t && k + 1 < sizeof(buf)) buf[k++] = *t++; };
+    auto num = [&](uint64_t v) { char t[24]; int j = 0; do { t[j++] = char('0' + v % 10); v /= 10; } while (v);
+        while (j && k + 1 < sizeof(buf)) buf[k++] = t[--j]; };
+    txt("[MENEDZER-ZADAN] BWS104 wywolujacy="); num(static_cast<uint64_t>(wywolujacy)); txt(" pid="); num(pid);
+    txt(" generacja="); num(generacja); txt(" wynik="); num(wynik);
+    buf[k] = 0; klog_serial(buf);
+}
+
+uint64_t proces_zakoncz_v2(proces_t& p, uint64_t pid64, uint64_t generacja) {
+    const bool uprawniony = wolno_zarzadzac_procesami_v2(p);
+    uint64_t wynik = BWS_ZAKONCZ_BLAD;
+    {
+        /* Decyzja, sprawdzenie generacji i zadanie w JEDNEJ sekcji bez przerwan: slot nie moze zmienic wlasciciela. */
+        BezPrzerwan bez_przerwan;
+        ProcesyMigawka::Cel cel{static_cast<int>(pid64 < PZB_MAKS_PROCESOW ? pid64 : 0), PROCES_PUSTY, PZB_PIASKOWNICA, false};
+        uint64_t generacja_slotu = 0;
+        if (pid64 < PZB_MAKS_PROCESOW) {
+            const proces_t& q = tablica_procesow[pid64];
+            cel.stan = __atomic_load_n(&q.stan, __ATOMIC_ACQUIRE);
+            cel.poziom = q.poziom_zaufania;
+            cel.menedzer_okien = sciezka_menedzera_okien_v2(q.sciezka_pliku, sizeof(q.sciezka_pliku));
+            generacja_slotu = scheduler_generacja_procesu(static_cast<int>(pid64));
+        }
+        wynik = ProcesyMigawka::decyzja_zakonczenia(uprawniony, static_cast<int>(p.pid), p.poziom_zaufania, pid64,
+                                                   generacja, static_cast<int>(PZB_MAKS_PROCESOW), cel,
+                                                   generacja_slotu, PZB_ZAUFANE);
+        if (wynik == BWS_ZAKONCZ_ZAAKCEPTOWANO) {
+            /* Jedyny mechanizm zakonczenia: scheduler (odroczone sprzatanie w kontekscie timera, zob. BWS 97). */
+            const int r = scheduler_zazadaj_zakonczenia(static_cast<int>(pid64));
+            wynik = r == 1 ? BWS_ZAKONCZ_ZAAKCEPTOWANO : r == 2 ? BWS_ZAKONCZ_JUZ_KONCZONY : BWS_ZAKONCZ_BRAK_PROCESU;
+        }
+    }
+    /* Odmowy dla nieuprawnionych: najwyzej kilka linii na proces (PID+generacja), aby zwykla aplikacja nie mogla
+     * zalewac logu szeregowego. Wywolania uprawnione (Menedzer zadan) sa logowane zawsze. */
+    if (wynik == BWS_ZAKONCZ_BRAK_UPRAWNIEN && p.pid < PZB_MAKS_PROCESOW) {
+        constexpr uint32_t MAKS_LOGOW_ODMOWY = 4;
+        static uint64_t generacja_odmow[PZB_MAKS_PROCESOW];
+        static uint32_t licznik_odmow[PZB_MAKS_PROCESOW];
+        const int pid_w = static_cast<int>(p.pid);
+        const uint64_t gen_w = scheduler_generacja_procesu(pid_w);
+        if (generacja_odmow[pid_w] != gen_w) { generacja_odmow[pid_w] = gen_w; licznik_odmow[pid_w] = 0; }
+        const uint32_t n = licznik_odmow[pid_w] < 0xFFFFFFFFU ? ++licznik_odmow[pid_w] : licznik_odmow[pid_w];
+        if (n <= MAKS_LOGOW_ODMOWY) log_zakonczenia_v2(pid_w, pid64, generacja, wynik);
+        if (n == MAKS_LOGOW_ODMOWY)
+            klog_serial("[MENEDZER-ZADAN] BWS104: dalsze odmowy dla tego procesu nie sa logowane");
+        return wynik;
+    }
+    log_zakonczenia_v2(static_cast<int>(p.pid), pid64, generacja, wynik);
+    return wynik;
+}
+
+/* =========================================================================
  * OKNA PODRZEDNE (BWS 101/102): wlasnosc, limity, czas zycia - zob. okna_podrzedne.h
  * ========================================================================= */
 constexpr const char* SCIEZKA_OKNA_INFORMACYJNEGO = "/programy/okno-informacyjne.cebula/okno-informacyjne.bur";
@@ -1670,6 +1961,10 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_SOCKET_CLOSE: return socket_close(*proces, a1);
         case BWS_PROCESY_LISTA: return procesy_lista(*proces, a1, a2);
         case BWS_PROCES_ZABIJ: return proces_zabij(*proces, a1);
+        case BWS_PROCESY_MIGAWKA: return procesy_migawka(*proces, a1, a2, a3);
+        case BWS_PROCES_ZAKONCZ: return proces_zakoncz_v2(*proces, a1, a2);
+        case BWS_URZADZENIA_TELEMETRIA: return urzadzenia_telemetria(*proces, a1, a2, a3);
+        case BWS_PROCESY_IO: return procesy_io(*proces, a1, a2, a3);
         case BWS_OKNO_PODRZEDNE_OTWORZ: return okno_podrzedne_otworz(*proces, a1, a2, a3, a4);
         case BWS_OKNO_PODRZEDNE_TRESC: return okno_podrzedne_tresc(*proces, a1, a2);
         case BWS_OTA_STATUS:

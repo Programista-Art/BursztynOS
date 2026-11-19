@@ -2,6 +2,7 @@
 #include "pamiec.h"
 #include "grafika.h"
 #include "instalator.h"
+#include "hpet.h"
 
 namespace {
 struct FilterContext {
@@ -141,13 +142,17 @@ bool blokowy_zarejestruj_dysk(Storage::Device* dev) {
     d.legacy_read = filter_legacy_read;
     d.legacy_write = filter_legacy_write;
     d.legacy_flush = filter_legacy_flush;
+    d.licz_io = false;   // telemetria liczona raz, na urzadzeniu sprzetowym (block_device.h: BlockIoStats)
     d.sync_state();
 
     registered_device_count++;
     return true;
 }
 
+static uint64_t zegar_io_ns() { return hpet_dostepny() ? czas_monotoniczny_ns() : 0; }
+
 void blokowy_inicjalizuj() {
+    g_block_io_clock_ns = zegar_io_ns;
     registered_device_count = 0;
     dysk_glowny = nullptr;
     installation_target = -1;
@@ -159,6 +164,10 @@ uint32_t blokowy_liczba_dyskow() {
 
 Storage::Device* blokowy_dysk(uint32_t i) {
     return i < registered_device_count ? &devices[i] : nullptr;
+}
+
+const Storage::Device* blokowy_dysk_sprzetowy(uint32_t id) {
+    return id < registered_device_count ? filter_contexts[id].underlying : nullptr;
 }
 
 bool blokowy_sprawdz_tozsamosc(uint32_t id) {

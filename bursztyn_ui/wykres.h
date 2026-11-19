@@ -89,10 +89,19 @@ public:
     bool ustaw_punkty(size_t seria_idx, const int* wartosci, size_t liczba,
                       const char* nazwa_serii = nullptr, uint32_t kolor = 0) {
         if (seria_idx >= MAKS_SERII) return false;
-        if (seria_idx >= liczba_serii_) liczba_serii_ = seria_idx + 1;
+        const bool nowa_seria = seria_idx >= liczba_serii_;
+        if (nowa_seria) liczba_serii_ = seria_idx + 1;
 
         SeriaDanych& s = serie_[seria_idx];
         if (liczba > MAKS_PUNKTOW) liczba = MAKS_PUNKTOW;
+        // Te same dane (np. plaska seria po przesunieciu historii): bez uniewaznienia i ponownego rysowania.
+        bool bez_zmian = !nowa_seria && s.liczba_punktow == liczba && (kolor == 0 || s.kolor == kolor);
+        for (size_t i = 0; bez_zmian && i < liczba; ++i) bez_zmian = s.punkty[i] == (wartosci ? wartosci[i] : 0);
+        if (bez_zmian && nazwa_serii) {
+            size_t i = 0;
+            while (bez_zmian && i < sizeof(s.nazwa) - 1 && (nazwa_serii[i] || s.nazwa[i])) { bez_zmian = nazwa_serii[i] == s.nazwa[i]; ++i; }
+        }
+        if (bez_zmian) return true;
         s.liczba_punktow = liczba;
         for (size_t i = 0; i < liczba; ++i) {
             s.punkty[i] = wartosci ? wartosci[i] : 0;
@@ -113,6 +122,7 @@ public:
     }
 
     size_t liczba_serii() const { return liczba_serii_; }
+    const SeriaDanych* seria(size_t i) const { return i < liczba_serii_ ? &serie_[i] : nullptr; }
 
     void wyczysc() {
         liczba_serii_ = 0;

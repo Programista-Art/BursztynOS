@@ -106,6 +106,30 @@ static bool native_alpha(void *, uint32_t cp, int px, bool bold, bool italic,
   out.release = BSF::unpin;
   return true;
 }
+// Dawne zawijanie Etykiety (pomiar prefiksu po kazdym znaku, O(n^2)) - referencja dla wyszukiwania binarnego.
+static void zawijanie_referencyjne(const char *t, int width, SkalaUI scale, int &rows, int &widest) {
+  rows = 0; widest = 0; size_t at = 0;
+  while (t[at]) {
+    while (t[at] == ' ') ++at;
+    if (!t[at]) break;
+    char part[256]{}; size_t used = 0, start = at, last_space = 0;
+    while (t[at] && t[at] != '\n') {
+      uint32_t cp; size_t n = CzcionkaUI::dekoduj_utf8(t, at, &cp);
+      if (!n || used + n >= sizeof(part)) break;
+      for (size_t j = 0; j < n; ++j) part[used + j] = t[at + j];
+      part[used + n] = 0;
+      if (used && CzcionkaUI::zmierz_tekst(part, scale) > width) { part[used] = 0; break; }
+      if (cp == ' ') last_space = used;
+      used += n; at += n;
+    }
+    if (t[at] && t[at] != '\n' && last_space) { used = last_space; at = start + used; }
+    while (used && part[used - 1] == ' ') --used;
+    part[used] = 0; ++rows;
+    int w = CzcionkaUI::zmierz_tekst(part, scale); if (w > widest) widest = w;
+    if (t[at] == '\n') ++at;
+    if (at == start) ++at;
+  }
+}
 int main() {
   saved.checksum = BSF::checksum(saved);
   g_test_bws_hook = hook;
@@ -441,6 +465,75 @@ int main() {
   CHECK(CzcionkaUI::zmierz_tekst("Czytelny pulpit") > 0);
   BSF::shutdown();
   Husarz::font_family_resolver = nullptr;
+  // Ponowne wczytanie poprawnych czcionek dla testu zawijania (powyzej pliki zostaly celowo uszkodzone).
+  for (const char *name : {"DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSansMono.ttf"}) {
+    std::ifstream f(std::string("czcionki/ttf/") + name, std::ios::binary);
+    files[std::string("/czcionki/ttf/") + name] = {std::istreambuf_iterator<char>(f), {}};
+  }
+  CHECK(BSF::enumerate() == 3 && BSF::ready());
+  {
+    // Zawijanie Etykiety z prawdziwa czcionka BSF (kerning AV/To/LT, polskie znaki, za dlugie slowa): wyszukiwanie
+    // binarne daje dokladnie te same linie co dawny skan liniowy (liczba wierszy i najszersza linia z zmierz()).
+    const char *slowa[] = {"AV", "Wydajność", "procesora:", "67,6", "%", "Źródło:", "HPET", "-",
+                           "WWWWWWWWWWWWWWWWWWWW", "iiii", "ą", "żółć", "To", "LT", "Yo", "\n", "jądro", "(PID", "0)"};
+    uint32_t los = 12345;
+    auto nast = [&] { los = los * 1103515245u + 12345u; return (los >> 16) & 0x7FFF; };
+    Etykieta pusta(""); pusta.ustaw_zawijanie(true);
+    for (int t = 0; t < 60; ++t) {
+      std::string tekst; int n = 1 + int(nast() % 18);
+      for (int i = 0; i < n; ++i) { tekst += slowa[nast() % 19]; if (nast() % 3) tekst += ' '; }
+      Etykieta e(tekst.c_str()); e.ustaw_zawijanie(true);
+      for (int w : {1, 30, 61, 140, 260, 431}) {
+        const int pad = pusta.zmierz({w + 1000, 1000}).szerokosc;   // samo wypelnienie
+        const int pad_v = pusta.zmierz({w + 1000, 1000}).wysokosc;
+        const Rozmiar r = e.zmierz({w + pad, 1000});
+        int rows = 0, widest = 0; zawijanie_referencyjne(e.tekst(), w, SkalaUI::procent(100), rows, widest);
+        CHECK(r.szerokosc == widest + pad);
+        CHECK(r.wysokosc == rows * CzcionkaUI::pobierz_wysokosc() + pad_v);
+      }
+    }
+  }
+  {
+    // TabelaWirtualna z prawdziwa czcionka BSF: kolumna nie wezsza niz naglowek (Menedzer zadan, "Czas działania"),
+    // a przy zmianie rodziny/rozmiaru czcionki systemowej szerokosci sa liczone na nowo. Wiersz przewiniety o pol
+    // wysokosci nie maluje w pasie naglowka (kolor zaznaczenia).
+    struct Dane : DostawcaDanychTabeli {
+      size_t liczba_wierszy() override { return 40; }
+      size_t liczba_kolumn() override { return 2; }
+      const char *naglowek_kolumny(size_t k) override { return k ? "Czas działania" : "Właściwość"; }
+      int szerokosc_kolumny(size_t) override { return 60; }
+      const char *pobierz_komorke(size_t r, size_t, char *b, size_t n) override { snprintf(b, n, "Wiersz %zu", r); return b; }
+    } dane;
+    for (uint32_t proc : {100u, 150u, 200u}) {
+      TabelaWirtualna t; t.ustaw_skale_dpi(SkalaUI::procent(proc)); t.ustaw_dostawce(&dane);
+      t.ustaw_geometrie(0, 0, 500 * int(proc) / 100, 220 * int(proc) / 100);
+      CHECK(t.szerokosc_kolumny_px(1) == 60 * int(proc) / 100);                 // domyslnie: szerokosc dostawcy
+      t.ustaw_szerokosc_wg_naglowkow(true);
+      const SkalaUI sk = SkalaUI::procent(proc);
+      CHECK(t.szerokosc_kolumny_px(1) >= CzcionkaUI::zmierz_tekst("Czas działania", sk) + 12 * sk + 14 * sk);
+      CHECK(t.wysokosc_naglowka() >= CzcionkaUI::pobierz_wysokosc(sk));
+      const int przed = t.szerokosc_kolumny_px(1);
+      BSF::preview(BSF::resolve_family("monospace"), 22);                      // inna czcionka systemowa
+      const int mono = t.szerokosc_kolumny_px(1);
+      CHECK(mono != przed && mono >= CzcionkaUI::zmierz_tekst("Czas działania", sk) + 12 * sk + 14 * sk);
+      CHECK(t.wysokosc_naglowka() >= CzcionkaUI::pobierz_wysokosc(sk));
+      BSF::end_preview();
+      CHECK(t.szerokosc_kolumny_px(1) == przed);
+      const int wh = t.wysokosc_wiersza(), nh = t.wysokosc_naglowka();
+      t.ustaw_wybrany_wiersz(7); t.ustaw_przewiniecie_pionowe(7 * wh + wh / 2);
+      std::vector<uint32_t> px(size_t(t.obszar().szerokosc) * t.obszar().wysokosc, 0);
+      KontekstRysowania c(Prostokat(0, 0, t.obszar().szerokosc, t.obszar().wysokosc));
+      c.ustaw_cel(px.data(), Prostokat(0, 0, t.obszar().szerokosc, t.obszar().wysokosc));
+      t.rysuj_siebie(c);
+      const uint32_t zazn = motyw_kolor(MOTYW_KOLOR_ZAZNACZENIE) & 0xFFFFFF;
+      int w_naglowku = 0, pod = 0;
+      for (int y = 0; y < t.obszar().wysokosc; ++y)
+        for (int x = 0; x < t.obszar().szerokosc; ++x)
+          if ((px[size_t(y) * t.obszar().szerokosc + x] & 0xFFFFFF) == zazn) (y <= nh ? w_naglowku : pod)++;
+      CHECK(w_naglowku == 0 && pod > 0);
+    }
+  }
+  BSF::shutdown();
   printf("BSF UI/browser: %u checks PASS; proportional geometry, clipping/AA, "
          "Polish UTF-8, previews, persistence, font priority, cooperative "
          "paint and corrupt-font fallback\n",

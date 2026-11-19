@@ -565,6 +565,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_shell_blob.o \
 	ikona_app_tapety_blob.o \
 	ikona_app_ustawienia_ekranu_blob.o \
+	ikona_app_menedzer_zadan_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -586,6 +587,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	motyw.o \
 	test_dzwieku_blob.o \
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
+	menedzer_zadan_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
@@ -2517,6 +2519,39 @@ diagnostyka_blob.o: diagnostyka_tmp.o bursztyn_gui.o programy/diagnostyka/diagno
 	$(PYTHON) narzedzia/kompresuj_blob.py diagnostyka.bin diagnostyka.bin.bz
 	$(LD) -r -b binary diagnostyka.bin.bz -o diagnostyka_blob.o
 
+# Menedzer zadan (.cebula / BUR): telemetria procesow BWS 103, zakonczenie BWS 104 (docs/menedzer-zadan.md).
+MENEDZER_ZADAN_ZRODLA := programy/menedzer_zadan/menedzer_zadan.cpp programy/menedzer_zadan/okno.h programy/menedzer_zadan/model.h programy/menedzer_zadan/urzadzenia.h jadro/bws/procesy_migawka.h jadro/bws/urzadzenia_telemetria.h jadro/bws/bws_api.h jadro/gui/desktop_entries.h
+menedzer_zadan_tmp.o: $(MENEDZER_ZADAN_ZRODLA) $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -fstack-usage -c $< -o $@
+
+menedzer_zadan_blob.o: menedzer_zadan_tmp.o bursztyn_gui.o programy/menedzer_zadan/menedzer_zadan_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/menedzer_zadan/menedzer_zadan_linker.ld) $(RING3_LDFLAGS) menedzer_zadan_tmp.o bursztyn_gui.o -o menedzer_zadan.elf
+	$(BUR_CONVERT) menedzer_zadan.elf menedzer_zadan.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py menedzer_zadan.bin menedzer_zadan.bin.bz
+	$(LD) -r -b binary menedzer_zadan.bin.bz -o menedzer_zadan_blob.o
+
+# Testy hosta Menedzera zadan: czysta logika jadra (rozliczanie CPU, pamiec z tablic stron, polityka zakonczenia,
+# ABI BWS 103/104), model aplikacji, rejestracja (pulpit/Start/ikony) i okno BursztynUI z ASan/UBSan.
+.PHONY: test-menedzer-zadan-host
+test-menedzer-zadan-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_menedzer_zadan_host.cpp -o .bsf-test/menedzer-zadan
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/menedzer-zadan
+
+# Telemetria urzadzen (BWS 105, docs/menedzer-zadan-monitorowanie.md): liczniki BlockDevice, rejestr NetworkDevice,
+# budowa odpowiedzi jadra i model urzadzen Menedzera zadan (ASan/UBSan).
+.PHONY: test-telemetria-urzadzen-host
+test-telemetria-urzadzen-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_NET_HOST_TEST -fsanitize=address,undefined -fno-omit-frame-pointer sterowniki/siec/network_device.cpp testy/test_telemetria_urzadzen_host.cpp -o .bsf-test/telemetria-urzadzen
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/telemetria-urzadzen
+
+# Kazda slaba referencja w obiektach jadra musi trafic w definicje w obrazie (regresja zlego linkage hooka
+# usun_warstwe, ktory zostawial okna-duchy po BWS 97/104).
+.PHONY: test-slabe-hooki-jadra
+test-slabe-hooki-jadra: $(KERNEL)
+	$(PYTHON) testy/test_slabe_hooki_jadra.py $(KERNEL) $(filter %.o,$(OBJS))
+
 .PHONY: test-diagnostyka-systemu-host
 test-diagnostyka-systemu-host:
 	@mkdir -p .input-test/diagnostyka
@@ -2810,6 +2845,9 @@ ikona_app_shell_blob.o: ikonki/app_shell.png
 ikona_app_ustawienia_ekranu_blob.o: ikonki/app_ustawienia_ekranu.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_app_menedzer_zadan_blob.o: ikonki/app_menedzer_zadan.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_app_tapety_blob.o: ikonki/app_tapety.png
 	$(LD) -r -b binary $< -o $@
 
@@ -2891,7 +2929,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
@@ -3158,7 +3196,7 @@ test-window-geometry-host:
 
 # Tozsamosc aplikacji systemowych: SHA-256 plikow .bur zbudowanych razem z jadrem.
 SKROTY_SYSTEMOWE_H := jadro/fs/skroty_systemowe.generated.h
-SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o okno_informacyjne_blob.o
+SKROTY_SYSTEMOWE_APPS := ustawienia_blob.o diagnostyka_blob.o test_dzwieku_blob.o aktualizacje_blob.o ekran_blob.o przegladarka_obrazow_blob.o okno_informacyjne_blob.o menedzer_zadan_blob.o
 $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemowe.py
 	$(PYTHON) narzedzia/generuj_skroty_systemowe.py $@ \
 		/programy/ustawienia.cebula/ustawienia.bur=ustawienia.bin \
@@ -3167,7 +3205,8 @@ $(SKROTY_SYSTEMOWE_H): $(SKROTY_SYSTEMOWE_APPS) narzedzia/generuj_skroty_systemo
 		/programy/aktualizacje.cebula/aktualizacje.bur=aktualizacje.bin \
 		/programy/ekran.cebula/ekran.bur=ekran.bin \
 		/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur=przegladarka_obrazow.bin \
-		/programy/okno-informacyjne.cebula/okno-informacyjne.bur=okno_informacyjne.bin
+		/programy/okno-informacyjne.cebula/okno-informacyjne.bur=okno_informacyjne.bin \
+		/programy/menedzer_zadan.cebula/menedzer_zadan.bur=menedzer_zadan.bin
 # Kursor zmiany rozmiaru: opcjonalne ikonki/kursor_rozciagania.png (brak pliku nie psuje budowania).
 KURSOR_ROZCIAGANIA_H := jadro/gui/kursor_rozciagania.generated.h
 KURSOR_ROZCIAGANIA_PNG := ikonki/kursor.png ikonki/kursor_rozciagania.png ikonki/kursorrozciagania.png
