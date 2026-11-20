@@ -29,6 +29,9 @@
  * i przed montowaniem rygorystycznie sprawdza strukture systemu plikow.
  */
 
+#if !defined(BURSZTYN_PSF_HOST_TEST)
+#include "jadro/arch/diag_opoznienia_irq.h"
+#endif
 #include "psf.h"
 #include "blokowy.h"
 #include "zegar-rtc.h"
@@ -455,12 +458,19 @@ static void odblokuj_psf() {
 class BlokadaPSF {
 public:
     BlokadaPSF()
-        : stan_(wylacz_przerwania()) {
+        : stan_(wylacz_przerwania())
+#if !defined(BURSZTYN_PSF_HOST_TEST)
+        , pomiar_(DiagOpoznieniaIrq::Site::Psf, (stan_.rflags & (1ULL << 9)) != 0)
+#endif
+    {
         zablokuj_psf();
     }
 
     ~BlokadaPSF() {
         odblokuj_psf();
+#if !defined(BURSZTYN_PSF_HOST_TEST)
+        pomiar_.finish();
+#endif
         przywroc_przerwania(stan_);
     }
 
@@ -469,6 +479,9 @@ public:
 
 private:
     StanPrzerwan stan_;
+#if !defined(BURSZTYN_PSF_HOST_TEST)
+    DiagOpoznieniaIrq::Scope pomiar_;
+#endif
 };
 
 /* =========================================================================

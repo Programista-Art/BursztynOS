@@ -65,6 +65,7 @@ static constexpr size_t MAKS_DZIECI_OKNA = 4;
 #include "bufory_grafiki.h"
 #include "ekran_format.h"
 #include "sterowniki/czas/hpet.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "virtio_gpu.h"
 #include "scheduler.h"
 
@@ -2286,7 +2287,11 @@ void skladacz_obrazu_obsluz_dirty() {
         const GuiDirtyRect&r=work[ri];
         pixels+=rect_area(r);
         grafika_odtworz_tlo_regionu(r.x,r.y,r.width,r.height);
-        for(int li=0;li<layer_count;++li)zloz_snapshot_region(layers[li],r);
+        for(int li=0;li<layer_count;++li) {
+            zloz_snapshot_region(layers[li],r);
+            // Audio never takes compositor, screen, or GPU locks.
+            hda_wykonaj_zaplanowana_prace_odroczona();
+        }
         zloz_pasek_zadan(layers,layer_count,r);
         rysuj_drag_overlay_region(r);
         zloz_popup_aplikacji(layers,layer_count,r);
@@ -2328,8 +2333,9 @@ void skladacz_obrazu_obsluz_dirty() {
         if(dirty_przecina_kursor)++cursor_reoverlay_after_dirty;
 #endif
     }
-    else for(uint32_t ri=0;ri<present_count;++ri){const auto& r=present_work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
+    else for(uint32_t ri=0;ri<present_count;++ri){const auto& r=present_work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);hda_wykonaj_zaplanowana_prace_odroczona();}
     grafika_zakoncz_scene();
+    hda_wykonaj_zaplanowana_prace_odroczona();
     /*
      * A scene generation advances only after the cursor-free scene has been
      * composed and submitted. CursorMotion alone never changes this value.

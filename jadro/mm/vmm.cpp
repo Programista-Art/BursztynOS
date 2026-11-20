@@ -19,6 +19,7 @@
  * nie publikuja niedokonczonego wpisu liscia.
  */
 
+#include "jadro/arch/diag_opoznienia_irq.h"
 #include "vmm_zakres.h"
 #include "vmm_synchronizacja.h"
 #include "zarezerwowane_va.h"
@@ -317,13 +318,16 @@ static void odblokuj_vmm() {
 
 class BlokadaVMM {
 public:
-    BlokadaVMM()
-        : stan_(wylacz_przerwania()) {
+    BlokadaVMM(DiagOpoznieniaIrq::Site site = DiagOpoznieniaIrq::Site::Vmm)
+        : stan_(wylacz_przerwania()),
+          pomiar_(site, (stan_.rflags & (1ULL << 9)) != 0)
+    {
         zablokuj_vmm();
     }
 
     ~BlokadaVMM() {
         odblokuj_vmm();
+        pomiar_.finish();
         przywroc_przerwania(stan_);
     }
 
@@ -332,6 +336,7 @@ public:
 
 private:
     StanPrzerwan stan_;
+    DiagOpoznieniaIrq::Scope pomiar_;
 };
 
 /* =========================================================================
@@ -2382,7 +2387,7 @@ extern "C" void* PobierzAktualnePML4() {
  * ========================================================================= */
 
 void* UtworzPrzestrzenAdresowaProcesu() {
-    BlokadaVMM blokada;
+    BlokadaVMM blokada(DiagOpoznieniaIrq::Site::VmmClone);
 
     if (!vmm_zainicjalizowany ||
         !bazowe_pml4_jadra) {
@@ -2522,7 +2527,7 @@ extern "C" bool VmmPoliczPamiecProcesu(void* pml4, PamiecProcesu::Wynik* wynik) 
     if (!pml4 || !wynik) return false;
     *wynik = PamiecProcesu::Wynik{};
     uint64_t* przestrzen = static_cast<uint64_t*>(pml4);
-    BlokadaVMM blokada;
+    BlokadaVMM blokada(DiagOpoznieniaIrq::Site::VmmCount);
     if (!vmm_zainicjalizowany || !bazowe_pml4_jadra || przestrzen == bazowe_pml4_jadra) return false;
     bool zarejestrowana = false;
     for (uint64_t* p : g_rejestr_przestrzeni.wpisy) if (p == przestrzen) { zarejestrowana = true; break; }

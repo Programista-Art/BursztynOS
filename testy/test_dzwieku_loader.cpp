@@ -7,6 +7,8 @@
 #include "podpis_paczki.h"
 #include "bur_v2.h"
 #include "uklad_procesu.h"
+#include "vmm_zakres.h"
+#include "blob_skompresowany.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -70,6 +72,16 @@ struct BlokadaVMM { ~BlokadaVMM() {} };
 static uint64_t* pml4_z_cr3() { return static_cast<uint64_t*>(current_root); }
 /* The loader resets per-process FPU state; the host has no hardware to reset. */
 void fpu_reset_process(int) {}
+extern "C" void scheduler_nowy_proces_w_slocie(int pid) {
+    CHECK(pid > 0 && pid < MAKS_PROCESOW);
+}
+extern "C" bool tozsamosc_systemowa_zweryfikuj(const char*, const uint8_t*, uint64_t) {
+    return false;
+}
+extern "C" bool VmmZakresWolnyWBazie(uint64_t start, uint64_t end) {
+    // The fixture models only the base identity map and per-process pages.
+    return vmm_zainicjalizowany && end > start && start >= (1ULL << 32);
+}
 /*
  * Host stand-in for the kernel entropy-based ASLR offset.
  *
@@ -144,6 +156,8 @@ bool stos_jadra_przydziel(int pid, uint64_t* base, uint64_t* top) {
 }
 void stos_jadra_zwolnij(int pid) { std::free(stacks.at(pid)); stacks.erase(pid); }
 
+static BlobZ::Strumien blob_strumien;
+void powitanie_punkt_startu() {}
 #include "../.hda-test/repair/package_actual.inc"
 static constexpr const char* path = "/programy/test_dzwieku.cebula/test_dzwieku.bur";
 static constexpr const char* bad_path = "/programy/test_dzwieku.cebula/invalid.bur";

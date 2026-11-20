@@ -1,334 +1,301 @@
-
 # Bursztyn OS
 
 ![Logo Bursztyn OS](image/logo-bursztyn-os.png)
 
-Witaj w oficjalnej dokumentacji **Bursztyn OS** – niezależnego, 64-bitowego systemu operacyjnego z polską duszą inżynieryjną, tworzonego całkowicie od zera (czysty bare-metal).
+**Niezależny, polski system operacyjny x86-64 rozwijany od podstaw.**
 
-System jest rozwijany z myślą o architekturze x86-64, implementując własne Jądro, natywny stos sieciowy TCP/IP, autorski system plików na dyskach AHCI SATA, niezależny logiczny model bezpieczeństwa (PZB) oraz w pełni graficzne środowisko uruchomieniowe (GUI) dla programów w Ring 3.
+Bursztyn OS to eksperymentalny system typu *bare metal*: nie jest dystrybucją Linuksa, nakładką na Windows ani środowiskiem działającym na cudzym jądrze. Rozwijany jest we własnej architekturze systemowej, z jądrem napisanym w C, C++ i asemblerze, natywnymi programami użytkownika oraz autorskim interfejsem graficznym.
 
----
+> **Status projektu:** aktywny rozwój i testy. Bursztyn OS nie jest jeszcze systemem produkcyjnym ani zamiennikiem systemu do przechowywania ważnych danych. Poszczególne sterowniki i funkcje mają różny poziom dojrzałości; powodzenie testów w QEMU nie oznacza automatycznie zgodności z każdym komputerem.
 
-## 🖥️ Środowisko Graficzne i Aplikacje (Ring 3)
-
-Bursztyn OS to pełnoprawny system okienkowy. Posiada autorską warstwę HAL (obsługa UEFI GOP oraz VESA VBE) i proporcjonalne czcionki UTF-8.
-
-**Menedżer Okien (Pulpit) v systemu v.1.0.0.7 wielozadaniowa**
-System uruchamia interaktywny pulpit z paskiem zadań, rozwijanym menu i wsparciem dla myszy PS/2 (Z-Order, Drag & Drop).
-![Pulpit Bursztyna 1](image/BursztynOS.jpg)
-
-## Przeglądarka Husarz v 1.0.0.6 ##
-
-![Przeglądarka Husarz](image/hussar/Hussar-1.png)
-![Przeglądarka Husarz](image/hussar/Hussar-2.png)
-![Przeglądarka Husarz](image/hussar/Hussar-3.png)
-![Przeglądarka Husarz](image/hussar/Hussar-4.png)
-
-**Aplikacje użytkowe (Paczki .cebula)**
-Programy w Bursztyn OS są odizolowane i posiadają własne manifesty uprawnień. Aplikacje możesz uruchamiać klikając w ikony na pulpicie lub wywołując je z terminala (np. `uruchom /programy/notatnik.cebula/notatnik.bur`).
-
-* **Notatnik:** Edytor tekstowy obsługujący odczyt i zapis z dysku AHCI.
-![Notatnik](image/pulpit/7.png)
-
-* **Kalkulator:** Okienkowa aplikacja użytkowa.
-![Kalkulator](image/pulpit/6.png)
-
----
-
-## ⌨️ Powłoka Bursztynowa (Terminal)
-
-Powłoka systemowa to potężne, zintegrowane narzędzie działające w oknie. Oferuje pełną obsługę polskich znaków oraz natywnego klienta sieci.
-![Powłoka Bursztynowa](image/pulpit/5.png)
-
-**Dostępne polecenia:**
-
-**⚙️ Systemowe:**
-* `pomoc` - wyświetla dostępną listę komend.
-* `system` - wypisuje informacje o architekturze Bursztyn OS.
-* `wersja` - krótka informacja o wersji powłoki i OS.
-* `kto` - odpowiada, na jakich prawach PZB aktualnie działasz.
-* `pci` - wyświetla urządzenia na płycie głównej (magistrala PCI).
-* `czas` - wyświetla aktualną godzinę ze sprzętowego zegara RTC.
-* `historia` - pokazuje 5 ostatnich wpisanych przez Ciebie poleceń.
-* `czysc` - czyści ekran terminala.
-* `wyjdz` - zamyka powłokę bursztynową i wraca na pulpit.
-
-**🌐 Sieć i Internet (TCP/IP):**
-* `ping [adres/domena]` - wysyła sygnał ICMP (np. `ping 10.0.2.2` lub `ping google.com`).
-* `pobierz [domena] [sciezka] [zapisz_jako]` - pobiera plik z sieci przez HTTP (np. `pobierz example.com / /test.html`).
-
-**📁 Zarządzanie Plikami (Dysk AHCI):**
-* `uruchom [plik]` - uruchamia aplikację (np. `uruchom /programy/kalkulator.cebula/kalkulator.bur`).
-* `utworz` - kreator tworzenia nowego, pustego pliku/katalogu na dysku.
-* `zapisz` - zapisuje tekst do pliku.
-* `czytaj [plik]` - wyświetla zawartość wskazanego pliku.
-* `pliki [katalog]` - wylistowuje zawartość katalogu.
-* `usun [sciezka]` - trwale usuwa plik lub katalog z dysku.
-* `zmien_nazwe` - kreator zmiany nazwy pliku/katalogu.
-* `gdzie` - wyświetla ścieżkę obecnego katalogu.
-
-**🎲 Rozrywka:**
-* `pisz [tekst]` - wypisuje podany tekst na ekran (echo).
-* `cytat` - wczytuje i wyświetla cytaty z pliku.
-* `losuj` - rzuca wirtualną kością (wynik 1-6).
-
-**Testowanie
-*`dzwiek` - generuje ton dla testu dźwięku w systemie
+**Kod autorski: PolyForm Noncommercial License 1.0.0** · **Źródła: publicznie dostępne po opublikowaniu repozytorium** · **Szczegóły: [LICENSE.md](LICENSE.md)**
 
 
----
+## Czym jest Bursztyn OS?
 
-## 🗂️ Struktura Dokumentacji Technicznej
+Celem projektu jest stworzenie samodzielnego systemu operacyjnego, w którym najważniejsze warstwy — od rozruchu, zarządzania pamięcią i procesami, przez wywołania systemowe i sterowniki, po pulpit — są rozwijane na potrzeby Bursztyn OS.
 
-Poniższe pliki zawierają pełną specyfikację techniczną, opisy mechanizmów oraz analizę kodu źródłowego systemu:
+Podstawowe założenia:
 
-0. [00_mapa_repozytorium.md](docs/00_mapa_repozytorium.md) – Mapa katalogów źródłowych (jądro, programy, sterowniki, testy, narzędzia).
-1. [01_wstep_i_filozofia.md](docs/01_wstep_i_filozofia.md) – Wizja projektu, założenia ideologiczne, polskie nazewnictwo i roadmapa.
-2. [02_architektura_systemu.md](docs/02_architektura_systemu.md) – Podział Ring 0/Ring 3, sprzętowy TSS oraz logiczny model bezpieczeństwa PZB (Poziom Zaufania Bursztyna).
-3. [03_proces_rozruchu.md](docs/03_proces_rozruchu.md) – Analiza wymuszeń graficznych Multiboot2, tymczasowe stronicowanie i skok do Long Mode.
-4. [04_zarzadzanie_sprzetem.md](docs/04_zarzadzanie_sprzetem.md) – Inicjalizacja GDT, IDT (z systemem BSOD), APIC, Zegar Systemowy, RTC oraz mysz PS/2.
-5. [05_bursztynowy_system_plikow.md](docs/05_bursztynowy_system_plikow.md) – Specyfikacja systemu BSP trwale zapisywanego na sterowniku AHCI SATA.
-6. [06_wywolania_systemowe.md](docs/06_wywolania_systemowe.md) – Architektura 26 funkcji BWS (Bursztynowych Wywołań Systemowych) izolujących Ring 3.
-7. [07_ekosystem_i_formaty.md](docs/07_ekosystem_i_formaty.md) – Specyfikacja binarna `.bur`, struktura paczek `.cebula` oraz manifesty `opis.aplikacji`.
-8. [08_bursztynowy_slownik_i_architektura.md](docs/08_bursztynowy_slownik_i_architektura.md) – Oficjalny słownik pojęć (Teczka, Włókno, Planista) oraz rendering UTF-8.
-9. [09_tryb_graficzny.md](docs/09_tryb_graficzny.md) - Zorientowana obiektowo warstwa HAL (UEFI GOP, VESA), Double Buffering i Z-Order.
-10. [10_siec.md](docs/10_siec.md) - Stos sieciowy: E1000, ICMP, DHCP, klient DNS (UDP) oraz pobieranie plików (TCP/HTTP).
-12. [12_lokalna_weryfikacja.md](docs/12_lokalna_weryfikacja.md) – Lokalne gate’y smoke/security/regresji bez GitHuba (`make test`, `test-local-suite`).
+- **Własne jądro i infrastruktura systemowa:** architektura x86-64, tryb Long Mode, pamięć wirtualna, procesy, planista i obsługa przerwań.
+- **Natywne aplikacje Ring 3:** programy `.bur`, pakiety aplikacyjne `.cebula` i manifesty uprawnień.
+- **BWS — Bursztynowe Wywołania Systemowe:** własny interfejs między programami użytkownika a jądrem.
+- **PZB — Poziomy Zaufania Bursztyna:** model logicznych poziomów 0–5 współpracujący ze sprzętową izolacją Ring 0/Ring 3.
+- **BursztynUI:** wspólne elementy graficzne i kontrolki dla rodzimych programów.
+- **Rozwój niezależnego ekosystemu:** sterowniki, system plików, narzędzia programistyczne oraz docelowa integracja z językiem Avocado.
 
----
+Do budowania obrazu rozruchowego aktualna gałąź projektu wykorzystuje **GRUB i Multiboot2** w trybie BIOS oraz UEFI/OVMF. Jest to narzędzie startowe, a nie jądro Linuksa. Własny **Bursztynowy Program Rozruchowy (BRB)** pozostaje planowanym kierunkiem rozwoju.
 
-## 🛠️ Architektura w pigułce
+## Aktualne możliwości
 
-* **Procesor:** x86-64 Long Mode (Start przez standard Multiboot2 z GRUB).
-* **Izolacja / Bezpieczeństwo:** Sprzętowe Ring 3 wymuszane przez `SYSCALL/SYSRET` + sprzętowy segment TSS + programowy pancerz PZB.
-* **Pamięć:** Wielkie Strony (Huge Pages 2 MB), VMM z dynamicznym mapowaniem adresów do `0x130000000ULL` (powyżej 4 GB).
-* **Asynchroniczność:** Pełne odejście od układów PIC na rzecz nowoczesnego kontrolera APIC i asynchronicznego LAPIC Timera we współpracy z RTC.
-* **Grafika (HAL):** Abstrakcyjna warstwa renderująca (Liniowy Bufor Ramki) wybierająca natywnie między UEFI GOP a Legacy VESA.
-* **Storage i Pliki:** Własny sterownik dysków twardych AHCI SATA. System BSP używa sektorów 512B natywnie zmapowanych na bloki dyskowe.
+Poniższy opis uwzględnia funkcje rozwijane i testowane do listopada 2026 r. Dokładny zakres działania zależy od wersji kodu i sprzętu.
 
-# Jak uruchomić system Burstzyn w QEMU na Windows 11
-## Krok 1: pobierz plik BursztynOS.iso na pc, otwórz wiersz polecenia cmd
-Naciśnij na klawiaturze skrót Win + R, wpisz cmd i wciśnij Enter.
-## Krok 2: Przejście do folderu z systemem
-Wpisz po kolei te dwie komendy (każdą zatwierdź Enterem), aby przełączyć się na dysk D: czy C: i wejść do katalogu z najnowszym wydaniem:
-```
-D:
-cd D:\Bursztyn-OS\
+| Obszar | Implementacja / stan |
+| --- | --- |
+| Jądro | x86-64, mechanizmy pamięci i procesów, Ring 3, obsługa przerwań, planista |
+| Rozruch | BIOS i UEFI z GRUB Multiboot2; OVMF w QEMU |
+| Grafika | GOP/VESA oraz rozwijane sterowniki graficzne, w tym VirtIO-GPU |
+| Interfejs | Własny menedżer okien, pulpit, menu Start, pasek zadań, okna i kontrolki BursztynUI |
+| Tekst | UTF-8, polskie znaki, czcionki TTF/OTF oraz ustawienia czcionek |
+| Dyski i pliki | Sterowniki i operacje plikowe rozwijane dla środowisk AHCI i VirtIO-BLK; PSF i własne mechanizmy systemu plików |
+| Sieć | Własny stos sieciowy z TCP/IP, DHCP, DNS i obsługą wspieranych kart, m.in. VirtIO-Net |
+| Audio | Intel HDA, wspólny mikser PCM i natywne BWS 110 dla aplikacji Ring 3; płynność odtwarzania wciąż rozwijana |
+| Wejście | PS/2 i rozwijana obsługa USB/xHCI oraz urządzeń wejściowych VirtIO |
+| Zabezpieczenia | PZB, walidacja buforów wywołań systemowych, izolacja przestrzeni adresowych, uprawnienia procesów |
+| Testy | Regresje hostowe, testy ASan/UBSan, testy QEMU oraz wybrane próby na fizycznym sprzęcie |
+
+### Pulpit i aplikacje
+
+![Pulpit Bursztyn OS](image/BursztynOS.jpg)
+
+Pulpit umożliwia pracę z wieloma oknami, przełączanie aktywnych aplikacji, minimalizowanie, przeciąganie, korzystanie z menu Start, paska zadań i okien dialogowych. Trwają prace nad ergonomią, wydajnością i obsługą urządzeń.
+
+| Program / komponent | Zastosowanie |
+| --- | --- |
+| **Husarz** | Natywna przeglądarka internetowa z rozwijanym silnikiem HTML, CSS i JavaScript. Zgodność z nowoczesnymi witrynami jest jeszcze częściowa. |
+| **Notatnik** | Edytor tekstu z obsługą UTF-8, zapisu, otwierania plików i podstawowej edycji. |
+| **Kalkulator** | Graficzny kalkulator systemowy. |
+| **Eksplorator plików** | Przeglądanie katalogów i operacje na plikach. |
+| **Powłoka Bursztynowa** | Terminal z rodzimymi poleceniami systemowymi, plikowymi i sieciowymi. |
+| **Ustawienia** | Konfiguracja wyglądu, czcionek, informacji systemowych i innych dostępnych opcji. |
+| **Menedżer zadań** | Podgląd procesów i zasobów, wybrane statystyki wydajności oraz kontrolowane kończenie procesów. |
+| **Kalendarz** | Osobna aplikacja kalendarza i panel kalendarza otwierany z zegara na pasku zadań. |
+| **Bursztynowy Zasobnik** | Ikony i panele sieci, głośności, powiadomień oraz szybkich ustawień. |
+| **Tapety** | Wybór dostępnych tapet pulpitu. |
+| **Test dźwięku / PCM** | Diagnostyka HDA i przykładowe programy PCM Ring 3. |
+
+Przykładowe zrzuty ekranu z wcześniejszych etapów:
+
+![Notatnik](image/Notatnik.png)
+
+### Programy `.bur` i pakiety `.cebula`
+
+Wykonywalne programy Bursztyn OS korzystają z natywnego formatu `.bur`; aplikacja może być dostarczana w katalogu pakietu `.cebula` wraz z dodatkowymi zasobami i manifestem. Uprawnienia i operacje systemowe są sprawdzane przez jądro.
+
+Przykładowa ścieżka uruchamiania aplikacji z terminala:
+
+```text
+uruchom /programy/notatnik.cebula/notatnik.bur
 ```
 
-## Krok 3: Uruchomienie QEMU
-Będąc już w folderze, w którym leży plik BursztynOS.iso, odwołaj się do programu zainstalowanego na dysku C:. Skopiuj całą tę linijkę (z zachowaniem cudzysłowów) i wklej do konsoli:
-```
-"C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
-```
+W testach dźwięku wykorzystywano także:
 
-
-## Jak uruchomić w power shell w QEMU na Windows 11
-Jeżeli masz pobrnay obraz iso w folderze na pustym miejscu kliknij prawym przyciskiem myszy i wybierz Otwórz w terminalu dalej wpisz to
-```
-& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -m 2G
-```
-Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie
-```
-& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G
+```text
+/programy/pcm440.cebula/pcm440.bur
+/programy/pcm660.cebula/pcm660.bur
 ```
 
-# Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
-```
-& "C:\Program Files\qemu\qemu-system-x86_64.exe" `
-    -drive if=pflash,format=raw,unit=0,readonly=on,file="C:\Program Files\qemu\share\edk2-x86_64-code.fd" `
-    -cdrom BursztynOS.iso `
-    -drive "id=disk,file=wirtualny_dysk.img,format=raw,if=none" `
-    -device ahci,id=ahci `
-    -device ide-hd,drive=disk,bus=ahci.0 `
-    -m 2G `
-    -vga std `
-    -serial stdio
-```
+Zawartość i lista zainstalowanych aplikacji zależą od konkretnego obrazu ISO.
 
-# Jak uruchomić Bursztyn w trybie Legacy BIOS + QEMU VGA w power shell w QEMU na Windows 11 od wersji pliki iso BursztynOS v1.0.0.5
-```
-& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
-```
+## Dźwięk: BWS 110 i wspólny mikser PCM
 
-# Jak uruchomić system Bursztyn w QEMU na Linux Mint
-## Krok 1: Otwórz terminal w folderze z plikiem
-Najszybsza metoda w systemach takich jak Linux Mint:
+Bursztyn OS ma natywny mechanizm przesyłania i miksowania próbek PCM: aplikacje Ring 3 otwierają własne strumienie przez **BWS 110**, zapisują próbki, sterują głośnością i zamykają strumienie. Jądro łączy strumienie i przekazuje dźwięk do obsługiwanego wyjścia **Intel HDA**.
 
-1. Otwórz menedżera plików i wejdź do folderu, w którym leży BursztynOS.iso.
+Podstawowy obsługiwany format demonstracyjny to **PCM16 little-endian, 48 kHz, mono lub stereo**. API obejmuje m.in. operacje otwarcia, zapisu, sprawdzania stanu, ustawiania wzmocnienia i zamknięcia strumienia. Dla procesów stosowana jest kontrola własności z uwzględnieniem identyfikatora i generacji PID.
 
-2. Kliknij prawym przyciskiem myszy w puste miejsce w tym folderze.
+**Co potwierdziły testy w QEMU:** dwa odrębne procesy Ring 3 odtwarzały jednocześnie tony 440 Hz i 660 Hz, niezależna regulacja głośności działała, master mute wyciszał całość, a zakończenie jednego procesu nie wyłączało dźwięku drugiego.
 
-3. Wybierz opcję "Otwórz w terminalu" (Open in Terminal).
+**Ograniczenie:** nie ogłoszono jeszcze bezprzerwowego odtwarzania. W nagraniach testowych nadal występują spóźnienia uzupełniania buforów, niedobory próbek i okresowe odzyskiwanie DMA; istotnym czynnikiem testowym jest QEMU działające wewnątrz VirtualBox. Nie należy traktować tej funkcji jako gotowej do niezawodnego odtwarzania muzyki czy dźwięku w przeglądarce.
 
-(Alternatywnie możesz użyć komendy cd, np. cd ~/Pulpit/Bursztyn\ OS/kod).
+## Architektura i bezpieczeństwo
 
-## Krok 2: Wpisz komendę uruchamiającą
-1. W Linuksie program QEMU jest dodany do globalnych ścieżek systemu, więc nie musisz podawać do niego pełnej ścieżki w cudzysłowach tak jak na Windowsie.
-1. Po prostu wklej to:
-```
+- **Ring 0 / Ring 3:** kod jądra i programy użytkownika działają w rozdzielonych poziomach uprawnień sprzętowych.
+- **PZB 0–5:** autorski, dodatkowy model kontroli praw do operacji systemowych.
+- **BWS:** własne, sprawdzane w jądrze wywołania systemowe, w tym BWS 110 dla PCM.
+- **Ochrona pamięci:** walidacja zakresów dostarczanych przez aplikacje, kopiowanie danych przez kontrolowane interfejsy oraz ograniczenia zasobów.
+- **Pliki i sieć:** własne komponenty systemowe i sterowniki, stopniowo rozwijane i testowane na różnym sprzęcie.
 
-qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G
-```
+To projekt eksperymentalny. Model PZB i obecność testów zabezpieczeń nie są równoznaczne z ukończonym audytem bezpieczeństwa całego systemu.
 
-## Jeżeli chcesz uruchomić wraz z wirtualnym dyskiem wpisz polecenie w terminalu
-```
-qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -serial stdio
-```
-# Jak uruchomić Bursztyn w trybie UEFI (OVMF) z UEFI GOP w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
-```
-qemu-system-x86_64 \
-    -bios /usr/share/qemu/OVMF.fd \
-    -cdrom BursztynOS.iso \
-    -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none \
-    -device ahci,id=ahci \
-    -device ide-hd,drive=disk,bus=ahci.0 \
-    -m 2G \
-    -vga std \
-    -serial stdio
-```
+## Szybki start w QEMU
 
-# Jak uruchomić Bursztyn w trybie Legacy BIOS + QEMU VGA w QEMU na Linux Mint od wersji pliki iso BursztynOS v1.0.0.5
-```
-qemu-system-x86_64 -cdrom BursztynOS.iso -drive id=disk,file=wirtualny_dysk.img,format=raw,if=none -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -vga std -serial stdio
-```
+Najprostszy sposób to uruchomienie przygotowanego `BursztynOS.iso` bez podłączania prywatnego dysku:
 
-
-### Krok 3: (Opcjonalnie) Włącz dopalacze KVM! 🚀
-Na Windowsie próbowaliśmy włączyć akcelerację WHPX, ale to na Linuksie QEMU rozwija prawdziwe skrzydła dzięki natywnej akceleracji KVM (Kernel-based Virtual Machine). Zamiast emulować procesor programowo, system pozwala wirtualnej maszynie używać Twojego fizycznego procesora. Bursztyn OS uruchomi się wtedy z prędkością światła!
-
-Aby to zrobić, po prostu dodaj flagę -enable-kvm:
-```
-qemu-system-x86_64 -enable-kvm -cdrom BursztynOS.iso -m 2G
-```
-
-
-# Kompilowanie systemu ze źródel na Linux Mint i uruchomienie w QEMU
-### Przygotowanie Środowiska w Linux Mint
-1. Otwórz natywny terminal i wykonaj te trzy polecenia:
-1. Aktualizacja repozytoriów:
-```
-sudo apt update && sudo apt upgrade -y
-```
-
-2. Instalacja narzędzi budujących i kompilatora skrośnego: Narzędzie build-essential dostarczy nam program make, a pakiety g++ pozwolą kompilować kod.
-sudo apt install build-essential gcc-x86-64-linux-gnu g++-x86-64-linux-gnu -y
-
-3. Instalacja narzędzi do tworzenia obrazu ISO (Multiboot)
-Aby komenda grub-mkrescue działała bezbłędnie podczas budowania obrazu .iso  systemu Bursztyn OS, musisz doinstalować te pakiety:
-```
-sudo apt install xorriso mtools grub-pc-bin grub-common -y
-```
-
-4. Emulator do szybkich testów (Opcjonalnie)
-Zamiast za każdym razem uruchamiać cięższe środowiska i przeklikiwać się przez interfejs VirtualBoxa, w systemie Linux Mint możesz zainstalować lekki emulator QEMU. Pozwala on na błyskawiczne uruchomiać system bezpośrednio z terminala za pomocą jednej komendy (np. qemu-system-x86_64 -cdrom BursztynOS.iso).
-Aby zainstalować QEMU, wpisz w terminalu:
-```
-sudo apt install qemu-system-x86 -y
-```
-
-
-5. Wybór Edytora Kodu
-    1. Możesz użyć wbudowanego w Minta lekkiego programu Xed.
-    1. Możesz pobrać Visual Studio Code (wersję natywną dla Linuxa, instalowaną z pakietu .deb).
-    1. Możesz użyć dowolnego innego narzędzia (np. Vim, Nano, CLion), w którym pisze Ci się wygodnie.
-Skrypt Makefile i tak zajmie się całą "magią" kompilacji i budowania pliku ISO w tle, niezależnie od tego, w jakim programie edytujesz pliki źródłowe.
-
-
-Aby w pełni skompilować kod Bursztyn OS i uruchomić go na maszynie wirtualnej, musisz połączyć wygenerowany plik binarny z programem rozruchowym GRUB (zgodnie ze standardem Multiboot2) i stworzyć obraz ISO.
-Oto instrukcja krok po kroku, jak to zrobić na Twoim systemie Linux Mint:
-## Krok 1: Dostosowanie Makefile do kompilatorów w Linux Mint
-Makefile narzędzia są zdefiniowane jako standardowy cross-compiler x86_64-elf:
-
-```
-CC = x86_64-elf-g++
-AS = x86_64-elf-as
-LD = x86_64-elf-ld
-```
-
-## Krok 2: Kompilacja Jądra Bursztyna
-Otwórz terminal w folderze, w którym znajduje się Twój plik Makefile i kod źródłowy, a następnie wpisz:
-make
-
-Skrypt automatycznie skompiluje jednostki z `jadro/` (boot.o, gdt.o, pmm.o, vmm.o, kernel.o itd.) i połączy je skryptem `jadro/arch/linker.ld`. Jeśli nie ma błędów w kodzie, w folderze pojawi się plik system_operacyjny.bin.
-## Krok 3: Przygotowanie struktury pliku ISO (GRUB Multiboot2)
-Bursztyn OS operuje w 64-bitowym Long Mode, więc wymaga programu rozruchowego (GRUB), który przekaże parametry Multiboot2. Musisz zbudować prostą strukturę teczek dla obrazu płyty:
-W terminalu utwórz katalogi:
-```
-mkdir -p isodir/boot/grub
-```
-Skopiuj swoje skompilowane jądro do katalogu /boot:
-```
-cp system_operacyjny.bin isodir/boot/
-```
-
-Stwórz plik konfiguracyjny GRUBa o nazwie grub.cfg (np. za pomocą xed isodir/boot/grub/grub.cfg lub nano isodir/boot/grub/grub.cfg) i wklej do niego ten kod:
-
-set timeout=0
-set default=0
-
-menuentry "Bursztyn OS" {
-    multiboot2 /boot/system_operacyjny.bin
-    boot
-}
-
-## Krok 4: Generowanie bootowalnego obrazu ISO
-Mając gotową strukturę (isodir), użyj zainstalowanego wcześniej narzędzia grub-mkrescue, aby "zamknąć" to w plik .iso:
-
-grub-mkrescue -o BursztynOS.iso isodir
-
-W głównym folderze pojawi się nowy plik BursztynOS.iso.
-
-## Krok 5: Uruchomienie w QEMU
-Teraz czas ożywić polski system operacyjny! Użyj QEMU, ładując wygenerowany obraz płyty:
-```
+```bash
 qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
 ```
 
-(Flaga -m 2G przydziela 2 Gigabajty pamięci RAM dla maszyny, co przyda się przy testowaniu Zarządcy Pamięci (PMM/VMM) w Etapie 3, a -serial stdio pozwala kierować logi z jądra bezpośrednio do Twojego terminala Linux).
-Po wykonaniu tej komendy powinno wyskoczyć okno emulatora wyświetlające GRUB, a zaraz po nim kod jądra z `jadro/rdzen/kernel.cpp` Bursztyn OS!
+Polecenie uruchamia podstawową konfigurację. Nie wszystkie sterowniki i urządzenia wirtualne będą dostępne bez odpowiednich opcji QEMU. Szczegółowe scenariusze są obsługiwane przez cele `Makefile` oraz skrypty testowe projektu.
 
+**Bezpieczeństwo danych:** nie uruchamiaj testów zapisu na dysku zawierającym ważne dane. Obrazy wirtualnych dysków również mogą być modyfikowane przez instalator i system plików.
 
-Komenda make clear - usuwa pliki .o
-```
-make clear
-```
+## Budowanie ze źródeł — Linux Mint / Ubuntu
 
-Skompiluj wszystko od nowa wpisując:
+### 1. Narzędzia i GCC 13
 
-make
+W projekcie używany jest kompilator **GCC 13**. Zależności instaluj z repozytoriów własnej dystrybucji:
 
-Teraz kompilator przejdzie przez wszystkie moduły (włącznie z systemem plików psf.o i urządzeniami), a na końcu wyświetli Ci poprawnie sklejony plik system_operacyjny.bin, który będziesz mógł podpiąć do GRUBa za pomocą komendy
-
-
-Ostatnie kroki w terminalu:
-Wpisz po kolei te polecenia
-1. Skompiluj kod:
-```
-make
-```
-2. Skopiuj wygenerowany obraz do struktury wirtualnej płyty:
-```
-cp system_operacyjny.bin isodir/boot/
-```
-3. Stwórz plik ISO:
-```
-grub-mkrescue -o BursztynOS.iso isodir
-```
-lub
-```
-grub-mkrescue -o BursztynOS.iso isodir --xorriso=xorriso
-```
-4. Uruchom system!:
-```
-qemu-system-x86_64 -cdrom BursztynOS.iso -m 2G -serial stdio
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential gcc-13 g++-13 \
+  gcc-13-x86-64-linux-gnu g++-13-x86-64-linux-gnu \
+  binutils-x86-64-linux-gnu \
+  xorriso mtools dosfstools \
+  grub-common grub-pc-bin grub-efi-amd64-bin \
+  qemu-system-x86 qemu-system-gui qemu-utils ovmf \
+  python3 python3-pil
 ```
 
-ewentualnie po prostu wpisz ```make run``` to zbuduje system w trybie BIOS i wszystko się zrobi automatycznie
+Uwaga: nazwy i dostępność pakietów mogą się różnić zależnie od wydania Ubuntu/Linux Mint. Nie wszystkie zależności muszą być konieczne dla każdego pojedynczego celu `make`.
+
+Sprawdź wersje kompilatorów:
+
+```bash
+gcc-13 --version
+g++-13 --version
+x86_64-linux-gnu-gcc-13 --version
+x86_64-linux-gnu-g++-13 --version
 ```
-make run
+
+Powinna pojawić się wersja **13.x**. Nie trzeba ustawiać GCC 13 globalnie przez `update-alternatives`.
+
+**Ważne rozróżnienie:** obecny `Makefile` używa prefiksu `x86_64-linux-gnu-`, a nie `x86_64-elf-`. Wymuszenie kompilatora GCC 13 w poleceniu `make` jest bezpieczniejsze niż zmiana systemowych dowiązań kompilatora.
+
+### 2. Budowanie obrazu ISO
+
+W katalogu projektu (tam, gdzie znajduje się `Makefile`) uruchom:
+
+```bash
+make -j1 iso \
+  CC=x86_64-linux-gnu-gcc-13 \
+  CXX=x86_64-linux-gnu-g++-13
 ```
-Budownaie w trybie UEFI ```make runuefu``` i wszystko się zrobi automatycznie
+
+`-j1` oznacza kompilację sekwencyjną. Jest zalecane w ograniczonych środowiskach wirtualnych.
+
+Po pomyślnej kompilacji oczekiwanym artefaktem jest `BursztynOS.iso`. Makefile sam przygotowuje wymagane pliki rozruchowe i strukturę ISO; nie trzeba wykonywać ręcznie `cp` jądra do `isodir` ani ręcznie wywoływać `grub-mkrescue`.
+
+**Uwaga o zmianie kompilatora:** jeżeli wcześniej budowano te same obiekty inną wersją GCC, należy wykonać kontrolowaną pełną przebudowę. Nie usuwaj plików i dysków automatycznymi skryptami czyszczącymi bez sprawdzenia ich działania.
+
+### 3. Uruchamianie z Makefile
+
+Repozytorium zawiera następujące cele (ich opcje urządzeń mogą się zmieniać między rewizjami):
+
+```bash
+make run             # QEMU BIOS, typowa konfiguracja VirtIO
+make runuefi         # QEMU UEFI/OVMF
+make run-legacy      # QEMU BIOS z konfiguracją legacy
+make runuefi-legacy  # QEMU UEFI z konfiguracją legacy
 ```
-make run
+
+**Ostrzeżenie:** w sprawdzonym `Makefile` cele `run` i `runuefi` zależą od `prepare-disk` i mogą korzystać z obrazu wskazanego jako `VIRTUAL_DISK` (domyślnie `wirtualny_dysk.img`). Zanim użyjesz ich na dysku z danymi, sprawdź odpowiednie cele i wykonaj kopię obrazu.
+
+### 4. Dodatkowe kontrole środowiska
+
+```bash
+qemu-system-x86_64 --version
+grub-mkrescue --version
+python3 -c "from PIL import Image, ImageOps; print('Pillow OK')"
 ```
+
+Instalacja `libsdl2-dev` nie jest wymagana do samego uruchomienia QEMU. To pakiet programistyczny, potrzebny dopiero przy kompilowaniu oprogramowania korzystającego z biblioteki SDL2. Wyświetlanie okna QEMU wymaga odpowiedniego dostępnego backendu graficznego.
+
+**KVM:** na fizycznym Linuksie z poprawnie działającym `/dev/kvm` można przetestować `-enable-kvm`. Wewnątrz VirtualBox akceleracja KVM nie musi być dostępna; nie należy zakładać, że dodanie tej flagi zadziała.
+
+## Uruchamianie na Windows 11
+
+Zainstaluj QEMU i otwórz PowerShell w katalogu, gdzie znajduje się obraz `BursztynOS.iso`.
+
+Podstawowa próba bez wirtualnego dysku:
+
+```powershell
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" -cdrom .\BursztynOS.iso -m 2G -serial stdio
+```
+
+Jeśli QEMU jest zainstalowane w innym miejscu, popraw ścieżkę programu. Konfiguracje UEFI wymagają firmware OVMF/EDK II odpowiedniego do instalacji QEMU. W przypadku pracy nad sterownikami VirtIO, siecią i HDA należy korzystać ze sprawdzonych konfiguracji testowych projektu.
+
+Nie podłączaj do eksperymentalnych testów istniejącego `wirtualny_dysk.img` bez kopii zapasowej.
+
+## Testy i diagnostyka
+
+Projekt rozwijany jest z wykorzystaniem testów hostowych, kontroli ABI i pamięci, ASan/UBSan oraz testów rozruchu i działania w QEMU. Część sterowników jest także testowana na wybranym sprzęcie fizycznym.
+
+Wybrane cele występujące w starszej rewizji `Makefile`:
+
+```bash
+make -j1 test-hda-tone
+make -j1 test-hda-diag
+make -j1 test-bur-loader
+make -j1 test-wm-click-routing
+```
+
+Lista testów zmienia się podczas rozwoju. Przed uruchomieniem sprawdź bieżący `Makefile` i dokumentację odpowiedniego podsystemu. Testy ingerujące w dyski, instalator lub obrazy ISO powinny korzystać wyłącznie z danych testowych.
+
+## Dokumentacja techniczna
+
+Dokumenty techniczne przestażałe w repozytorium:
+
+| Dokument | Temat |
+| --- | --- |
+| [01 — Wstęp i filozofia](docs/01_wstep_i_filozofia.md) | Cele projektu i założenia |
+| [02 — Architektura systemu](docs/02_architektura_systemu.md) | Ring 0/Ring 3 oraz PZB |
+| [03 — Proces rozruchu](docs/03_proces_rozruchu.md) | BIOS, UEFI i Multiboot2 |
+| [04 — Zarządzanie sprzętem](docs/04_zarzadzanie_sprzetem.md) | Przerwania, urządzenia i sprzęt |
+| [05 — Bursztynowy system plików](docs/05_bursztynowy_system_plikow.md) | Warstwa plikowa |
+| [06 — Wywołania systemowe](docs/06_wywolania_systemowe.md) | BWS i granice uprawnień |
+| [07 — Ekosystem i formaty](docs/07_ekosystem_i_formaty.md) | `.bur`, `.cebula` i manifesty |
+| [08 — Słownik i architektura](docs/08_bursztynowy_slownik_i_architektura.md) | Nazewnictwo wewnętrzne |
+| [09 — Tryb graficzny](docs/09_tryb_graficzny.md) | Grafika i wyświetlanie |
+| [10 — Sieć](docs/10_siec.md) | Stos sieciowy i sterowniki |
+| [11 — Audyt nowoczesnych BWS](docs/11_audyt_bws_nowoczesne.md) | Analiza interfejsu systemowego |
+
+Dokumentacja bardziej rozbudowana ale też nie aktualna. https://github.com/Programista-Art/BursztynOS-Dokumentacja
+
+Niektóre dokumenty opisują wcześniejsze etapy implementacji. Aktualny rejestr ABI i zachowanie programu należy zawsze sprawdzić również w kodzie źródłowym bieżącej gałęzi.
+
+## Plan rozwoju i ograniczenia
+
+Najważniejsze obszary dalszych prac:
+
+- zwiększenie stabilności i płynności dźwięku PCM dla aplikacji Ring 3 oraz walidacja na sprzęcie fizycznym;
+- poprawa zgodności i wydajności przeglądarki Husarz;
+- rozwój sterowników wejścia, grafiki, dysków i urządzeń rzeczywistych;
+- dalsze prace nad systemem plików, niezawodnością zapisu i odzyskiwaniem danych;
+- doskonalenie bezpieczeństwa, planisty procesów, testów regresyjnych i API;
+- rozwój narzędzi programistycznych, formatu paczek i integracji z językiem Avocado;
+- docelowo autorski program rozruchowy BRB.
+
+Bursztyn OS może zawierać błędy prowadzące do utraty danych lub zawieszenia komputera. Zalecane jest uruchamianie na maszynie wirtualnej, a na fizycznym sprzęcie — wyłącznie na urządzeniach testowych z kopią zapasową danych.
+
+## Licencja i kod źródłowy
+
+**Autorskie elementy Bursztyn OS są udostępniane na warunkach [PolyForm Noncommercial License 1.0.0](LICENSE.md)**, chyba że dla konkretnego pliku lub komponentu wskazano inaczej.
+
+**Identyfikator SPDX:** `PolyForm-Noncommercial-1.0.0`  
+**Oficjalne brzmienie:** https://polyformproject.org/licenses/noncommercial/1.0.0
+
+Kod źródłowy jest przeznaczony do **publicznego udostępniania (source-available)**. Licencja pozwala na korzystanie, badanie, modyfikowanie i redystrybucję autorskiego kodu oraz jego pochodnych **w dozwolonych celach niekomercyjnych**, z zachowaniem wymaganych informacji licencyjnych. Dotyczy to również niekomercyjnych forków i kopii — nie jest to licencja zakazująca wszelkiej redystrybucji.
+
+**Wykorzystanie komercyjne** wymaga uzyskania odrębnej zgody lub licencji od odpowiedniego właściciela praw. Autor może oferować oddzielne warunki komercyjne dla elementów, do których posiada odpowiednie prawa. Sama publikacja kodu nie oznacza zgody na dowolne wykorzystanie komercyjne.
+
+**Ważne:** PolyForm Noncommercial 1.0.0 **nie jest licencją open source w znaczeniu definicji OSI**, ponieważ ogranicza cele komercyjne. Określenie *publiczny kod źródłowy* nie jest równoznaczne z licencją OSI.
+
+**Komponenty osób trzecich** — biblioteki, czcionki, grafiki, programy rozruchowe i inne elementy niebędące autorskimi utworami Bursztyn OS — **pozostają na własnych licencjach**. W szczególności dołączony kod Mbed TLS ma odrębne warunki (w badanej rewizji: Apache-2.0 lub GPL-2.0-or-later, zgodnie z `biblioteki/mbedtls/LICENSE`). Postanowienia PolyForm nie zastępują ani nie ograniczają uprawnień przyznanych przez licencje tych komponentów. Dla dystrybucji kodu i obrazów ISO należy zachować odpowiednie informacje o prawach autorskich, teksty licencji i warunki redystrybucji wszystkich dołączanych elementów.
+
+Nazwa i logo Bursztyn OS mogą podlegać odrębnym prawom; licencja do kodu nie jest automatycznie zezwoleniem na podszywanie się pod oficjalne wydanie projektu.
+
+Pełna treść warunków dotyczących autorskich składników projektu: **[LICENSE.md](LICENSE.md)**.
+
+## Społeczność i kontakt
+
+Dołącz do społeczności Bursztyn OS, śledź rozwój projektu i dziel się opiniami:
+
+- [Discord](https://discord.gg/ZPpAUUz5xN)
+- [Facebook](https://www.facebook.com/profile.php?id=61563368962907)
+- [YouTube](https://www.youtube.com/@programistaart)
+- [LinkedIn](https://www.linkedin.com/in/dymitr-wygowski-bb707216b/)
+
+**Autor:** Dymitr Wygowski / Programista-Art  
+**E-mail:** [programista.art@gmail.com](mailto:programista.art@gmail.com)
+
+- [Oficjalna strona](https://bursztynos.pl/)
+Bursztyn OS jest projektem długoterminowym. Przydatne są raporty błędów, testy na różnych konfiguracjach sprzętowych, propozycje poprawek, audyty bezpieczeństwa, dokumentacja i pomysły na dalszy rozwój.
+
+Przed zgłoszeniem problemu warto dołączyć wersję lub identyfikator commita, konfigurację QEMU albo sprzętu, kroki odtworzenia, logi oraz informację, czy test był wykonany na sprzęcie fizycznym czy w maszynie wirtualnej.
+
+---
+
+**Bursztyn OS — polski system operacyjny, tworzony niezależnie od podstaw.**
+
+Copyright © 2026 Dymitr Wygowski. Prawa do komponentów osób trzecich pozostają przy ich odpowiednich właścicielach.

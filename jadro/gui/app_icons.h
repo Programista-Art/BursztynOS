@@ -18,6 +18,8 @@ struct Wpis {
 inline constexpr Wpis Dodatkowe[] = {
     {"/shell.bur", "/ikonki/app_shell.png"},
     {"/programy/tapety.cebula/tapety.bur", "/ikonki/app_tapety.png"},
+    // Kalendarz: tylko menu Start (bez skrotu na pulpicie) - ta sama ikona na pasku zadan.
+    {AppIdentity::Calendar, "/ikonki/app_kalendarz.png"},
 };
 inline constexpr int LiczbaDodatkowych = sizeof(Dodatkowe) / sizeof(Dodatkowe[0]);
 inline constexpr int Count = DesktopEntries::Count + LiczbaDodatkowych;

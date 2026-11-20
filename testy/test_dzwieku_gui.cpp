@@ -10,6 +10,11 @@
 #define BURSZTYN_UI_CZCIONKA_SYSTEMOWA 1
 #define BURSZTYN_PSF_HOST_TEST 1
 #include "bursztyn_ui_host_fixture.h"
+#include "ochrona_sciezek.h"
+#include "ustawienia_aplikacji.h"
+#define BURSZTYN_ROZLICZANIE_IO_HOST
+#include "rozliczanie_io.h"
+#undef BURSZTYN_ROZLICZANIE_IO_HOST
 #define czytaj_fragment_pliku psf_host_czytaj_fragment_pliku
 #include "../jadro/fs/psf.cpp"
 #undef czytaj_fragment_pliku
@@ -46,6 +51,7 @@ bool skopiuj_string_z_uzytkownika(char* dst, const char* src, size_t cap) {
     std::memcpy(dst, src, std::strlen(src) + 1); return true;
 }
 namespace KernelFsHost {
+void rozliczanie_io_pliku(int, RozliczanieIo::Rodzaj, uint64_t) {}
 bool instalator_tryb() { return false; }
 void powiadom_zmiane_systemu_plikow(const char*, uint32_t) {}
 #include "../.hda-test/repair/filesystem_actual.inc"
@@ -252,8 +258,15 @@ int main(int argc, char** argv) {
     CHECK(snapshot_calls == snapshots); CHECK(!window.potrzebuje_ticku());
     for (uint32_t scale : {100, 125, 150, 175, 200}) {
         ++scenarios; bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_EKRAN; ev.kod = scale; window.obsluz_zdarzenie(ev);
-        CHECK(window.x() >= 0 && window.y() >= 0); CHECK(window.x() + window.szerokosc() <= 1280);
-        CHECK(window.y() + window.wysokosc() <= 720);
+        // The current desktop contract keeps the title reachable at high DPI.
+        // User windows can extend past the screen up to twice the work area.
+        CHECK(window.szerokosc() <= 2 * 1280 && window.wysokosc() <= 2 * 720);
+        const int visible_title_w = std::min(1280, window.x() + window.szerokosc()) -
+                                    std::max(0, window.x());
+        const int title_h = std::min(window.wysokosc(), Okno::WYSOKOSC_BELKI_TYTULOWEJ * window.skala_dpi());
+        const int visible_title_h = std::min(720, window.y() + title_h) - std::max(0, window.y());
+        CHECK(visible_title_w >= std::min(window.szerokosc(), ui_skaluj(96, scale)));
+        CHECK(visible_title_h >= title_h / 2);
         for (int section = 0; section < 7; ++section) {
             window.sekcje_->ustaw_wybrany_indeks(section);
             window.pokaz_sekcje(section); draw(window);

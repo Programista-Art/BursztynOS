@@ -610,6 +610,9 @@ uint32_t bws_siec_ping(
     uint8_t ip4
 );
 
+/* Konfiguracja IPv4 z DHCP (tylko odczyt). false = stos nie ma konfiguracji; pola wyzerowane. */
+bool siec_pobierz_konfiguracje_ipv4(uint8_t ip[4], uint8_t maska[4], uint8_t brama[4], uint8_t dns[4]);
+
 /*
  * Resolver DNS A.
  *

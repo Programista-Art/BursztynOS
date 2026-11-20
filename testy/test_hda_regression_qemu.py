@@ -64,7 +64,8 @@ def capture_failure(socket_path: Path, backend: str) -> None:
     (OUT / f"{backend}-failure.json").write_text(json.dumps(diagnostics, indent=2) + "\n")
 
 
-def make_iso(kernel: Path, wallpapers: Path, destination: Path, staging: Path, timeout: float) -> None:
+def make_iso(kernel: Path, wallpapers: Path, destination: Path, staging: Path, timeout: float,
+             *, boot_args: str = "bursztyn.test=hda-tone", log_dir: Path = OUT) -> None:
     boot = staging / "boot"
     (boot / "grub").mkdir(parents=True)
     shutil.copy2(kernel, boot / "system_operacyjny.bin")
@@ -75,10 +76,10 @@ def make_iso(kernel: Path, wallpapers: Path, destination: Path, staging: Path, t
         '    insmod all_video\n'
         '    set gfxmode=1920x1080x32,1280x720x32,1024x768x32,auto\n'
         '    set gfxpayload=keep\n'
-        '    multiboot2 /boot/system_operacyjny.bin bursztyn.test=hda-tone\n'
+        f'    multiboot2 /boot/system_operacyjny.bin {boot_args}\n'
         '    module2 /boot/tapety.pak tapety.pak\n'
         '    boot\n}\n', encoding="ascii")
-    with (OUT / "iso-build.log").open("w") as log:
+    with (log_dir / "iso-build.log").open("w") as log:
         subprocess.run(["grub-mkrescue", "-o", str(destination), str(staging)],
                        cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=min(45, timeout), check=True)
 

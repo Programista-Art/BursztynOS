@@ -14,7 +14,7 @@
  *   - konfiguruje kodek przez Immediate Command,
  *   - posiada bezpieczne DMA przez PMM,
  *   - obsluguje obecnie topologie kodeka QEMU hda-output/hda-duplex,
- *   - udostepnia asynchroniczny test tonu z produkcyjnym deadline.
+ *   - miesza strumienie z jadra i udostepnia asynchroniczny test tonu.
  *
  * Struktury MMIO, Stream Descriptor oraz BDL sa celowo prywatne dla
  * hda.cpp. Inne moduly jadra powinny korzystac tylko z API ponizej.
@@ -132,6 +132,13 @@ void hda_zatrzymaj_ton();
  */
 void hda_obsluz_okresowo();
 
+// Timer IRQ: bounded fail-safe RUN clear. All refill and recovery are deferred.
+void hda_pcm_watchdog_irq(unsigned pid, bool ring0);
+bool hda_pcm_praca_oczekuje();
+bool hda_pcm_pilny_powrot_pid0();
+bool hda_pcm_pilny_w_toku();
+bool hda_blokada_aktywna();
+
 /* Transport wywoluje przed resetem kontrolera; zachowuje powod STOP. */
 void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);
 
@@ -145,6 +152,30 @@ void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);
  *   - nie resetuje calego kontrolera.
  */
 void hda_stop();
+
+/*
+ * Glosnosc systemowa (Bursztynowy Zasobnik). Backend: wzmacniacz wyjsciowy kodeka na aktywnej trasie albo,
+ * bez niego, programowe wzmocnienie generatora PCM (sterowniki/dzwiek/hda_glosnosc.h). Funkcje nie blokuja:
+ * zajety transport = HDA_GLOSNOSC_ZAJETE i stan bez zmian (nigdy "udane" bez zapisu do sprzetu).
+ */
+enum : uint32_t {
+    HDA_GLOSNOSC_OK = 0,
+    HDA_GLOSNOSC_NIEOBSLUGIWANE = 1,
+    HDA_GLOSNOSC_ZAJETE = 2,
+    HDA_GLOSNOSC_ZLE_ARGUMENTY = 3,
+};
+enum : uint32_t { HDA_GLOSNOSC_BRAK = 0, HDA_GLOSNOSC_WZMACNIACZ = 1, HDA_GLOSNOSC_PCM = 2 };
+
+struct HdaGlosnoscInfo {
+    bool urzadzenie, wyciszanie, wyciszony, odtwarza;
+    uint32_t backend, procent, generacja;
+    uint16_t pci_vendor, pci_device;
+    uint8_t kodek, wezel, kroki, cel;
+};
+
+void hda_glosnosc_info(HdaGlosnoscInfo* out);
+uint32_t hda_glosnosc_ustaw(uint32_t procent);
+uint32_t hda_wyciszenie_ustaw(bool wyciszony);
 
 /* =========================================================================
  * 3. HELPERY HEADER-ONLY
