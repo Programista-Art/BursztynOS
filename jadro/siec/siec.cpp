@@ -49,6 +49,7 @@
  * niepelne przypadki w sposob ryzykowny.
  */
 
+#include "powiadomienia_jadra.h"
 #include "siec.h"
 #include "gui_runtime_diag.h"
 #include "http_origin.h"
@@ -2421,6 +2422,8 @@ extern "C" void uruchom_klienta_dhcp() {
         wypisz_log(
             "[DHCP] Serwer odrzucil konfiguracje (DHCPNAK)."
         );
+        powiadomienie_systemowe(BWS_POW_OSTRZEZENIE, "Sieć bez konfiguracji",
+                                "Serwer DHCP odrzucił konfigurację.");
 
         return;
     }
@@ -2432,6 +2435,8 @@ extern "C" void uruchom_klienta_dhcp() {
         wypisz_log(
             "[DHCP] Timeout oczekiwania na DHCPACK."
         );
+        powiadomienie_systemowe(BWS_POW_OSTRZEZENIE, "Sieć bez konfiguracji",
+                                "Brak potwierdzenia adresu z DHCP.");
 
         return;
     }
@@ -2443,6 +2448,8 @@ extern "C" void uruchom_klienta_dhcp() {
         "[DHCP] IPv4: ",
         nasz_ip
     );
+    powiadomienie_systemowe(BWS_POW_SUKCES, "Sieć skonfigurowana",
+                            "Adres IPv4 przydzielony przez DHCP.");
 
     wypisz_ip_log(
         "[DHCP] Brama: ",
@@ -5665,4 +5672,18 @@ void siec_operacja_posprzataj(int pid) {
         tcp_resetuj_sesje(true);
         (void)operacja_sieci.release(pid);
     }
+}
+
+/* Konfiguracja IPv4 stosu (tylko odczyt, Bursztynowy Zasobnik / BWS 107). false = brak konfiguracji (brak DHCP ACK):
+ * wtedy pola sa wyzerowane - domyslne 255.255.255.0 / 8.8.8.8 sprzed DHCP nie sa raportowane jako konfiguracja. */
+bool siec_pobierz_konfiguracje_ipv4(uint8_t ip[4], uint8_t maska[4], uint8_t brama[4], uint8_t dns[4]) {
+    if (!ip || !maska || !brama || !dns) return false;
+    const bool gotowa = konfiguracja_ipv4_gotowa;
+    for (int i = 0; i < 4; ++i) {
+        ip[i] = gotowa ? nasz_ip[i] : 0;
+        maska[i] = gotowa ? maska_podsieci[i] : 0;
+        brama[i] = gotowa ? brama_ip[i] : 0;
+        dns[i] = gotowa ? serwer_dns_ip[i] : 0;
+    }
+    return gotowa;
 }

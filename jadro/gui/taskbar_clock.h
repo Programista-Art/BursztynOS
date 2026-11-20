@@ -6,6 +6,7 @@ class Surface {
     uint32_t* pixels_{};size_t capacity_{};
     char published_[32]{};
     bool dirty_=true;
+    bool active_=false;     // najechanie albo otwarty kalendarz paska: tlo przycisku (zegar jest klikalny)
     SkalaUI scale_{1};
 public:
     Prostokat bounds{};
@@ -21,6 +22,10 @@ public:
         bounds={width-w,height-bar,w,bar};dirty_=true;
     }
     bool needs_repaint()const{return dirty_;}
+    bool active()const{return active_;}
+    // Zmiana stanu = jedno przerysowanie zegara (nie calego paska); ten sam stan nic nie robi.
+    bool set_active(bool a){if(a==active_)return false;active_=a;dirty_=true;return true;}
+    bool contains(int x,int y)const{return bounds.zawiera(x,y);}
     template<class Publish> bool update(const char* text,bool force,Publish publish){
         if(!text || bounds.czy_pusty())return false;
         bool same=true;size_t length=0;
@@ -33,6 +38,8 @@ public:
         Prostokat local{0,0,bounds.szerokosc,bounds.wysokosc};
         KontekstRysowania ctx(local);ctx.ustaw_cel(pixels_,local);
         ctx.rysuj_prostokat(local,0xff000000U|motyw_kolor(MOTYW_KOLOR_PODNIESIONY));
+        if(active_)ctx.rysuj_zaokraglony_prostokat({3*scale_,4*scale_,local.szerokosc-6*scale_,local.wysokosc-8*scale_},
+            0xff000000U|motyw_kolor(MOTYW_KOLOR_PRZYCISK_NAJECHANY),4*scale_);
         ctx.rysuj_linie_pozioma(0,0,local.szerokosc,0xff000000U|motyw_kolor(MOTYW_KOLOR_RAMKA));
         ctx.rysuj_linie_pionowa(0,0,local.wysokosc,0xff000000U|motyw_kolor(MOTYW_KOLOR_RAMKA));
         ctx.dodaj_przyciecie({1,1,local.szerokosc-1,local.wysokosc-1});

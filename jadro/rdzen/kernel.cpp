@@ -1,3 +1,5 @@
+extern "C" unsigned char _binary_pcm440_bin_bz_start[], _binary_pcm440_bin_bz_end[], _binary_pcm660_bin_bz_start[], _binary_pcm660_bin_bz_end[];
+#include "powiadomienia_jadra.h"
 #include "galeria_pak.h"
 #include "galeria_kopiowanie.h"
 extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
@@ -58,6 +60,8 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "sterowniki/dzwiek/hda_qemu_regression.h"
+#include "sterowniki/dzwiek/hda_pcm_regression.h"
+#include "sterowniki/dzwiek/hda_ring3_regression.h"
 #include "sterowniki/usb/usb.h"
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
@@ -186,6 +190,7 @@ extern "C" uint8_t _binary_ikonki_app_ustawienia_png_start[], _binary_ikonki_app
 extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_app_test_dzwieku_png_end[];
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_menedzer_zadan_png_start[], _binary_ikonki_app_menedzer_zadan_png_end[];
+extern "C" uint8_t _binary_ikonki_app_kalendarz_png_start[], _binary_ikonki_app_kalendarz_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
@@ -244,6 +249,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 
 extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
 extern "C" uint8_t _binary_menedzer_zadan_bin_bz_start[],_binary_menedzer_zadan_bin_bz_end[];
+extern "C" uint8_t _binary_kalendarz_bin_bz_start[],_binary_kalendarz_bin_bz_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
@@ -1517,6 +1523,15 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"menedzer_zadan.bur\"\n"
         "uprawnienia = [\"okna\", \"pliki_czytaj\"]\n";
 
+    /* Kalendarz: zwykla aplikacja uzytkownika (PZB 4), tylko GUI. Date czyta BWS 9 - bez dodatkowych praw. */
+    static const char MANIFEST_KALENDARZ[] =
+        "nazwa = \"Kalendarz\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"kalendarz.bur\"\n"
+        "uprawnienia = [\"okna\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1601,6 +1616,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_tapety.png",_binary_ikonki_app_tapety_png_start,_binary_ikonki_app_tapety_png_end},
         {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
         {"/ikonki/app_menedzer_zadan.png",_binary_ikonki_app_menedzer_zadan_png_start,_binary_ikonki_app_menedzer_zadan_png_end},
+        {"/ikonki/app_kalendarz.png",_binary_ikonki_app_kalendarz_png_start,_binary_ikonki_app_kalendarz_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -2121,6 +2137,18 @@ void instaluj_wbudowane_programy() {
     if (!instaluj_paczke("/programy/menedzer_zadan.cebula/opis.aplikacji",MANIFEST_MENEDZER_ZADAN,
             AppIdentity::TaskManager,_binary_menedzer_zadan_bin_bz_start,_binary_menedzer_zadan_bin_bz_end)) {
         wypisz_log("[MENEDZER-ZADAN] Nie udalo sie zainstalowac Menedzera zadan.");
+        if (scisla_instalacja) pliki_instalacja_ok = false;
+    }
+
+    const char manifest440[] = "nazwa = \"PCM 440 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm440.bur\"\nuprawnienia = [\"okna\"]\n";
+    const char manifest660[] = "nazwa = \"PCM 660 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm660.bur\"\nuprawnienia = [\"okna\"]\n";
+    if (!instaluj_paczke("/programy/pcm440.cebula/opis.aplikacji", manifest440,
+        "/programy/pcm440.cebula/pcm440.bur", _binary_pcm440_bin_bz_start, _binary_pcm440_bin_bz_end)) pliki_instalacja_ok = false;
+    if (!instaluj_paczke("/programy/pcm660.cebula/opis.aplikacji", manifest660,
+        "/programy/pcm660.cebula/pcm660.bur", _binary_pcm660_bin_bz_start, _binary_pcm660_bin_bz_end)) pliki_instalacja_ok = false;
+    if (!instaluj_paczke("/programy/kalendarz.cebula/opis.aplikacji",MANIFEST_KALENDARZ,
+            AppIdentity::Calendar,_binary_kalendarz_bin_bz_start,_binary_kalendarz_bin_bz_end)) {
+        wypisz_log("[KALENDARZ] Nie udalo sie zainstalowac Kalendarza.");
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
@@ -3007,6 +3035,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (diag_hda_ready) {
         wypisz_log(
             "[HDA] Karta HDA gotowa.");
+        powiadomienie_systemowe(BWS_POW_INFO, "Wykryto urządzenie dźwiękowe",
+                                "Kontroler HDA i wyjście audio są gotowe.");
 
         // Startup audio remains disabled until physical hardware retesting
         // confirms deadline maintenance and DMA stop/readback on Acer.
@@ -3218,6 +3248,9 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      */
     const bool hda_qemu_regression_requested = zadano_automatyczne_testy(
         g_multiboot_info_ptr, "bursztyn.test=hda-tone");
+    const bool hda_ring3_requested = zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.test=hda-ring3");
+    const bool hda_pcm_regression_requested = zadano_automatyczne_testy(
+        g_multiboot_info_ptr, "bursztyn.test=hda-pcm");
     t_kernel_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
 
     wielozadaniowosc_aktywna = true;
@@ -3240,12 +3273,19 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
-        hda_wykonaj_prace_odroczona();
+        hda_ring3_regression(hda_ring3_requested && __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE));
         hda_qemu_regression_krok(hda_qemu_regression_requested &&
             __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
             !powitanie_aktywne());
+        const bool pcm_test = hda_pcm_regression_requested &&
+            __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
+            !powitanie_aktywne();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_prace_odroczona();
         usb_obsluz();
         diag_service();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_zaplanowana_prace_odroczona();
         input_service_all();
         virtio_input_obsluz();
         ekran_obsluz_timeout();
@@ -3258,6 +3298,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
          * Petla kompozytora tylko zglasza zadanie; my je tu realizujemy.
          */
         (void)skladacz_obrazu_wykonaj_zmiane_geometrii();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_zaplanowana_prace_odroczona();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.
@@ -3277,5 +3319,6 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             : "memory");
         scheduler_bezczynnosc_koniec();
         gui_perf_idle_end();
+        hda_wykonaj_zaplanowana_prace_odroczona();
     }
 }

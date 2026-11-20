@@ -31,6 +31,9 @@ extern void host_idt_irq_restore(unsigned long);
 #endif
 
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#ifndef BURSZTYN_IDT_HOST_TEST
+#include "diag_opoznienia_irq.h"
+#endif
 
 /* =========================================================================
  * POLACZENIA Z INNYMI MODULAMI
@@ -388,9 +391,9 @@ bool lapic_wektor_w_obsludze(uint8_t wektor) {
         (wartosc & (1U << bit)) != 0;
 }
 
-void wyslij_eoi_jesli_potrzebne(uint8_t wektor) {
+bool wyslij_eoi_jesli_potrzebne(uint8_t wektor) {
     if (!baza_lapic_wirtualna)
-        return;
+        return false;
 
     /*
      * To rozwiazuje dwa problemy naraz:
@@ -399,12 +402,13 @@ void wyslij_eoi_jesli_potrzebne(uint8_t wektor) {
      *    wysylac EOI samodzielnie. Nie wysylamy wtedy drugiego EOI.
      */
     if (!lapic_wektor_w_obsludze(wektor))
-        return;
+        return false;
 
     baza_lapic_wirtualna[
         LAPIC_EOI / 4U] = 0;
 
     asm volatile("" ::: "memory");
+    return true;
 }
 
 /* =========================================================================
@@ -880,6 +884,13 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
         static_cast<uint8_t>(wektor64);
 
     const bool przerwano_ring0 = ((stan->rejestr_cs & 3ULL) == 0ULL);
+#ifndef BURSZTYN_IDT_HOST_TEST
+    using Site = DiagOpoznieniaIrq::Site;
+    DiagOpoznieniaIrq::Scope irq_span(wektor == WEKTOR_TIMERA ? Site::Timer :
+        wektor == IDT_WEKTOR_ODDANIA_CPU ? Site::Yield : Site::OtherIrq);
+    const uint64_t timer_entry = wektor == WEKTOR_TIMERA ?
+        DiagOpoznieniaIrq::timer(aktualny_pid, przerwano_ring0) : 0;
+#endif
     if (przerwano_ring0 && aktualny_pid > 0 && aktualny_pid < MAKS_PROCESOW) {
         const char* irq_ctx = "IRQOTHER";
         if (wektor == WEKTOR_TIMERA) irq_ctx = "IRQTIMER";
@@ -908,7 +919,7 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     switch (wektor) {
         case WEKTOR_TIMERA:
-            hda_zaplanuj_prace_odroczona();
+            hda_zaplanuj_prace_odroczona(aktualny_pid, przerwano_ring0);
             obsluga_przerwania_zegara();
             break;
 
@@ -941,8 +952,12 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
      * EOI musi zostac wyslane przed ewentualna zmiana CR3/RSP.
      * Funkcja sprawdza ISR, wiec nie wykonuje podwojnego EOI.
      */
-    wyslij_eoi_jesli_potrzebne(
-        wektor);
+    const bool acknowledged = wyslij_eoi_jesli_potrzebne(wektor);
+#ifndef BURSZTYN_IDT_HOST_TEST
+    DiagOpoznieniaIrq::eoi(timer_entry, acknowledged);
+#else
+    (void)acknowledged;
+#endif
 
     if (wektor != WEKTOR_TIMERA) {
 #if BURSZTYNDIAGVIRTIOINPUTINIT
@@ -964,7 +979,11 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     extern volatile bool ekran_zajety;
     const bool pid_idle =
-        aktualny_pid == 0 && !__atomic_load_n(&ekran_zajety, __ATOMIC_ACQUIRE);
+        aktualny_pid == 0 && !__atomic_load_n(&ekran_zajety, __ATOMIC_ACQUIRE)
+#ifndef BURSZTYN_IDT_HOST_TEST
+        && !hda_blokada_aktywna() && !hda_pcm_pilny_w_toku()
+#endif
+        ;
 
     bool proces_juz_pusty = false;
     bool proces_blokuje_w_bws38 = false;

@@ -5636,6 +5636,7 @@ extern "C" void zaktualizuj_kolo_myszy(int pion, int poziom, uint8_t przyciski) 
 extern "C" int grafika_pobierz_mysz_x() { return g_mock_input_capture.abs_x; }
 extern "C" int grafika_pobierz_mysz_y() { return g_mock_input_capture.abs_y; }
 void klog_serial(const char* msg) { (void)msg; }
+void powiadomienie_systemowe(uint32_t, const char*, const char*) {}
 
 extern "C" void klawiatura_test_hook(uint16_t keycode, uint32_t value) {
     g_mock_input_capture.last_key_code = keycode;

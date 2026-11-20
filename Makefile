@@ -566,6 +566,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_tapety_blob.o \
 	ikona_app_ustawienia_ekranu_blob.o \
 	ikona_app_menedzer_zadan_blob.o \
+	ikona_app_kalendarz_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -588,6 +589,8 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	test_dzwieku_blob.o \
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	menedzer_zadan_blob.o \
+	kalendarz_blob.o \
+	pcm440_blob.o pcm660_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
@@ -756,7 +759,7 @@ bws_nowoczesne.o: jadro/bws/bws_nowoczesne.cpp jadro/bws/bws_nowoczesne.h jadro/
 syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_pcm_ring.h jadro/dzwiek/pcm_jadro.h jadro/dzwiek/mikser_pcm.h sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h sterowniki/dma.h sterowniki/czas/hpet.h
@@ -1206,7 +1209,7 @@ repro_blob.o: repro_tmp.o $(BSF_APP_GUI) programy/repro/repro_linker.ld
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: programy/menedzer_okien/menedzer_okien.cpp jadro/gui/desktop_entries.h jadro/gui/desktop_layout_settings.h jadro/gui/desktop_layout.h jadro/gui/bursztyn_gui.h jadro/gui/ui_skala.h jadro/gui/pulpit_geometria.h obrazy/png_dekoder.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+menedzer_okien_tmp.o: programy/menedzer_okien/menedzer_okien.cpp jadro/gui/desktop_entries.h jadro/gui/desktop_layout_settings.h jadro/gui/desktop_layout.h jadro/gui/bursztyn_gui.h jadro/gui/ui_skala.h jadro/gui/pulpit_geometria.h obrazy/png_dekoder.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h jadro/gui/zasobnik.h jadro/gui/zasobnik_panele.h jadro/bws/zasobnik_api.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o $(MENEDZER_OKIEN_LINKER)
@@ -2152,6 +2155,12 @@ test-tapety-bur: tapety_blob.o
 	$(PYTHON) testy/test_tapety_regression.py
 
 .PHONY: test-hda-physical test-hda-tone test-hda-regression-qemu test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+.PHONY: test-mikser-pcm-host
+test-mikser-pcm-host:
+	@mkdir -p .hda-test
+	g++ -I. -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_mikser_pcm.cpp -o .hda-test/test-mikser-pcm
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .hda-test/test-mikser-pcm
+
 test-hda-physical:
 	$(PYTHON) testy/test_hda_physical.py
 test-hda-tone:
@@ -2530,6 +2539,32 @@ menedzer_zadan_blob.o: menedzer_zadan_tmp.o bursztyn_gui.o programy/menedzer_zad
 	$(PYTHON) narzedzia/kompresuj_blob.py menedzer_zadan.bin menedzer_zadan.bin.bz
 	$(LD) -r -b binary menedzer_zadan.bin.bz -o menedzer_zadan_blob.o
 
+# Kalendarz (.cebula / BUR): siatka BursztynUI::Kalendarz, data z BWS 9 (czas lokalny V1), tylko prawo "okna".
+KALENDARZ_ZRODLA := programy/kalendarz/kalendarz.cpp programy/kalendarz/okno.h programy/kalendarz/model.h bursztyn_ui/data_systemowa.h jadro/bws/czas_lokalny.h
+kalendarz_tmp.o: $(KALENDARZ_ZRODLA) $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -Os -c $< -o $@
+
+kalendarz_blob.o: kalendarz_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) kalendarz_tmp.o bursztyn_gui.o -o kalendarz.elf
+	$(BUR_CONVERT) kalendarz.elf kalendarz.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py kalendarz.bin kalendarz.bin.bz
+	$(LD) -r -b binary kalendarz.bin.bz -o kalendarz_blob.o
+
+# Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
+# aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).
+.PHONY: test-kalendarz-host test-zasobnik-host
+# Bursztynowy Zasobnik (docs/bursztynowy-zasobnik.md): rejestr/uklad/glify/panele WM, kolejka powiadomien, glosnosc
+# HDA i budowa odpowiedzi BWS 107-109 wobec atrapy jadra.
+test-zasobnik-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_zasobnik_host.cpp -o .bsf-test/zasobnik
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/zasobnik
+
+test-kalendarz-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_kalendarz_host.cpp -o .bsf-test/kalendarz
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/kalendarz
+
 # Testy hosta Menedzera zadan: czysta logika jadra (rozliczanie CPU, pamiec z tablic stron, polityka zakonczenia,
 # ABI BWS 103/104), model aplikacji, rejestracja (pulpit/Start/ikony) i okno BursztynUI z ASan/UBSan.
 .PHONY: test-menedzer-zadan-host
@@ -2763,6 +2798,8 @@ test-settings-themes-power-host:
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/settings-themes-power
 
 menedzer_okien_tmp.o: jadro/gui/start_menu_ui.h obrazy/dekoder_obrazu.h
+# Kalendarz paska zadan (klik zegara) i data z BWS 9.
+menedzer_okien_tmp.o: jadro/gui/kalendarz_paska.h jadro/gui/taskbar_clock.h jadro/gui/start_menu_model.h jadro/gui/app_icons.h jadro/gui/app_identity.h jadro/bws/czas_lokalny.h
 
 ikona_zasilania_blob.o: ikonki/przyciskzasilania.png
 	$(LD) -r -b binary $< -o $@
@@ -2848,6 +2885,9 @@ ikona_app_ustawienia_ekranu_blob.o: ikonki/app_ustawienia_ekranu.png
 ikona_app_menedzer_zadan_blob.o: ikonki/app_menedzer_zadan.png
 	$(LD) -r -b binary $< -o $@
 
+ikona_app_kalendarz_blob.o: ikonki/app_kalendarz.png
+	$(LD) -r -b binary $< -o $@
+
 ikona_app_tapety_blob.o: ikonki/app_tapety.png
 	$(LD) -r -b binary $< -o $@
 
@@ -2929,7 +2969,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
@@ -3344,3 +3384,15 @@ test-ochrona-sciezek-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ochrona_sciezek_host.cpp -o .bsf-test/ochrona-sciezek
 	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ochrona-sciezek
+
+
+pcm440_tmp.o: programy/pcm_demo/pcm_demo.cpp programy/pcm_demo/refill_policy.h jadro/bws/pcm_api.h bursztyn_ui/aplikacja.h
+	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=440 -c $< -o $@
+pcm660_tmp.o: programy/pcm_demo/pcm_demo.cpp programy/pcm_demo/refill_policy.h jadro/bws/pcm_api.h bursztyn_ui/aplikacja.h
+	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=660 -c $< -o $@
+pcm%_blob.o: pcm%_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) $< bursztyn_gui.o -o pcm$*.elf
+	$(BUR_CONVERT) pcm$*.elf pcm$*.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py pcm$*.bin pcm$*.bin.bz
+	$(LD) -r -b binary pcm$*.bin.bz -o $@
+pcm440_tmp.o pcm660_tmp.o: .bur-format-config

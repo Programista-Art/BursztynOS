@@ -55,7 +55,7 @@ bool hda_wew_pobierz_stan_strumienia(HdaWewStanStrumienia* out) { *out = {}; out
 void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out) { *out = {}; out->active = playing; }
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) { *out = {0, 2, 3, 0}; }
 bool hda_wew_test_start(uint32_t, uint32_t, uint32_t, uint8_t channels) {
-    CHECK(!playing); ++starts; last_channels = channels; playing = controller; return playing;
+    ++starts; last_channels = channels; playing = controller; return playing;
 }
 void hda_wew_test_stop() { ++stops; playing = false; }
 bool hda_wew_test_tick(uint64_t) { return playing; }
@@ -139,7 +139,7 @@ int main() {
         if (mode == HDA_TEST_LEWY) CHECK(last_channels == 1);
         if (mode == HDA_TEST_PRAWY) CHECK(last_channels == 2);
     }
-    CHECK(starts == 5); CHECK(stops >= 5); now += 2000000000ULL;
+    CHECK(starts == 5); CHECK(stops == 0); now += 2000000000ULL;
     CHECK(!hda_diag_test_tick(now / 1000000)); CHECK(!playing);
     CHECK(bws_hda_test(p, 2, 0, 0, 0)); CHECK(bws_hda_test(p, 2, 0, 0, 0));
     ++scenarios;

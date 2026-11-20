@@ -10,7 +10,7 @@ OUT = ROOT / ".hda-test" / "repair"
 
 
 def function(source, name):
-    match = re.search(r'^(?:extern "C" |static )?(?:__attribute__\(\(noinline\)\) )?(?:bool|size_t|uint64_t|uint8_t|void\*|void) ' + name + r"\s*\(", source, re.M)
+    match = re.search(r'^(?:extern "C" |static )?(?:__attribute__\(\(noinline\)\) )?(?:bool|size_t|uint64_t|uint8_t|uint8_t\*|void\*|void) ' + name + r"\s*\(", source, re.M)
     if not match:
         raise RuntimeError(f"missing production function: {name}")
     start = source.index("{", match.start())
@@ -29,12 +29,11 @@ def extract_boot_install():
     globals_ = kernel[kernel.index("bool scisla_instalacja="):
                       kernel.index("bool sciezka_ma_poczatek(")]
     names = ["dlugosc_tekstu_u32", "pobierz_rozmiar_bloba", "zapisz_plik_od_nowa_impl",
-             "zapisz_plik_od_nowa", "zapisz_blob_bur", "zapisz_manifest", "instaluj_paczke"]
+             "zapisz_plik_od_nowa", "rozpakuj_blob", "zapisz_blob_bur", "zapisz_manifest", "instaluj_paczke"]
     manifest = re.search(r"static const char MANIFEST_TEST_DZWIEKU\[\] =.*?;", kernel, re.S)[0]
     call = re.search(r'instaluj_paczke\(\s*"/programy/test_dzwieku\.cebula/opis\.aplikacji".*?\)',
                      kernel, re.S)[0]
-    call = call.replace("_binary_test_dzwieku_bin_start", "start").replace(
-        "_binary_test_dzwieku_bin_end", "end")
+    call = re.sub(r"_binary_test_dzwieku_bin(?:_bz)?_(start|end)", r"\1", call)
     (OUT / "package_actual.inc").write_text(globals_ + "\n" + "\n".join(
         function(kernel, name) for name in names) + "\n" + manifest +
         "\nstatic bool boot_install(const uint8_t* start, const uint8_t* end) { return " + call + "; }\n")
@@ -43,7 +42,7 @@ def extract_boot_install():
 def extract_filesystem_bws():
     source = (ROOT / "jadro/bws/syscalls.cpp").read_text()
     helpers = ["znane_prawa", "proces_ma_prawo", "dlugosc_stringa_limit", "pobierz_string_user",
-               "pobierz_sciezke_pliku", "segment_prefiksu", "sciezka_chroniona",
+               "pobierz_sciezke_pliku", "segment_prefiksu", "sciezka_chroniona", "sciezka_kanoniczna",
                "proces_moze_modyfikowac_sciezke", "poziom_pliku_pozwala_modyfikowac",
                "pobierz_rodzica_sciezki", "efektywny_pzb_dla_nowego", "proces_moze_utworzyc_w_sciezce",
                "proces_moze_modyfikowac_obiekt", "wyzeruj", "alokuj_bufor"]

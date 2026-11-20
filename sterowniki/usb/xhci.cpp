@@ -1,5 +1,6 @@
 #include "jadro/mm/zarezerwowane_va.h"
 #include "diagnostyka_systemu.h"
+#include "powiadomienia_jadra.h"
 #include "sterowniki/usb/xhci.h"
 #include "sterowniki/usb/xhci_ring.h"
 #include "sterowniki/usb/xhci_hw.h"

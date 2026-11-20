@@ -1,3 +1,7 @@
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#endif
+#include "powiadomienia_jadra.h"
 #include "jadro/gui/display_mode_policy.h"
 #include "jadro/gui/graphics_perf.h"
 /*
@@ -309,6 +313,8 @@ static void virtio_gpu_permanent_failure_locked(VirtioGpuDriver* drv, const char
         log_append_str(buf, sizeof(buf), pos, " cmd=");
         log_append_str(buf, sizeof(buf), pos, virtio_gpu_cmd_name(drv->pending_cmd_type));
         gpu_klog(buf);
+        powiadomienie_systemowe(BWS_POW_BLAD, "Awaria karty graficznej",
+                                "VirtIO-GPU zgłosił trwały błąd.");
     }
     drv->cmd_state = VIRTIO_GPU_CMD_PERMANENT_FAILURE;
     drv->permanent_failure_reason = reason;
@@ -551,6 +557,11 @@ static inline void gpu_wait_for_irq(VirtioGpuDriver* drv) {
         asm volatile("pause" ::: "memory");
         return;
     }
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    // IRQs are enabled, but the compositor cannot yield from this wait.
+    // The audio worker has no GPU/screen dependency and performs no yield.
+    hda_wykonaj_zaplanowana_prace_odroczona();
+#endif
     gpu_cpu_irq_disable();
     if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
         gpu_cpu_irq_enable();

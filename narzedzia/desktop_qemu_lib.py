@@ -23,7 +23,7 @@ FAULTS = ('[PF]', '[KERNEL-PANIC]', '[GP]', 'KRYTYCZNY BLAD SYSTEMU',
 
 class Guest:
     def __init__(self, iso, out, build=ROOT, bios=False, resolution='1280x720', pages=None,
-                 timeout=1500, accel='tcg', extra_args=(), https=False, tablet=False):
+                 timeout=1500, accel='tcg', extra_args=(), https=False, tablet=False, audio_wav=None):
         self.iso, self.out, self.build = Path(iso).resolve(), Path(out), Path(build).resolve()
         self.out.mkdir(parents=True, exist_ok=True)
         self.bios, self.timeout = bios, timeout
@@ -44,7 +44,8 @@ class Guest:
                '-smp', '1', '-m', '2048', '-display', 'none', '-serial', 'file:' + str(self.serial_path),
                '-no-reboot', '-qmp', f'unix:{sock},server=on,wait=off',
                '-device', 'qemu-xhci,id=usb', '-device', 'usb-kbd,bus=usb.0'] + (['-device', 'virtio-tablet-pci,disable-legacy=on'] if tablet else ['-device', 'usb-mouse,bus=usb.0']) + [
-               '-audiodev', 'none,id=snd', '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd']
+               '-audiodev', ('wav,id=snd,path=' + str(audio_wav)) if audio_wav else 'none,id=snd',
+               '-device', 'intel-hda', '-device', 'hda-output,audiodev=snd']
         if bios:
             cmd += ['-vga', 'std', '-global', 'VGA.vgamem_mb=64', '-cdrom', str(self.iso), '-boot', 'd']
         else:

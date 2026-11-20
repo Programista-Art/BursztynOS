@@ -497,8 +497,8 @@ bool hda_diag_test_start(
     uint32_t czas_ms,
     uint8_t kanaly
 ) {
-    hda_diag_test_stop();
-
+    // The driver replaces the legacy PCM producer in place. Stopping first
+    // would tear down a running engine when the test is its only client.
     if (tryb == HDA_TEST_BRAK) return false;
     if (czas_ms == 0 || czas_ms > HDA_API_MAX_CZAS_MS) return false;
     if (tryb == HDA_TEST_TON || tryb == HDA_TEST_LEWY ||

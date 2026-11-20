@@ -1,3 +1,4 @@
+#include "pcm_jadro_api.h"
 #include "uklad_procesu.h"
 #include "app_identity.h"
 #include "wyjatek_uzytkownika.h"
@@ -73,6 +74,7 @@
 #include "bws_pliki.h"
 #include "bws_api.h"
 #include "rozliczanie_io.h"
+#include "czas_lokalny.h"
 #include "../siec/http_origin.h"
 #include "bws_gui_batch.h"
 #include "bws_czcionka.h"
@@ -1738,9 +1740,36 @@ __attribute__((noinline)) uint64_t bws_kopiuj_twor(proces_t& proces, uint64_t ar
  * RTC
  * ========================================================================= */
 
+#ifndef BURSZTYN_RTC_CMOS_JEST_UTC
+#define BURSZTYN_RTC_CMOS_JEST_UTC 1   // ta sama wartosc domyslna co w zegar-rtc.cpp (tylko do flagi strefy)
+#endif
+
+/* BWS 9 z arg2 == BWS_CZAS_LOKALNY_V1: data i czas lokalny jako struktura (czas_lokalny.h). Bez prawa, jak tekstowy
+ * BWS 9; brak prawdziwej probki RTC = 0 (zadnej zastepczej daty). */
+__attribute__((noinline)) uint64_t bws_czas_lokalny(uint64_t arg1) {
+    // Caly bufor sprawdzany PRZED kopiowaniem (zakres Ring 3 + mapowanie do zapisu na kazdej stronie): kopia jest
+    // stronicowana, wiec struktura na granicy stron z niezmapowana druga strona bylaby inaczej zapisana czesciowo.
+    if (arg1 == 0 ||
+        !czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(arg1), sizeof(BwsCzasLokalny)) ||
+        !bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(arg1), sizeof(BwsCzasLokalny), true))
+        return 0;
+    czas_rtc czas{};
+    if (!pobierz_czas_rtc_bezpiecznie(&czas)) return 0;
+    BwsCzasLokalny wynik{};
+    if (!CzasLokalny::wypelnij(wynik, czas.rok, czas.miesiac, czas.dzien, czas.godziny, czas.minuty, czas.sekundy,
+                               BURSZTYN_RTC_CMOS_JEST_UTC ? BWS_CZAS_STREFA_CET : BWS_CZAS_CMOS_LOKALNY))
+        return 0;
+    return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg1), &wynik, sizeof(wynik)) ? 1ULL : 0ULL;
+}
+
 __attribute__((noinline)) uint64_t bws_rtc(
-    uint64_t arg1
+    uint64_t arg1,
+    uint64_t arg2 = 0
 ) {
+    if (arg2 == BWS_CZAS_LOKALNY_V1) return bws_czas_lokalny(arg1);
+    // arg2 == 0: historyczny tekst "HH:MM:SS". Kazda inna wartosc (np. przyszla wersja struktury) = blad bez zapisu:
+    // nie wolno wpisac 32-bajtowego tekstu do bufora, ktory wywolujacy przygotowal na inna strukture.
+    if (!czas_lokalny_tryb_tekstowy(arg2)) return 0;
     if (arg1 == 0) {
         return 0;
     }
@@ -3326,8 +3355,14 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         return bws_ostatni_blad_uruchomienia(proces);
     if (nr_funkcji == BWS_ZAPISZ_FRAGMENT_PLIKU)
         return bws_zapisz_fragment_pliku(proces, arg1, arg2, arg3, arg4);
+    if (nr_funkcji == BWS_PCM) {
+        const Pcm::Owner owner{static_cast<uint32_t>(aktualny_pid),
+            scheduler_generacja_procesu(aktualny_pid)};
+        return static_cast<uint64_t>(bws_pcm_obsluz(owner, arg1, arg2, arg3, arg4,
+            skopiuj_z_przestrzeni_uzytkownika, skopiuj_do_przestrzeni_uzytkownika));
+    }
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
-        nr_funkcji < BWS_PIERWSZY_WOLNY) {
+        nr_funkcji <= BWS_POWIADOMIENIA) {
         return bws_nowoczesne_obsluz(
             nr_funkcji, &proces, arg1, arg2, arg3, arg4);
     }
@@ -3400,7 +3435,8 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         case 9:
             return
                 bws_rtc(
-                    arg1
+                    arg1,
+                    arg2
                 );
 
         case 10:
@@ -4011,23 +4047,27 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                 return 0;
 
             for (;;) {
+                asm volatile("cli" ::: "memory");
                 bws_zdarzenie zdarzenie{};
                 if (scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) {
+                    asm volatile("sti" ::: "memory");
                     return skopiuj_do_przestrzeni_uzytkownika(
                                reinterpret_cast<void*>(arg1), &zdarzenie,
                                sizeof(zdarzenie)) ? 1ULL : 0ULL;
                 }
                 if (arg2 > 0 &&
-                    scheduler_zuzyj_wygasly_timeout_zdarzenia(aktualny_pid))
+                    scheduler_zuzyj_wygasly_timeout_zdarzenia(aktualny_pid)) {
+                    asm volatile("sti" ::: "memory");
                     return 2;
+                }
 
                 scheduler_czekaj_na_zdarzenie(aktualny_pid, arg2);
 
                 /* BWS38 jest istniejacym blokujacym waitem. Prywatny stos
                    jadra zachowuje rame SYSCALL, a standardowa rama IRQ
                    timera moze bezpiecznie zostac zapisana przez scheduler.
-                   Po wybudzeniu wracamy dokladnie za HLT i ponownie
-                   sprawdzamy kolejke/deadline. */
+                   CLI powyzej zamyka okno wybudzenia przed HLT, a STI przed
+                   powrotem przywraca normalny stan przerwan w Ring 0. */
                 asm volatile(
                     "sti\n\t"
                     "hlt\n\t"
