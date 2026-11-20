@@ -1,3 +1,4 @@
+extern "C" unsigned char _binary_pcm440_bin_bz_start[], _binary_pcm440_bin_bz_end[], _binary_pcm660_bin_bz_start[], _binary_pcm660_bin_bz_end[];
 #include "powiadomienia_jadra.h"
 #include "galeria_pak.h"
 #include "galeria_kopiowanie.h"
@@ -60,6 +61,7 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "sterowniki/dzwiek/hda_qemu_regression.h"
 #include "sterowniki/dzwiek/hda_pcm_regression.h"
+#include "sterowniki/dzwiek/hda_ring3_regression.h"
 #include "sterowniki/usb/usb.h"
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
@@ -2138,6 +2140,12 @@ void instaluj_wbudowane_programy() {
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
+    const char manifest440[] = "nazwa = \"PCM 440 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm440.bur\"\nuprawnienia = [\"okna\"]\n";
+    const char manifest660[] = "nazwa = \"PCM 660 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm660.bur\"\nuprawnienia = [\"okna\"]\n";
+    if (!instaluj_paczke("/programy/pcm440.cebula/opis.aplikacji", manifest440,
+        "/programy/pcm440.cebula/pcm440.bur", _binary_pcm440_bin_bz_start, _binary_pcm440_bin_bz_end)) pliki_instalacja_ok = false;
+    if (!instaluj_paczke("/programy/pcm660.cebula/opis.aplikacji", manifest660,
+        "/programy/pcm660.cebula/pcm660.bur", _binary_pcm660_bin_bz_start, _binary_pcm660_bin_bz_end)) pliki_instalacja_ok = false;
     if (!instaluj_paczke("/programy/kalendarz.cebula/opis.aplikacji",MANIFEST_KALENDARZ,
             AppIdentity::Calendar,_binary_kalendarz_bin_bz_start,_binary_kalendarz_bin_bz_end)) {
         wypisz_log("[KALENDARZ] Nie udalo sie zainstalowac Kalendarza.");
@@ -3240,6 +3248,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      */
     const bool hda_qemu_regression_requested = zadano_automatyczne_testy(
         g_multiboot_info_ptr, "bursztyn.test=hda-tone");
+    const bool hda_ring3_requested = zadano_automatyczne_testy(g_multiboot_info_ptr, "bursztyn.test=hda-ring3");
     const bool hda_pcm_regression_requested = zadano_automatyczne_testy(
         g_multiboot_info_ptr, "bursztyn.test=hda-pcm");
     t_kernel_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
@@ -3264,6 +3273,7 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
+        hda_ring3_regression(hda_ring3_requested && __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE));
         hda_qemu_regression_krok(hda_qemu_regression_requested &&
             __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
             !powitanie_aktywne());

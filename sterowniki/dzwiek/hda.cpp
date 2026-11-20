@@ -3239,3 +3239,78 @@ bool slad_pcm(uint32_t index, SladPcm& out) {
     return true;
 }
 }
+
+#include "jadro/dzwiek/pcm_aplikacji.h"
+namespace PcmAplikacji {
+static int64_t result(Pcm::Result rc) {
+    switch (rc) {
+        case Pcm::OK: return PCM_OK;
+        case Pcm::UNSUPPORTED: return PCM_UNSUPPORTED;
+        case Pcm::LIMIT: return PCM_LIMIT;
+        case Pcm::BAD_HANDLE: return PCM_HANDLE;
+        case Pcm::FULL: return PCM_FULL;
+        default: return PCM_INVALID;
+    }
+}
+int64_t open(Pcm::Owner owner, const BwsPcmFormat& fmt) {
+    if (fmt.version != BWS_PCM_V1 || fmt.size != sizeof(fmt) || fmt.reserved)
+        return PCM_INVALID;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    if (!pcm_device_ready()) return PCM_DEVICE;
+    uint64_t handle = 0;
+    const auto rc = pcm_mixer.open(owner, {fmt.rate, fmt.channels, fmt.encoding}, &handle);
+    if (rc != Pcm::OK) return result(rc);
+    ++pcm_clients;
+    ++pcm_stats.otwarcia_aplikacji;
+    pcm_idle_since = 0;
+    pcm_interest_set(true);
+    return static_cast<int64_t>(handle);
+}
+int64_t write(Pcm::Owner owner, uint64_t handle, const int16_t* samples, uint32_t frames) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    if (!pcm_device_ready()) return PCM_DEVICE;
+    uint32_t accepted = 0;
+    const auto rc = pcm_mixer.write(owner, handle, samples, frames, &accepted);
+    return rc == Pcm::OK ? static_cast<int64_t>(accepted) : result(rc);
+}
+int64_t query(Pcm::Owner owner, uint64_t handle, BwsPcmState& state) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    Pcm::Status status{};
+    const auto rc = pcm_mixer.status(owner, handle, &status);
+    if (rc != Pcm::OK) return result(rc);
+    state = {BWS_PCM_V1, sizeof(state), status.queued, status.capacity,
+             status.volume, status.muted, status.channels, Pcm::RATE};
+    return PCM_OK;
+}
+int64_t gain(Pcm::Owner owner, uint64_t handle, uint64_t volume, uint64_t mute) {
+    if (volume > 100 || mute > 1) return PCM_INVALID;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    return result(pcm_mixer.gain(owner, handle, volume, mute));
+}
+int64_t close(Pcm::Owner owner, uint64_t handle) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    const auto rc = pcm_mixer.close(owner, handle);
+    if (rc == Pcm::OK && !--pcm_clients) pcm_idle_since = czas_monotoniczny_ns();
+    return result(rc);
+}
+int64_t finish(Pcm::Owner owner, uint64_t handle) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    return result(pcm_mixer.finish(owner, handle));
+}
+}
+extern "C" bool pcm_posprzataj_proces(uint32_t pid, uint64_t generation) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return false;
+    const Pcm::Owner owner{pid, generation};
+    const auto removed = pcm_mixer.cleanup(owner);
+    pcm_clients -= removed;
+    pcm_stats.usuniete_przy_zakonczeniu += removed;
+    if (!pcm_clients) pcm_idle_since = czas_monotoniczny_ns();
+    return true;
+}

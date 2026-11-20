@@ -1,5 +1,7 @@
 # Bursztynowy System Dźwięku — transport HDA
 
+Interfejs aplikacji Ring 3 opisuje [PCM Ring 3](pcm-ring3-api.md). Dalsze pomiary historyczne dotyczą etapów stabilizacji wewnętrznych producentów.
+
 Sterownik wybranego wyjścia posiada jedną instancję `Pcm::Mixer` oraz jeden deskryptor wyjściowy HDA. Wewnętrzny interfejs `PcmJadro` przyjmuje próbki stereo PCM16 LE przy 48 kHz i zwraca liczbę przyjętych ramek. Kopiuje je do pierścieni jądra i nie przechowuje wskaźnika producenta. Mikser ma osiem miejsc po 4096 ramek. Zaufani producenci tego etapu współdzielą jedną wewnętrzną tożsamość z limitem dwóch strumieni. Generator Testu dźwięku ma osobną tożsamość i osobny uchwyt. Kod tego etapu nie rejestruje nowych wywołań BWS.
 
 Instancja miksera jest wyzerowana w BSS. Otwarcie jest możliwe po pomyślnej inicjalizacji trasy HDA i HPET. Silnik uruchamia DMA przy pierwszym źródle. `PcmJadro::wylacz()` najpierw potwierdza `RUN=0`, następnie usuwa strumienie i zamyka dostęp do silnika do końca pracy systemu. Strony PMM należą do sterownika przez cały czas pracy systemu. Po zamknięciu obu wewnętrznych źródeł silnik przez krótki okres uzupełnia BDL ciszą, po czym zatrzymuje się. Zamknięcie jednego źródła usuwa od razu ramki z jego kolejki, a dane już opublikowane mogą wybrzmieć raz.

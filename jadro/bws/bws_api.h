@@ -159,7 +159,7 @@ enum BwsNumer : uint64_t {
     BWS_ZASOBNIK_STAN = 107,
     BWS_ZASOBNIK_POLECENIE = 108,
     BWS_POWIADOMIENIA = 109,
-    BWS_PIERWSZY_WOLNY = 110
+    BWS_PIERWSZY_WOLNY = 111
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

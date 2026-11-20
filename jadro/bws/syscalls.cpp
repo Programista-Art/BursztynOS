@@ -1,3 +1,4 @@
+#include "pcm_jadro_api.h"
 #include "uklad_procesu.h"
 #include "app_identity.h"
 #include "wyjatek_uzytkownika.h"
@@ -3354,8 +3355,14 @@ static uint64_t obsluga_wywolan_systemowych_impl(
         return bws_ostatni_blad_uruchomienia(proces);
     if (nr_funkcji == BWS_ZAPISZ_FRAGMENT_PLIKU)
         return bws_zapisz_fragment_pliku(proces, arg1, arg2, arg3, arg4);
+    if (nr_funkcji == BWS_PCM) {
+        const Pcm::Owner owner{static_cast<uint32_t>(aktualny_pid),
+            scheduler_generacja_procesu(aktualny_pid)};
+        return static_cast<uint64_t>(bws_pcm_obsluz(owner, arg1, arg2, arg3, arg4,
+            skopiuj_z_przestrzeni_uzytkownika, skopiuj_do_przestrzeni_uzytkownika));
+    }
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
-        nr_funkcji < BWS_PIERWSZY_WOLNY) {
+        nr_funkcji <= BWS_POWIADOMIENIA) {
         return bws_nowoczesne_obsluz(
             nr_funkcji, &proces, arg1, arg2, arg3, arg4);
     }

@@ -24,7 +24,7 @@ PREFIX = "[HDA-PCM] "
 TRANSITION_MARGIN_MS = 250
 
 
-def production_test_iso(source, target, work, out):
+def production_test_iso(source, target, work, out, test_token="hda-pcm"):
     """Replace just the GRUB menu in a byte-for-byte copy of the production ISO."""
     original = work / "grub-original.cfg"
     guest_config = "/boot/grub/grub.cfg"
@@ -39,7 +39,7 @@ def production_test_iso(source, target, work, out):
         if kernel not in boot:
             raise RuntimeError("The production GRUB menu lacks the normal boot entry")
         boot = re.sub(r"^set timeout=.*$", "set timeout=0", boot, count=1, flags=re.M)
-        boot = boot.replace(kernel, kernel + " bursztyn.test=hda-pcm bursztyn.splash=0", 1)
+        boot = boot.replace(kernel, kernel + f" bursztyn.test={test_token} bursztyn.splash=0", 1)
         # Repacking a hybrid GRUB image can shift the appended EFI partition.
         # Remove indentation from the menu commands to make room for the token.
         updated = re.sub(r"^[ \t]+", "", boot, flags=re.M).encode()
@@ -137,7 +137,7 @@ def near_zero_intervals(samples, start, rate):
 def phase_sample_ranges(timings, rate, length):
     # Allow backend buffering, serial polling and already published PCM.
     margin = rate * TRANSITION_MARGIN_MS // 1000
-    for phase, following in zip(PHASES[:5], PHASES[1:6]):
+    for phase, following in zip(PHASES[:-2], PHASES[1:-1]):
         lo = max(0, (timings[phase]["wav_bytes"] - 44) // 4 + margin)
         hi = min(length, (timings[following]["wav_bytes"] - 44) // 4 - margin)
         yield phase.lower(), lo, hi
@@ -354,7 +354,7 @@ def capture(out, args):
         work = Path(temp)
         iso = work / "pcm.iso"
         sock = work / "qmp.sock"
-        production_test_iso(args.iso.resolve(), iso, work, out)
+        production_test_iso(args.iso.resolve(), iso, work, out, getattr(args, "test_token", "hda-pcm"))
         cmd = ["qemu-system-x86_64", "-machine", "pc,hpet=on", "-cpu", "max",
                "-accel", "tcg,thread=single", "-smp", "1", "-m", "2G",
                "-name", "bursztyn-pcm,debug-threads=on",

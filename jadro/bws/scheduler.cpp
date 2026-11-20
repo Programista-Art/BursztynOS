@@ -23,6 +23,7 @@
  */
 
 #include "scheduler.h"
+extern "C" bool pcm_posprzataj_proces(uint32_t, uint64_t) __attribute__((weak));
 #include "idt.h"
 #include "punkt_zwrotu_syscalla.h"
 #include "zakonczenie_procesu.h"
@@ -583,6 +584,8 @@ static void posprzataj_zakonczone_procesy(
         /* Zwykle wyjscie (BWS 32) usunelo juz warstwe i powiadomilo WM - wtedy usun_warstwe nic nie robi
          * (idempotentne), a powiadomienie nie jest powtarzane. */
         const bool mial_warstwe = skladacz_obrazu_bajty_warstwy && skladacz_obrazu_bajty_warstwy(pid) != 0;
+        if (pcm_posprzataj_proces && !pcm_posprzataj_proces(static_cast<uint32_t>(pid),
+                g_generacja_procesu[pid])) continue;
         if (usun_warstwe)
             usun_warstwe(pid);
         if (mial_warstwe && bws_gui_powiadom_lifecycle)

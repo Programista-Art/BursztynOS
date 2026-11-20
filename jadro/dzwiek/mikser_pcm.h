@@ -72,7 +72,7 @@ public:
             if (!streams_[i].active && slot == MAX_STREAMS) slot = i;
         }
         // A wrapped handle counter is retired permanently, never reused.
-        if (owned >= MAX_PER_PROCESS || slot == MAX_STREAMS || last_handle_ == UINT64_MAX) return LIMIT;
+        if (owned >= MAX_PER_PROCESS || slot == MAX_STREAMS || last_handle_ == INT64_MAX) return LIMIT;
         Stream& s = streams_[slot];
         s.owner = owner; s.handle = ++last_handle_; s.read = 0; s.count = 0;
         s.channels = fmt.channels; s.volume = 100; s.mute = false; s.active = true;
@@ -84,10 +84,12 @@ public:
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
         remove(*s); return OK;
     }
-    void cleanup(Owner owner) {
-        if (!valid_owner(owner)) return;
+    uint32_t cleanup(Owner owner) {
+        if (!valid_owner(owner)) return 0;
+        uint32_t removed = 0;
         for (uint32_t i = 0; i < MAX_STREAMS; ++i)
-            if (streams_[i].active && same(streams_[i].owner, owner)) remove(streams_[i]);
+            if (streams_[i].active && same(streams_[i].owner, owner)) { remove(streams_[i]); ++removed; }
+        return removed;
     }
     Result status(Owner owner, uint64_t handle, Status* out) {
         if (!out) return INVALID;

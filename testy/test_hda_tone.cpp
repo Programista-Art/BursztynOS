@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "../sterowniki/dzwiek/hda.cpp"
 #include "../sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "../jadro/bws/pcm_jadro_api.h"
 
 namespace {
 alignas(4096) uint8_t registers[16384];
@@ -145,7 +146,98 @@ static Pcm::Frame first(uint32_t slot) {
     return frame;
 }
 
+static uintptr_t pcm_user_begin, pcm_user_end;
+static bool pcm_copy_ok(void* out, const void* in, size_t size) {
+    const auto address = reinterpret_cast<uintptr_t>(in);
+    if (pcm_user_end && (address < pcm_user_begin || address > pcm_user_end || size > pcm_user_end-address)) return false;
+    if (!in || !out || reinterpret_cast<uintptr_t>(in) < 4096) return false;
+    std::memcpy(out, in, size);
+    return true;
+}
+static bool pcm_copy_fail(void* out, const void* in, size_t size) {
+    if (size) std::memcpy(out, in, size / 2);
+    return false;
+}
+static void test_pcm_api() {
+    reset();
+    const Pcm::Owner owner{42, 7}, stranger{43,7}, reused{42,8};
+    BwsPcmFormat fmt{1,sizeof(fmt),48000,2,1,0};
+    auto invoke=[&](Pcm::Owner o,uint64_t op,uint64_t a,uint64_t b=0,uint64_t c=0) {
+        return bws_pcm_obsluz(o,op,a,b,c,pcm_copy_ok,pcm_copy_ok);
+    };
+    const auto address=reinterpret_cast<uint64_t>(&fmt);
+    CHECK(invoke(owner,PCM_OPEN,0,sizeof(fmt),1)==PCM_MEMORY);
+    CHECK(invoke(owner,PCM_OPEN,address,sizeof(fmt),2)==PCM_INVALID);
+    fmt.rate=44100;
+    CHECK(invoke(owner,PCM_OPEN,address,sizeof(fmt),1)==PCM_UNSUPPORTED);
+    fmt.rate=48000;
+    const auto h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(h>0);
+    const auto second=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(second>0 && invoke(owner,PCM_OPEN,address,sizeof(fmt),1)==PCM_LIMIT);
+    CHECK(invoke(owner,PCM_CLOSE,second)==PCM_OK);
+    CHECK(invoke(owner,PCM_CLOSE,second)==PCM_HANDLE);
+    CHECK(invoke(owner,99,h)==PCM_INVALID);
+    CHECK(invoke(owner,PCM_WRITE,h,0,UINT64_MAX)==PCM_INVALID);
+    CHECK(invoke(owner,PCM_WRITE,h,0,0)==PCM_INVALID);
+    const auto other=invoke(stranger,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(other>0 && other!=h);
+    BwsPcmState state{};
+    CHECK(invoke(stranger,PCM_QUERY,h,reinterpret_cast<uint64_t>(&state),sizeof(state))==PCM_HANDLE);
+    CHECK(invoke(reused,PCM_CLOSE,h)==PCM_HANDLE);
+    CHECK(invoke(owner,PCM_GAIN,h,101,0)==PCM_INVALID);
+    CHECK(invoke(owner,PCM_GAIN,h,25,1)==PCM_OK);
+    CHECK(invoke(owner,PCM_QUERY,h,reinterpret_cast<uint64_t>(&state),sizeof(state))==PCM_OK);
+    CHECK(state.volume==25 && state.muted==1 && state.queued==0);
+    int16_t samples[512];
+    for(auto& v:samples) v=1000;
+    const auto data=reinterpret_cast<uint64_t>(samples);
+    CHECK(invoke(owner,PCM_WRITE,h,data,UINT64_MAX)==PCM_INVALID);
+    CHECK(invoke(owner,PCM_WRITE,h,UINT64_MAX-10,256)==PCM_MEMORY);
+    CHECK(invoke(owner,PCM_WRITE,h,1,256)==PCM_MEMORY);
+    CHECK(bws_pcm_obsluz(owner,PCM_WRITE,h,data,256,pcm_copy_fail,pcm_copy_ok)==PCM_MEMORY);
+    pcm_user_begin = reinterpret_cast<uintptr_t>(data);
+    pcm_user_end = pcm_user_begin + 512; // first page suffix mapped, following page absent
+    CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(data)+508,256)==PCM_MEMORY);
+    pcm_user_end = 0;
+
+    CHECK(invoke(owner,PCM_QUERY,h,reinterpret_cast<uint64_t>(&state),sizeof(state))==PCM_OK && state.queued==0);
+    for(unsigned i=0;i<16;++i) CHECK(invoke(owner,PCM_WRITE,h,data,256)==256);
+    CHECK(invoke(owner,PCM_WRITE,h,data,1)==PCM_FULL);
+    Pcm::Frame consumed[10];
+    CHECK(pcm_mixer.mix(consumed,10)==Pcm::OK);
+    CHECK(invoke(owner,PCM_WRITE,h,data,256)==10);
+    CHECK(invoke(owner,PCM_WRITE,h,data,1)==PCM_FULL);
+
+    CHECK(invoke(owner,PCM_GAIN,h,100,0)==PCM_OK);
+    hda_wykonaj_prace_odroczona();
+    CHECK(first(0).left==1000);
+    CHECK(invoke(owner,PCM_WRITE,h,data,256)==256);
+    CHECK(invoke(stranger,PCM_WRITE,other,data,200)==200);
+    period(1);
+    CHECK(invoke(stranger,PCM_WRITE,other,data,256)==256);
+    CHECK(invoke(owner,PCM_FINISH,h)==PCM_OK);
+    CHECK(invoke(owner,PCM_GAIN,h,25,1)==PCM_OK);
+    CHECK(invoke(owner,PCM_QUERY,h,reinterpret_cast<uint64_t>(&state),sizeof(state))==PCM_OK &&
+        state.volume==25 && state.muted==1);
+    hda_blokada=true;
+    CHECK(!pcm_posprzataj_proces(owner.pid,owner.generation));
+    CHECK(invoke(owner,PCM_CLOSE,h)==PCM_BUSY);
+    hda_blokada=false;
+    CHECK(pcm_posprzataj_proces(owner.pid,owner.generation));
+    CHECK(pcm_posprzataj_proces(owner.pid,owner.generation));
+    CHECK(invoke(owner,PCM_CLOSE,h)==PCM_HANDLE);
+    CHECK(invoke(stranger,PCM_QUERY,other,reinterpret_cast<uint64_t>(&state),sizeof(state))==PCM_OK);
+    CHECK(pcm_clients==1);
+    CHECK(pcm_posprzataj_proces(owner.pid,owner.generation));
+    CHECK(pcm_posprzataj_proces(owner.pid,owner.generation));
+    CHECK(pcm_clients==1);
+    CHECK(invoke(stranger,PCM_FINISH,other)==PCM_OK);
+    CHECK(invoke(stranger,PCM_CLOSE,other)==PCM_OK);
+    CHECK(pcm_clients==0);
+}
 int main() {
+    test_pcm_api();
     using namespace PcmJadro;
     reset();
     put(0x80, HDA_SD_CTL_RUN, 2); // unrelated input stream

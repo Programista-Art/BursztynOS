@@ -590,6 +590,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	menedzer_zadan_blob.o \
 	kalendarz_blob.o \
+	pcm440_blob.o pcm660_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
 
@@ -3383,3 +3384,15 @@ test-ochrona-sciezek-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ochrona_sciezek_host.cpp -o .bsf-test/ochrona-sciezek
 	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ochrona-sciezek
+
+
+pcm440_tmp.o: programy/pcm_demo/pcm_demo.cpp jadro/bws/pcm_api.h
+	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=440 -c $< -o $@
+pcm660_tmp.o: programy/pcm_demo/pcm_demo.cpp jadro/bws/pcm_api.h
+	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=660 -c $< -o $@
+pcm%_blob.o: pcm%_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) $< bursztyn_gui.o -o pcm$*.elf
+	$(BUR_CONVERT) pcm$*.elf pcm$*.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py pcm$*.bin pcm$*.bin.bz
+	$(LD) -r -b binary pcm$*.bin.bz -o $@
+pcm440_tmp.o pcm660_tmp.o: .bur-format-config
