@@ -124,5 +124,75 @@ int main() {
         assert(m->write(a, h, bs, 3, &accepted) == OK && accepted == 3);
         assert(m->close(a, h) == OK);
     }
+    auto measured = std::make_unique<Mixer>();
+    uint64_t measured_handle = 0;
+    assert(measured->open(a, stereo, &measured_handle) == OK);
+    assert(measured->write(a, measured_handle, samples.data(), 255, &accepted) == OK);
+    assert(measured->mix(chunk, 256) == OK);
+    BwsPcmStats metrics{};
+    assert(measured->statistics(a, measured_handle, metrics) == OK);
+    assert(metrics.writes == 1 && metrics.accepted == 255 && metrics.consumed == 255);
+    assert(metrics.starved == 1 && metrics.min_queued == 0 && metrics.max_queued == 255);
+    assert(measured->gain(a, measured_handle, 100, 1) == OK);
+    assert(measured->mix(chunk, 256) == OK);
+    assert(measured->statistics(a, measured_handle, metrics) == OK);
+    assert(metrics.starved == 1 && metrics.muted_missing == 256);
+    assert(measured->finish(a, measured_handle) == OK);
+    assert(measured->mix(chunk, 1024) == OK);
+    assert(measured->statistics(a, measured_handle, metrics) == OK && metrics.starved == 1);
+    assert(measured->statistics(b, measured_handle, metrics) == BAD_HANDLE);
+
+    // Per-stream pre-roll: second stream starting while first is active does not
+    // interrupt first and is not prematurely consumed on its first 512-frame write.
+    {
+        auto pr = std::make_unique<Mixer>();
+        uint64_t h1 = 0, h2 = 0;
+        assert(pr->open(a, stereo, &h1, 2048) == OK);
+        assert(pr->open(b, stereo, &h2, 2048) == OK);
+        std::vector<int16_t> tone1(4096 * 2, 2000), tone2(4096 * 2, 1000);
+        assert(pr->write(a, h1, tone1.data(), 4096, &accepted, 1000) == OK && accepted == 4096);
+        // Stream B submits only 512 frames (still priming < 2048).
+        assert(pr->write(b, h2, tone2.data(), 512, &accepted, 1000) == OK && accepted == 512);
+        // Stream A plays cleanly without starving or consuming Stream B's 512 frames.
+        assert(pr->mix(chunk, 1024) == OK);
+        assert(chunk[0].left == 2000 && pr->underrun_frames() == 0);
+        Status sb{};
+        assert(pr->status(b, h2, &sb) == OK && sb.queued == 512);
+        // Once Stream B completes pre-roll (2048 frames), both mix cleanly with 0 starvation.
+        assert(pr->write(b, h2, tone2.data(), 1536, &accepted, 2000) == OK && accepted == 1536);
+        assert(pr->mix(chunk, 1024) == OK);
+        assert(chunk[0].left == 3000 && pr->underrun_frames() == 0);
+        BwsPcmStats st1{}, st2{};
+        assert(pr->statistics(a, h1, st1) == OK && st1.starved == 0 && st1.queued == 2048);
+        assert(pr->statistics(b, h2, st2) == OK && st2.starved == 0 && st2.queued == 1024);
+        // Full rejection increments full & rejected without inflating successful writes.
+        assert(pr->write(a, h1, tone1.data(), 2048, &accepted, 3000) == OK && accepted == 2048);
+        assert(pr->write(a, h1, tone1.data(), 16, &accepted, 3000) == FULL && accepted == 0);
+        assert(pr->statistics(a, h1, st1) == OK && st1.writes == 2 && st1.full == 1 && st1.rejected == 1);
+        // Partial write increments partial and writes, and advances queue to exact capacity.
+        assert(pr->mix(chunk, 500) == OK);
+        assert(pr->write(a, h1, tone1.data(), 512, &accepted, 4000) == OK && accepted == 500);
+        assert(pr->statistics(a, h1, st1) == OK && st1.partial == 1 && st1.writes == 3 && st1.queued == CAPACITY_FRAMES);
+        // Repeated full -> empty transitions and delayed-source timeout promotion.
+        uint64_t h3 = 0;
+        Owner c{3, 1};
+        assert(pr->open(c, stereo, &h3, 2048) == OK);
+        assert(pr->write(c, h3, tone2.data(), 256, &accepted, 10000) == OK && accepted == 256);
+        assert(pr->promote_timed_out(20000, 21333333ULL) == 0);
+        assert(pr->promote_timed_out(10000 + 21333333ULL, 21333333ULL) == 1);
+        assert(pr->mix(chunk, 1024) == OK);
+        BwsPcmStats st3{};
+        assert(pr->statistics(c, h3, st3) == OK && st3.consumed == 256 && st3.starved == 768);
+        // Short finite clip with finish() bypasses pre-roll with 0 starvation.
+        uint64_t h4 = 0;
+        Owner d{4, 1};
+        assert(pr->open(d, stereo, &h4, 2048) == OK);
+        assert(pr->write(d, h4, tone2.data(), 256, &accepted, 30000) == OK);
+        assert(pr->finish(d, h4) == OK);
+        assert(pr->has_ready_pcm());
+        assert(pr->mix(chunk, 512) == OK);
+        BwsPcmStats st4{};
+        assert(pr->statistics(d, h4, st4) == OK && st4.consumed == 256 && st4.starved == 0);
+    }
     std::puts("test_mikser_pcm: OK");
 }

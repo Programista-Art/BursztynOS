@@ -3386,9 +3386,9 @@ test-ochrona-sciezek-host:
 	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ochrona-sciezek
 
 
-pcm440_tmp.o: programy/pcm_demo/pcm_demo.cpp jadro/bws/pcm_api.h
+pcm440_tmp.o: programy/pcm_demo/pcm_demo.cpp programy/pcm_demo/refill_policy.h jadro/bws/pcm_api.h bursztyn_ui/aplikacja.h
 	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=440 -c $< -o $@
-pcm660_tmp.o: programy/pcm_demo/pcm_demo.cpp jadro/bws/pcm_api.h
+pcm660_tmp.o: programy/pcm_demo/pcm_demo.cpp programy/pcm_demo/refill_policy.h jadro/bws/pcm_api.h bursztyn_ui/aplikacja.h
 	$(CXX) $(RING3_FLAGS) -Os -DPCM_HZ=660 -c $< -o $@
 pcm%_blob.o: pcm%_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
 	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) $< bursztyn_gui.o -o pcm$*.elf

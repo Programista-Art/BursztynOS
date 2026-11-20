@@ -5,9 +5,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <vector>
 #include "../sterowniki/dzwiek/hda.cpp"
 #include "../sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "../jadro/bws/pcm_jadro_api.h"
+#include "../programy/pcm_demo/refill_policy.h"
 
 namespace {
 alignas(4096) uint8_t registers[16384];
@@ -50,9 +52,16 @@ void reset() {
     pcm_mixer.cleanup(pcm_internal);
     pcm_mixer.cleanup(pcm_legacy);
     pcm_clients = 0;
+    pcm_app_clients = 0;
     pcm_tone = {};
+    PcmSchedDiag::disable_timeline();
+    PcmSchedDiag::tracked_mask = 0;
+    for (uint32_t i = 0; i < PcmSchedDiag::MAX_PIDS; ++i) PcmSchedDiag::pids[i] = {};
+    PcmWriteStaging::claimed = false;
     pcm_running = pcm_retry = pcm_shutdown = false;
     pcm_idle_since = pcm_retry_ns = pcm_watchdog_ns = 0;
+    pcm_app_prime_since = 0;
+    pcm_final_count = 0;
     pcm_watchdog_fired = false;
     pcm_stats = {};
     pcm_shortfall_count = 0;
@@ -65,7 +74,8 @@ void reset() {
     hda_gotowy = true;
     hda_blokada = false;
     pcm_interest = false;
-    pcm_pending_ns = pcm_last_priority_request = 0;
+    pcm_pending_ns = pcm_last_priority_request = pcm_last_priority_ns = 0;
+    pcm_boost_w_toku = false;
     pcm_guard_misses = pcm_guard_max_ns = 0;
     pcm_irq_timing = {};
     pcm_recovery_since = pcm_watchdog_time = pcm_worker_request = 0;
@@ -171,7 +181,7 @@ static void test_pcm_api() {
     fmt.rate=44100;
     CHECK(invoke(owner,PCM_OPEN,address,sizeof(fmt),1)==PCM_UNSUPPORTED);
     fmt.rate=48000;
-    const auto h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    auto h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
     CHECK(h>0);
     const auto second=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
     CHECK(second>0 && invoke(owner,PCM_OPEN,address,sizeof(fmt),1)==PCM_LIMIT);
@@ -180,6 +190,47 @@ static void test_pcm_api() {
     CHECK(invoke(owner,99,h)==PCM_INVALID);
     CHECK(invoke(owner,PCM_WRITE,h,0,UINT64_MAX)==PCM_INVALID);
     CHECK(invoke(owner,PCM_WRITE,h,0,0)==PCM_INVALID);
+    // First small WRITE must not prime 4096 frames from just 256 frames.
+    int16_t startup[512];
+    for (auto& sample : startup) sample=1000;
+    const uint64_t before_starvation=pcm_mixer.underrun_frames();
+    CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(startup),256)==256);
+    hda_wykonaj_prace_odroczona();
+    CHECK(!run() && pcm_mixer.underrun_frames()==before_starvation);
+    BwsPcmStats stats{};
+    CHECK(invoke(owner,PCM_QUERY_STATS,h,reinterpret_cast<uint64_t>(&stats),sizeof(stats))==PCM_OK &&
+        stats.accepted==256 && stats.writes==1);
+    CHECK(invoke(stranger,PCM_QUERY_STATS,h,reinterpret_cast<uint64_t>(&stats),sizeof(stats))==PCM_HANDLE);
+    // Finite old clients still start after a bounded single-period grace.
+    now_ns += HdaPcm::PERIOD_NS;
+    hda_wykonaj_prace_odroczona();
+    CHECK(run() && first(0).left==1000);
+    CHECK(invoke(owner,PCM_CLOSE,h)==PCM_OK);
+    // Reset and resume the remaining ownership/security cases independently.
+    reset();
+    h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(h>0);
+    const uint64_t before_priming = pcm_mixer.underrun_frames();
+    CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(startup),256)==256);
+    hda_wykonaj_prace_odroczona();
+    CHECK(!run());
+    for (unsigned i=0;i<15;++i)
+        CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(startup),256)==256);
+    hda_wykonaj_prace_odroczona();
+    CHECK(run() && pcm_mixer.underrun_frames()==before_priming);
+    CHECK(invoke(owner,PCM_CLOSE,h)==PCM_OK);
+    reset();
+    h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(h>0);
+    int16_t large[1024];
+    for (auto& sample : large) sample=1000;
+    CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(large),512)==512);
+    CHECK(invoke(owner,PCM_QUERY_STATS,h,reinterpret_cast<uint64_t>(&stats),sizeof(stats))==PCM_OK &&
+        stats.accepted==512);
+    CHECK(invoke(owner,PCM_WRITE,h,reinterpret_cast<uint64_t>(large),1024)==PCM_INVALID);
+    CHECK(invoke(owner,PCM_CLOSE,h)==PCM_OK);
+    h=invoke(owner,PCM_OPEN,address,sizeof(fmt),1);
+    CHECK(h>0);
     const auto other=invoke(stranger,PCM_OPEN,address,sizeof(fmt),1);
     CHECK(other>0 && other!=h);
     BwsPcmState state{};
@@ -236,7 +287,193 @@ static void test_pcm_api() {
     CHECK(invoke(stranger,PCM_CLOSE,other)==PCM_OK);
     CHECK(pcm_clients==0);
 }
+static void test_pcm_large_write() {
+    reset();
+    Pcm::Owner owner{44,9};
+    BwsPcmFormat fmt{1,sizeof(fmt),48000,2,1,0};
+    const auto handle=PcmAplikacji::open(owner,fmt);
+    CHECK(handle>0);
+    int16_t samples[1024]{};
+    const auto ptr=reinterpret_cast<uint64_t>(samples);
+    CHECK(bws_pcm_obsluz(owner,PCM_WRITE,handle,ptr,512,pcm_copy_ok,pcm_copy_ok)==512);
+    CHECK(bws_pcm_obsluz(owner,PCM_WRITE,handle,ptr,1024,pcm_copy_ok,pcm_copy_ok)==PCM_INVALID);
+    CHECK(bws_pcm_obsluz(owner,PCM_WRITE,handle,ptr,512,pcm_copy_fail,pcm_copy_ok)==PCM_MEMORY);
+    BwsPcmState state{};
+    CHECK(PcmAplikacji::query(owner,handle,state)==PCM_OK && state.queued==512);
+    BwsPcmStats stats{};
+    CHECK(PcmAplikacji::statistics(owner,handle,stats)==PCM_OK && stats.accepted==512);
+    CHECK(PcmAplikacji::close(owner,handle)==PCM_OK);
+
+    // Simulate the application's policy with the real worker at every WRITE
+    // return. Priming consumes the first queue, so the same visit must refill it.
+    reset();
+    const auto refill_handle = PcmAplikacji::open(owner,fmt);
+    uint64_t phase = 0;
+    auto r = PcmDemo::refill_stream(
+        phase, 440,
+        [&](BwsPcmState& q) { return PcmAplikacji::query(owner, refill_handle, q); },
+        [&](const int16_t* data, uint32_t frames) {
+            const auto rc = PcmAplikacji::write(owner, refill_handle, data, frames);
+            hda_wykonaj_prace_odroczona();
+            return rc;
+        });
+    CHECK(r.writes == 16 && r.queries >= 2 && run());
+    // 16 * 512 = 8192 frames: 5 * 1024 primed/lead into DMA + 3072 remaining queued.
+    CHECK(PcmAplikacji::query(owner,refill_handle,state)==PCM_OK && state.queued == 3072);
+    CHECK(PcmAplikacji::statistics(owner,refill_handle,stats)==PCM_OK && stats.starved==0 && stats.queued==3072);
+    // V1 (104-byte) and full (144-byte) QUERY_STATS compatibility + staging guard check.
+    uint8_t v1_buf[BWS_PCM_STATS_V1_SIZE]{};
+    CHECK(bws_pcm_obsluz(owner, PCM_QUERY_STATS, refill_handle,
+                         reinterpret_cast<uint64_t>(v1_buf), BWS_PCM_STATS_V1_SIZE,
+                         pcm_copy_ok, pcm_copy_ok) == PCM_OK);
+    CHECK(bws_pcm_obsluz(owner, PCM_QUERY_STATS, refill_handle,
+                         reinterpret_cast<uint64_t>(&stats), sizeof(stats) - 8,
+                         pcm_copy_ok, pcm_copy_ok) == PCM_INVALID);
+    PcmWriteStaging::claimed = true;
+    CHECK(bws_pcm_obsluz(owner, PCM_WRITE, refill_handle, ptr, 512, pcm_copy_ok, pcm_copy_ok) == PCM_BUSY);
+    PcmWriteStaging::claimed = false;
+    CHECK(PcmAplikacji::close(owner,refill_handle)==PCM_OK);
+
+    // Producer starvation race: QUERY sees 3584 (512 free), mixer consumes 2048
+    // frames during the WRITE, post-batch QUERY detects drop and replenishes fully.
+    reset();
+    const auto race_h = PcmAplikacji::open(owner, fmt);
+    phase = 0;
+    CHECK(PcmAplikacji::write(owner, race_h, samples, 512) == 512);
+    for (int i = 0; i < 6; ++i) CHECK(PcmAplikacji::write(owner, race_h, samples, 512) == 512);
+    // Now queued = 3584 (512 free). First write triggers concurrent consumption of 2048 frames.
+    bool injected_consume = false;
+    r = PcmDemo::refill_stream(
+        phase, 440,
+        [&](BwsPcmState& q) { return PcmAplikacji::query(owner, race_h, q); },
+        [&](const int16_t* data, uint32_t frames) {
+            const auto rc = PcmAplikacji::write(owner, race_h, data, frames);
+            if (!injected_consume) {
+                injected_consume = true;
+                Pcm::Frame sink[1024];
+                CHECK(pcm_mixer.mix(sink, 1024) == Pcm::OK);
+                CHECK(pcm_mixer.mix(sink, 1024) == Pcm::OK);
+            }
+            return rc;
+        });
+    CHECK(r.queries >= 2 && r.writes == 5 && r.frames_accepted == 2560);
+    CHECK(PcmAplikacji::query(owner, race_h, state) == PCM_OK && state.queued == Pcm::CAPACITY_FRAMES);
+    CHECK(PcmAplikacji::close(owner, race_h) == PCM_OK);
+
+    // Partial write, FULL, and BUSY handling with exact phase continuity (zero skip/dup).
+    {
+        uint64_t p = 0;
+        std::vector<int16_t> emitted;
+        uint32_t queued = 3000;
+        constexpr uint32_t cap = 4096;
+        unsigned step = 0;
+        bool returned_write_busy = false;
+        bool forced_partial = false;
+        auto res = PcmDemo::refill_stream(
+            p, 440,
+            [&](BwsPcmState& q) -> int64_t {
+                ++step;
+                if (step == 1) return PCM_BUSY; // transient QUERY BUSY
+                q = {BWS_PCM_V1, sizeof(q), queued, cap, 100, 0, 2, 48000};
+                return PCM_OK;
+            },
+            [&](const int16_t* data, uint32_t frames) -> int64_t {
+                if (!returned_write_busy) {
+                    returned_write_busy = true;
+                    return PCM_BUSY; // transient WRITE BUSY (must not advance phase!)
+                }
+                const uint32_t space = cap - queued;
+                if (!space) return PCM_FULL;
+                uint32_t accept = frames < space ? frames : space;
+                if (!forced_partial && accept > 300) {
+                    forced_partial = true;
+                    accept = 300;
+                }
+                for (uint32_t i = 0; i < accept; ++i) emitted.push_back(data[2 * i]);
+                queued += accept;
+                return accept;
+            });
+        CHECK(res.busies == 2 && res.partials == 1 && emitted.size() == cap - 3000);
+        // Verify exact sample-by-sample triangle phase continuity!
+        uint64_t expected_phase = 0;
+        for (size_t i = 0; i < emitted.size(); ++i) {
+            CHECK(emitted[i] == PcmDemo::triangle_sample(expected_phase));
+            expected_phase = (expected_phase + 440) % 48000;
+        }
+        CHECK(p == expected_phase);
+
+        // Explicit FULL response handling: phase must remain unchanged.
+        const uint64_t phase_before_full = p;
+        auto full_res = PcmDemo::refill_stream(
+            p, 440,
+            [&](BwsPcmState& q) -> int64_t {
+                q = {BWS_PCM_V1, sizeof(q), 3000, cap, 100, 0, 2, 48000};
+                return PCM_OK;
+            },
+            [&](const int16_t*, uint32_t) -> int64_t { return PCM_FULL; });
+        CHECK(full_res.fulls == 1 && full_res.writes == 0 && p == phase_before_full);
+    }
+
+    // Second stream starting while first is active: no interruption to first,
+    // no initial missing frames for second, and clean termination/no stale replay.
+    reset();
+    const Pcm::Owner proc_a{10, 1}, proc_b{11, 1};
+    const auto ha = PcmAplikacji::open(proc_a, fmt);
+    const auto hb = PcmAplikacji::open(proc_b, fmt);
+    CHECK(ha > 0 && hb > 0);
+    int16_t wave_a[1024], wave_b[1024];
+    for (unsigned i = 0; i < 512; ++i) {
+        wave_a[2 * i] = wave_a[2 * i + 1] = 2000;
+        wave_b[2 * i] = wave_b[2 * i + 1] = 1000;
+    }
+    for (int i = 0; i < 8; ++i) CHECK(PcmAplikacji::write(proc_a, ha, wave_a, 512) == 512);
+    hda_wykonaj_prace_odroczona();
+    CHECK(run() && starts == 1 && first(0).left == 2000);
+    // Refill A after priming so A stays continuously active.
+    for (int i = 0; i < 8; ++i) CHECK(PcmAplikacji::write(proc_a, ha, wave_a, 512) == 512);
+    // B submits first 512 frames; advance one DMA period -> A plays uninterrupted, B stays primed=false with 0 starvation!
+    CHECK(PcmAplikacji::write(proc_b, hb, wave_b, 512) == 512);
+    period(1, 10000000ULL); // 10 ms < PERIOD_NS grace
+    CHECK(run() && starts == 1);
+    CHECK(PcmAplikacji::statistics(proc_a, ha, stats) == PCM_OK && stats.starved == 0);
+    CHECK(PcmAplikacji::statistics(proc_b, hb, stats) == PCM_OK && stats.starved == 0 && stats.queued == 512);
+    // B completes pre-roll (writes 7 more x 512 = 4096 total); both play mixed cleanly!
+    for (int i = 0; i < 7; ++i) CHECK(PcmAplikacji::write(proc_b, hb, wave_b, 512) == 512);
+    period(2, HdaPcm::PERIOD_NS);
+    CHECK(first(5).left == 2000 && first(6).left == 3000 && pcm_mixer.underrun_frames() == 0);
+    // Simulate scheduling jitter longer than queue duration (85.3 ms) -> safe underrun, no unsafe DMA overwrite.
+    for (uint32_t k = 3; k <= 7; ++k) period(k % HdaPcm::PERIODS, HdaPcm::PERIOD_NS);
+    CHECK(PcmAplikacji::statistics(proc_a, ha, stats) == PCM_OK && stats.starved > 0);
+    CHECK(pcm_stats.bledy_dma == 0 && pcm_stats.fifo_error == 0 && pcm_stats.descriptor_error == 0);
+    // Terminate proc_a while it has queued audio; proc_b continues uninterrupted and no stale frames from A replay.
+    CHECK(PcmAplikacji::write(proc_a, ha, wave_a, 512) == 512);
+    CHECK(PcmAplikacji::write(proc_b, hb, wave_b, 512) == 512);
+    CHECK(PcmAplikacji::write(proc_b, hb, wave_b, 512) == 512);
+    CHECK(pcm_posprzataj_proces(proc_a.pid, proc_a.generation));
+    period(0, HdaPcm::PERIOD_NS);
+    CHECK(run() && starts == 1);
+    // Check hda_blokada_aktywna() helper reflects GuardHDA ownership.
+    CHECK(!hda_blokada_aktywna());
+    {
+        GuardHDA guard(HDA_TIMEOUT_LOCK);
+        CHECK(guard.aktywny() && hda_blokada_aktywna());
+    }
+    CHECK(!hda_blokada_aktywna());
+    // Check PcmSchedDiag wait vs runnable separation and timeline recording.
+    PcmSchedDiag::enable_timeline();
+    PcmSchedDiag::track_pid(2);
+    PcmSchedDiag::on_wait_enter(2, 100000000ULL);
+    PcmSchedDiag::on_ready(2, 120000000ULL, 1); // 20 ms voluntary wait
+    PcmSchedDiag::on_schedule(2, 135000000ULL); // 15 ms runnable wait
+    PcmSchedDiag::PidStats ps{};
+    CHECK(PcmSchedDiag::snapshot_pid(2, ps));
+    CHECK(ps.max_voluntary_wait_ns == 20000000ULL && ps.max_runnable_wait_ns == 15000000ULL);
+    CHECK(PcmSchedDiag::event_count() >= 2);
+    PcmSchedDiag::disable_timeline();
+    CHECK(PcmAplikacji::close(proc_b, hb) == PCM_OK);
+}
 int main() {
+    test_pcm_large_write();
     test_pcm_api();
     using namespace PcmJadro;
     reset();
@@ -320,7 +557,8 @@ int main() {
     hda_zaplanuj_prace_odroczona(7, false);
     CHECK(pcm_pending_ns == requested && pcm_stats.blokady_pracy == 3);
     CHECK(hda_pcm_pilny_powrot_pid0());
-    CHECK(!hda_pcm_pilny_powrot_pid0()); // no repeated priority for the same request
+    CHECK(hda_pcm_pilny_w_toku());
+    CHECK(!hda_pcm_pilny_powrot_pid0()); // no repeated priority within 12 ms cooldown
     hda_blokada = false;
     CHECK(zamknij(a) == Wynik::Ok && zamknij(a) == Wynik::ZlyUchwyt);
     hda_wykonaj_zaplanowana_prace_odroczona(); // no new timer IRQ
@@ -547,6 +785,160 @@ int main() {
         CHECK(pcm_stats.okresy_master_mute > 0 && pcm_stats.bledy_dma == 0);
         CHECK(hda_wyciszenie_ustaw(false) == HDA_GLOSNOSC_OK && run());
         period(2); CHECK(first(6).left == 2000 && first(6).right == -4000);
+    }
+    // 21. Recovery waits for PCM before restarting DMA, and a joining Ring 3 stream gets 2-period preroll grace.
+    reset();
+    {
+        ++scenarios;
+        auto invoke = [&](Pcm::Owner o, uint64_t op, uint64_t a, uint64_t b = 0, uint64_t c = 0) {
+            return bws_pcm_obsluz(o, op, a, b, c, pcm_copy_ok, pcm_copy_ok);
+        };
+        Pcm::Owner owner_a{501, 1}, owner_b{502, 1};
+        BwsPcmFormat fmt{1, sizeof(fmt), 48000, 2, 1, 0};
+        const uint64_t addr = reinterpret_cast<uint64_t>(&fmt);
+        const auto ha = invoke(owner_a, PCM_OPEN, addr, sizeof(fmt), 1);
+        CHECK(ha > 0);
+        int16_t buf[BWS_PCM_MAX_FRAMES * 2];
+        for (uint32_t i = 0; i < BWS_PCM_MAX_FRAMES; ++i) { buf[2 * i] = 1500; buf[2 * i + 1] = 1500; }
+        for (unsigned k = 0; k < 8; ++k)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        hda_wykonaj_prace_odroczona();
+        CHECK(run());
+        // Simulate a watchdog recovery when the mixer queue has drained to 0.
+        pcm_recover(now_ns, HdaPcm::Fault::Watchdog);
+        CHECK(!run() && pcm_retry && !pcm_mixer.has_pcm());
+        now_ns += 2 * HdaPcm::PERIOD_NS;
+        hda_wykonaj_prace_odroczona();
+        CHECK(!run() && pcm_retry);
+        // Once PCM arrives again, DMA restarts cleanly with real audio.
+        for (unsigned k = 0; k < 8; ++k)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        hda_wykonaj_prace_odroczona();
+        CHECK(run() && !pcm_retry && pcm_stats.odzyskania == 1 && first(0).left == 1500);
+        // Second Ring 3 stream joining an active ring gets 2*PERIOD_NS preroll grace.
+        const uint32_t premature_before = pcm_stats.start_przedwczesny;
+        const uint64_t starved_before = pcm_mixer.underrun_frames();
+        const auto hb = invoke(owner_b, PCM_OPEN, addr, sizeof(fmt), 1);
+        CHECK(hb > 0);
+        CHECK(invoke(owner_b, PCM_WRITE, hb, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        now_ns += HdaPcm::PERIOD_NS;
+        hda_wykonaj_prace_odroczona();
+        CHECK(pcm_stats.start_przedwczesny == premature_before && pcm_mixer.underrun_frames() == starved_before);
+        for (unsigned k = 0; k < 3; ++k)
+            CHECK(invoke(owner_b, PCM_WRITE, hb, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        for (unsigned k = 0; k < 2; ++k)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        period(1);
+        CHECK(pcm_stats.start_przedwczesny == premature_before && pcm_mixer.underrun_frames() == starved_before);
+        CHECK(invoke(owner_a, PCM_CLOSE, ha) == PCM_OK);
+        CHECK(invoke(owner_b, PCM_CLOSE, hb) == PCM_OK);
+        // Priority boost re-arms after 12 ms cooldown if pending work remained unserviced,
+        // and deferred worker clears hda_pcm_pilny_w_toku() even under GuardHDA contention.
+        hda_blokada = true;
+        const uint64_t pend = now_ns;
+        pcm_pending_ns = pend;
+        now_ns += 12000000;
+        CHECK(hda_pcm_pilny_powrot_pid0() && hda_pcm_pilny_w_toku());
+        CHECK(!hda_pcm_pilny_powrot_pid0());
+        now_ns += 12000000;
+        CHECK(hda_pcm_pilny_powrot_pid0() && hda_pcm_pilny_w_toku());
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(!hda_pcm_pilny_w_toku() && pcm_pending_ns == pend);
+        hda_blokada = false;
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(!hda_pcm_praca_oczekuje());
+    }
+    // 22. Initial priming triggers immediate refill opportunity, multi-stream recovery
+    // waits 2-period grace instead of starting with an empty peer, and PCM_FINISH
+    // completes cleanly across repeated startup/recovery cycles.
+    reset();
+    {
+        ++scenarios;
+        auto invoke = [&](Pcm::Owner o, uint64_t op, uint64_t a, uint64_t b = 0, uint64_t c = 0) {
+            return bws_pcm_obsluz(o, op, a, b, c, pcm_copy_ok, pcm_copy_ok);
+        };
+        const uint64_t underruns_before = pcm_mixer.underrun_frames();
+        Pcm::Owner owner_a{601, 1}, owner_b{602, 1}, owner_c{603, 1};
+        BwsPcmFormat fmt{1, sizeof(fmt), 48000, 2, 1, 0};
+        const uint64_t addr = reinterpret_cast<uint64_t>(&fmt);
+        const auto ha = invoke(owner_a, PCM_OPEN, addr, sizeof(fmt), 1);
+        CHECK(ha > 0);
+        int16_t buf[BWS_PCM_MAX_FRAMES * 2];
+        for (uint32_t i = 0; i < BWS_PCM_MAX_FRAMES; ++i) { buf[2 * i] = 1800; buf[2 * i + 1] = 1800; }
+        for (unsigned k = 0; k < 8; ++k) {
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+            // Simulate syscall-exit deferred worker hook after each WRITE.
+            hda_wykonaj_zaplanowana_prace_odroczona();
+        }
+        // Writing the 4096-frame prime published pcm_pending_ns so DMA started on
+        // syscall exit and drained the mixer, allowing immediate producer top-up.
+        CHECK(run() && starts == 1);
+        BwsPcmState state{};
+        CHECK(invoke(owner_a, PCM_QUERY, ha, reinterpret_cast<uint64_t>(&state), sizeof(state)) == PCM_OK && state.queued == 0);
+        for (unsigned k = 0; k < 8; ++k)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        // Simulate delayed producer scheduling across 2 periods (42.7 ms): 4096 frames
+        // in DMA + 4096 frames topped up in mixer survive without starvation.
+        period(1);
+        period(2);
+        CHECK(pcm_mixer.underrun_frames() == underruns_before);
+
+        // Join second stream and refill both; then simulate repeated recovery cycles.
+        const auto hb = invoke(owner_b, PCM_OPEN, addr, sizeof(fmt), 1);
+        CHECK(hb > 0);
+        for (unsigned k = 0; k < 8; ++k)
+            CHECK(invoke(owner_b, PCM_WRITE, hb, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        for (unsigned k = 0; k < 6; ++k)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        period(3);
+        period(4);
+        CHECK(pcm_mixer.underrun_frames() == underruns_before && pcm_stats.start_przedwczesny == 0);
+
+        // Cycle 1: watchdog recovery where stream A refills first and stream B arrives
+        // after > 1 period (25 ms < 2*PERIOD_NS): must NOT timeout or start with B empty.
+        pcm_recover(now_ns, HdaPcm::Fault::Watchdog);
+        CHECK(!run() && pcm_retry);
+        CHECK(invoke(owner_a, PCM_QUERY, ha, reinterpret_cast<uint64_t>(&state), sizeof(state)) == PCM_OK);
+        for (uint32_t f = state.queued; f + BWS_PCM_MAX_FRAMES <= state.capacity; f += BWS_PCM_MAX_FRAMES)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(!run()); // waiting for stream B within 2-period recovery grace
+        now_ns += HdaPcm::PERIOD_NS + 2000000ULL;
+        hda_zaplanuj_prace_odroczona();
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(!run() && pcm_stats.start_przedwczesny == 0);
+        CHECK(invoke(owner_b, PCM_QUERY, hb, reinterpret_cast<uint64_t>(&state), sizeof(state)) == PCM_OK);
+        for (uint32_t f = state.queued; f + BWS_PCM_MAX_FRAMES <= state.capacity; f += BWS_PCM_MAX_FRAMES)
+            CHECK(invoke(owner_b, PCM_WRITE, hb, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(run() && !pcm_retry && pcm_stats.odzyskania == 1 && pcm_stats.start_przedwczesny == 0);
+        CHECK(pcm_mixer.underrun_frames() == underruns_before);
+
+        // Cycle 2: recovery where stream B stalls beyond 2*PERIOD_NS: bounded grace
+        // still recovers stream A instead of blocking permanently.
+        pcm_recover(now_ns, HdaPcm::Fault::Watchdog);
+        CHECK(!run() && pcm_retry);
+        CHECK(invoke(owner_a, PCM_QUERY, ha, reinterpret_cast<uint64_t>(&state), sizeof(state)) == PCM_OK);
+        for (uint32_t f = state.queued; f + BWS_PCM_MAX_FRAMES <= state.capacity; f += BWS_PCM_MAX_FRAMES)
+            CHECK(invoke(owner_a, PCM_WRITE, ha, reinterpret_cast<uint64_t>(buf), BWS_PCM_MAX_FRAMES) == BWS_PCM_MAX_FRAMES);
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        now_ns += 2 * HdaPcm::PERIOD_NS;
+        hda_zaplanuj_prace_odroczona();
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(run() && !pcm_retry && pcm_stats.odzyskania == 2 && pcm_stats.start_przedwczesny == 1);
+
+        // Short completed stream using PCM_FINISH does not block or starve.
+        CHECK(invoke(owner_a, PCM_CLOSE, ha) == PCM_OK);
+        CHECK(invoke(owner_b, PCM_CLOSE, hb) == PCM_OK);
+        reset();
+        const uint64_t underruns_short = pcm_mixer.underrun_frames();
+        const auto hc = invoke(owner_c, PCM_OPEN, addr, sizeof(fmt), 1);
+        CHECK(hc > 0);
+        CHECK(invoke(owner_c, PCM_WRITE, hc, reinterpret_cast<uint64_t>(buf), 256) == 256);
+        CHECK(invoke(owner_c, PCM_FINISH, hc) == PCM_OK);
+        hda_wykonaj_zaplanowana_prace_odroczona();
+        CHECK(run() && first(0).left == 1800 && pcm_mixer.underrun_frames() == underruns_short);
+        CHECK(invoke(owner_c, PCM_CLOSE, hc) == PCM_OK);
     }
     std::printf("HDA production tone: %u scenarios, %u checks PASS (ASan/UBSan; real driver, modeled MMIO)\n", scenarios, checks);
 }

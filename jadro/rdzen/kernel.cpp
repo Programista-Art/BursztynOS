@@ -3319,5 +3319,6 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             : "memory");
         scheduler_bezczynnosc_koniec();
         gui_perf_idle_end();
+        hda_wykonaj_zaplanowana_prace_odroczona();
     }
 }

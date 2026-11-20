@@ -86,6 +86,12 @@ public:
         glowne_okno_->rysuj(ctx, true);
         gui_odswiez();
 
+        // Szybkie zadania okresowe (1 tick, np. produkcja PCM) startuja od razu
+        // po pierwszym rysowaniu, zanim proces zasnie na czekaniu na zdarzenia.
+        if (okresowe_ && okresowe_ticks_ == 1) {
+            sprawdz_zadanie_okresowe(ctx);
+        }
+
         bws_zdarzenie ev{};
         while (czy_dziala_) {
             ++statystyki_.iteracje;
@@ -102,27 +108,18 @@ public:
                     gui_odswiez();
                     ++statystyki_.odrysowania;
                 }
+                sprawdz_zadanie_okresowe(ctx);
                 // Usypiamy proces w schedulerze na czas do klatki (8 tickow = ~32 ms przy 250 Hz)
-                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, odstep_animacji_);
+                const uint32_t wait_ticks = (okresowe_ && okresowe_ticks_ && okresowe_ticks_ < odstep_animacji_)
+                    ? okresowe_ticks_ : odstep_animacji_;
+                odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, wait_ticks);
             } else if (okresowe_ && okresowe_ticks_) {
                 odebrano = gui_czekaj_na_zdarzenie_z_timeoutem(&ev, okresowe_ticks_);
             } else {
                 odebrano = gui_czekaj_na_zdarzenie(&ev);
             }
 
-            if (okresowe_ && okresowe_ticks_) {
-                // Termin liczony zegarem, niezaleznie od galezi petli (animacje, zdarzenia).
-                const uint64_t teraz = gui_czas_monotoniczny_ns();
-                if (teraz - okresowe_ostatnio_ns_ >= uint64_t(okresowe_ticks_) * 4000000ULL) {
-                    okresowe_ostatnio_ns_ = teraz;
-                    okresowe_(okresowe_kontekst_);
-                    if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
-                        glowne_okno_->rysuj(ctx);
-                        gui_odswiez();
-                        ++statystyki_.odrysowania;
-                    }
-                }
-            }
+            sprawdz_zadanie_okresowe(ctx);
 
             if (odebrano) {
                 ++statystyki_.odebrane_zdarzenia;
@@ -134,12 +131,22 @@ public:
                     glowne_okno_->obsluz_zdarzenie(ev);
                 }
 
+                // Szybkie zadania okresowe (np. uzupelnianie PCM) wykonujemy przed
+                // ewentualnym kosztownym odrysowaniem okna.
+                if (okresowe_ && okresowe_ticks_ == 1) {
+                    sprawdz_zadanie_okresowe(ctx);
+                }
+
                 // Odśwież widok
                 if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
                     glowne_okno_->rysuj(ctx);
                     gui_odswiez();
                     ++statystyki_.odrysowania;
                 }
+
+                // Jesli obsluga zdarzen lub odrysowanie przekroczyly okres, wykonaj
+                // zadanie okresowe od razu przed kolejnym usypianiem.
+                sprawdz_zadanie_okresowe(ctx);
             }
         }
 
@@ -147,6 +154,21 @@ public:
     }
 
 private:
+    void sprawdz_zadanie_okresowe(KontekstRysowania& ctx) {
+        if (!okresowe_ || !okresowe_ticks_) return;
+        // Termin liczony zegarem, niezaleznie od galezi petli (animacje, zdarzenia).
+        const uint64_t teraz = gui_czas_monotoniczny_ns();
+        if (teraz - okresowe_ostatnio_ns_ >= uint64_t(okresowe_ticks_) * 4000000ULL) {
+            okresowe_ostatnio_ns_ = teraz;
+            okresowe_(okresowe_kontekst_);
+            if (!glowne_okno_->czy_zminimalizowane() && glowne_okno_->czy_wymaga_odrysowania()) {
+                glowne_okno_->rysuj(ctx);
+                gui_odswiez();
+                ++statystyki_.odrysowania;
+            }
+        }
+    }
+
     uint32_t odstep_animacji_{8};
     uint32_t okresowe_ticks_{0};
     uint64_t okresowe_ostatnio_ns_{0};

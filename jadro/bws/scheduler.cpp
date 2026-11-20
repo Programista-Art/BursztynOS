@@ -38,6 +38,7 @@ extern "C" bool pcm_posprzataj_proces(uint32_t, uint64_t) __attribute__((weak));
 #include "grafika.h"
 #include "hpet.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "jadro/dzwiek/pcm_sched_diag.h"
 
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
 extern void klog_serial(const char*);
@@ -93,6 +94,12 @@ static uint64_t g_liczba_ticktow_odroczonych = 0;   // tiki, ktore trafily w Rin
 static uint64_t licznik_przelaczen_kontekstu = 0;
 static uint64_t licznik_wybudzen_event = 0;
 static bool jawne_czekanie_sieci[MAKS_PROCESOW]{};
+static int g_rr_powrot_po_boost = -1;
+
+static inline uint64_t pcm_sched_now(int pid) {
+    return (pid > 0 && PcmSchedDiag::is_tracked(static_cast<uint32_t>(pid)) && hpet_dostepny())
+        ? czas_monotoniczny_ns() : 0;
+}
 
 /*
  * Menedzer zadan: rozliczanie czasu CPU (rozliczanie_cpu.h) i tozsamosc slotu.
@@ -513,6 +520,7 @@ static void obsluz_timeouty_myszy() {
                 proces,
                 PROCES_GOTOWY
             );
+            PcmSchedDiag::on_ready(pid, pcm_sched_now(pid), 1);
         }
     }
 }
@@ -640,6 +648,7 @@ static void posprzataj_zakonczone_procesy(
         proces.baza_stosu_jadra=0;
         proces.szczyt_stosu_jadra=0;
         fpu_reset_process(pid);
+        PcmSchedDiag::reset_pid(static_cast<uint32_t>(pid));
         __atomic_store_n(&jawne_czekanie_sieci[pid],false,__ATOMIC_RELEASE);
         ustaw_stan_procesu(proces,PROCES_PUSTY);
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
@@ -707,9 +716,24 @@ static int znajdz_nastepny_proces(
     }
 
     // PID0 is the existing worker. Give it one turn when audio work
-    // already waited three nominal ticks; otherwise preserve round-robin.
-    if (biezacy != 0 && proces_moze_byc_uruchomiony(0) && hda_pcm_pilny_powrot_pid0())
+    // already waited three nominal ticks; preserve round-robin cursor on return
+    // so boosted turns never skip or starve user processes.
+    if (biezacy != 0 && proces_moze_byc_uruchomiony(0) && hda_pcm_pilny_powrot_pid0()) {
+        g_rr_powrot_po_boost = biezacy;
         return 0;
+    }
+
+    if (biezacy == 0 && g_rr_powrot_po_boost > 0) {
+        const int start = g_rr_powrot_po_boost;
+        g_rr_powrot_po_boost = -1;
+        for (int krok = 1; krok <= MAKS_PROCESOW; ++krok) {
+            const int kandydat = (start + krok) % MAKS_PROCESOW;
+            if (kandydat != 0 && proces_moze_byc_uruchomiony(kandydat)) {
+                return kandydat;
+            }
+        }
+        return proces_moze_byc_uruchomiony(0) ? 0 : -1;
+    }
 
     /*
      * Typowy round-robin: zaczynamy OD procesu po aktualnym.
@@ -985,6 +1009,7 @@ extern "C" void WybudzProcesyOczekujaceNaMysz() {
                 proces,
                 PROCES_GOTOWY
             );
+            PcmSchedDiag::on_ready(pid, pcm_sched_now(pid), 1);
         }
     }
 }
@@ -1034,6 +1059,7 @@ bool scheduler_dodaj_zdarzenie(
                                  __ATOMIC_RELEASE);
                 gui_perf_add(pid,GP_WAKE);
                 ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+                PcmSchedDiag::on_ready(pid, pcm_sched_now(pid), 2);
             }
             przywroc_przerwania(irq);
             return true;
@@ -1077,6 +1103,7 @@ bool scheduler_dodaj_zdarzenie(
         __atomic_store_n(&wygasl_timeout_zdarzenia[pid], false,
                          __ATOMIC_RELEASE);
         ustaw_stan_procesu(tablica_procesow[pid], PROCES_GOTOWY);
+        PcmSchedDiag::on_ready(pid, pcm_sched_now(pid), 2);
         gui_perf_add(pid,GP_WAKE);
         __atomic_add_fetch(&licznik_wybudzen_event,1ULL,__ATOMIC_RELAXED);
     }
@@ -1120,6 +1147,7 @@ void scheduler_czekaj_na_zdarzenie(int pid, uint64_t timeout_ticki) {
         }
         ustaw_stan_procesu(tablica_procesow[pid],
                            PROCES_ZABLOKOWANY_ZDARZENIE);
+        PcmSchedDiag::on_wait_enter(pid, pcm_sched_now(pid));
     }
     przywroc_przerwania(irq);
 }
@@ -1202,6 +1230,7 @@ void InicjalizujPlaniste(
     }
 
     licznik_tykniec_zegara = 0;
+    g_rr_powrot_po_boost = -1;
 
     __atomic_store_n(
         &globalne_zdarzenia_myszy,
@@ -1503,7 +1532,10 @@ static uint64_t przelacz_kontekst_impl(uint64_t stary_rsp, bool tick_zegara) {
 #endif
     fpu_switch_process(stary_pid, nastepny_pid);
     gui_perf_switch(nastepny_pid);
-    g_rozliczanie_cpu.przelacz(zegar_rozliczania(), nastepny_pid);   // koniec odcinka stary_pid
+    const uint64_t teraz_ns = zegar_rozliczania();
+    g_rozliczanie_cpu.przelacz(teraz_ns, nastepny_pid);   // koniec odcinka stary_pid
+    PcmSchedDiag::on_preempt(stary_pid, teraz_ns, stan_starego == PROCES_GOTOWY);
+    PcmSchedDiag::on_schedule(nastepny_pid, teraz_ns);
     aktualny_pid =
         nastepny_pid;
 
@@ -1730,6 +1762,7 @@ extern "C" void scheduler_nowy_proces_w_slocie(int pid) {
     g_generacja_procesu[pid] = g_nastepna_generacja++;
     g_czas_startu_procesu[pid] = zegar_rozliczania();
     g_rozliczanie_cpu.nowy_proces(pid);
+    PcmSchedDiag::reset_pid(static_cast<uint32_t>(pid));
     przywroc_przerwania(stan_irq);
 }
 

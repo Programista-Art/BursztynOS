@@ -27,7 +27,7 @@ struct Statystyki {
     uint64_t maks_irq_pid, maks_irq_ring0;
     uint64_t bezpieczna_cisza, cisza_miksera, okresy_master_mute;
     uint64_t proby_watchdoga, fifo_error, descriptor_error;
-    uint64_t otwarcia_aplikacji, usuniete_przy_zakonczeniu;
+    uint64_t otwarcia_aplikacji, usuniete_przy_zakonczeniu, start_przedwczesny;
     uint64_t przyczyny[9];
     uint32_t zapisane_zdarzenia;
 };

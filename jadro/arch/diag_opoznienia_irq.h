@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "sterowniki/czas/hpet.h"
+#include "jadro/dzwiek/pcm_sched_diag.h"
 
 // BSP-only, opt-in during the PCM regression. Instrumented scopes already
 // have IF=0. Events are copied/logged after tracing has been disabled.
@@ -57,6 +58,8 @@ inline uint64_t timer(unsigned pid, bool ring0) {
         if (ns >= LONG_NS) {
             ++late_gaps;
             if (gap_count < CAPACITY) gaps[gap_count++] = {last, now, pid, ring0};
+            PcmSchedDiag::record(PcmSchedDiag::Kind::TimerGap, now, pid,
+                                 static_cast<uint32_t>(ns / 1000ULL), ring0 ? 1U : 0U);
         }
     }
     last = now;

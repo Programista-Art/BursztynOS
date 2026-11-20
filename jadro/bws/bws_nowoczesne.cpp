@@ -42,6 +42,7 @@
 #include "zakonczenie_procesu.h"
 #include "loader.h"
 #include "sterowniki/dzwiek/hda.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "sterowniki/dzwiek/hda_diag.h"
 #include "sterowniki/dzwiek/hda_transport.h"
 #include "sterowniki/dzwiek/hda_wewnetrzny.h"
@@ -1191,6 +1192,7 @@ uint64_t procesy_migawka(proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t
             w.pamiec_wspoldzielona_bajtow = pam.wspoldzielona_bajtow;
             w.stos_jadra_bajtow = ROZMIAR_STOSU_JADRA;
         }
+        hda_wykonaj_zaplanowana_prace_odroczona();
         w.bufor_okna_bajtow = skladacz_obrazu_bajty_warstwy(pid);
         const uint64_t heap_base = uklady_procesow[pid].wersja == 2 ? uklady_procesow[pid].sterta_baza : RING3_HEAP_BASE;
         w.sterta_wirtualna_bajtow = s.granica_sterty > heap_base ? s.granica_sterty - heap_base : 0;

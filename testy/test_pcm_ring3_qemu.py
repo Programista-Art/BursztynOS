@@ -33,19 +33,70 @@ def main():
     if sys.byteorder!="little":
         samples.byteswap()
     left=samples[::2]
+    phase_diag={}
     for phase,lo,hi in capture.phase_sample_ranges(timings,rate,len(left)):
         width=rate//2
         for start in range(lo,hi-width+1,rate//20):
             chunk=left[start:start+width]
-            if capture.near_zero_intervals(chunk,start,rate) and phase!="master_mute":
+            if phase!="master_mute" and (
+                capture.near_zero_intervals(chunk,start,rate) or
+                any(abs(b-a)>1000 for a,b in zip(chunk,chunk[1:]))):
                 continue
             levels=[[capture.amplitude(chunk[i:i+rate//10],hz,rate)
                      for i in range(0,width,rate//10)] for hz in (440,660)]
             if all(max(v)-min(v)<=max(5,.01*max(v)) for v in levels):
                 windows[phase]=(start/rate,(start+width)/rate)
                 break
+        # Independent diagnostics: separate silence, discontinuities, and clean 200ms gain.
+        sub_w=rate//5
+        clean_sub=None
+        for start in range(lo,hi-sub_w+1,rate//20):
+            sub=left[start:start+sub_w]
+            if phase!="master_mute" and (
+                capture.near_zero_intervals(sub,start,rate) or
+                any(abs(b-a)>1000 for a,b in zip(sub,sub[1:]))):
+                continue
+            clean_sub={
+                "window_s":[start/rate,(start+sub_w)/rate],
+                "amplitude_440":capture.amplitude(sub,440,rate),
+                "amplitude_660":capture.amplitude(sub,660,rate),
+            }
+            break
+        phase_info=sustained.get(phase,{})
+        phase_diag[phase]={
+            "silent_intervals_ms":sum(ms for _,ms in phase_info.get("near_zero_intervals_s_and_ms",[])),
+            "waveform_discontinuities":phase_info.get("jumps_over_1000",0),
+            "clean_200ms_subwindow":clean_sub,
+        }
     result=capture.analyze(out/"mixed.wav",windows)
     result["continuity"]=sustained
+    result["phase_diagnostics"]=phase_diag
+    def records(prefix, first):
+        result_records=[]
+        for line in (out/"serial.log").read_text().splitlines():
+            match=re.fullmatch(re.escape(prefix)+r" (\w+)=(\d+)",line)
+            if not match:
+                continue
+            key,value=match[1],int(match[2])
+            if key==first:
+                result_records.append({})
+            if result_records:
+                result_records[-1][key]=value
+        return result_records
+    result["streams"]=records("[PCM-STREAM]","pid")
+    result["sched"]=records("[PCM-SCHED]","pid")
+    result["timeline"]=records("[PCM-TIMELINE]","ns")
+    result["starvation_events"]=records("[PCM-STARVE]","pid")
+    result["recovery_events"]=records("[PCM-RECOVERY]","ns")
+    result["irq_gaps"]=records("[PCM-IRQ]","begin_ns")
+    result["shortfalls"]=records("[PCM-SHORTFALL]","ns")
+    vcpu_path=out/"host-vcpu.json"
+    qmp_path=out/"host-qmp.json"
+    if vcpu_path.exists() and qmp_path.exists():
+        vcpu_data=json.loads(vcpu_path.read_text())
+        qmp_data=json.loads(qmp_path.read_text())
+        result["irq_host_context"]=capture.irq_host_context(
+            result["irq_gaps"], timings, vcpu_data.get("samples",[]), qmp_data)
     evidence=(out/"serial.log").read_text()
     result["guest"]={key:int(value) for key,value in re.findall(r"\[HDA-PCM\] R3_(\w+)=(\d+)",evidence)}
     verdict="PASS"

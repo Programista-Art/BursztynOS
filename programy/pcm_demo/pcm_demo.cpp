@@ -2,6 +2,7 @@
 #include "bursztyn_gui.h"
 #include "../../bursztyn_ui/bursztyn_ui.h"
 #include "../../jadro/bws/pcm_api.h"
+#include "refill_policy.h"
 #ifndef PCM_HZ
 #define PCM_HZ 440
 #endif
@@ -17,7 +18,7 @@ class PcmWindow : public BursztynUI::Okno {
     void stop() {
         if (handle && call(PCM_CLOSE,handle) == PCM_OK) handle=0;
     }
-    void gain() { if(handle) call(PCM_GAIN,handle,volume,muted); }
+    bool gain() { return !handle || call(PCM_GAIN,handle,volume,muted)==PCM_OK; }
 public:
     PcmWindow() : BursztynUI::Okno(PCM_HZ == 440 ? "PCM 440 Hz" : "PCM 660 Hz", 360, 280) {}
     void init() {
@@ -48,7 +49,8 @@ public:
             const auto elapsed=(gui_czas_monotoniczny_ns()-epoch)/1000000;
             const int stage=elapsed<4000?0:elapsed<6000?1:elapsed<8000?2:3;
             if(PCM_HZ==440 && stage!=automatic_stage) {
-                volume=stage==0?100:25; muted=stage==2; gain(); automatic_stage=stage;
+                volume=stage==0?100:25; muted=stage==2;
+                if (gain()) automatic_stage=stage;
             }
             if(PCM_HZ==660 && elapsed>=17000) { playing=false; stop(); }
         }
@@ -72,21 +74,14 @@ public:
             }
             validated=true;
         }
-        // At most one queue per visit. Advance the oscillator only for accepted PCM.
-        for(unsigned batch=0;batch<16;++batch) {
-            int16_t samples[BWS_PCM_MAX_FRAMES*2];
-            uint64_t next=phase;
-            for(unsigned i=0;i<BWS_PCM_MAX_FRAMES;++i) {
-                const int a=static_cast<int>(next*4);
-                const int triangle=a<48000?a:a<144000?96000-a:a-192000;
-                samples[2*i]=samples[2*i+1]=static_cast<int16_t>(triangle/6);
-                next=(next+PCM_HZ)%48000;
-            }
-            const auto accepted=call(PCM_WRITE,handle,reinterpret_cast<uint64_t>(samples),BWS_PCM_MAX_FRAMES);
-            if(accepted<=0) break;
-            phase=(phase+static_cast<uint64_t>(accepted)*PCM_HZ)%48000;
-            if(accepted<BWS_PCM_MAX_FRAMES) break;
-        }
+        (void)PcmDemo::refill_stream(
+            phase, PCM_HZ,
+            [this](BwsPcmState& queue) {
+                return call(PCM_QUERY, handle, reinterpret_cast<uint64_t>(&queue), sizeof(queue));
+            },
+            [this](const int16_t* samples, uint32_t requested) {
+                return call(PCM_WRITE, handle, reinterpret_cast<uint64_t>(samples), requested);
+            });
     }
     ~PcmWindow() { stop(); }
 };
@@ -94,6 +89,7 @@ extern "C" __attribute__((noreturn)) void _start() {
     BursztynUI::AplikacjaGUI app;
     auto* window=new PcmWindow;
     window->init();
+    app.ustaw_odstep_animacji(1);
     app.ustaw_zadanie_okresowe(1,[](void* p){static_cast<PcmWindow*>(p)->feed();},window);
     (void)app.uruchom(*window);
     delete window;

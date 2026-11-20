@@ -4047,23 +4047,27 @@ static uint64_t obsluga_wywolan_systemowych_impl(
                 return 0;
 
             for (;;) {
+                asm volatile("cli" ::: "memory");
                 bws_zdarzenie zdarzenie{};
                 if (scheduler_pobierz_zdarzenie(aktualny_pid, &zdarzenie)) {
+                    asm volatile("sti" ::: "memory");
                     return skopiuj_do_przestrzeni_uzytkownika(
                                reinterpret_cast<void*>(arg1), &zdarzenie,
                                sizeof(zdarzenie)) ? 1ULL : 0ULL;
                 }
                 if (arg2 > 0 &&
-                    scheduler_zuzyj_wygasly_timeout_zdarzenia(aktualny_pid))
+                    scheduler_zuzyj_wygasly_timeout_zdarzenia(aktualny_pid)) {
+                    asm volatile("sti" ::: "memory");
                     return 2;
+                }
 
                 scheduler_czekaj_na_zdarzenie(aktualny_pid, arg2);
 
                 /* BWS38 jest istniejacym blokujacym waitem. Prywatny stos
                    jadra zachowuje rame SYSCALL, a standardowa rama IRQ
                    timera moze bezpiecznie zostac zapisana przez scheduler.
-                   Po wybudzeniu wracamy dokladnie za HLT i ponownie
-                   sprawdzamy kolejke/deadline. */
+                   CLI powyzej zamyka okno wybudzenia przed HLT, a STI przed
+                   powrotem przywraca normalny stan przerwan w Ring 0. */
                 asm volatile(
                     "sti\n\t"
                     "hlt\n\t"

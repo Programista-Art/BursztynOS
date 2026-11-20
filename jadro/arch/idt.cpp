@@ -979,7 +979,11 @@ extern "C" uint64_t WspolnaObslugaPrzerwan(
 
     extern volatile bool ekran_zajety;
     const bool pid_idle =
-        aktualny_pid == 0 && !__atomic_load_n(&ekran_zajety, __ATOMIC_ACQUIRE);
+        aktualny_pid == 0 && !__atomic_load_n(&ekran_zajety, __ATOMIC_ACQUIRE)
+#ifndef BURSZTYN_IDT_HOST_TEST
+        && !hda_blokada_aktywna() && !hda_pcm_pilny_w_toku()
+#endif
+        ;
 
     bool proces_juz_pusty = false;
     bool proces_blokuje_w_bws38 = false;

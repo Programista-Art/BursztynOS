@@ -52,6 +52,7 @@
 #include "jadro/arch/diag_opoznienia_irq.h"
 #include "jadro/dzwiek/mikser_pcm.h"
 #include "jadro/dzwiek/pcm_jadro.h"
+#include "jadro/dzwiek/pcm_sched_diag.h"
 #include "../czas/hpet.h"
 #include "pamiec.h"
 #include "pci.h"
@@ -661,6 +662,8 @@ void hda_odblokuj() {
 bool pcm_interest = false;
 uint64_t pcm_pending_ns = 0;
 uint64_t pcm_last_priority_request = 0;
+uint64_t pcm_last_priority_ns = 0;
+bool pcm_boost_w_toku = false;
 uint64_t pcm_guard_max_ns = 0;
 uint64_t pcm_guard_misses = 0;
 
@@ -2131,11 +2134,13 @@ HdaPcm::Ring pcm_ring;
 PcmJadro::Statystyki pcm_stats{};
 Pcm::Frame pcm_stage[HdaPcm::PERIOD_FRAMES];
 uint32_t pcm_clients = 0;
+uint32_t pcm_app_clients = 0;
 bool pcm_running = false;
 bool pcm_shutdown = false;
 bool pcm_retry = false;
 uint64_t pcm_idle_since = 0;
 uint64_t pcm_retry_ns = 0;
+uint64_t pcm_app_prime_since = 0;
 uint64_t pcm_recovery_since = 0;
 uint64_t pcm_watchdog_time = 0;
 uint64_t pcm_watchdog_irq_gap = 0;
@@ -2156,7 +2161,9 @@ PcmIrqTiming pcm_irq_timing{};
 void pcm_interest_set(bool active) {
     PcmCommitIrq commit;
     if (!active) {
+        pcm_app_prime_since = 0;
         __atomic_store_n(&pcm_pending_ns, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&pcm_boost_w_toku, false, __ATOMIC_RELEASE);
         pcm_irq_timing.last = pcm_irq_timing.last_gap = 0;
     }
     __atomic_store_n(&pcm_interest, active, __ATOMIC_RELEASE);
@@ -2250,12 +2257,14 @@ void pcm_trace_shortfall(PcmJadro::BrakPcm reason, uint64_t period, uint64_t pre
         pcm_ring.bytes, previous_bytes, pcm_ring.lpib, queue.minimum, queue.maximum,
         queue.expecting, missing, reason, start, s_glosnosc.wyciszony, staged, available
     };
+    PcmSchedDiag::record(PcmSchedDiag::Kind::HdaShortfall, pcm_ring.sampled_ns, 0,
+                         static_cast<uint32_t>(period), missing, static_cast<uint8_t>(reason));
 }
 
 void pcm_commit_mix(bool signal, uint64_t period, uint64_t previous_ns,
                     uint64_t previous_bytes, bool start) {
     const auto queue = pcm_mixer.queue_levels();
-    const auto missing = pcm_mixer.consume(HdaPcm::PERIOD_FRAMES);
+    const auto missing = pcm_mixer.consume(HdaPcm::PERIOD_FRAMES, czas_monotoniczny_ns());
     if (s_glosnosc.wyciszony) ++pcm_stats.okresy_master_mute;
     else if (!signal) ++pcm_stats.cisza_miksera;
     if (missing)
@@ -2491,6 +2500,8 @@ void pcm_recover(uint64_t now, HdaPcm::Fault fault) {
             };
         }
         pcm_recovery_since = irq_stop ? pcm_watchdog_time : now;
+        PcmSchedDiag::record(PcmSchedDiag::Kind::HdaRecovery, now, 0, cause,
+                             static_cast<uint32_t>((irq_stop ? pcm_watchdog_irq_gap : pcm_irq_timing.last_gap) / 1000ULL));
     }
     // No page can be cleared until STOP is confirmed. Retry on the next
     // scheduled turn after success; back off only if the device refused.
@@ -2674,14 +2685,28 @@ bool hda_pcm_praca_oczekuje() {
     return __atomic_load_n(&pcm_pending_ns, __ATOMIC_ACQUIRE) != 0;
 }
 
-// Called by scheduler with IF=0. At most one priority return per outstanding
-// request and no priority when PID0 is already the current task.
+bool hda_blokada_aktywna() {
+    return __atomic_load_n(&hda_blokada, __ATOMIC_ACQUIRE);
+}
+
+bool hda_pcm_pilny_w_toku() {
+    return __atomic_load_n(&pcm_boost_w_toku, __ATOMIC_ACQUIRE);
+}
+
+// Called by scheduler with IF=0. Rate-limits priority return to at most once
+// per 12 ms while a pending request remains unserviced, so a boosted PID0
+// that gets preempted or hits a busy lock can still be boosted again.
 bool hda_pcm_pilny_powrot_pid0() {
     const uint64_t pending = __atomic_load_n(&pcm_pending_ns, __ATOMIC_ACQUIRE);
-    if (!pending || pending == pcm_last_priority_request || !hpet_dostepny()) return false;
+    if (!pending || !hpet_dostepny()) return false;
     const uint64_t now = czas_monotoniczny_ns();
     if (now < pending || now - pending < 12000000ULL) return false;
+    if (pending == pcm_last_priority_request && now >= pcm_last_priority_ns &&
+        now - pcm_last_priority_ns < 12000000ULL)
+        return false;
     pcm_last_priority_request = pending;
+    pcm_last_priority_ns = now;
+    __atomic_store_n(&pcm_boost_w_toku, true, __ATOMIC_RELEASE);
     ++pcm_irq_timing.boosts;
     return true;
 }
@@ -2692,6 +2717,7 @@ void hda_obsluz_okresowo() {
     asm volatile("pushfq; popq %0" : "=r"(flags) :: "memory");
     if (!(flags & (1ULL << 9))) return;
 #endif
+    __atomic_store_n(&pcm_boost_w_toku, false, __ATOMIC_RELEASE);
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) {
         if (hda_pcm_praca_oczekuje()) __atomic_add_fetch(&pcm_stats.blokady_pracy, 1, __ATOMIC_RELAXED);
@@ -2710,6 +2736,10 @@ void hda_obsluz_okresowo() {
         ++pcm_stats.paczki_pracy;
         pcm_stats.suma_czekania_ns += wait;
         if (wait > pcm_stats.maks_czekanie_ns) pcm_stats.maks_czekanie_ns = wait;
+        if (wait >= PcmSchedDiag::LONG_SCHED_NS)
+            PcmSchedDiag::record(PcmSchedDiag::Kind::HdaWorkerLate, now, 0,
+                                 static_cast<uint32_t>(wait / 1000ULL),
+                                 static_cast<uint32_t>(pcm_stats.blokady_pracy));
     }
     const bool clock_ok = hpet_dostepny();
     const bool controller_ok = (mmio_odczytaj32(HDA_REG_GCTL) & HDA_GCTL_CRST) != 0;
@@ -2742,6 +2772,10 @@ void hda_obsluz_okresowo() {
             if (now >= pcm_retry_ns) pcm_recover(now, Fault::None);
             return;
         }
+        // Give a stream joining an active ring its full 2-period preroll grace
+        // before forcing promotion, so it does not count spurious starvation.
+        if (const uint32_t timed_out = pcm_mixer.promote_timed_out(now, 2 * HdaPcm::PERIOD_NS))
+            pcm_stats.start_przedwczesny += timed_out;
         if (!pcm_clients && !pcm_tone.handle && pcm_idle_since &&
             now - pcm_idle_since >= 256000000ULL) {
             if (pcm_stop_dma()) pcm_interest_set(false);
@@ -2762,10 +2796,38 @@ void hda_obsluz_okresowo() {
             ++pcm_stats.bledy_dma;
             pcm_recover(now, Fault::Device);
         }
-    } else if ((pcm_clients || pcm_tone.handle) && (pcm_retry || pcm_tone.frames_left || pcm_mixer.has_pcm()) &&
-               now >= pcm_retry_ns && !pcm_start_dma()) {
-        ++pcm_stats.bledy_dma;
-        pcm_recover(now, Fault::Start);
+    } else if (pcm_app_clients && !pcm_tone.frames_left) {
+        if (!pcm_mixer.has_pcm()) {
+            pcm_app_prime_since = 0;
+            return;
+        }
+        const auto queues = pcm_mixer.queue_levels();
+        const bool ready = pcm_mixer.has_ready_pcm() &&
+            (!queues.expecting || queues.minimum >= HdaPcm::PRIME * HdaPcm::PERIOD_FRAMES);
+        if (!ready) {
+            if (!pcm_app_prime_since) pcm_app_prime_since = now;
+            const uint64_t grace = (pcm_retry || queues.expecting > 1)
+                ? 2 * HdaPcm::PERIOD_NS : HdaPcm::PERIOD_NS;
+            if (now - pcm_app_prime_since < grace) return;
+            const uint32_t promoted = pcm_mixer.promote_all_nonempty();
+            if (promoted) pcm_stats.start_przedwczesny += promoted;
+            else ++pcm_stats.start_przedwczesny;
+        }
+        if (now >= pcm_retry_ns) {
+            if (!pcm_start_dma()) {
+                ++pcm_stats.bledy_dma;
+                pcm_recover(now, Fault::Start);
+            } else {
+                pcm_app_prime_since = 0;
+            }
+        }
+    } else {
+        if (!pcm_mixer.has_pcm() && !pcm_retry) pcm_app_prime_since = 0;
+        if ((pcm_clients || pcm_tone.handle) && (pcm_retry || pcm_tone.frames_left || pcm_mixer.has_pcm()) &&
+            now >= pcm_retry_ns && !pcm_start_dma()) {
+            ++pcm_stats.bledy_dma;
+            pcm_recover(now, Fault::Start);
+        }
     }
 }
 
@@ -3241,6 +3303,25 @@ bool slad_pcm(uint32_t index, SladPcm& out) {
 }
 
 #include "jadro/dzwiek/pcm_aplikacji.h"
+struct PcmFinalStats { Pcm::Owner owner; BwsPcmStats stats; };
+PcmFinalStats pcm_final_stats[Pcm::MAX_STREAMS]{};
+uint32_t pcm_final_count = 0;
+void pcm_fill_sched_stats(Pcm::Owner owner, BwsPcmStats& stats) {
+    PcmSchedDiag::PidStats sched{};
+    if (PcmSchedDiag::snapshot_pid(owner.pid, sched)) {
+        stats.max_runnable_wait_ns = sched.max_runnable_wait_ns;
+        stats.max_voluntary_wait_ns = sched.max_voluntary_wait_ns;
+        stats.max_exec_gap_ns = sched.max_exec_gap_ns;
+    }
+}
+void pcm_archive(Pcm::Owner owner, uint64_t handle) {
+    if (pcm_final_count == Pcm::MAX_STREAMS) return;
+    BwsPcmStats stats{};
+    if (pcm_mixer.statistics(owner, handle, stats) == Pcm::OK) {
+        pcm_fill_sched_stats(owner, stats);
+        pcm_final_stats[pcm_final_count++] = {owner, stats};
+    }
+}
 namespace PcmAplikacji {
 static int64_t result(Pcm::Result rc) {
     switch (rc) {
@@ -3259,20 +3340,39 @@ int64_t open(Pcm::Owner owner, const BwsPcmFormat& fmt) {
     if (!guard.aktywny()) return PCM_BUSY;
     if (!pcm_device_ready()) return PCM_DEVICE;
     uint64_t handle = 0;
-    const auto rc = pcm_mixer.open(owner, {fmt.rate, fmt.channels, fmt.encoding}, &handle);
+    const auto rc = pcm_mixer.open(owner, {fmt.rate, fmt.channels, fmt.encoding},
+                                   &handle, 2 * HdaPcm::PERIOD_FRAMES);
     if (rc != Pcm::OK) return result(rc);
     ++pcm_clients;
+    ++pcm_app_clients;
     ++pcm_stats.otwarcia_aplikacji;
+    PcmSchedDiag::track_pid(owner.pid);
     pcm_idle_since = 0;
     pcm_interest_set(true);
     return static_cast<int64_t>(handle);
 }
-int64_t write(Pcm::Owner owner, uint64_t handle, const int16_t* samples, uint32_t frames) {
+inline void pcm_notify_ready(uint64_t now) {
+    if (!pcm_running && pcm_mixer.has_ready_pcm()) {
+        uint64_t empty = 0;
+        (void)__atomic_compare_exchange_n(&pcm_pending_ns, &empty, now ? now : 1ULL,
+                                          false, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+    }
+}
+
+int64_t write(Pcm::Owner owner, uint64_t handle, const int16_t* samples, uint32_t frames, uint64_t copy_ns) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return PCM_BUSY;
     if (!pcm_device_ready()) return PCM_DEVICE;
     uint32_t accepted = 0;
-    const auto rc = pcm_mixer.write(owner, handle, samples, frames, &accepted);
+    const uint64_t now = czas_monotoniczny_ns();
+    const auto rc = pcm_mixer.write(owner, handle, samples, frames, &accepted, now);
+    if (rc == Pcm::OK) {
+        const uint64_t gap = pcm_mixer.write_timing(owner, handle, now, copy_ns);
+        if (gap >= PcmSchedDiag::LONG_WRITE_NS)
+            PcmSchedDiag::record(PcmSchedDiag::Kind::PcmWriteGap, now, owner.pid,
+                                 static_cast<uint32_t>(gap / 1000ULL), accepted);
+        pcm_notify_ready(now);
+    }
     return rc == Pcm::OK ? static_cast<int64_t>(accepted) : result(rc);
 }
 int64_t query(Pcm::Owner owner, uint64_t handle, BwsPcmState& state) {
@@ -3285,6 +3385,13 @@ int64_t query(Pcm::Owner owner, uint64_t handle, BwsPcmState& state) {
              status.volume, status.muted, status.channels, Pcm::RATE};
     return PCM_OK;
 }
+int64_t statistics(Pcm::Owner owner, uint64_t handle, BwsPcmStats& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    const auto rc = pcm_mixer.statistics(owner, handle, out);
+    if (rc == Pcm::OK) pcm_fill_sched_stats(owner, out);
+    return result(rc);
+}
 int64_t gain(Pcm::Owner owner, uint64_t handle, uint64_t volume, uint64_t mute) {
     if (volume > 100 || mute > 1) return PCM_INVALID;
     GuardHDA guard(HDA_TIMEOUT_LOCK);
@@ -3294,23 +3401,50 @@ int64_t gain(Pcm::Owner owner, uint64_t handle, uint64_t volume, uint64_t mute) 
 int64_t close(Pcm::Owner owner, uint64_t handle) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return PCM_BUSY;
+    pcm_archive(owner, handle);
     const auto rc = pcm_mixer.close(owner, handle);
-    if (rc == Pcm::OK && !--pcm_clients) pcm_idle_since = czas_monotoniczny_ns();
+    if (rc == Pcm::OK) {
+        if (pcm_app_clients) --pcm_app_clients;
+        if (!--pcm_clients) pcm_idle_since = czas_monotoniczny_ns();
+    }
     return result(rc);
 }
 int64_t finish(Pcm::Owner owner, uint64_t handle) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return PCM_BUSY;
-    return result(pcm_mixer.finish(owner, handle));
+    const auto rc = pcm_mixer.finish(owner, handle);
+    if (rc == Pcm::OK) pcm_notify_ready(czas_monotoniczny_ns());
+    return result(rc);
 }
 }
 extern "C" bool pcm_posprzataj_proces(uint32_t pid, uint64_t generation) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return false;
     const Pcm::Owner owner{pid, generation};
+    pcm_mixer.archive_owner(owner, [](Pcm::Owner o, uint64_t h) { pcm_archive(o, h); });
     const auto removed = pcm_mixer.cleanup(owner);
     pcm_clients -= removed;
+    if (removed <= pcm_app_clients) pcm_app_clients -= removed;
+    else pcm_app_clients = 0;
     pcm_stats.usuniete_przy_zakonczeniu += removed;
     if (!pcm_clients) pcm_idle_since = czas_monotoniczny_ns();
     return true;
+}
+
+
+extern "C" bool pcm_diag_stream(uint32_t pid, uint64_t generation, BwsPcmStats& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return false;
+    for (uint32_t i = 0; i < pcm_final_count; ++i)
+        if (pcm_final_stats[i].owner.pid == pid && pcm_final_stats[i].owner.generation == generation) {
+            out = pcm_final_stats[i].stats;
+            return true;
+        }
+    return false;
+}
+
+
+extern "C" bool pcm_diag_starvation(uint32_t index, Pcm::Starvation& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    return guard.aktywny() && pcm_mixer.starvation(index, out);
 }

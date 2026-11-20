@@ -2333,8 +2333,9 @@ void skladacz_obrazu_obsluz_dirty() {
         if(dirty_przecina_kursor)++cursor_reoverlay_after_dirty;
 #endif
     }
-    else for(uint32_t ri=0;ri<present_count;++ri){const auto& r=present_work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);}
+    else for(uint32_t ri=0;ri<present_count;++ri){const auto& r=present_work[ri];grafika_prezentuj_region(r.x,r.y,r.width,r.height);hda_wykonaj_zaplanowana_prace_odroczona();}
     grafika_zakoncz_scene();
+    hda_wykonaj_zaplanowana_prace_odroczona();
     /*
      * A scene generation advances only after the cursor-free scene has been
      * composed and submitted. CursorMotion alone never changes this value.

@@ -136,6 +136,8 @@ void hda_obsluz_okresowo();
 void hda_pcm_watchdog_irq(unsigned pid, bool ring0);
 bool hda_pcm_praca_oczekuje();
 bool hda_pcm_pilny_powrot_pid0();
+bool hda_pcm_pilny_w_toku();
+bool hda_blokada_aktywna();
 
 /* Transport wywoluje przed resetem kontrolera; zachowuje powod STOP. */
 void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);
