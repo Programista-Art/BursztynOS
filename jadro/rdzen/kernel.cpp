@@ -1,3 +1,4 @@
+#include "powiadomienia_jadra.h"
 #include "galeria_pak.h"
 #include "galeria_kopiowanie.h"
 extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
@@ -3025,6 +3026,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (diag_hda_ready) {
         wypisz_log(
             "[HDA] Karta HDA gotowa.");
+        powiadomienie_systemowe(BWS_POW_INFO, "Wykryto urządzenie dźwiękowe",
+                                "Kontroler HDA i wyjście audio są gotowe.");
 
         // Startup audio remains disabled until physical hardware retesting
         // confirms deadline maintenance and DMA stop/readback on Acer.

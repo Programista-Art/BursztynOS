@@ -310,9 +310,10 @@ int main() {
          for(int szer:{1280,640}){screen_w=szer;metryki_ekranu();
           przypisz_ikony_okien();rysuj();int poprz=-1,widoczne=0;
           for(uint32_t i=0;i<liczba_okien_taskbara;++i){int bx,by;if(!prostokat_przycisku_paska(i,&bx,&by))continue;++widoczne;
-             assert(bx+TASK_BUTTON_W<=poczatek_zegara()&&(poprz<0||bx==poprz+TASK_BUTTON_W+TASK_BUTTON_GAP));poprz=bx;}
-          // 1280: wszystkie 16 ikon (tytuly zajmowaly ~9); 640: tylko mieszczace sie przed zegarem.
-          if(szer==1280)assert(widoczne==int(liczba_okien_taskbara));else assert(widoczne>5&&widoczne<int(liczba_okien_taskbara));
+             assert(bx+TASK_BUTTON_W<=poczatek_zasobnika()&&poczatek_zasobnika()<=poczatek_zegara()&&(poprz<0||bx==poprz+TASK_BUTTON_W+TASK_BUTTON_GAP));poprz=bx;}
+          // 1280: wszystkie 16 ikon (tytuly zajmowaly ~9); 640: tylko mieszczace sie przed Bursztynowym Zasobnikiem
+          // (4 ikony stanu przed zegarem), reszta w menu przepelnienia.
+          if(szer==1280)assert(widoczne==int(liczba_okien_taskbara));else assert(widoczne>=3&&widoczne<int(liczba_okien_taskbara));
           for(int y=0;y<desktop_geometry.taskbar_y;y+=11)for(int x=0;x<1280;x+=11)assert(px(x,y)==0xABCDEF);}
          screen_w=1280;metryki_ekranu();rysuj();
          assert(ikona_okna_taskbara[1]==iH&&ikona_okna_taskbara[2]==iSn&&ikona_okna_taskbara[3]==iO);
@@ -388,7 +389,8 @@ int main() {
         int poprzednio_widocznych=-1;
         for(Tryb t:{Tryb{1024,768,100},Tryb{1280,720,100},Tryb{1366,768,100},Tryb{1920,1080,100},Tryb{1024,768,125},Tryb{1366,768,150},Tryb{1920,1080,200}}){
             screen_w=t.w;screen_h=t.h;ui_skala_procent=t.skala;metryki_ekranu();przypisz_ikony_okien();przelicz_uklad_paska();
-            const int zegar=poczatek_zegara();
+            const int zegar=poczatek_zasobnika();                         // przyciski okien koncza sie przed zasobnikiem
+            assert(zegar<poczatek_zegara()&&zasobnik&&zasobnik->uklad.liczba==4);   // zasobnik nie zaslania zegara
             int ile=uklad_paska.liczba_widocznych+uklad_paska.liczba_ukrytych;assert(ile==N);
             for(int k=0;k<uklad_paska.liczba_widocznych;++k){int bx,by;assert(prostokat_przycisku_paska(uklad_paska.widoczne[k],&bx,&by));
                 assert(bx+TASK_BUTTON_W<=zegar-TASK_BUTTON_GAP&&bx>=TASK_BUTTON_X);}
@@ -617,6 +619,90 @@ int main() {
         launched.clear();test_activated_window=0;test_running_executable=AppIdentity::Calendar;test_running_title="Kalendarz";
         obsluz_element_menu(23);assert(launched.empty()&&test_activated_window==42);   // jedna instancja: aktywacja
         test_running_executable=nullptr;
+    }
+    {   // ---- Bursztynowy Zasobnik: ikony przy zegarze, panele, wspolny routing popupow, dymki, zegar
+        static uint32_t zglos=60;static int zstan=0;
+        g_test_bws_hook=[](uint64_t nr,uint64_t a,uint64_t a2,uint64_t a3,uint64_t a4)->uint64_t{
+            if(nr==BWS_ZASOBNIK_STAN){++zstan;if(a3!=BWS_ZASOBNIK_V1||a2<sizeof(BwsZasobnikStanV1))return BWS_ZAS_ZLY_BUFOR;
+                BwsZasobnikStanV1 s{};s.wersja=uint32_t(BWS_ZASOBNIK_V1);s.rozmiar=sizeof(s);
+                s.dzwiek.flagi=BWS_DZW_URZADZENIE|BWS_DZW_REGULACJA|BWS_DZW_WYCISZANIE;s.dzwiek.glosnosc=zglos;s.dzwiek.backend=BWS_DZW_BACKEND_WZMACNIACZ;
+                memcpy(reinterpret_cast<void*>(a),&s,sizeof s);return BWS_ZAS_OK;}
+            if(nr==BWS_ZASOBNIK_POLECENIE&&a==BWS_ZAS_POL_GLOSNOSC&&a2<=100){zglos=uint32_t(a2);return BWS_ZAS_OK;}
+            if(nr==BWS_POWIADOMIENIA&&a==BWS_POW_POL_POBIERZ){BwsPowiadomieniaListaV1 l{};l.wersja=uint32_t(BWS_ZASOBNIK_V1);l.rozmiar=sizeof l;
+                memcpy(reinterpret_cast<void*>(a2),&l,sizeof l);return BWS_ZAS_OK;}
+            return launch_hook(nr,a,a2,a3,a4);};
+        screen_w=1280;screen_h=720;ui_skala_procent=100;metryki_ekranu();
+        CzasLokalny::wypelnij(test_czas,2026,11,19,10,15,0,BWS_CZAS_STREFA_CET);test_czas_ok=true;
+        assert(zasobnik&&!zasobnik_otwarty());
+        test_monotonic_ns+=10000000000ULL;odswiez_zasobnik(test_monotonic_ns);
+        assert(zstan==1&&!strcmp(zasobnik->rejestr.znajdz(Zasobnik::Id::Dzwiek)->dymek,"Głośność: 60 %"));
+        odswiez_zasobnik(test_monotonic_ns+500000000ULL);assert(zstan==1);                // co 2 s, nie przy kazdym zdarzeniu
+        // obszar: tuz przed zegarem, przyciski okien koncza sie przed nim, zegar odsloniety
+        assert(zasobnik->uklad.liczba==4&&zasobnik->uklad.obszar.prawy()==poczatek_zegara());
+        assert(metryki_paska().koniec_x==poczatek_zasobnika()-TASK_BUTTON_GAP);
+        const uint64_t rys=zasobnik->powierzchnia.rysowan();RysujTaskbar();assert(zasobnik->powierzchnia.rysowan()==rys+1);   // w klatce paska
+        auto ikona=[](Zasobnik::Id id){return zasobnik->uklad.prostokat(id);};
+        auto zdz=[](uint32_t typ,int x,int y){bws_zdarzenie e{};e.typ=typ;e.x=x;e.y=y;return e;};
+        const auto ig=ikona(Zasobnik::Id::Dzwiek);
+        // klik ikony: panel Głośność; inny popup WM (dymki wstrzymane)
+        obsluz_klikniecie(ig.x+ig.szerokosc/2,ig.y+ig.wysokosc/2);
+        assert(zasobnik_otwarty()&&zasobnik->aktywny()==Zasobnik::Id::Dzwiek&&inny_popup_wm_otwarty()&&!kalendarz_paska_otwarty());
+        auto* pg=static_cast<Zasobnik::PanelGlosnosci*>(zasobnik->panel(Zasobnik::Id::Dzwiek));
+        assert(pg->obszar().dolny()<=desktop_geometry.taskbar_y&&pg->obszar().prawy()<=screen_w&&pg->suwak()->wartosc()==60);
+        pg->suwak()->ustaw_wartosc(25);assert(zglos==25&&!strcmp(zasobnik->rejestr.znajdz(Zasobnik::Id::Dzwiek)->dymek,"Głośność: 25 %"));
+        // TIMER przy otwartym panelu nie konczy iteracji petli: zegar paska dalej sie aktualizuje
+        {bws_zdarzenie t=zdz(BWS_ZDARZENIE_TIMER,0,0);assert(!popup_konczy_obsluge(obsluz_zasobnika(t),t.typ)&&zasobnik_otwarty());}
+        {bws_zdarzenie m=zdz(BWS_ZDARZENIE_MYSZ_RUCH,pg->obszar().x+4,pg->obszar().y+4);assert(popup_konczy_obsluge(obsluz_zasobnika(m),m.typ));}
+        // klik zegara przy otwartym panelu: panel zamkniety, klik przechodzi - kalendarz otwiera sie od razu
+        const auto zb=taskbar_clock->bounds;
+        {bws_zdarzenie k=zdz(BWS_ZDARZENIE_MYSZ_DOWN,zb.x+5,zb.y+5);assert(!obsluz_zasobnika(k)&&!zasobnik_otwarty());obsluz_klikniecie(k.x,k.y);}
+        assert(kalendarz_paska_otwarty());
+        // klik ikony zasobnika przy otwartym kalendarzu: kalendarz zamkniety, panel otwarty (jeden klik)
+        {bws_zdarzenie k=zdz(BWS_ZDARZENIE_MYSZ_DOWN,ig.x+3,ig.y+3);assert(!obsluz_kalendarz_paska(k)&&!kalendarz_paska_otwarty());obsluz_klikniecie(k.x,k.y);}
+        assert(zasobnik_otwarty()&&!taskbar_clock->active());
+        // ponowny klik tej samej ikony: pochloniety, panel zamkniety (bez ponownego otwarcia)
+        {bws_zdarzenie k=zdz(BWS_ZDARZENIE_MYSZ_DOWN,ig.x+3,ig.y+3);assert(obsluz_zasobnika(k)&&!zasobnik_otwarty());}
+        // przelaczanie paneli: inna ikona zamyka poprzedni i otwiera swoj
+        const auto isi=ikona(Zasobnik::Id::Siec),ip=ikona(Zasobnik::Id::Powiadomienia);
+        obsluz_klikniecie(isi.x+3,isi.y+3);assert(zasobnik->aktywny()==Zasobnik::Id::Siec);
+        {bws_zdarzenie k=zdz(BWS_ZDARZENIE_MYSZ_DOWN,ip.x+3,ip.y+3);assert(!obsluz_zasobnika(k));obsluz_klikniecie(k.x,k.y);}
+        assert(zasobnik->aktywny()==Zasobnik::Id::Powiadomienia&&!zasobnik->panel(Zasobnik::Id::Siec)->czy_otwarta());
+        // przycisk Start: panel zamkniety, menu otwarte jednym klikiem
+        {bws_zdarzenie k=zdz(BWS_ZDARZENIE_MYSZ_DOWN,PRZYCISK_MENU_X+5,przycisk_menu_y()+5);assert(!obsluz_zasobnika(k)&&!zasobnik_otwarty());
+         obsluz_klikniecie(k.x,k.y);assert(menu_start_otwarte);}
+        obsluz_klikniecie(ig.x+3,ig.y+3);assert(zasobnik_otwarty()&&!menu_start_otwarte);   // panel zamyka menu Start
+        przelacz_kalendarz_paska();assert(kalendarz_paska_otwarty()&&!zasobnik_otwarty());    // kalendarz zamyka panel
+        zamknij_kalendarz_paska();
+        obsluz_klikniecie(ig.x+3,ig.y+3);przelacz_menu_przepelnienia();assert(!zasobnik_otwarty());   // menu przepelnienia tez
+        // Escape i utrata fokusu
+        obsluz_klikniecie(ig.x+3,ig.y+3);
+        {bws_zdarzenie e{};e.typ=BWS_ZDARZENIE_KLAWISZ_FIZYCZNY;e.kod=BWS_KEY_SOURCE_USB|41;e.x=1;assert(obsluz_zasobnika(e)&&!zasobnik_otwarty());}
+        // dymek ikony: ten sam automat i opoznienie co przyciski okien, tekst z rejestru
+        auto tick=[&](uint64_t ms){test_monotonic_ns+=ms*1000000ULL;obsluz_termin_dymka(test_monotonic_ns);};
+        test_dymek_otwarty=false;aktualizuj_hover_paska(ig.x+4,ig.y+4);tick(300);assert(!test_dymek_otwarty);
+        tick(350);assert(test_dymek_otwarty&&!strcmp(tekst_dymka,"Głośność: 25 %"));
+        assert(test_dymek_rect[1]+test_dymek_rect[3]<=desktop_geometry.taskbar_y&&test_dymek_rect[0]+test_dymek_rect[2]<=screen_w);
+        aktualizuj_hover_paska(10,10);assert(!test_dymek_otwarty);
+        po_zmianie_okien_paska();                                                            // klucz zasobnika to nie okno
+        obsluz_klikniecie(ig.x+3,ig.y+3);aktualizuj_hover_paska(ip.x+4,ip.y+4);tick(700);assert(!test_dymek_otwarty);   // przy panelu: bez dymka
+        zamknij_zasobnik();
+        // rozdzielczosci i skale: przy zegarze, nie na nim; panel w ekranie nad paskiem
+        struct T{int w,h;uint32_t s;};
+        for(T t:{T{800,600,100},T{1024,768,125},T{1366,768,100},T{1920,1080,150},T{1920,1080,200},T{640,480,100}}){
+            screen_w=t.w;screen_h=t.h;ui_skala_procent=t.s;metryki_ekranu();
+            assert(zasobnik->uklad.liczba>=1&&zasobnik->uklad.obszar.prawy()==poczatek_zegara());
+            assert(zasobnik->uklad.prostokat(Zasobnik::Id::SzybkieUstawienia).szerokosc>0);       // centrum zawsze widoczne
+            for(int i=0;i<zasobnik->uklad.liczba;++i){const auto b=zasobnik->uklad.prostokaty[i];
+                assert(b.x>=TASK_BUTTON_X&&b.prawy()<=poczatek_zegara()&&b.y>=desktop_geometry.taskbar_y);
+                obsluz_klikniecie(b.x+2,b.y+2);assert(zasobnik_otwarty());
+                const auto q=zasobnik->panel(zasobnik->uklad.sloty[i])->obszar();
+                assert(q.x>=0&&q.prawy()<=screen_w&&q.y>=0&&q.dolny()<=desktop_geometry.taskbar_y);
+                zamknij_zasobnik();}
+        }
+        screen_w=1280;screen_h=720;ui_skala_procent=100;metryki_ekranu();
+        // zmiana ekranu i BLUR zamykaja panel (jak kalendarz)
+        obsluz_klikniecie(ig.x+3,ig.y+3);assert(zasobnik_otwarty());zamknij_zasobnik();assert(!zasobnik_otwarty());
+        g_test_bws_hook=launch_hook;
     }
     printf("WM routing %u/%u PASS: ",checks,checks);puts("WM click routing passed: desktop, Start, launch, client PID, titlebar, close region, transparency, z-order, popup owner, theme and redraw");
 }

@@ -9,22 +9,14 @@
  */
 #include "plik_popup_ui.h"
 #include "bursztyn_ui/kalendarz.h"
+#include "zasobnik.h"
 
 namespace KalendarzPaska {
 using namespace BursztynUI;
 
-/* Polozenie panelu: nad paskiem zadan, prawa krawedz przy prawej krawedzi zegara, w granicach ekranu. */
+/* Polozenie panelu: wspolne z panelami Bursztynowego Zasobnika (nad paskiem, przy prawej krawedzi zegara). */
 inline Prostokat polozenie(Prostokat zegar, int ekran_w, int pasek_y, int szer, int wys, int margines, int odstep) {
-    if (szer > ekran_w - 2 * margines) szer = ekran_w - 2 * margines;
-    if (szer < 1) szer = 1;
-    if (wys > pasek_y - margines - odstep) wys = pasek_y - margines - odstep;   // niski ekran: panel krotszy, nie na pasku
-    if (wys < 1) wys = 1;
-    int x = zegar.prawy() - szer;
-    if (x > ekran_w - margines - szer) x = ekran_w - margines - szer;
-    if (x < margines) x = margines;
-    int y = pasek_y - odstep - wys;            // nad paskiem: zegar pozostaje odsloniety
-    if (y < margines) y = margines;
-    return {x, y, szer, wys};
+    return Zasobnik::polozenie_panelu(zegar, ekran_w, pasek_y, szer, wys, margines, odstep);
 }
 
 class Surface : public PowierzchniaPopup {

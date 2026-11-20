@@ -50,6 +50,7 @@
 #include "hda_transport.h"
 #include "hda_diag.h"
 #include "hda_quirks.h"
+#include "hda_glosnosc.h"
 #include "../czas/hpet.h"
 #include "pamiec.h"
 #include "pci.h"
@@ -554,6 +555,10 @@ bool hda_gotowy =
 
 bool hda_blokada =
     false;
+
+/* Glosnosc systemowa (hda_glosnosc.h): wzmacniacz aktywnej trasy i stan poziomu/wyciszenia. */
+HdaGlosnosc::Wzmacniacz s_wzmacniacz{};
+HdaGlosnosc::Stan s_glosnosc{};
 
 HdaDiagSciezka s_aktywna_sciezka{};
 bool s_sciezka_skonfigurowana = false;
@@ -1342,11 +1347,11 @@ bool konfiguruj_kodek_qemu() {
     /*
      * Unmute output amplifier convertera.
      */
-    const uint16_t amp_payload =
-        HDA_AMP_SET_OUTPUT |
-        HDA_AMP_SET_LEFT |
-        HDA_AMP_SET_RIGHT |
-        QEMU_HDA_GAIN;
+    HdaGlosnosc::Wzmacniacz wzm{};
+    wzm.jest = true; wzm.cad = hda_codec_addr; wzm.nid = QEMU_NID_DAC;
+    wzm.caps = HdaGlosnosc::QEMU_AMP_CAPS; wzm.gain_ref = static_cast<uint8_t>(QEMU_HDA_GAIN & 0x7F);
+    s_wzmacniacz = wzm;                         // 100 % = dotychczasowe 0x4A
+    const uint16_t amp_payload = HdaGlosnosc::payload(wzm, s_glosnosc);
 
     if (!wyslij_immediate(
             verb4(
@@ -1500,7 +1505,9 @@ bool konfiguruj_trase_audio(
         return false;
     }
 
-    // 4. Wzmacniacze: Unmute i bezpieczny gain wzdluz calej aktywnej trasy
+    // 4. Wzmacniacze: Unmute i bezpieczny gain wzdluz calej aktywnej trasy. Pierwszy regulowany wzmacniacz
+    //    wyjsciowy (od konwertera) jest kontrolka glosnosci systemowej: jego bezpieczny gain = 100 %.
+    HdaGlosnosc::Wzmacniacz wzm{};
     for (uint8_t h = 0; h < sciezka.dlugosc; ++h) {
         const uint8_t nid = sciezka.nids[h];
         const auto* w = znajdz_widget_w_snapshot(snap, k, cad, fg_nid, nid);
@@ -1519,8 +1526,12 @@ bool konfiguruj_trase_audio(
                     gain = static_cast<uint8_t>(QEMU_HDA_GAIN & 0x7F);
                 }
             }
-            const uint16_t amp_out =
-                HDA_AMP_SET_OUTPUT | HDA_AMP_SET_LEFT | HDA_AMP_SET_RIGHT | (gain & 0x7F);
+            uint16_t amp_out = HdaGlosnosc::payload_staly(gain);
+            if (!wzm.jest && HdaGlosnosc::kroki(caps) > 0 && (gain & 0x7F) > 0) {
+                wzm.jest = true; wzm.cad = cad; wzm.nid = nid; wzm.caps = caps;
+                wzm.gain_ref = static_cast<uint8_t>(gain & 0x7F);
+                amp_out = HdaGlosnosc::payload(wzm, s_glosnosc);
+            }
             (void)wyslij_immediate(
                 verb4(cad, nid, HDA_VERB4_SET_AMP_GAIN_MUTE, amp_out),
                 &resp);
@@ -1548,6 +1559,8 @@ bool konfiguruj_trase_audio(
             }
         }
     }
+
+    s_wzmacniacz = wzm;                         // brak regulowanego wzmacniacza = backend programowy (PCM)
 
     // 5. Pin Widget Control dla pinu glosnika/wyjscia
     const uint8_t pin_nid = sciezka.pin_nid ? sciezka.pin_nid : sciezka.nids[sciezka.dlugosc - 1];
@@ -2020,24 +2033,8 @@ int16_t probka_trojkatna(
          3) /
         4;
 
-    if (v >
-        32767) {
-
-        v =
-            32767;
-    }
-
-    if (v <
-        -32768) {
-
-        v =
-            -32768;
-    }
-
-    return
-        static_cast<int16_t>(
-            v
-        );
+    /* Jedyne miejsce tworzenia probek PCM: programowa glosnosc tylko bez regulowanego wzmacniacza kodeka. */
+    return HdaGlosnosc::skaluj_probke(v, s_glosnosc, !s_wzmacniacz.regulowany());
 }
 
 bool przygotuj_okres_tonu(
@@ -3312,3 +3309,65 @@ bool hda_wew_send_verb_readonly(
 
 
 uint32_t hda_wew_kontroler_odtwarzania() { return hda_kontroler_odtwarzania; }
+
+/* =========================================================================
+ * 25. GLOSNOSC SYSTEMOWA (Bursztynowy Zasobnik, BWS 107/108)
+ * ========================================================================= */
+
+void hda_glosnosc_info(HdaGlosnoscInfo* out) {
+    if (!out) return;
+    *out = HdaGlosnoscInfo{};
+    out->procent = s_glosnosc.procent;
+    out->wyciszony = s_glosnosc.wyciszony;
+    out->generacja = s_glosnosc.generacja;
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return;
+    out->urzadzenie = true;
+    out->odtwarza = __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE);
+    if (s_wzmacniacz.regulowany()) {
+        out->backend = HDA_GLOSNOSC_WZMACNIACZ;
+        out->wyciszanie = s_wzmacniacz.wyciszanie();
+        out->kodek = s_wzmacniacz.cad; out->wezel = s_wzmacniacz.nid;
+        out->kroki = HdaGlosnosc::kroki(s_wzmacniacz.caps);
+    } else {
+        out->backend = HDA_GLOSNOSC_PCM;
+        out->wyciszanie = true;                  // cisza w generatorze + zatrzymanie biezacego strumienia
+    }
+    out->cel = s_sciezka_skonfigurowana ? s_aktywna_sciezka.cel : 0;
+    HdaDiagKontroler k{};
+    if (hda_kontroler_odtwarzania != UINT32_MAX && hda_transport_stan(hda_kontroler_odtwarzania, &k)) {
+        out->pci_vendor = k.vendor_id; out->pci_device = k.device_id;
+    }
+}
+
+namespace {
+/* Nowy stan: zapis do wzmacniacza (backend 1) albo tylko do generatora (backend 2). Blad sprzetu = stan bez zmian. */
+uint32_t hda_glosnosc_zastosuj(const HdaGlosnosc::Stan& nowy) {
+    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return HDA_GLOSNOSC_NIEOBSLUGIWANE;
+    if (s_wzmacniacz.regulowany()) {
+        if (nowy.wyciszony && !s_wzmacniacz.wyciszanie()) return HDA_GLOSNOSC_NIEOBSLUGIWANE;
+        uint32_t resp = 0;
+        if (!wyslij_immediate(verb4(s_wzmacniacz.cad, s_wzmacniacz.nid, HDA_VERB4_SET_AMP_GAIN_MUTE,
+                                    HdaGlosnosc::payload(s_wzmacniacz, nowy)), &resp))
+            return HDA_GLOSNOSC_ZAJETE;
+        s_glosnosc.procent = nowy.procent; s_glosnosc.wyciszony = nowy.wyciszony;
+    } else {
+        s_glosnosc.procent = nowy.procent; s_glosnosc.wyciszony = nowy.wyciszony;
+        if (nowy.wyciszony || nowy.procent == 0) hda_zatrzymaj_ton();   // biezacy bufor juz wygenerowany: cisza = stop
+    }
+    ++s_glosnosc.generacja;
+    return HDA_GLOSNOSC_OK;
+}
+}  // namespace
+
+uint32_t hda_glosnosc_ustaw(uint32_t procent) {
+    if (procent > 100U) return HDA_GLOSNOSC_ZLE_ARGUMENTY;
+    HdaGlosnosc::Stan n = s_glosnosc;
+    n.procent = procent;
+    return hda_glosnosc_zastosuj(n);
+}
+
+uint32_t hda_wyciszenie_ustaw(bool wyciszony) {
+    HdaGlosnosc::Stan n = s_glosnosc;
+    n.wyciszony = wyciszony;
+    return hda_glosnosc_zastosuj(n);
+}

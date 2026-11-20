@@ -1,3 +1,4 @@
+#include "powiadomienia_jadra.h"
 #include "jadro/gui/display_mode_policy.h"
 #include "jadro/gui/graphics_perf.h"
 /*
@@ -309,6 +310,8 @@ static void virtio_gpu_permanent_failure_locked(VirtioGpuDriver* drv, const char
         log_append_str(buf, sizeof(buf), pos, " cmd=");
         log_append_str(buf, sizeof(buf), pos, virtio_gpu_cmd_name(drv->pending_cmd_type));
         gpu_klog(buf);
+        powiadomienie_systemowe(BWS_POW_BLAD, "Awaria karty graficznej",
+                                "VirtIO-GPU zgłosił trwały błąd.");
     }
     drv->cmd_state = VIRTIO_GPU_CMD_PERMANENT_FAILURE;
     drv->permanent_failure_reason = reason;

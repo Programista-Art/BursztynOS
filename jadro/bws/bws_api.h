@@ -153,7 +153,13 @@ enum BwsNumer : uint64_t {
      * wersja) skumulowane liczniki plikow i sieci kazdej generacji procesu. Tylko odczyt. */
     BWS_URZADZENIA_TELEMETRIA = 105,
     BWS_PROCESY_IO = 106,
-    BWS_PIERWSZY_WOLNY = 107
+    /* Bursztynowy Zasobnik (jadro/bws/zasobnik_api.h, docs/bursztynowy-zasobnik.md). 107: (bufor*, rozmiar, wersja)
+     * migawka stanu; 108: (polecenie, wartosc) glosnosc/wyciszenie/powiadomienia - oba tylko Menedzer Okien.
+     * 109: (polecenie, bufor*, rozmiar) POBIERZ (Menedzer Okien) albo ZGLOS (PRAWO_GUI, limit, nadawca z jadra). */
+    BWS_ZASOBNIK_STAN = 107,
+    BWS_ZASOBNIK_POLECENIE = 108,
+    BWS_POWIADOMIENIA = 109,
+    BWS_PIERWSZY_WOLNY = 110
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

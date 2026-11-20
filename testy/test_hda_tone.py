@@ -11,6 +11,7 @@ subprocess.run([
     'g++', '-std=c++17', '-O1', '-g', '-Wall', '-Wextra',
     '-fno-omit-frame-pointer', '-fno-pie', '-no-pie',
     '-DBURSZTYN_HDA_HOST_TEST', '-fsanitize=address,undefined',
+    '-I.', '-Isterowniki', '-Isterowniki/czas', '-Isterowniki/pci', '-Ijadro/mm', '-Ijadro/arch', '-Ijadro/rdzen',
     '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
     'testy/test_hda_tone.cpp', '-o', str(OUT / 'tone'),
 ], cwd=ROOT, check=True)

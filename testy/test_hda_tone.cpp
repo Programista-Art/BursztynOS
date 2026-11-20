@@ -16,6 +16,9 @@ uint64_t now_ns;
 bool clock_ready;
 bool refuse_stop;
 uint32_t verbs;
+uint32_t ostatni_verb;
+bool transport_zajety;
+uint32_t amp_verbs;
 unsigned stop_failure_logs;
 unsigned checks, scenarios;
 constexpr uint32_t SD = 0x100; // ISS=4: first output descriptor, never SD0
@@ -35,6 +38,9 @@ void reset() {
     clock_ready = true;
     refuse_stop = false;
     verbs = 0;
+    ostatni_verb = 0; transport_zajety = false; amp_verbs = 0;
+    s_wzmacniacz = HdaGlosnosc::Wzmacniacz{};
+    s_glosnosc = HdaGlosnosc::Stan{};
     stop_failure_logs = 0;
     hda_mmio_base = reinterpret_cast<uint64_t>(registers);
     hda_stream_base = hda_mmio_base + SD;
@@ -91,7 +97,13 @@ uint64_t czas_monotoniczny_ns() { return now_ns; }
 void* FizycznyZakresDoWirtualnego(uint64_t physical, size_t) { return reinterpret_cast<void*>(physical); }
 bool CzyZakresWMapowaniuFizycznym(uint64_t, size_t) { return true; }
 const HdaDiagSnapshot* hda_diag_pobierz_opublikowana(uint32_t*) { return nullptr; }
-HdaTransportStatus hda_transport_zglos(uint32_t, uint32_t, uint32_t) { ++verbs; return HDA_TRANSPORT_PENDING; }
+HdaTransportStatus hda_transport_zglos(uint32_t, uint32_t, uint32_t cmd) {
+    if (transport_zajety) return HDA_TRANSPORT_BUSY;
+    ++verbs; ostatni_verb = cmd;
+    if (((cmd >> 16) & 0xF) == 0x3) ++amp_verbs;          // SET_AMP_GAIN_MUTE (verb 4-bitowy 0x3)
+    return HDA_TRANSPORT_PENDING;
+}
+bool hda_transport_stan(uint32_t, HdaDiagKontroler* k) { if (!k) return false; *k = HdaDiagKontroler{}; k->vendor_id = 0x8086; k->device_id = 0x2668; return true; }
 HdaTransportStatus hda_transport_krok(uint32_t, uint32_t) { return HDA_TRANSPORT_SUCCESS; }
 HdaTransportStatus hda_transport_odbierz(uint32_t, uint32_t, uint32_t* response) { *response = 0; return HDA_TRANSPORT_SUCCESS; }
 void hda_transport_anuluj(uint32_t, uint32_t) {}
@@ -173,5 +185,59 @@ int main() {
     CHECK(!hda_test_ton(440, 500)); CHECK(!run()); CHECK(verbs == 0);
     HdaWewSciezkaTestu route{}; hda_wew_pobierz_sciezke_testu(&route);
     CHECK(route.konwerter_nid == 0); CHECK(route.pin_nid == 0);
+    // ---- Glosnosc systemowa (Bursztynowy Zasobnik): prawdziwe verby wzmacniacza, stan tylko po zapisie do sprzetu
+    {
+        reset();
+        HdaGlosnoscInfo info{};
+        CHECK(konfiguruj_kodek_qemu());                                   // potwierdzony kodek QEMU: DAC NID 2, 0x4A
+        CHECK(s_wzmacniacz.regulowany() && s_wzmacniacz.nid == QEMU_NID_DAC && amp_verbs == 1);
+        hda_glosnosc_info(&info);
+        CHECK(info.urzadzenie && info.backend == HDA_GLOSNOSC_WZMACNIACZ && info.wyciszanie && info.procent == 100 && info.kroki == 0x4A);
+        CHECK(info.pci_vendor == 0x8086 && info.pci_device == 0x2668);
+        const uint32_t g0 = info.generacja;
+        auto amp = [](uint32_t payload) { return (uint32_t(QEMU_NID_DAC) << 20) | (0x3U << 16) | payload; };
+        CHECK(hda_glosnosc_ustaw(40) == HDA_GLOSNOSC_OK && ostatni_verb == amp(HdaGlosnosc::AMP_OUT_LR | 30));
+        hda_glosnosc_info(&info); CHECK(info.procent == 40 && info.generacja == g0 + 1);
+        CHECK(hda_wyciszenie_ustaw(true) == HDA_GLOSNOSC_OK && ostatni_verb == amp(HdaGlosnosc::AMP_OUT_LR | HdaGlosnosc::AMP_MUTE | 30));
+        hda_glosnosc_info(&info); CHECK(info.wyciszony && info.procent == 40);
+        CHECK(hda_wyciszenie_ustaw(false) == HDA_GLOSNOSC_OK && ostatni_verb == amp(HdaGlosnosc::AMP_OUT_LR | 30));   // poprzedni poziom
+        CHECK(hda_glosnosc_ustaw(0) == HDA_GLOSNOSC_OK && ostatni_verb == amp(HdaGlosnosc::AMP_OUT_LR | HdaGlosnosc::AMP_MUTE));
+        CHECK(hda_glosnosc_ustaw(101) == HDA_GLOSNOSC_ZLE_ARGUMENTY);
+        // zajety transport: ZAJETE, stan i generacja bez zmian (nigdy "udane" bez zapisu)
+        CHECK(hda_glosnosc_ustaw(70) == HDA_GLOSNOSC_OK);
+        transport_zajety = true;
+        hda_glosnosc_info(&info); const uint32_t g1 = info.generacja;
+        CHECK(hda_glosnosc_ustaw(20) == HDA_GLOSNOSC_ZAJETE && hda_wyciszenie_ustaw(true) == HDA_GLOSNOSC_ZAJETE);
+        hda_glosnosc_info(&info); CHECK(info.procent == 70 && !info.wyciszony && info.generacja == g1);
+        transport_zajety = false;
+        // ponowna konfiguracja trasy (np. przed tonem) zachowuje poziom uzytkownika
+        CHECK(konfiguruj_kodek_qemu());
+        CHECK(s_glosnosc.procent == 70);
+        // ton odtwarza sie przy dowolnym poziomie (sprzetowy backend: probki bez zmian)
+        const int16_t pelna = probka_trojkatna(6000);
+        CHECK(hda_test_ton(440, 500) && run()); hda_stop();
+        // wyciszenie sprzetowe nie zatrzymuje strumienia (bit Mute wzmacniacza), odciszenie wraca do poziomu
+        CHECK(hda_test_ton(440, 500) && run());
+        CHECK(hda_wyciszenie_ustaw(true) == HDA_GLOSNOSC_OK && run() && (ostatni_verb & HdaGlosnosc::AMP_MUTE));
+        CHECK(hda_wyciszenie_ustaw(false) == HDA_GLOSNOSC_OK && !(ostatni_verb & HdaGlosnosc::AMP_MUTE));
+        hda_stop();
+        // brak urzadzenia
+        hda_gotowy = false;
+        CHECK(hda_glosnosc_ustaw(50) == HDA_GLOSNOSC_NIEOBSLUGIWANE);
+        hda_glosnosc_info(&info); CHECK(!info.urzadzenie && info.backend == HDA_GLOSNOSC_BRAK);
+        hda_gotowy = true;
+        // trasa bez regulowanego wzmacniacza: programowe wzmocnienie w generatorze, bez verbow
+        s_wzmacniacz = HdaGlosnosc::Wzmacniacz{};
+        const uint32_t v = verbs;
+        CHECK(hda_glosnosc_ustaw(50) == HDA_GLOSNOSC_OK && verbs == v);
+        hda_glosnosc_info(&info); CHECK(info.backend == HDA_GLOSNOSC_PCM && info.procent == 50);
+        const int16_t polowa = probka_trojkatna(6000);
+        CHECK(pelna > 1000 && (polowa == pelna / 2 || polowa == (pelna - 1) / 2 + (pelna & 1)));
+        // biezacy strumien: trasa konfiguruje sie przy starcie (tu z wzmacniaczem QEMU), potem symulujemy trase bez niego
+        CHECK(hda_test_ton(440, 500) && run());
+        s_wzmacniacz = HdaGlosnosc::Wzmacniacz{};
+        CHECK(hda_wyciszenie_ustaw(true) == HDA_GLOSNOSC_OK && !run());   // cisza = biezacy strumien zatrzymany
+        CHECK(probka_trojkatna(6000) == 0);
+    }
     std::printf("HDA production tone: %u scenarios, %u checks PASS (ASan/UBSan; real driver, modeled MMIO)\n", scenarios, checks);
 }

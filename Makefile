@@ -1208,7 +1208,7 @@ repro_blob.o: repro_tmp.o $(BSF_APP_GUI) programy/repro/repro_linker.ld
 # 16. MENEDZER OKIEN .bur
 # ============================================================================
 
-menedzer_okien_tmp.o: programy/menedzer_okien/menedzer_okien.cpp jadro/gui/desktop_entries.h jadro/gui/desktop_layout_settings.h jadro/gui/desktop_layout.h jadro/gui/bursztyn_gui.h jadro/gui/ui_skala.h jadro/gui/pulpit_geometria.h obrazy/png_dekoder.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h $(wildcard bursztyn_ui/*.h)
+menedzer_okien_tmp.o: programy/menedzer_okien/menedzer_okien.cpp jadro/gui/desktop_entries.h jadro/gui/desktop_layout_settings.h jadro/gui/desktop_layout.h jadro/gui/bursztyn_gui.h jadro/gui/ui_skala.h jadro/gui/pulpit_geometria.h obrazy/png_dekoder.h jadro/gui/plik_popup_ui.h jadro/gui/plik_operacje_ui.h jadro/gui/zasobnik.h jadro/gui/zasobnik_panele.h jadro/bws/zasobnik_api.h $(wildcard bursztyn_ui/*.h)
 	$(CXX) $(RING3_FLAGS) -I. -DBSF_PROFILE=$(BSF_PROFILE) -Os -fstack-usage -c $< -o $@
 
 menedzer_okien_blob.o: menedzer_okien_tmp.o bursztyn_gui.o ikona_png_ring3.o image_png_ring3.o btp_ring3.o $(MENEDZER_OKIEN_LINKER)
@@ -2545,7 +2545,14 @@ kalendarz_blob.o: kalendarz_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_li
 
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).
-.PHONY: test-kalendarz-host
+.PHONY: test-kalendarz-host test-zasobnik-host
+# Bursztynowy Zasobnik (docs/bursztynowy-zasobnik.md): rejestr/uklad/glify/panele WM, kolejka powiadomien, glosnosc
+# HDA i budowa odpowiedzi BWS 107-109 wobec atrapy jadra.
+test-zasobnik-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_zasobnik_host.cpp -o .bsf-test/zasobnik
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/zasobnik
+
 test-kalendarz-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_kalendarz_host.cpp -o .bsf-test/kalendarz

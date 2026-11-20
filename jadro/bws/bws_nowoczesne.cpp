@@ -34,6 +34,8 @@
 #include "sterowniki/virtio/virtio_gpu.h"
 #include "graphics_perf.h"
 #include "popup_autoryzacja.h"
+#include "zasobnik_jadro.h"
+#include "powiadomienia_jadra.h"
 #include "pamiec_procesu.h"
 #include "stos_jadra.h"
 #include "okna_podrzedne.h"
@@ -53,6 +55,7 @@ extern bool skopiuj_do_przestrzeni_uzytkownika(void*, const void*, size_t);
 extern bool skopiuj_string_z_uzytkownika(char*, const char*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_odczytu(const void*, size_t);
 extern bool czy_bezpieczny_zakres_uzytkownika_do_zapisu(void*, size_t);
+extern "C" bool bws_vmm_sprawdz_zakres_uzytkownika(const void* adres, size_t rozmiar, bool zapis);
 extern volatile bool ekran_zajety;
 extern void klog_serial(const char*);
 #include "bsf/config_kernel.inc"
@@ -1607,6 +1610,7 @@ extern "C" void bws_nowoczesne_posprzataj_proces(int pid, bool aktywny_cr3) {
     ekran_posprzataj_proces(pid);
     instalator_zamknij_proces(pid);
     motyw_posprzataj_proces(pid);
+    powiadomienia_posprzataj_proces(pid);
 
     for (uint32_t i = 0; i < IPC_ENDPOINTOW_MAX; ++i) {
         IpcEndpoint& e = endpoints[i];
@@ -1878,6 +1882,127 @@ uint64_t bws_potwierdz_pulpit_gotowy(const proces_t& proces) {
     return system_potwierdz_gotowosc_pulpitu(static_cast<int>(proces.pid)) ? 1ULL : 0ULL;
 }
 
+/*
+ * Bursztynowy Zasobnik (BWS 107-109) - zasobnik_api.h, docs/bursztynowy-zasobnik.md.
+ * Stan buduje sie w buforze BSS jadra (wyzerowanym), z krotka sekcja bez przerwan tylko na czas kopiowania licznikow;
+ * zakres i mapowanie calego bufora Ring 3 sa sprawdzane przed jedna kopia (bez czesciowego zapisu na granicy stron).
+ */
+namespace {
+
+static_assert(Powiadomienia::MAKS_PID == PZB_MAKS_PROCESOW, "limity powiadomien na PID");
+Powiadomienia::Kolejka g_powiadomienia;
+
+uint64_t zasobnik_czas_ms() { return hpet_dostepny() ? czas_monotoniczny_ms() : scheduler_pobierz_tick() * 10ULL; }
+
+PopupAutoryzacja::Wywolujacy zasobnik_wywolujacy(const proces_t& p) {
+    return PopupAutoryzacja::Wywolujacy{p.uprawnienia & static_cast<uint64_t>(PRAWA_ZNANE), p.poziom_zaufania,
+                                        p.sciezka_pliku, sizeof(p.sciezka_pliku), false};
+}
+
+bool zasobnik_bufor_do_zapisu(uint64_t adres, uint64_t rozmiar, uint64_t wymagany) {
+    return ZasobnikJadro::bufor_poprawny(adres, rozmiar, wymagany) &&
+           czy_bezpieczny_zakres_uzytkownika_do_zapisu(reinterpret_cast<void*>(adres), wymagany) &&
+           bws_vmm_sprawdz_zakres_uzytkownika(reinterpret_cast<void*>(adres), wymagany, true);
+}
+
+uint64_t zasobnik_stan(const proces_t& p, uint64_t bufor, uint64_t rozmiar, uint64_t wersja) {
+    if (!ZasobnikJadro::menedzer_okien(zasobnik_wywolujacy(p))) return BWS_ZAS_BRAK_UPRAWNIEN;
+    if (wersja != BWS_ZASOBNIK_V1) return BWS_ZAS_ZLA_WERSJA;
+    if (!zasobnik_bufor_do_zapisu(bufor, rozmiar, sizeof(BwsZasobnikStanV1))) return BWS_ZAS_ZLY_BUFOR;
+    static BwsZasobnikStanV1 odp;
+    odp = {};
+    odp.wersja = static_cast<uint32_t>(BWS_ZASOBNIK_V1);
+    odp.rozmiar = sizeof(odp);
+    HdaGlosnoscInfo h{};
+    hda_glosnosc_info(&h);
+    ZasobnikJadro::dzwiek(odp.dzwiek, h);
+    uint8_t ip[4], maska[4], brama[4], dns[4];
+    const bool ipv4 = siec_pobierz_konfiguracje_ipv4(ip, maska, brama, dns);
+    ZasobnikJadro::ipv4(odp.siec, ipv4, ip, maska, brama, dns);
+    {
+        BezPrzerwan bez_przerwan;
+        if (hpet_dostepny()) odp.siec.czas_ns = czas_monotoniczny_ns();
+        const uint32_t sieci = net_get_device_count();
+        odp.siec.liczba_interfejsow = sieci;
+        const NetworkDevice* glowna = net_get_primary_device();
+        const NetworkDevice* d = glowna ? glowna : (sieci ? net_get_device_by_index(0) : nullptr);
+        if (d) {
+            UrzadzeniaMigawka::siec(odp.siec.interfejs, *d, d == glowna, d->get_link_state());
+            odp.siec.flagi |= BWS_ZSIEC_INTERFEJS;
+        }
+        const Storage::Device* psf = psf_urzadzenie_trwale();
+        const uint32_t dyski = blokowy_liczba_dyskow();
+        for (uint32_t i = 0; i < dyski; ++i) {
+            const Storage::Device* f = blokowy_dysk(i);
+            if (!f) continue;
+            BwsDyskInfoV1 opis{};
+            UrzadzeniaMigawka::dysk(opis, i, *f, blokowy_dysk_sprzetowy(i), f == psf);
+            if (!(opis.flagi & BWS_DYSK_WYMIENNY)) continue;
+            if (odp.liczba_nosnikow >= BWS_ZAS_MAKS_NOSNIKOW) { odp.flagi |= BWS_ZAS_NOSNIKI_OBCIETE; continue; }
+            if (ZasobnikJadro::nosnik(odp.nosniki[odp.liczba_nosnikow], opis)) ++odp.liczba_nosnikow;
+        }
+        odp.powiadomienia_liczba = g_powiadomienia.liczba();
+        odp.powiadomienia_nieprzeczytane = g_powiadomienia.nieprzeczytane();
+        odp.powiadomienia_generacja = g_powiadomienia.generacja();
+    }
+    if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &odp, sizeof(odp))) return BWS_ZAS_ZLY_BUFOR;
+    return BWS_ZAS_OK;
+}
+
+uint64_t zasobnik_polecenie(const proces_t& p, uint64_t pol, uint64_t arg) {
+    if (!ZasobnikJadro::menedzer_okien(zasobnik_wywolujacy(p))) return BWS_ZAS_BRAK_UPRAWNIEN;
+    if (pol == BWS_ZAS_POL_GLOSNOSC) {
+        if (arg > 100) return BWS_ZAS_ZLE_ARGUMENTY;
+        return ZasobnikJadro::wynik_glosnosci(hda_glosnosc_ustaw(static_cast<uint32_t>(arg)));
+    }
+    if (pol == BWS_ZAS_POL_WYCISZENIE) {
+        if (arg > 1) return BWS_ZAS_ZLE_ARGUMENTY;
+        return ZasobnikJadro::wynik_glosnosci(hda_wyciszenie_ustaw(arg == 1));
+    }
+    BezPrzerwan bez_przerwan;
+    return ZasobnikJadro::polecenie_powiadomien(g_powiadomienia, pol, arg);
+}
+
+uint64_t powiadomienia_bws(const proces_t& p, int pid, uint64_t pol, uint64_t bufor, uint64_t rozmiar) {
+    const PopupAutoryzacja::Wywolujacy w = zasobnik_wywolujacy(p);
+    if (pol == BWS_POW_POL_POBIERZ) {
+        if (!ZasobnikJadro::menedzer_okien(w)) return BWS_ZAS_BRAK_UPRAWNIEN;
+        if (!zasobnik_bufor_do_zapisu(bufor, rozmiar, sizeof(BwsPowiadomieniaListaV1))) return BWS_ZAS_ZLY_BUFOR;
+        static BwsPowiadomieniaListaV1 lista;
+        { BezPrzerwan bez_przerwan; g_powiadomienia.migawka(lista); }
+        if (!skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(bufor), &lista, sizeof(lista))) return BWS_ZAS_ZLY_BUFOR;
+        return BWS_ZAS_OK;
+    }
+    if (pol == BWS_POW_POL_ZGLOS) {
+        if (!ZasobnikJadro::moze_zglaszac(w)) return BWS_ZAS_BRAK_UPRAWNIEN;
+        if (!ZasobnikJadro::bufor_poprawny(bufor, rozmiar, sizeof(BwsPowiadomienieZgloszenieV1)) ||
+            !czy_bezpieczny_zakres_uzytkownika_do_odczytu(reinterpret_cast<const void*>(bufor), sizeof(BwsPowiadomienieZgloszenieV1)))
+            return BWS_ZAS_ZLY_BUFOR;
+        BwsPowiadomienieZgloszenieV1 z{};
+        if (!skopiuj_z_przestrzeni_uzytkownika(&z, reinterpret_cast<const void*>(bufor), sizeof(z))) return BWS_ZAS_ZLY_BUFOR;
+        if (z.wersja != static_cast<uint32_t>(BWS_ZASOBNIK_V1) || z.rozmiar != sizeof(z)) return BWS_ZAS_ZLA_WERSJA;
+        char nazwa[BWS_POW_NADAWCA];
+        Powiadomienia::nazwa_programu(nazwa, sizeof(nazwa), p.sciezka_pliku, sizeof(p.sciezka_pliku));
+        const uint64_t teraz = zasobnik_czas_ms();
+        BezPrzerwan bez_przerwan;
+        return g_powiadomienia.dodaj_aplikacji(pid, nazwa, z.poziom, z.tytul, sizeof(z.tytul), z.tresc, sizeof(z.tresc), teraz);
+    }
+    return BWS_ZAS_ZLE_ARGUMENTY;
+}
+
+}  // namespace
+
+void powiadomienie_systemowe(uint32_t poziom, const char* tytul, const char* tresc) {
+    const uint64_t teraz = zasobnik_czas_ms();
+    BezPrzerwan bez_przerwan;
+    (void)g_powiadomienia.dodaj_systemowe(poziom, tytul, tresc, teraz);
+}
+
+void powiadomienia_posprzataj_proces(int pid) {
+    BezPrzerwan bez_przerwan;
+    g_powiadomienia.posprzataj_proces(pid);
+}
+
 extern "C" uint64_t bws_nowoczesne_obsluz(
     uint64_t nr, proces_t* proces, uint64_t a1, uint64_t a2,
     uint64_t a3, uint64_t a4
@@ -1964,6 +2089,9 @@ extern "C" uint64_t bws_nowoczesne_obsluz(
         case BWS_PROCESY_MIGAWKA: return procesy_migawka(*proces, a1, a2, a3);
         case BWS_PROCES_ZAKONCZ: return proces_zakoncz_v2(*proces, a1, a2);
         case BWS_URZADZENIA_TELEMETRIA: return urzadzenia_telemetria(*proces, a1, a2, a3);
+        case BWS_ZASOBNIK_STAN: return zasobnik_stan(*proces, a1, a2, a3);
+        case BWS_ZASOBNIK_POLECENIE: return zasobnik_polecenie(*proces, a1, a2);
+        case BWS_POWIADOMIENIA: return powiadomienia_bws(*proces, aktualny_pid, a1, a2, a3);
         case BWS_PROCESY_IO: return procesy_io(*proces, a1, a2, a3);
         case BWS_OKNO_PODRZEDNE_OTWORZ: return okno_podrzedne_otworz(*proces, a1, a2, a3, a4);
         case BWS_OKNO_PODRZEDNE_TRESC: return okno_podrzedne_tresc(*proces, a1, a2);

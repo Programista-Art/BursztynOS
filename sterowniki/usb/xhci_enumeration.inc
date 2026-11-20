@@ -187,7 +187,8 @@ void enumeration_step(Controller& xhc) {
     case EnumStep::ConfigBodyDone:
         if(!e.ok||e.actual<9||!usb_hid_parse_configuration(data(),e.actual,e.configuration)){enumeration_fail(xhc);return;}
         log_usb_configuration(xhc,d,e.configuration,data(),e.actual);
-        if(!e.configuration.count){wypisz_log("[USB] no usable HID interrupt IN interfaces");e.diagnostic_status=DIAG_DETECTED_UNSUPPORTED;enumeration_fail(xhc);return;}
+        if(!e.configuration.count){wypisz_log("[USB] no usable HID interrupt IN interfaces");
+            powiadomienie_systemowe(BWS_POW_INFO,"Wykryto urządzenie USB","Brak sterownika dla tego urządzenia.");e.diagnostic_status=DIAG_DETECTED_UNSUPPORTED;enumeration_fail(xhc);return;}
         if(e.configuration.count>1){
             if(!allocate_dma(xhc,(e.configuration.count-1)*sizeof(XhciHid),64,&d.interface_storage)){enumeration_fail(xhc);return;}
             d.extra_hid=new(d.interface_storage.virtual_address) XhciHid[uint8_t(e.configuration.count-1)]{};
@@ -265,7 +266,8 @@ void enumeration_step(Controller& xhc) {
             usable=hid_pointer_register(hi.pointer_device,hi.pointer_layout,(uint32_t(xhc.index)<<24)|(uint32_t(hi.hid_interfejs)<<16)|d.slot_id);}
         if(usable)usable=xhci_zakolejkuj_transfer_interrupt_in(xhc,d,&hi);
         if(!usable){hi.hid_gotowy=false;remove_hid(hi);log_hid(xhc,d,hi,"interface unavailable; continuing",hi.configuration_failed||hi.type==USB_HID_BOOT_KEYBOARD||hi.type==USB_HID_POINTER?DIAG_INIT_FAILED:DIAG_UNSUPPORTED);}
-        else {log_hid(xhc,d,hi,"interrupt IN armed",DIAG_OK);BootTiming::mark("first interrupt IN submit",e.slot);}
+        else {log_hid(xhc,d,hi,"interrupt IN armed",DIAG_OK);
+            powiadomienie_systemowe(BWS_POW_INFO,"Podłączono urządzenie USB",hi.type==USB_HID_BOOT_KEYBOARD?"Klawiatura USB jest gotowa.":"Urządzenie wskazujące USB jest gotowe.");BootTiming::mark("first interrupt IN submit",e.slot);}
         if(++e.interface_index<d.hid_count){e.step=EnumStep::Protocol;return;}
         bool active=false;for(size_t i=0;i<d.hid_count;++i)if(hid_at(d,i).hid_gotowy)active=true;
         diag_usb(xhc,d,active?DIAG_OK:DIAG_UNSUPPORTED,active?"Interfejsy HID uruchomione":"Brak obsługi interfejsów tego urządzenia");

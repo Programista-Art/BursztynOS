@@ -146,6 +146,30 @@ void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);
  */
 void hda_stop();
 
+/*
+ * Glosnosc systemowa (Bursztynowy Zasobnik). Backend: wzmacniacz wyjsciowy kodeka na aktywnej trasie albo,
+ * bez niego, programowe wzmocnienie generatora PCM (sterowniki/dzwiek/hda_glosnosc.h). Funkcje nie blokuja:
+ * zajety transport = HDA_GLOSNOSC_ZAJETE i stan bez zmian (nigdy "udane" bez zapisu do sprzetu).
+ */
+enum : uint32_t {
+    HDA_GLOSNOSC_OK = 0,
+    HDA_GLOSNOSC_NIEOBSLUGIWANE = 1,
+    HDA_GLOSNOSC_ZAJETE = 2,
+    HDA_GLOSNOSC_ZLE_ARGUMENTY = 3,
+};
+enum : uint32_t { HDA_GLOSNOSC_BRAK = 0, HDA_GLOSNOSC_WZMACNIACZ = 1, HDA_GLOSNOSC_PCM = 2 };
+
+struct HdaGlosnoscInfo {
+    bool urzadzenie, wyciszanie, wyciszony, odtwarza;
+    uint32_t backend, procent, generacja;
+    uint16_t pci_vendor, pci_device;
+    uint8_t kodek, wezel, kroki, cel;
+};
+
+void hda_glosnosc_info(HdaGlosnoscInfo* out);
+uint32_t hda_glosnosc_ustaw(uint32_t procent);
+uint32_t hda_wyciszenie_ustaw(bool wyciszony);
+
 /* =========================================================================
  * 3. HELPERY HEADER-ONLY
  * ========================================================================= */

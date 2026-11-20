@@ -93,7 +93,7 @@ static void test_brak_surowych_verbow() {
     CHECK(BWS_PROCES_ZAKONCZ == 104);
     CHECK(BWS_URZADZENIA_TELEMETRIA == 105);
     CHECK(BWS_PROCESY_IO == 106);
-    CHECK(BWS_PIERWSZY_WOLNY == 107);
+    CHECK(BWS_PIERWSZY_WOLNY == 110);
 
     /* Istniejace numery nie ulegly zmianie. */
     CHECK(BWS_DZWIEK_TON == 27);
