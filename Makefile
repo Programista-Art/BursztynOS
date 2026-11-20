@@ -758,7 +758,7 @@ bws_nowoczesne.o: jadro/bws/bws_nowoczesne.cpp jadro/bws/bws_nowoczesne.h jadro/
 syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_pcm_ring.h jadro/dzwiek/pcm_jadro.h jadro/dzwiek/mikser_pcm.h sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h sterowniki/dma.h sterowniki/czas/hpet.h
@@ -2154,6 +2154,12 @@ test-tapety-bur: tapety_blob.o
 	$(PYTHON) testy/test_tapety_regression.py
 
 .PHONY: test-hda-physical test-hda-tone test-hda-regression-qemu test-hda-diag test-dzwieku-packaging test-dzwieku-repair
+.PHONY: test-mikser-pcm-host
+test-mikser-pcm-host:
+	@mkdir -p .hda-test
+	g++ -I. -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_mikser_pcm.cpp -o .hda-test/test-mikser-pcm
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .hda-test/test-mikser-pcm
+
 test-hda-physical:
 	$(PYTHON) testy/test_hda_physical.py
 test-hda-tone:

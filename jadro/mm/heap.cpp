@@ -15,6 +15,9 @@
  * integralnosc metadanych przed wykonaniem alokacji lub zwolnienia.
  */
 
+#if !defined(BURSZTYN_LOCK_HOST_TEST)
+#include "jadro/arch/diag_opoznienia_irq.h"
+#endif
 #include "heap.h"
 #include "virtio_input_activation_diag.h"
 #ifdef BURSZTYN_LOCK_HOST_TEST
@@ -92,14 +95,24 @@ static inline void zwolnij_blokade_sterty() {
 
 struct BlokadaSterty {
     uint64_t rflags;
+#if !defined(BURSZTYN_LOCK_HOST_TEST)
+    DiagOpoznieniaIrq::Scope pomiar_;
+#endif
 
     BlokadaSterty()
-        : rflags(zapisz_i_wylacz_przerwania()) {
+        : rflags(zapisz_i_wylacz_przerwania())
+#if !defined(BURSZTYN_LOCK_HOST_TEST)
+        , pomiar_(DiagOpoznieniaIrq::Site::Heap, (rflags & (1ULL << 9)) != 0)
+#endif
+    {
         przejmij_blokade_sterty();
     }
 
     ~BlokadaSterty() {
         zwolnij_blokade_sterty();
+#if !defined(BURSZTYN_LOCK_HOST_TEST)
+        pomiar_.finish();
+#endif
         przywroc_przerwania(rflags);
     }
 

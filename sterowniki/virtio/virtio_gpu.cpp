@@ -1,3 +1,6 @@
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#endif
 #include "powiadomienia_jadra.h"
 #include "jadro/gui/display_mode_policy.h"
 #include "jadro/gui/graphics_perf.h"
@@ -554,6 +557,11 @@ static inline void gpu_wait_for_irq(VirtioGpuDriver* drv) {
         asm volatile("pause" ::: "memory");
         return;
     }
+#ifndef BURSZTYN_VIRTIO_HOST_TEST
+    // IRQs are enabled, but the compositor cannot yield from this wait.
+    // The audio worker has no GPU/screen dependency and performs no yield.
+    hda_wykonaj_zaplanowana_prace_odroczona();
+#endif
     gpu_cpu_irq_disable();
     if (__atomic_load_n(&drv->command_done, __ATOMIC_ACQUIRE) || virtqueue_has_used(drv->controlq)) {
         gpu_cpu_irq_enable();

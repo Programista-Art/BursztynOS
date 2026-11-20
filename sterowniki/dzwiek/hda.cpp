@@ -7,9 +7,8 @@
  *   - polling, bez IRQ,
  *   - jeden Output Stream,
  *   - 48 kHz / 16-bit / stereo PCM,
- *   - Immediate Command do konfiguracji kodeka,
- *   - kodek QEMU hda-output / hda-duplex (vendor 0x1AF4),
- *   - testowy ton o zadanej czestotliwosci i czasie.
+ *   - wykrywanie i konfiguracja tras kodeka przez istniejacy transport,
+ *   - jeden silnik PCM dla miksera i diagnostycznego generatora tonu.
  *
  * Sterownik celowo NIE udaje jeszcze uniwersalnego parsera topologii
  * dowolnego kodeka Realtek/Conexant/etc. Dla nieznanego kodeka failuje
@@ -34,10 +33,8 @@
  *   - stream przechodzi prawidlowa sekwencje resetu przed programowaniem,
  *   - statusy DESE/FIFOE/BCIS sa czyszczone jako RW1C,
  *   - IRQ HDA i stream interrupt enables sa wylaczone przy pollingu,
- *   - hda_test_ton() wraca po START; produkcyjna praca odroczona wykonuje STOP,
- *   - czas odtwarzania wymaga dzialajacego monotonicznego HPET,
- *   - bufor tonu zawiera calkowity okres sygnalu, wiec cykliczny BDL
- *     nie wprowadza skoku fazy na koncu bufora,
+ *   - praca odroczona przygotowuje okresy na podstawie SDnLPIB,
+ *   - HPET ogranicza czas, w ktorym pozycja modulo pozostaje jednoznaczna,
  *   - dostep do sterownika jest serializowany try-lockiem.
  *
  * Dokument referencyjny:
@@ -51,6 +48,10 @@
 #include "hda_diag.h"
 #include "hda_quirks.h"
 #include "hda_glosnosc.h"
+#include "hda_pcm_ring.h"
+#include "jadro/arch/diag_opoznienia_irq.h"
+#include "jadro/dzwiek/mikser_pcm.h"
+#include "jadro/dzwiek/pcm_jadro.h"
 #include "../czas/hpet.h"
 #include "pamiec.h"
 #include "pci.h"
@@ -313,45 +314,13 @@ static_assert(
     "Stereo 16-bit musi zajmowac 4 bajty na sample frame"
 );
 
-/*
- * BDL:
- *   minimum 2,
- *   maksimum 256,
- *   base alignment 128 B,
- *   kazdy bufor alignment 128 B.
- *
- * PMM daje strony 4 KiB, wiec spelnia alignment.
- *
- * Maks. okres dla freq 20..20000 Hz przy 48 kHz ma 48000 sample frames,
- * czyli 192000 bajtow. 48 stron daje 196608 bajtow.
- */
-constexpr uint32_t HDA_MAKS_BDL =
-    48U;
-
-constexpr uint32_t HDA_MAKS_BUFOROW_DMA =
-    HDA_MAKS_BDL;
-
-constexpr uint32_t HDA_DMA_BUFOR_BAJTOW =
-    static_cast<uint32_t>(
-        ROZMIAR_RAMKI_4K
-    );
-
-constexpr uint32_t HDA_MAKS_BAJTOW_OKRESU =
-    HDA_MAKS_BUFOROW_DMA *
-    HDA_DMA_BUFOR_BAJTOW;
-
-static_assert(
-    HDA_MAKS_BDL >= 2U &&
-    HDA_MAKS_BDL <= 256U,
-    "Liczba wpisow BDL musi byc w zakresie 2..256"
-);
-
-static_assert(
-    HDA_MAKS_BAJTOW_OKRESU >=
-        HDA_SAMPLE_RATE *
-        HDA_BAJTY_RAMKI_AUDIO,
-    "Bufory musza pomiescic najgorszy 1-sekundowy okres tonu"
-);
+// One page per PCM period, all descriptors owned by this driver.
+constexpr uint32_t HDA_MAKS_BDL = HdaPcm::PERIODS;
+constexpr uint32_t HDA_MAKS_BUFOROW_DMA = HDA_MAKS_BDL;
+static_assert(HdaPcm::PERIOD_BYTES == ROZMIAR_RAMKI_4K);
+static_assert(Pcm::RATE == HDA_SAMPLE_RATE && sizeof(Pcm::Frame) == HDA_BAJTY_RAMKI_AUDIO);
+static_assert(HdaPcm::BYTES_PER_SEC == HDA_SAMPLE_RATE * HDA_BAJTY_RAMKI_AUDIO);
+static_assert(HdaPcm::PERIOD_FRAMES <= Pcm::MAX_MIX_FRAMES);
 
 /* Stream tag 0 jest zarezerwowany. */
 constexpr uint8_t HDA_STREAM_TAG =
@@ -624,25 +593,6 @@ void wyzeruj(
     }
 }
 
-uint32_t nwd_u32(
-    uint32_t a,
-    uint32_t b
-) {
-    while (b != 0) {
-        const uint32_t r =
-            a %
-            b;
-
-        a =
-            b;
-
-        b =
-            r;
-    }
-
-    return a;
-}
-
 void* dma_wirtualny_z_fizycznego(
     void* phys
 ) {
@@ -706,6 +656,14 @@ void hda_odblokuj() {
     );
 }
 
+// IRQ and BSP scheduler handoff. The MMIO watchdog and the short DMA
+// publication section must run on the same CPU (as the current scheduler).
+bool pcm_interest = false;
+uint64_t pcm_pending_ns = 0;
+uint64_t pcm_last_priority_request = 0;
+uint64_t pcm_guard_max_ns = 0;
+uint64_t pcm_guard_misses = 0;
+
 class GuardHDA {
 public:
     explicit GuardHDA(
@@ -716,10 +674,18 @@ public:
                   timeout
               )
           ) {
+        if (__atomic_load_n(&pcm_interest, __ATOMIC_ACQUIRE)) {
+            if (aktywny_) began_ = czas_monotoniczny_ns();
+            else __atomic_add_fetch(&pcm_guard_misses, 1, __ATOMIC_RELAXED);
+        }
     }
 
     ~GuardHDA() {
         if (aktywny_) {
+            if (began_) {
+                const uint64_t held = czas_monotoniczny_ns() - began_;
+                if (held > pcm_guard_max_ns) pcm_guard_max_ns = held;
+            }
             hda_odblokuj();
         }
     }
@@ -738,6 +704,7 @@ public:
 
 private:
     bool aktywny_;
+    uint64_t began_ = 0;
 };
 
 /* =========================================================================
@@ -1594,16 +1561,6 @@ bool konfiguruj_trase_audio(
     return true;
 }
 
-bool konfiguruj_trase_biezaca() {
-    if (s_sciezka_skonfigurowana) {
-        const HdaDiagSnapshot* snap = hda_diag_pobierz_opublikowana(nullptr);
-        if (snap) {
-            return konfiguruj_trase_audio(s_aktywna_sciezka, *snap);
-        }
-    }
-    return konfiguruj_kodek_qemu();
-}
-
 void loguj_konfiguracje_trasy(
     const HdaDiagSciezka& sciezka,
     const HdaDiagSnapshot& snap
@@ -1732,78 +1689,6 @@ void loguj_konfiguracje_trasy(
         append_str(" power=D0");
         wypisz_log(buf);
     }
-}
-
-void loguj_stan_streamu() {
-    if (hda_stream_base == 0) return;
-    char buf[256];
-    size_t pos = 0;
-    auto append_str = [&](const char* s) {
-        while (*s && pos + 1 < sizeof(buf)) buf[pos++] = *s++;
-        buf[pos] = '\0';
-    };
-    auto append_hex = [&](uint64_t v, int digits) {
-        const char hex_chars[] = "0123456789ABCDEF";
-        append_str("0x");
-        char tmp[17];
-        for (int i = digits - 1; i >= 0; --i) {
-            tmp[i] = hex_chars[v & 0xF];
-            v >>= 4;
-        }
-        tmp[digits] = '\0';
-        append_str(tmp);
-    };
-    auto append_dec = [&](uint32_t v) {
-        char tmp[12];
-        int i = 0;
-        if (v == 0) tmp[i++] = '0';
-        else {
-            while (v > 0) {
-                tmp[i++] = '0' + (v % 10);
-                v /= 10;
-            }
-        }
-        while (i > 0 && pos + 1 < sizeof(buf)) {
-            buf[pos++] = tmp[--i];
-        }
-        buf[pos] = '\0';
-    };
-
-    const uint32_t base = static_cast<uint32_t>(hda_stream_base - hda_mmio_base);
-    const uint32_t ctl = stream_odczytaj_ctl();
-    const uint8_t sts = stream_odczytaj_sts();
-    const uint32_t lpib1 = mmio_odczytaj32(base + HDA_SD_LPIB);
-    const uint32_t cbl = mmio_odczytaj32(base + HDA_SD_CBL);
-    const uint16_t lvi = mmio_odczytaj16(base + HDA_SD_LVI);
-    const uint16_t fmt = mmio_odczytaj16(base + HDA_SD_FMT);
-    const uint64_t bdpl = mmio_odczytaj32(base + HDA_SD_BDPL);
-    const uint64_t bdpu = mmio_odczytaj32(base + HDA_SD_BDPU);
-    const uint64_t bdl_addr = (bdpu << 32) | bdpl;
-
-    for (int p = 0; p < 200; ++p) pause_cpu();
-    const uint32_t lpib2 = mmio_odczytaj32(base + HDA_SD_LPIB);
-    const bool moving = (lpib2 != lpib1) || (lpib2 > 0);
-
-    pos = 0;
-    append_str("[HDA] Stream #0 tag=");
-    append_dec((ctl >> 20) & 0x0F);
-    append_str(" fmt=");
-    append_hex(fmt, 4);
-    append_str(" BDL=");
-    append_hex(bdl_addr, 8);
-    append_str(" CBL=");
-    append_dec(cbl);
-    append_str(" LVI=");
-    append_dec(lvi);
-    append_str(" RUN=");
-    append_dec((ctl >> 1) & 1);
-    append_str(" LPIB=");
-    append_dec(lpib2);
-    append_str(" STS=");
-    append_hex(sts, 2);
-    append_str(" DMA_moving=");
-    append_str(moving ? "YES" : "NO/WAIT");
-    wypisz_log(buf);
 }
 
 /* =========================================================================
@@ -1988,324 +1873,10 @@ bool resetuj_stream() {
  * 16. GENERATOR CYKLICZNEGO TONU
  * ========================================================================= */
 
-int16_t probka_trojkatna(
-    uint32_t faza
-) {
-    /*
-     * faza: 0..47999.
-     * Przeliczamy na 16-bitowy kat i tworzymy triangle wave bez FP/SSE.
-     */
-    const uint32_t p =
-        static_cast<uint32_t>(
-            (static_cast<uint64_t>(
-                 faza) *
-             UINT64_C(65536)) /
-            HDA_SAMPLE_RATE
-        );
-
-    int32_t v =
-        0;
-
-    if (p < 0x4000U) {
-        v =
-            static_cast<int32_t>(
-                p
-            );
-    } else if (p < 0xC000U) {
-        v =
-            static_cast<int32_t>(
-                0x8000U -
-                p
-            );
-    } else {
-        v =
-            static_cast<int32_t>(
-                p
-            ) -
-            0x10000;
-    }
-
-    /*
-     * ~75% maksymalnej amplitudy, aby pozostawic zapas.
-     */
-    v =
-        (v *
-         3) /
-        4;
-
-    /* Jedyne miejsce tworzenia probek PCM: programowa glosnosc tylko bez regulowanego wzmacniacza kodeka. */
-    return HdaGlosnosc::skaluj_probke(v, s_glosnosc, !s_wzmacniacz.regulowany());
-}
-
-bool przygotuj_okres_tonu(
-    uint32_t hz,
-    uint32_t* bdl_count,
-    uint32_t* cbl_bytes
-) {
-    if (!bdl_count ||
-        !cbl_bytes ||
-        hz < HDA_MIN_HZ ||
-        hz > HDA_MAX_HZ) {
-
-        return false;
-    }
-
-    const uint32_t gcd =
-        nwd_u32(
-            HDA_SAMPLE_RATE,
-            hz
-        );
-
-    if (gcd == 0) {
-        return false;
-    }
-
-    const uint32_t okres_probek =
-        HDA_SAMPLE_RATE /
-        gcd;
-
-    const uint64_t bytes64 =
-        static_cast<uint64_t>(
-            okres_probek) *
-        HDA_BAJTY_RAMKI_AUDIO;
-
-    if (bytes64 <
-            8U ||
-        bytes64 >
-            HDA_MAKS_BAJTOW_OKRESU) {
-
-        return false;
-    }
-
-    const uint32_t bytes =
-        static_cast<uint32_t>(
-            bytes64
-        );
-
-    uint32_t count =
-        (bytes +
-         HDA_DMA_BUFOR_BAJTOW -
-         1U) /
-        HDA_DMA_BUFOR_BAJTOW;
-
-    if (count < 2U) {
-        count =
-            2U;
-    }
-
-    if (count >
-        HDA_MAKS_BDL) {
-
-        return false;
-    }
-
-    /*
-     * Wyzeruj tylko wykorzystywane bufory oraz BDL.
-     */
-    wyzeruj(
-        hda_bdl,
-        ROZMIAR_RAMKI_4K
-    );
-
-    for (uint32_t i = 0;
-         i < count;
-         ++i) {
-
-        wyzeruj(
-            dma_wirtualny_z_fizycznego(
-                hda_bufory_phys[i]
-            ),
-            ROZMIAR_RAMKI_4K
-        );
-    }
-
-    uint32_t pozostalo =
-        bytes;
-
-    /*
-     * Gdy caly okres miesci sie w jednej stronie, BDL nadal musi miec
-     * co najmniej dwa wpisy. Dzielimy okres na dwie 4-byte aligned czesci.
-     */
-    uint32_t specjalny_pierwszy =
-        0;
-
-    if (bytes <=
-        HDA_DMA_BUFOR_BAJTOW) {
-
-        specjalny_pierwszy =
-            (bytes /
-             2U) &
-            ~UINT32_C(3);
-
-        if (specjalny_pierwszy <
-            4U) {
-
-            specjalny_pierwszy =
-                4U;
-        }
-
-        if (bytes -
-                specjalny_pierwszy <
-            4U) {
-
-            specjalny_pierwszy =
-                bytes -
-                4U;
-        }
-    }
-
-    uint32_t faza =
-        0;
-
-    uint32_t globalna_probka =
-        0;
-
-    for (uint32_t i = 0;
-         i < count;
-         ++i) {
-
-        uint32_t len =
-            0;
-
-        if (bytes <=
-            HDA_DMA_BUFOR_BAJTOW) {
-
-            len =
-                (i == 0)
-                    ? specjalny_pierwszy
-                    : bytes -
-                        specjalny_pierwszy;
-        } else {
-            len =
-                pozostalo >
-                        HDA_DMA_BUFOR_BAJTOW
-                    ? HDA_DMA_BUFOR_BAJTOW
-                    : pozostalo;
-        }
-
-        if (len < 4U ||
-            (len &
-             3U) != 0) {
-
-            return false;
-        }
-
-        void* phys =
-            hda_bufory_phys[i];
-
-        if (!fizyczny_dma_poprawny(
-                phys)) {
-
-            return false;
-        }
-
-        uint8_t* bufor =
-            static_cast<uint8_t*>(
-                dma_wirtualny_z_fizycznego(
-                    phys
-                )
-            );
-
-        const uint32_t frames =
-            len /
-            HDA_BAJTY_RAMKI_AUDIO;
-
-        for (uint32_t f = 0;
-             f < frames;
-             ++f) {
-
-            const int16_t sample =
-                probka_trojkatna(
-                    faza
-                );
-
-            const uint32_t off =
-                f *
-                HDA_BAJTY_RAMKI_AUDIO;
-
-            /*
-             * Little-endian PCM16 stereo.
-             * Piszemy bajtowo, aby nie zalezec od alignment int16_t.
-             */
-            const uint16_t u =
-                static_cast<uint16_t>(
-                    sample
-                );
-
-            bufor[off + 0U] =
-                static_cast<uint8_t>(
-                    u &
-                    0xFFU
-                );
-
-            bufor[off + 1U] =
-                static_cast<uint8_t>(
-                    u >>
-                    8
-                );
-
-            bufor[off + 2U] =
-                bufor[off + 0U];
-
-            bufor[off + 3U] =
-                bufor[off + 1U];
-
-            faza +=
-                hz;
-
-            if (faza >=
-                HDA_SAMPLE_RATE) {
-
-                faza -=
-                    HDA_SAMPLE_RATE;
-            }
-
-            ++globalna_probka;
-        }
-
-        hda_bdl[i].adres =
-            reinterpret_cast<uint64_t>(
-                phys
-            );
-
-        hda_bdl[i].dlugosc =
-            len;
-
-        /*
-         * IOC=0: sterownik pollingowy, nie generujemy IRQ.
-         */
-        hda_bdl[i].flagi =
-            0;
-
-        if (pozostalo >=
-            len) {
-
-            pozostalo -=
-                len;
-        } else {
-            pozostalo =
-                0;
-        }
-    }
-
-    if (globalna_probka !=
-            okres_probek ||
-        faza != 0) {
-
-        /*
-         * Po calym okresie faza musi wrocic do 0, inaczej cykliczne
-         * odtwarzanie mialoby skok na granicy CBL.
-         */
-        return false;
-    }
-
-    *bdl_count =
-        count;
-
-    *cbl_bytes =
-        bytes;
-
-    return true;
+int16_t probka_trojkatna(uint32_t faza) {
+    const int32_t p = static_cast<int32_t>(uint64_t(faza) * 65536 / HDA_SAMPLE_RATE);
+    const int32_t v = p < 16384 ? p : (p < 49152 ? 32768 - p : p - 65536);
+    return static_cast<int16_t>(v * 3 / 4);
 }
 
 /* =========================================================================
@@ -2433,22 +2004,47 @@ bool zaprogramuj_stream(
  * 18. START / STOP STREAMU
  * ========================================================================= */
 
-bool uruchom_stream() {
-    stream_wyczysc_sts();
+// Published with local IRQs masked, read only by the BSP timer.
+uint64_t pcm_watchdog_ns = 0;
+bool pcm_watchdog_fired = false;
+HdaPcm::WatchdogWindow pcm_watchdog_window{};
 
-    uint32_t ctl =
-        stream_odczytaj_ctl();
+void pcm_set_deadline(const HdaPcm::Ring& ring) {
+    pcm_watchdog_window = ring.watchdog_window();
+    const uint64_t due = pcm_watchdog_window.safe_until(ring.lpib, ring.sampled_ns);
+    __atomic_store_n(&pcm_watchdog_ns, due ? due : ring.sampled_ns, __ATOMIC_RELEASE);
+}
 
-    ctl &=
-        ~(HDA_SD_CTL_SRST |
-          HDA_SD_CTL_IRQ_MASK);
+class PcmCommitIrq {
+#ifndef BURSZTYN_HDA_HOST_TEST
+    uint64_t flags_;
+#endif
+public:
+    PcmCommitIrq() {
+#ifndef BURSZTYN_HDA_HOST_TEST
+        asm volatile("pushfq; popq %0; cli" : "=r"(flags_) :: "memory");
+#endif
+    }
+    ~PcmCommitIrq() {
+#ifndef BURSZTYN_HDA_HOST_TEST
+        if (flags_ & (1ULL << 9)) asm volatile("sti" ::: "memory");
+#endif
+    }
+};
 
-    ctl |=
-        HDA_SD_CTL_RUN;
-
-    stream_zapisz_ctl(
-        ctl
-    );
+bool uruchom_stream(uint64_t& started_ns) {
+    {
+        PcmCommitIrq commit;
+        stream_wyczysc_sts();
+        uint32_t ctl = stream_odczytaj_ctl();
+        ctl &= ~(HDA_SD_CTL_SRST | HDA_SD_CTL_IRQ_MASK);
+        ctl |= HDA_SD_CTL_RUN;
+        started_ns = czas_monotoniczny_ns();
+        HdaPcm::Ring initial;
+        initial.start(started_ns);
+        pcm_set_deadline(initial);
+        stream_zapisz_ctl(ctl);
+    }
 
     if (!czekaj_stream_ctl_bit(
             HDA_SD_CTL_RUN,
@@ -2506,19 +2102,12 @@ bool uruchom_stream() {
 }
 
 bool zatrzymaj_stream_wewnetrznie() {
-    if (hda_stream_base == 0) {
-        return true;
+    {
+        PcmCommitIrq commit;
+        __atomic_store_n(&pcm_watchdog_ns, 0, __ATOMIC_RELEASE);
+        if (!hda_stream_base) return true;
+        stream_zapisz_ctl(stream_odczytaj_ctl() & ~HDA_SD_CTL_RUN);
     }
-
-    uint32_t ctl =
-        stream_odczytaj_ctl();
-
-    ctl &=
-        ~HDA_SD_CTL_RUN;
-
-    stream_zapisz_ctl(
-        ctl
-    );
 
     const bool zatrzymany =
         czekaj_stream_ctl_bit(
@@ -2534,55 +2123,381 @@ bool zatrzymaj_stream_wewnetrznie() {
         zatrzymany;
 }
 
-// Wywolywane z zajeta blokada odtwarzania; zawsze dotyczy tego samego SDn,
-// ktory ustawil RUN w uruchom_stream(). Nie kasuj aktywnosci przy bledzie STOP.
-bool zatrzymaj_ton_wewnetrznie(uint32_t powod) {
-    const bool aktywny = __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE);
-    const bool gral = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0;
-    const bool zatrzymany = zatrzymaj_stream_wewnetrznie();
-    const uint8_t run = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) ? 1U : 0U;
-    const uint8_t poprzedni_run = __atomic_exchange_n(&s_ton_run_po_stop, run, __ATOMIC_ACQ_REL);
-    if (aktywny || gral) {
-        __atomic_store_n(&s_ton_stop_powod, powod, __ATOMIC_RELEASE);
+// Protected by GuardHDA. No code taking this try-lock may sleep or yield.
+Pcm::Mixer pcm_mixer;
+constexpr Pcm::Owner pcm_internal{UINT32_MAX, 1};
+constexpr Pcm::Owner pcm_legacy{UINT32_MAX, 2};
+HdaPcm::Ring pcm_ring;
+PcmJadro::Statystyki pcm_stats{};
+Pcm::Frame pcm_stage[HdaPcm::PERIOD_FRAMES];
+uint32_t pcm_clients = 0;
+bool pcm_running = false;
+bool pcm_shutdown = false;
+bool pcm_retry = false;
+uint64_t pcm_idle_since = 0;
+uint64_t pcm_retry_ns = 0;
+uint64_t pcm_recovery_since = 0;
+uint64_t pcm_watchdog_time = 0;
+uint64_t pcm_watchdog_irq_gap = 0;
+uint32_t pcm_watchdog_lpib = 0;
+uint64_t pcm_worker_request = 0;
+uint32_t pcm_observed_lpib = 0;
+constexpr uint32_t PCM_EVENTS = 32;
+PcmJadro::Zdarzenie pcm_events[PCM_EVENTS]{};
+constexpr uint32_t PCM_SHORTFALL_EVENTS = 64;
+PcmJadro::SladPcm pcm_shortfalls[PCM_SHORTFALL_EVENTS]{};
+uint32_t pcm_shortfall_count = 0;
+
+struct PcmIrqTiming {
+    uint64_t count, last, max_gap, last_gap, pid, ring0, boosts, rechecks, extensions;
+};
+PcmIrqTiming pcm_irq_timing{};
+
+void pcm_interest_set(bool active) {
+    PcmCommitIrq commit;
+    if (!active) {
+        __atomic_store_n(&pcm_pending_ns, 0, __ATOMIC_RELEASE);
+        pcm_irq_timing.last = pcm_irq_timing.last_gap = 0;
     }
-    if (zatrzymany && run == 0) {
-        if (aktywny || gral) {
-            __atomic_store_n(&s_ton_stopped_ns,
-                             hpet_dostepny() ? czas_monotoniczny_ns() : 0,
-                             __ATOMIC_RELEASE);
-        }
-        __atomic_store_n(&s_ton_aktywny, false, __ATOMIC_RELEASE);
-        __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
-        return true;
-    }
-    // Zachowaj aktywnosc i powod: nastepny produkcyjny obieg ponowi STOP.
-    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
-    __atomic_store_n(&s_ton_stop_zadany, powod, __ATOMIC_RELEASE);
-    if (poprzedni_run != 1U) {
-        wypisz_log("[HDA] STOP niepotwierdzony: SDnCTL.RUN=1; ponawiam w pracy odroczonej.");
-    }
-    return false;
+    __atomic_store_n(&pcm_interest, active, __ATOMIC_RELEASE);
 }
 
-bool uzbroj_deadline_tonu(uint32_t czas_ms) {
-    // Brak HPET oznacza czas_monotoniczny_ns()==0 na tej platformie.
-    // Nigdy nie uruchamiaj cyklicznego BDL bez dzialajacego zegara.
-    if (!hpet_dostepny()) return false;
-    const uint64_t teraz = czas_monotoniczny_ns();
-    const uint64_t dlugosc = static_cast<uint64_t>(czas_ms) * 1000000ULL;
-    if (teraz > UINT64_MAX - dlugosc) return false;
-    __atomic_store_n(&s_ton_deadline_ns, teraz + dlugosc, __ATOMIC_RELEASE);
-    __atomic_store_n(&s_ton_last_running_ns, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&s_ton_stopped_ns, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&s_ton_stop_powod, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+struct LegacyPcm {
+    uint64_t handle;
+    uint32_t frames_left, frequency, phase, sweep_frame;
+    uint8_t channels;
+    bool sweep, diagnostic;
+};
+LegacyPcm pcm_tone{};
+
+uint32_t pcm_sd() {
+    return static_cast<uint32_t>(hda_stream_base - hda_mmio_base);
+}
+
+bool pcm_device_ready() {
+    return !pcm_shutdown && __atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE) &&
+           hpet_dostepny() && (mmio_odczytaj32(HDA_REG_GCTL) & HDA_GCTL_CRST);
+}
+
+void pcm_feed_tone(uint32_t target) {
+    if (!pcm_tone.frames_left) return;
+    Pcm::Status status{};
+    if (pcm_mixer.status(pcm_legacy, pcm_tone.handle, &status) != Pcm::OK || status.queued >= target)
+        return;
+    uint32_t remaining = target - status.queued;
+    if (remaining > pcm_tone.frames_left) remaining = pcm_tone.frames_left;
+    while (remaining) {
+        constexpr uint32_t batch = 128;
+        int16_t samples[batch * 2];
+        const uint32_t count = remaining < batch ? remaining : batch;
+        for (uint32_t i = 0; i < count; ++i) {
+            uint32_t hz = pcm_tone.frequency;
+            if (pcm_tone.sweep) {
+                hz = HDA_TEST_SWEEP_MIN_HZ +
+                     (HDA_TEST_SWEEP_MAX_HZ - HDA_TEST_SWEEP_MIN_HZ) *
+                     pcm_tone.sweep_frame / HDA_SAMPLE_RATE;
+                if (++pcm_tone.sweep_frame == HDA_SAMPLE_RATE) pcm_tone.sweep_frame = 0;
+            }
+            int32_t v = probka_trojkatna(pcm_tone.phase);
+            if (pcm_tone.diagnostic) v = v * HDA_TEST_AMPLITUDA / 24576;
+            samples[2 * i] = pcm_tone.channels & 1 ? static_cast<int16_t>(v) : 0;
+            samples[2 * i + 1] = pcm_tone.channels & 2 ? static_cast<int16_t>(v) : 0;
+            pcm_tone.phase = (pcm_tone.phase + hz) % HDA_SAMPLE_RATE;
+        }
+        uint32_t accepted = 0;
+        (void)pcm_mixer.write(pcm_legacy, pcm_tone.handle, samples, count, &accepted);
+        pcm_tone.frames_left -= accepted;
+        remaining -= accepted;
+        if (accepted != count) break;
+    }
+    if (!pcm_tone.frames_left) (void)pcm_mixer.finish(pcm_legacy, pcm_tone.handle);
+}
+
+bool pcm_prepare(uint32_t offset = 0) {
+    const uint64_t begin = czas_monotoniczny_ns();
+    const uint64_t irq_before = __atomic_load_n(&pcm_irq_timing.count, __ATOMIC_RELAXED);
+    pcm_feed_tone(offset + HdaPcm::PERIOD_FRAMES);
+    (void)pcm_mixer.preview(pcm_stage, HdaPcm::PERIOD_FRAMES, offset);
+    const bool software_master = !s_wzmacniacz.regulowany();
+    bool has_signal = false;
+    for (auto& f : pcm_stage) {
+        if (software_master) {
+            f.left = HdaGlosnosc::skaluj_probke(f.left, s_glosnosc, true);
+            f.right = HdaGlosnosc::skaluj_probke(f.right, s_glosnosc, true);
+        }
+        has_signal |= f.left != 0 || f.right != 0;
+    }
+    const uint64_t duration = czas_monotoniczny_ns() - begin;
+    ++pcm_stats.okresy_miksowania;
+    if (__atomic_load_n(&pcm_irq_timing.count, __ATOMIC_RELAXED) != irq_before)
+        ++pcm_stats.irq_w_miksie;
+    pcm_stats.czas_miksowania_ns += duration;
+    if (duration > pcm_stats.maks_miks_ns) pcm_stats.maks_miks_ns = duration;
+    return has_signal;
+}
+
+void pcm_trace_shortfall(PcmJadro::BrakPcm reason, uint64_t period, uint64_t previous_ns,
+                         uint64_t previous_bytes, Pcm::QueueLevels queue, uint32_t missing,
+                         bool start, bool staged, bool available) {
+    if (!DiagOpoznieniaIrq::active() || pcm_shortfall_count == PCM_SHORTFALL_EVENTS) return;
+    uint64_t irq_gap;
+    {
+        PcmCommitIrq commit;
+        irq_gap = pcm_irq_timing.last_gap;
+    }
+    pcm_shortfalls[pcm_shortfall_count++] = {
+        pcm_ring.sampled_ns, previous_ns, pcm_worker_request, irq_gap, period,
+        pcm_ring.bytes, previous_bytes, pcm_ring.lpib, queue.minimum, queue.maximum,
+        queue.expecting, missing, reason, start, s_glosnosc.wyciszony, staged, available
+    };
+}
+
+void pcm_commit_mix(bool signal, uint64_t period, uint64_t previous_ns,
+                    uint64_t previous_bytes, bool start) {
+    const auto queue = pcm_mixer.queue_levels();
+    const auto missing = pcm_mixer.consume(HdaPcm::PERIOD_FRAMES);
+    if (s_glosnosc.wyciszony) ++pcm_stats.okresy_master_mute;
+    else if (!signal) ++pcm_stats.cisza_miksera;
+    if (missing)
+        pcm_trace_shortfall(PcmJadro::BrakPcm::Kolejka, period, previous_ns,
+                            previous_bytes, queue, missing, start, true, queue.maximum != 0);
+}
+
+void pcm_copy_period(uint32_t slot) {
+    auto* dst = static_cast<Pcm::Frame*>(dma_wirtualny_z_fizycznego(hda_bufory_phys[slot]));
+    for (uint32_t i = 0; i < HdaPcm::PERIOD_FRAMES; ++i) dst[i] = pcm_stage[i];
+    bariera_dma_przed_urzadzeniem();
+    ++pcm_stats.okresy;
+}
+
+bool pcm_stop_dma() {
+    // The IRQ can request a stop, but only this readback releases DMA ownership.
+    if (!zatrzymaj_stream_wewnetrznie()) return false;
+    pcm_running = false;
+    __atomic_store_n(&pcm_watchdog_fired, false, __ATOMIC_RELEASE);
+    return true;
+}
+
+bool pcm_start_dma() {
+    static_assert(HdaPcm::PRIME * HdaPcm::PERIOD_FRAMES <= Pcm::CAPACITY_FRAMES);
+    if (!pcm_device_ready() || !pcm_stop_dma()) return false;
+    // FIFOS is encoded as bytes minus one. Keep at least one full period
+    // between the link and the first byte to be published during RUN.
+    constexpr uint32_t sd_fifos = 0x10;
+    if (uint32_t(mmio_odczytaj16(pcm_sd() + sd_fifos)) + 1 > HdaPcm::PERIOD_BYTES)
+        return false;
+    wyzeruj(hda_bdl, ROZMIAR_RAMKI_4K);
+    bool primed[HdaPcm::PRIME]{};
+    for (uint32_t i = 0; i < HdaPcm::PERIODS; ++i) {
+        hda_bdl[i] = {reinterpret_cast<uint64_t>(hda_bufory_phys[i]), HdaPcm::PERIOD_BYTES, 0};
+        // The extra slots are initially silent. Only four periods are
+        // queued ahead, independent of the length of the physical BDL.
+        if (i < HdaPcm::PRIME) {
+            primed[i] = pcm_prepare(i * HdaPcm::PERIOD_FRAMES);
+            pcm_copy_period(i);
+        } else {
+            wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[i]), HdaPcm::PERIOD_BYTES);
+        }
+    }
+    if (!zaprogramuj_stream(HdaPcm::PERIODS, HdaPcm::RING_BYTES)) return false;
+    uint64_t started_ns = 0;
+    pcm_running = true; // RUN may already be set on failure.
+    if (!uruchom_stream(started_ns) || !(stream_odczytaj_ctl() & HDA_SD_CTL_RUN)) {
+        (void)pcm_stop_dma();
+        return false;
+    }
+    pcm_ring.start(started_ns);
+    for (uint32_t i = 0; i < HdaPcm::PRIME; ++i) {
+        pcm_ring.written[i] = primed[i];
+        pcm_commit_mix(primed[i], i, 0, 0, true);
+    }
+    ++pcm_stats.starty;
+    if (pcm_retry) {
+        ++pcm_stats.odzyskania;
+        const uint64_t elapsed = started_ns - pcm_recovery_since;
+        if (elapsed > pcm_stats.maks_odzyskanie_ns) pcm_stats.maks_odzyskanie_ns = elapsed;
+    }
+    pcm_retry = false;
+    pcm_interest_set(true);
+    return true;
+}
+
+HdaPcm::Fault pcm_observe() {
+    const uint64_t now = czas_monotoniczny_ns();
+    if (now >= pcm_ring.sampled_ns) {
+        const uint64_t gap = now - pcm_ring.sampled_ns;
+        if (gap > pcm_stats.maks_przerwa_ns) pcm_stats.maks_przerwa_ns = gap;
+    }
+    pcm_observed_lpib = mmio_odczytaj32(pcm_sd() + HDA_SD_LPIB);
+    if (__atomic_load_n(&pcm_watchdog_fired, __ATOMIC_ACQUIRE))
+        return HdaPcm::Fault::Watchdog;
+    const auto fault = pcm_ring.observe(pcm_observed_lpib, now);
+    if (pcm_ring.delta > pcm_stats.maks_skok_lpib) pcm_stats.maks_skok_lpib = pcm_ring.delta;
+    return fault;
+}
+
+// Composing a period and changing DMA memory are separate. Re-observe after
+// composing, even if the next action has changed while the CPU was away.
+HdaPcm::Fault pcm_refill() {
+    using namespace HdaPcm;
+    bool staged = false;
+    bool signal = false;
+    for (uint32_t n = 0; n < 2 * PERIODS; ++n) {
+        const auto previous_ns = pcm_ring.sampled_ns;
+        const auto previous_bytes = pcm_ring.bytes;
+        const auto period = pcm_ring.fill;
+        {
+            PcmCommitIrq commit;
+            const Fault fault = pcm_observe();
+            if (fault != Fault::None) return fault;
+            switch (pcm_ring.next()) {
+                case Action::Wait:
+                    pcm_set_deadline(pcm_ring);
+                    return Fault::None;
+                case Action::Recover:
+                    // Even a scrub would race hardware or stale data has
+                    // already reached its next turn. Only STOP may free it.
+                    return Fault::Ownership;
+                case Action::Scrub:
+                    wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[Ring::slot(pcm_ring.retire)]),
+                            PERIOD_BYTES);
+                    bariera_dma_przed_urzadzeniem();
+                    pcm_ring.scrubbed();
+                    pcm_set_deadline(pcm_ring);
+                    continue;
+                case Action::Skip: {
+                    ++pcm_ring.fill;
+                    ++pcm_stats.bezpieczna_cisza;
+                    const bool available = pcm_tone.frames_left || pcm_mixer.has_pcm();
+                    if (available) ++pcm_stats.utracone_okresy;
+                    if (DiagOpoznieniaIrq::active())
+                        pcm_trace_shortfall(PcmJadro::BrakPcm::WlasnoscDma, period, previous_ns,
+                                            previous_bytes, pcm_mixer.queue_levels(), 0, false, staged, available);
+                    continue;
+                }
+                case Action::Fill:
+                    if (staged) {
+                        const uint64_t lead = (pcm_ring.fill * PERIOD_BYTES - pcm_ring.bytes) / sizeof(Pcm::Frame);
+                        if (lead > pcm_stats.maks_wyprzedzenie_ramek) pcm_stats.maks_wyprzedzenie_ramek = lead;
+                        pcm_copy_period(Ring::slot(pcm_ring.fill));
+                        pcm_ring.published(signal);
+                        pcm_set_deadline(pcm_ring);
+                        break;
+                    }
+                    // Keep the fifth period available until there is PCM to
+                    // publish. In particular do not consume silence at cold start.
+                    if (pcm_ring.fill == pcm_ring.current() + LEAD - 1 && !pcm_tone.frames_left) {
+                        const auto queues = pcm_mixer.queue_levels();
+                        if ((queues.expecting && queues.minimum < PERIOD_FRAMES) || !pcm_mixer.has_pcm()) {
+                            pcm_set_deadline(pcm_ring);
+                            return Fault::None;
+                        }
+                    }
+                    pcm_set_deadline(pcm_ring);
+                    break;
+            }
+        }
+        if (staged) {
+            pcm_commit_mix(signal, period, previous_ns, previous_bytes, false);
+            staged = false;
+            continue;
+        }
+        signal = pcm_prepare();
+        staged = true;
+    }
+    // Bound work per invocation. Keep outstanding work for the next point.
+    uint64_t empty = 0;
+    const uint64_t now = czas_monotoniczny_ns();
+    (void)__atomic_compare_exchange_n(&pcm_pending_ns, &empty, now, false,
+                                      __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+    return Fault::None;
+}
+
+bool zatrzymaj_ton_wewnetrznie(uint32_t powod) {
+    if (!__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE)) return true;
+    if (pcm_tone.handle) {
+        (void)pcm_mixer.close(pcm_legacy, pcm_tone.handle);
+        pcm_tone = {};
+    }
+    __atomic_store_n(&s_ton_stop_powod, powod, __ATOMIC_RELEASE);
+    // Preserve the historical RUN=0 for the standalone test. If other
+    // clients are open, RUN belongs to them and the test only closes its PCM.
+    const bool stopped = pcm_clients || !pcm_running || pcm_stop_dma();
+    const uint8_t run = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0;
+    __atomic_store_n(&s_ton_run_po_stop, run, __ATOMIC_RELEASE);
+    if (!stopped) {
+        __atomic_store_n(&s_ton_stop_zadany, powod, __ATOMIC_RELEASE);
+        return false;
+    }
+    __atomic_store_n(&s_ton_stopped_ns, hpet_dostepny() ? czas_monotoniczny_ns() : 0,
+                     __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_aktywny, false, __ATOMIC_RELEASE);
     __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
     return true;
 }
 
+bool pcm_start_tone(uint32_t mode, uint32_t hz, uint32_t ms, uint8_t channels, bool diag) {
+    if (!hda_api_czas_poprawny(ms) || !channels || channels > 3 ||
+        (mode != HDA_TEST_SWEEP && !hda_api_czestotliwosc_poprawna(hz))) return false;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny() || !pcm_device_ready() || (pcm_retry && pcm_running)) return false;
 
-/* =========================================================================
- * 20. CLEANUP
- * ========================================================================= */
+    // Replace just the legacy producer, leaving any running DMA in place.
+    if (pcm_tone.handle) (void)pcm_mixer.close(pcm_legacy, pcm_tone.handle);
+    pcm_tone = {};
+    if (pcm_mixer.open(pcm_legacy, {Pcm::RATE, 2, Pcm::FORMAT_S16}, &pcm_tone.handle) != Pcm::OK)
+        return false;
+    pcm_tone.frames_left = hda_api_liczba_ramek_audio(ms);
+    pcm_tone.frequency = hz;
+    pcm_tone.channels = channels;
+    pcm_tone.sweep = mode == HDA_TEST_SWEEP;
+    pcm_tone.diagnostic = diag;
+    const bool was_running = pcm_running;
+    if (!was_running && !pcm_start_dma()) {
+        (void)pcm_mixer.close(pcm_legacy, pcm_tone.handle);
+        pcm_tone = {};
+        __atomic_store_n(&s_ton_aktywny, false, __ATOMIC_RELEASE);
+        ++pcm_stats.bledy_dma;
+        return false;
+    }
+
+    const uint64_t now = czas_monotoniczny_ns();
+    // On a running ring a newly inserted test starts on a later DMA period.
+    const uint64_t lead = was_running ? HdaPcm::LEAD * HdaPcm::PERIOD_NS : 0;
+    __atomic_store_n(&s_ton_deadline_ns, now + uint64_t(ms) * 1000000ULL + lead, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_last_running_ns, now, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stopped_ns, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_run_po_stop, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stop_powod, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_BRAK, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
+    return true;
+}
+
+void pcm_recover(uint64_t now, HdaPcm::Fault fault) {
+    if (!pcm_retry) {
+        PcmCommitIrq commit;
+        const uint32_t cause = static_cast<uint32_t>(fault);
+        static_assert(static_cast<unsigned>(HdaPcm::Fault::Count) ==
+                      sizeof(pcm_stats.przyczyny) / sizeof(pcm_stats.przyczyny[0]));
+        ++pcm_stats.przyczyny[cause];
+        const bool irq_stop = fault == HdaPcm::Fault::Watchdog;
+        const uint64_t deadline = __atomic_load_n(&pcm_watchdog_ns, __ATOMIC_RELAXED);
+        if (pcm_stats.zapisane_zdarzenia < PCM_EVENTS) {
+            pcm_events[pcm_stats.zapisane_zdarzenia++] = {
+                now, deadline, irq_stop ? pcm_watchdog_irq_gap : pcm_irq_timing.last_gap,
+                pcm_worker_request, pcm_ring.sampled_ns, pcm_observed_lpib, cause,
+                irq_stop ? pcm_watchdog_lpib : 0
+            };
+        }
+        pcm_recovery_since = irq_stop ? pcm_watchdog_time : now;
+    }
+    // No page can be cleared until STOP is confirmed. Retry on the next
+    // scheduled turn after success; back off only if the device refused.
+    const bool stopped = pcm_stop_dma();
+    pcm_retry = true;
+    pcm_retry_ns = now + (stopped ? 0 : HdaPcm::PERIOD_NS);
+}
 
 } // namespace
 
@@ -2703,116 +2618,165 @@ bool inicjalizuj_hda() {
  * 22. PUBLICZNY TON TESTOWY (ASYNCHRONICZNY / NON-BLOCKING)
  * ========================================================================= */
 
-bool hda_test_ton(
-    uint32_t czestotliwosc_hz,
-    uint32_t czas_ms
-) {
-    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE) ||
-        czestotliwosc_hz < HDA_MIN_HZ ||
-        czestotliwosc_hz > HDA_MAX_HZ ||
-        czas_ms == 0 ||
-        czas_ms > HDA_MAX_MS || !hpet_dostepny()) {
-        return false;
-    }
-
-    GuardHDA guard(HDA_TIMEOUT_LOCK);
-    if (!guard.aktywny()) {
-        return false;
-    }
-
-    /*
-     * Zawsze zaczynamy od zatrzymanego silnika.
-     */
-    if (!zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY)) {
-        return false;
-    }
-
-    uint32_t bdl_count = 0;
-    uint32_t cbl_bytes = 0;
-
-    if (!przygotuj_okres_tonu(
-            czestotliwosc_hz,
-            &bdl_count,
-            &cbl_bytes)) {
-        return false;
-    }
-
-    /*
-     * Prawidlowa kolejnosc DMA:
-     * 1. zatrzymanie streamu
-     * 2. reset stream descriptor
-     * 3. konfiguracja BDL (przygotuj_okres_tonu)
-     * 4. BDPL/BDPU, CBL, LVI, FMT, Stream Tag (zaprogramuj_stream)
-     * 5. konfiguracja kodeka
-     * 6. wyczyszczenie statusow
-     * 7. uruchomienie RUN
-     */
-    if (!resetuj_stream()) {
-        return false;
-    }
-
-    if (!zaprogramuj_stream(
-            bdl_count,
-            cbl_bytes)) {
-        return false;
-    }
-
-    if (!konfiguruj_trase_biezaca()) {
-        return false;
-    }
-
-    if (!uzbroj_deadline_tonu(czas_ms)) return false;
-    if (!uruchom_stream()) {
-        (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_BLAD_STRUMIENIA);
-        wypisz_log("[HDA] Output DMA nie wystartowalo.");
-        return false;
-    }
-
-    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
-
-    loguj_stan_streamu();
-
-    return true;
+bool hda_test_ton(uint32_t hz, uint32_t ms) {
+    return pcm_start_tone(HDA_TEST_TON, hz, ms, 3, false);
 }
 
 void hda_zatrzymaj_ton() {
     __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_RECZNY, __ATOMIC_RELEASE);
     GuardHDA guard(HDA_TIMEOUT_LOCK);
-    if (!guard.aktywny()) return;
-    (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY);
+    if (guard.aktywny()) (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY);
+}
+
+// The timer never reads or fills sample memory. If the worker has not
+// revalidated its DMA window in time, request RUN=0 without waiting in IRQ.
+void hda_pcm_watchdog_irq(unsigned pid, bool ring0) {
+    if (!__atomic_load_n(&pcm_interest, __ATOMIC_ACQUIRE)) return;
+    const bool clock_ok = hpet_dostepny();
+    const uint64_t now = clock_ok ? czas_monotoniczny_ns() : 1;
+    if (pcm_irq_timing.last && now >= pcm_irq_timing.last) {
+        pcm_irq_timing.last_gap = now - pcm_irq_timing.last;
+        if (pcm_irq_timing.last_gap > pcm_irq_timing.max_gap) {
+            pcm_irq_timing.max_gap = pcm_irq_timing.last_gap;
+            pcm_irq_timing.pid = pid;
+            pcm_irq_timing.ring0 = ring0;
+        }
+    }
+    pcm_irq_timing.last = now;
+    __atomic_add_fetch(&pcm_irq_timing.count, 1, __ATOMIC_RELAXED);
+    uint64_t empty = 0;
+    (void)__atomic_compare_exchange_n(&pcm_pending_ns, &empty, now, false,
+                                      __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+
+    const uint64_t limit = __atomic_load_n(&pcm_watchdog_ns, __ATOMIC_ACQUIRE);
+    if (!limit || __atomic_load_n(&pcm_watchdog_fired, __ATOMIC_RELAXED) ||
+        (clock_ok && now < limit)) return;
+    pcm_watchdog_lpib = 0;
+    if (clock_ok) {
+        ++pcm_irq_timing.rechecks;
+        const uint32_t pos = mmio_odczytaj32(pcm_sd() + HDA_SD_LPIB);
+        pcm_watchdog_lpib = pos;
+        const uint64_t safe = pcm_watchdog_window.safe_until(pos, now);
+        if (safe > now) {
+            __atomic_store_n(&pcm_watchdog_ns, safe, __ATOMIC_RELEASE);
+            ++pcm_irq_timing.extensions;
+            return;
+        }
+    }
+    const uint32_t reg = pcm_sd() + HDA_SD_CTL_LO;
+    mmio_zapisz16(reg, mmio_odczytaj16(reg) & ~HDA_SD_CTL_RUN);
+    pcm_watchdog_time = now;
+    pcm_watchdog_irq_gap = pcm_irq_timing.last_gap;
+    __atomic_store_n(&pcm_watchdog_fired, true, __ATOMIC_RELEASE);
+}
+
+bool hda_pcm_praca_oczekuje() {
+    return __atomic_load_n(&pcm_pending_ns, __ATOMIC_ACQUIRE) != 0;
+}
+
+// Called by scheduler with IF=0. At most one priority return per outstanding
+// request and no priority when PID0 is already the current task.
+bool hda_pcm_pilny_powrot_pid0() {
+    const uint64_t pending = __atomic_load_n(&pcm_pending_ns, __ATOMIC_ACQUIRE);
+    if (!pending || pending == pcm_last_priority_request || !hpet_dostepny()) return false;
+    const uint64_t now = czas_monotoniczny_ns();
+    if (now < pending || now - pending < 12000000ULL) return false;
+    pcm_last_priority_request = pending;
+    ++pcm_irq_timing.boosts;
+    return true;
 }
 
 void hda_obsluz_okresowo() {
-    if (!__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE) &&
-        __atomic_load_n(&s_ton_stop_zadany, __ATOMIC_ACQUIRE) == HDA_TON_STOP_BRAK) return;
-    GuardHDA guard(HDA_TIMEOUT_LOCK); // jeden CAS, bez czekania na innego wlasciciela
-    if (!guard.aktywny()) return;
-    uint32_t powod = __atomic_load_n(&s_ton_stop_zadany, __ATOMIC_ACQUIRE);
-    if (powod == HDA_TON_STOP_BRAK) {
-        if ((mmio_odczytaj32(HDA_REG_GCTL) & 1U) == 0) {
-            powod = HDA_TON_STOP_RESET_KONTROLERA;
-        } else if ((stream_odczytaj_sts() & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE)) != 0) {
-            powod = HDA_TON_STOP_BLAD_STRUMIENIA;
-        } else if (!hpet_dostepny()) {
-            powod = HDA_TON_STOP_BLAD_ZEGARA;
-        } else {
-            const uint64_t teraz = czas_monotoniczny_ns();
-            if (teraz >= __atomic_load_n(&s_ton_deadline_ns, __ATOMIC_ACQUIRE)) {
-                powod = HDA_TON_STOP_DEADLINE;
-            } else if (__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE) &&
-                       (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0) {
-                __atomic_store_n(&s_ton_last_running_ns, teraz, __ATOMIC_RELEASE);
+#ifndef BURSZTYN_HDA_HOST_TEST
+    uint64_t flags;
+    asm volatile("pushfq; popq %0" : "=r"(flags) :: "memory");
+    if (!(flags & (1ULL << 9))) return;
+#endif
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) {
+        if (hda_pcm_praca_oczekuje()) __atomic_add_fetch(&pcm_stats.blokady_pracy, 1, __ATOMIC_RELAXED);
+        return; // the pending timestamp stays published
+    }
+    pcm_worker_request = __atomic_exchange_n(&pcm_pending_ns, 0, __ATOMIC_ACQ_REL);
+    if (pcm_shutdown || !__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return;
+    if (!pcm_running && !pcm_clients && !pcm_tone.handle) {
+        pcm_interest_set(false);
+        return;
+    }
+
+    const uint64_t now = czas_monotoniczny_ns();
+    if (pcm_worker_request && now >= pcm_worker_request) {
+        const uint64_t wait = now - pcm_worker_request;
+        ++pcm_stats.paczki_pracy;
+        pcm_stats.suma_czekania_ns += wait;
+        if (wait > pcm_stats.maks_czekanie_ns) pcm_stats.maks_czekanie_ns = wait;
+    }
+    const bool clock_ok = hpet_dostepny();
+    const bool controller_ok = (mmio_odczytaj32(HDA_REG_GCTL) & HDA_GCTL_CRST) != 0;
+    const uint8_t dma_status = pcm_running ? stream_odczytaj_sts() : 0;
+    const bool dma_error = (dma_status & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE)) != 0;
+    if (!pcm_retry) {
+        if (dma_status & HDA_SD_STS_FIFOE) ++pcm_stats.fifo_error;
+        if (dma_status & HDA_SD_STS_DESE) ++pcm_stats.descriptor_error;
+    }
+    if (__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE)) {
+        uint32_t reason = __atomic_load_n(&s_ton_stop_zadany, __ATOMIC_ACQUIRE);
+        if (!controller_ok) reason = HDA_TON_STOP_RESET_KONTROLERA;
+        else if (!clock_ok) reason = HDA_TON_STOP_BLAD_ZEGARA;
+        else if (dma_error) reason = HDA_TON_STOP_BLAD_STRUMIENIA;
+        else if (reason == HDA_TON_STOP_BRAK &&
+                 now >= __atomic_load_n(&s_ton_deadline_ns, __ATOMIC_ACQUIRE))
+            reason = HDA_TON_STOP_DEADLINE;
+        if (reason != HDA_TON_STOP_BRAK) (void)zatrzymaj_ton_wewnetrznie(reason);
+        else if (pcm_running) __atomic_store_n(&s_ton_last_running_ns, now, __ATOMIC_RELEASE);
+    }
+
+    using HdaPcm::Fault;
+    if (dma_error) ++pcm_stats.bledy_dma;
+    if (!clock_ok || !controller_ok || dma_error) {
+        if (pcm_running) pcm_recover(now, clock_ok ? Fault::Device : Fault::Clock);
+        return;
+    }
+    if (pcm_running) {
+        if (pcm_retry) {
+            if (now >= pcm_retry_ns) pcm_recover(now, Fault::None);
+            return;
+        }
+        if (!pcm_clients && !pcm_tone.handle && pcm_idle_since &&
+            now - pcm_idle_since >= 256000000ULL) {
+            if (pcm_stop_dma()) pcm_interest_set(false);
+            return;
+        }
+        if (now >= pcm_ring.sampled_ns) {
+            const uint64_t gap = now - pcm_ring.sampled_ns;
+            if (gap >= HdaPcm::LATE_NS) {
+                ++pcm_stats.opoznienia;
+                const uint64_t late = gap - HdaPcm::LATE_NS;
+                if (late > pcm_stats.maks_spoznienie_ns) pcm_stats.maks_spoznienie_ns = late;
             }
         }
+        const Fault fault = pcm_refill();
+        if (fault != Fault::None) {
+            pcm_recover(czas_monotoniczny_ns(), fault);
+        } else if (!(stream_odczytaj_ctl() & HDA_SD_CTL_RUN)) {
+            ++pcm_stats.bledy_dma;
+            pcm_recover(now, Fault::Device);
+        }
+    } else if ((pcm_clients || pcm_tone.handle) && (pcm_retry || pcm_tone.frames_left || pcm_mixer.has_pcm()) &&
+               now >= pcm_retry_ns && !pcm_start_dma()) {
+        ++pcm_stats.bledy_dma;
+        pcm_recover(now, Fault::Start);
     }
-    if (powod != HDA_TON_STOP_BRAK) (void)zatrzymaj_ton_wewnetrznie(powod);
 }
 
 void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx) {
-    if (kontroler_idx != hda_kontroler_odtwarzania ||
-        !__atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE)) return;
-    __atomic_store_n(&s_ton_stop_zadany, HDA_TON_STOP_RESET_KONTROLERA, __ATOMIC_RELEASE);
-    hda_obsluz_okresowo();
+    if (kontroler_idx != hda_kontroler_odtwarzania) return;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return;
+    __atomic_store_n(&hda_gotowy, false, __ATOMIC_RELEASE);
+    (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RESET_KONTROLERA);
+    (void)pcm_stop_dma();
+    pcm_interest_set(false);
 }
 
 void hda_wew_pobierz_stan_tonu(HdaWewStanTonu* out) {
@@ -2933,160 +2897,6 @@ uint8_t sciezka_test_konw = 0;
 uint8_t sciezka_test_pin = 0;
 uint8_t sciezka_test_fizyczny = 0;
 
-int16_t probka_ton_mask(int32_t v, uint8_t kanal_bit, uint8_t kanaly) {
-    return (kanaly & kanal_bit) ? static_cast<int16_t>(v) : 0;
-}
-
-bool wypelnij_ton_kanaly(
-    uint32_t hz,
-    uint8_t kanaly,
-    uint32_t* bdl_count,
-    uint32_t* cbl_bytes
-) {
-    if (!bdl_count || !cbl_bytes) return false;
-    if (!hda_api_czestotliwosc_poprawna(hz)) return false;
-
-    const uint32_t gcd = nwd_u32(HDA_SAMPLE_RATE, hz);
-    if (gcd == 0) return false;
-    const uint32_t okres_probek = HDA_SAMPLE_RATE / gcd;
-    const uint64_t bytes64 =
-        static_cast<uint64_t>(okres_probek) * HDA_BAJTY_RAMKI_AUDIO;
-    if (bytes64 < 8U || bytes64 > HDA_MAKS_BAJTOW_OKRESU) return false;
-    const uint32_t bytes = static_cast<uint32_t>(bytes64);
-
-    uint32_t count = (bytes + HDA_DMA_BUFOR_BAJTOW - 1U) / HDA_DMA_BUFOR_BAJTOW;
-    if (count < 2U) count = 2U;
-    if (count > HDA_MAKS_BDL) return false;
-
-    wyzeruj(hda_bdl, ROZMIAR_RAMKI_4K);
-    for (uint32_t i = 0; i < count; ++i) {
-        wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[i]), ROZMIAR_RAMKI_4K);
-    }
-
-    uint32_t specjalny_pierwszy = 0;
-    if (bytes <= HDA_DMA_BUFOR_BAJTOW) {
-        specjalny_pierwszy = (bytes / 2U) & ~UINT32_C(3);
-        if (specjalny_pierwszy < 4U) specjalny_pierwszy = 4U;
-        if (bytes - specjalny_pierwszy < 4U) specjalny_pierwszy = bytes - 4U;
-    }
-
-    uint32_t faza = 0;
-    uint32_t globalna = 0;
-    uint32_t pozostalo = bytes;
-
-    for (uint32_t i = 0; i < count; ++i) {
-        uint32_t len;
-        if (bytes <= HDA_DMA_BUFOR_BAJTOW) {
-            len = (i == 0) ? specjalny_pierwszy : bytes - specjalny_pierwszy;
-        } else {
-            len = pozostalo > HDA_DMA_BUFOR_BAJTOW ? HDA_DMA_BUFOR_BAJTOW : pozostalo;
-        }
-        if (len < 4U || (len & 3U) != 0) return false;
-
-        uint8_t* bufor = static_cast<uint8_t*>(
-            dma_wirtualny_z_fizycznego(hda_bufory_phys[i]));
-        const uint32_t frames = len / HDA_BAJTY_RAMKI_AUDIO;
-        for (uint32_t f = 0; f < frames; ++f) {
-            const int16_t base = probka_trojkatna(faza);
-            /* Amplituda ~50% (HDA_TEST_AMPLITUDA) zamiast 75%. */
-            const int32_t v = (static_cast<int32_t>(base) * HDA_TEST_AMPLITUDA) / 24576;
-            const int16_t l = probka_ton_mask(v, 1, kanaly);
-            const int16_t r = probka_ton_mask(v, 2, kanaly);
-            const uint32_t off = f * HDA_BAJTY_RAMKI_AUDIO;
-            const uint16_t ul = static_cast<uint16_t>(l);
-            const uint16_t ur = static_cast<uint16_t>(r);
-            bufor[off + 0] = static_cast<uint8_t>(ul & 0xFF);
-            bufor[off + 1] = static_cast<uint8_t>(ul >> 8);
-            bufor[off + 2] = static_cast<uint8_t>(ur & 0xFF);
-            bufor[off + 3] = static_cast<uint8_t>(ur >> 8);
-            faza += hz;
-            if (faza >= HDA_SAMPLE_RATE) faza -= HDA_SAMPLE_RATE;
-            ++globalna;
-        }
-        hda_bdl[i].adres = reinterpret_cast<uint64_t>(hda_bufory_phys[i]);
-        hda_bdl[i].dlugosc = len;
-        hda_bdl[i].flagi = 0;
-        if (pozostalo >= len) pozostalo -= len; else pozostalo = 0;
-    }
-
-    if (globalna != okres_probek || faza != 0) return false;
-    *bdl_count = count;
-    *cbl_bytes = bytes;
-    return true;
-}
-
-bool wypelnij_sweep(
-    uint32_t hz_start,
-    uint32_t hz_koniec,
-    uint8_t kanaly,
-    uint32_t* bdl_count,
-    uint32_t* cbl_bytes
-) {
-    /*
-     * Krótki sweep 200..4000 Hz. Generujemy liniowy narastajacy
-     * accumulator fazy (bez FP). Caly sweep miesci sie w ~1 s
-     * (limit buforow DMA).
-     */
-    if (!bdl_count || !cbl_bytes) return false;
-    if (hz_start < HDA_TEST_SWEEP_MIN_HZ) hz_start = HDA_TEST_SWEEP_MIN_HZ;
-    if (hz_koniec > HDA_TEST_SWEEP_MAX_HZ) hz_koniec = HDA_TEST_SWEEP_MAX_HZ;
-    if (hz_start > hz_koniec) return false;
-
-    uint32_t count = HDA_MAKS_BUFOROW_DMA;
-    /* Uzyjemy tylko tylu stron ile potrzeba na ~1 s. */
-    const uint32_t docelowe = HDA_SAMPLE_RATE * HDA_BAJTY_RAMKI_AUDIO;
-    uint32_t uzyte = docelowe / HDA_DMA_BUFOR_BAJTOW;
-    if (uzyte < 2U) uzyte = 2U;
-    if (uzyte > HDA_MAKS_BDL) uzyte = HDA_MAKS_BDL;
-    count = uzyte;
-    const uint32_t ramki = count * (HDA_DMA_BUFOR_BAJTOW / HDA_BAJTY_RAMKI_AUDIO);
-    const uint32_t bytes_sweep = ramki * HDA_BAJTY_RAMKI_AUDIO;
-
-    wyzeruj(hda_bdl, ROZMIAR_RAMKI_4K);
-    for (uint32_t i = 0; i < count; ++i) {
-        wyzeruj(dma_wirtualny_z_fizycznego(hda_bufory_phys[i]), ROZMIAR_RAMKI_4K);
-    }
-
-    uint32_t faza = 0;
-    uint32_t globalna = 0;
-    for (uint32_t i = 0; i < count; ++i) {
-        uint8_t* bufor = static_cast<uint8_t*>(
-            dma_wirtualny_z_fizycznego(hda_bufory_phys[i]));
-        const uint32_t frames = HDA_DMA_BUFOR_BAJTOW / HDA_BAJTY_RAMKI_AUDIO;
-        for (uint32_t f = 0; f < frames; ++f) {
-            /*
-             * Postep sweepu: interpolacja liniowa hz w Q16.
-             */
-            const uint64_t postep =
-                (static_cast<uint64_t>(globalna) << 16) / ramki;
-            const uint32_t hz = hz_start +
-                static_cast<uint32_t>(
-                    (static_cast<uint64_t>(hz_koniec - hz_start) * postep) >> 16);
-            const int16_t base = probka_trojkatna(faza);
-            const int32_t v = (static_cast<int32_t>(base) * HDA_TEST_AMPLITUDA) / 24576;
-            const int16_t l = probka_ton_mask(v, 1, kanaly);
-            const int16_t r = probka_ton_mask(v, 2, kanaly);
-            const uint32_t off = f * HDA_BAJTY_RAMKI_AUDIO;
-            const uint16_t ul = static_cast<uint16_t>(l);
-            const uint16_t ur = static_cast<uint16_t>(r);
-            bufor[off + 0] = static_cast<uint8_t>(ul & 0xFF);
-            bufor[off + 1] = static_cast<uint8_t>(ul >> 8);
-            bufor[off + 2] = static_cast<uint8_t>(ur & 0xFF);
-            bufor[off + 3] = static_cast<uint8_t>(ur >> 8);
-            faza += hz;
-            if (faza >= HDA_SAMPLE_RATE) faza -= HDA_SAMPLE_RATE;
-            ++globalna;
-        }
-        hda_bdl[i].adres = reinterpret_cast<uint64_t>(hda_bufory_phys[i]);
-        hda_bdl[i].dlugosc = HDA_DMA_BUFOR_BAJTOW;
-        hda_bdl[i].flagi = 0;
-    }
-
-    *bdl_count = count;
-    *cbl_bytes = bytes_sweep;
-    return true;
-}
-
 } // namespace
 
 void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) {
@@ -3114,49 +2924,8 @@ void hda_wew_pobierz_sciezke_testu(HdaWewSciezkaTestu* out) {
     sciezka_test_fizyczny = out->routing_fizyczny;
 }
 
-bool hda_wew_test_start(
-    uint32_t tryb,
-    uint32_t hz,
-    uint32_t czas_ms,
-    uint8_t kanaly
-) {
-    if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE) ||
-        !hda_api_czas_poprawny(czas_ms) || !hpet_dostepny()) return false;
-    if (kanaly == 0) return false;
-
-    GuardHDA guard(HDA_TIMEOUT_LOCK);
-    if (!guard.aktywny()) return false;
-
-    if (!zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY)) return false;
-
-    uint32_t bdl_count = 0;
-    uint32_t cbl_bytes = 0;
-
-    if (tryb == HDA_TEST_SWEEP) {
-        if (!wypelnij_sweep(
-                HDA_TEST_SWEEP_MIN_HZ, HDA_TEST_SWEEP_MAX_HZ,
-                kanaly, &bdl_count, &cbl_bytes)) {
-            return false;
-        }
-    } else {
-        if (!wypelnij_ton_kanaly(hz, kanaly, &bdl_count, &cbl_bytes)) {
-            return false;
-        }
-    }
-
-    if (!resetuj_stream()) return false;
-    if (!zaprogramuj_stream(bdl_count, cbl_bytes)) return false;
-    if (!konfiguruj_trase_biezaca()) return false;
-    if (!uzbroj_deadline_tonu(czas_ms)) return false;
-    if (!uruchom_stream()) {
-        (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_BLAD_STRUMIENIA);
-        return false;
-    }
-    __atomic_store_n(&s_ton_aktywny, true, __ATOMIC_RELEASE);
-
-    loguj_stan_streamu();
-
-    return true;
+bool hda_wew_test_start(uint32_t mode, uint32_t hz, uint32_t ms, uint8_t channels) {
+    return pcm_start_tone(mode, hz, ms, channels, true);
 }
 
 void hda_wew_test_stop() {
@@ -3322,7 +3091,7 @@ void hda_glosnosc_info(HdaGlosnoscInfo* out) {
     out->generacja = s_glosnosc.generacja;
     if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return;
     out->urzadzenie = true;
-    out->odtwarza = __atomic_load_n(&s_ton_aktywny, __ATOMIC_ACQUIRE);
+    out->odtwarza = (stream_odczytaj_ctl() & HDA_SD_CTL_RUN) != 0;
     if (s_wzmacniacz.regulowany()) {
         out->backend = HDA_GLOSNOSC_WZMACNIACZ;
         out->wyciszanie = s_wzmacniacz.wyciszanie();
@@ -3330,7 +3099,7 @@ void hda_glosnosc_info(HdaGlosnoscInfo* out) {
         out->kroki = HdaGlosnosc::kroki(s_wzmacniacz.caps);
     } else {
         out->backend = HDA_GLOSNOSC_PCM;
-        out->wyciszanie = true;                  // cisza w generatorze + zatrzymanie biezacego strumienia
+        out->wyciszanie = true;                  // cisza w nowych okresach PCM
     }
     out->cel = s_sciezka_skonfigurowana ? s_aktywna_sciezka.cel : 0;
     HdaDiagKontroler k{};
@@ -3340,7 +3109,7 @@ void hda_glosnosc_info(HdaGlosnoscInfo* out) {
 }
 
 namespace {
-/* Nowy stan: zapis do wzmacniacza (backend 1) albo tylko do generatora (backend 2). Blad sprzetu = stan bez zmian. */
+/* Nowy stan: wzmacniacz albo skalowanie PCM. Blad sprzetu = stan bez zmian. */
 uint32_t hda_glosnosc_zastosuj(const HdaGlosnosc::Stan& nowy) {
     if (!__atomic_load_n(&hda_gotowy, __ATOMIC_ACQUIRE)) return HDA_GLOSNOSC_NIEOBSLUGIWANE;
     if (s_wzmacniacz.regulowany()) {
@@ -3352,7 +3121,6 @@ uint32_t hda_glosnosc_zastosuj(const HdaGlosnosc::Stan& nowy) {
         s_glosnosc.procent = nowy.procent; s_glosnosc.wyciszony = nowy.wyciszony;
     } else {
         s_glosnosc.procent = nowy.procent; s_glosnosc.wyciszony = nowy.wyciszony;
-        if (nowy.wyciszony || nowy.procent == 0) hda_zatrzymaj_ton();   // biezacy bufor juz wygenerowany: cisza = stop
     }
     ++s_glosnosc.generacja;
     return HDA_GLOSNOSC_OK;
@@ -3361,13 +3129,113 @@ uint32_t hda_glosnosc_zastosuj(const HdaGlosnosc::Stan& nowy) {
 
 uint32_t hda_glosnosc_ustaw(uint32_t procent) {
     if (procent > 100U) return HDA_GLOSNOSC_ZLE_ARGUMENTY;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return HDA_GLOSNOSC_ZAJETE;
     HdaGlosnosc::Stan n = s_glosnosc;
     n.procent = procent;
     return hda_glosnosc_zastosuj(n);
 }
 
 uint32_t hda_wyciszenie_ustaw(bool wyciszony) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return HDA_GLOSNOSC_ZAJETE;
     HdaGlosnosc::Stan n = s_glosnosc;
     n.wyciszony = wyciszony;
     return hda_glosnosc_zastosuj(n);
+}
+
+namespace PcmJadro {
+namespace {
+Wynik wynik(Pcm::Result result) {
+    switch (result) {
+        case Pcm::OK: return Wynik::Ok;
+        case Pcm::LIMIT: return Wynik::Limit;
+        case Pcm::BAD_HANDLE: return Wynik::ZlyUchwyt;
+        case Pcm::FULL: return Wynik::Pelny;
+        default: return Wynik::ZleDane;
+    }
+}
+}
+
+Wynik otworz(Uchwyt& out) {
+    out = 0;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return Wynik::Zajete;
+    if (!pcm_device_ready()) return Wynik::Niedostepne;
+    const auto rc = pcm_mixer.open(pcm_internal, {Pcm::RATE, 2, Pcm::FORMAT_S16}, &out);
+    if (rc == Pcm::OK) {
+        ++pcm_clients;
+        pcm_idle_since = 0;
+        pcm_interest_set(true);
+    }
+    return wynik(rc);
+}
+
+Wynik zapisz(Uchwyt handle, const int16_t* samples, uint32_t frames, uint32_t& accepted) {
+    accepted = 0;
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return Wynik::Zajete;
+    if (!pcm_device_ready()) return Wynik::Niedostepne;
+    return wynik(pcm_mixer.write(pcm_internal, handle, samples, frames, &accepted));
+}
+
+Wynik glosnosc(Uchwyt handle, uint32_t volume, bool mute) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return Wynik::Zajete;
+    return wynik(pcm_mixer.gain(pcm_internal, handle, volume, mute));
+}
+
+Wynik zamknij(Uchwyt handle) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return Wynik::Zajete;
+    const auto rc = pcm_mixer.close(pcm_internal, handle);
+    if (rc == Pcm::OK && !--pcm_clients)
+        pcm_idle_since = czas_monotoniczny_ns();
+    return wynik(rc);
+}
+
+bool wylacz() {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny() || !pcm_stop_dma()) return false;
+    (void)zatrzymaj_ton_wewnetrznie(HDA_TON_STOP_RECZNY);
+    pcm_mixer.cleanup(pcm_internal);
+    pcm_mixer.cleanup(pcm_legacy);
+    pcm_clients = 0;
+    pcm_shutdown = true;
+    pcm_interest_set(false);
+    return true;
+}
+
+bool statystyki(Statystyki& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return false;
+    {
+        PcmCommitIrq commit;
+        out = pcm_stats;
+        out.przerwania = pcm_irq_timing.count;
+        out.maks_irq_ns = pcm_irq_timing.max_gap;
+        out.maks_irq_pid = pcm_irq_timing.pid;
+        out.maks_irq_ring0 = pcm_irq_timing.ring0;
+        out.pilne_powroty = pcm_irq_timing.boosts;
+        out.przedluzenia_watchdoga = pcm_irq_timing.extensions;
+        out.proby_watchdoga = pcm_irq_timing.rechecks;
+    }
+    out.blokady = __atomic_load_n(&pcm_guard_misses, __ATOMIC_RELAXED);
+    out.maks_blokada_ns = pcm_guard_max_ns;
+    out.braki_ramek = pcm_mixer.underrun_frames();
+    return true;
+}
+
+bool zdarzenie(uint32_t index, Zdarzenie& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny() || index >= pcm_stats.zapisane_zdarzenia) return false;
+    out = pcm_events[index];
+    return true;
+}
+bool slad_pcm(uint32_t index, SladPcm& out) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny() || index >= pcm_shortfall_count) return false;
+    out = pcm_shortfalls[index];
+    return true;
+}
 }

@@ -36,6 +36,7 @@
 #include "stos_jadra.h"
 #include "grafika.h"
 #include "hpet.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 
 #ifdef BURSZTYN_DIAG_PROC_LIFECYCLE
 extern void klog_serial(const char*);
@@ -702,6 +703,11 @@ static int znajdz_nastepny_proces(
         return -1;
     }
 
+    // PID0 is the existing worker. Give it one turn when audio work
+    // already waited three nominal ticks; otherwise preserve round-robin.
+    if (biezacy != 0 && proces_moze_byc_uruchomiony(0) && hda_pcm_pilny_powrot_pid0())
+        return 0;
+
     /*
      * Typowy round-robin: zaczynamy OD procesu po aktualnym.
      */
@@ -828,6 +834,7 @@ void scheduler_oddaj_cpu_w_syscallu() {
 #if defined(BURSZTYN_DIAG_NO_YIELD) && BURSZTYN_DIAG_NO_YIELD
     return;   // tylko A/B w pomiarach
 #endif
+    hda_wykonaj_zaplanowana_prace_odroczona();
     static uint64_t ostatni_tik = 0;
     const uint64_t tik = scheduler_pobierz_tick();
     if (tik == ostatni_tik) return;

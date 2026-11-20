@@ -8,8 +8,8 @@
  * 0..100 % mapuje sie liniowo na kroki 0..gain_ref (kroki wzmacniacza HDA sa w dB). Wyciszenie = bit Mute
  * (tylko gdy Amp Caps ma Mute Capable); poziom 0 z Mute Capable takze ustawia Mute.
  *
- * Backend 2 (gdy trasa nie ma regulowanego wzmacniacza): programowe wzmocnienie w jedynym miejscu, ktore tworzy
- * probki PCM (generator tonu sterownika) - skaluj_probke() z nasyceniem do int16. Przy backendzie 1 skalowanie
+ * Backend 2 (gdy trasa nie ma regulowanego wzmacniacza): programowe wzmocnienie gotowego okresu PCM
+ * przed publikacja dla DMA - skaluj_probke() z nasyceniem do int16. Przy backendzie 1 skalowanie
  * programowe jest tozsamoscia (bez podwojnego tlumienia).
  */
 #include <stdint.h>

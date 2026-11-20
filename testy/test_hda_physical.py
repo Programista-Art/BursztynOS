@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.hda-test' / 'physical'
 OUT.mkdir(parents=True, exist_ok=True)
-flags = ['g++', '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-fno-omit-frame-pointer',
+flags = ['g++', '-I.', '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-fno-omit-frame-pointer',
          '-fno-pie', '-no-pie', '-DBURSZTYN_HDA_HOST_TEST', '-fsanitize=address,undefined',
          '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections']
 subprocess.run(flags + ['testy/test_hda_transport.cpp', 'sterowniki/dzwiek/hda_transport.cpp',

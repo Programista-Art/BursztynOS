@@ -59,6 +59,7 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "sterowniki/dzwiek/hda_qemu_regression.h"
+#include "sterowniki/dzwiek/hda_pcm_regression.h"
 #include "sterowniki/usb/usb.h"
 #include "aktualizacja.h"
 #include "wersja_systemu.h"
@@ -3239,6 +3240,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      */
     const bool hda_qemu_regression_requested = zadano_automatyczne_testy(
         g_multiboot_info_ptr, "bursztyn.test=hda-tone");
+    const bool hda_pcm_regression_requested = zadano_automatyczne_testy(
+        g_multiboot_info_ptr, "bursztyn.test=hda-pcm");
     t_kernel_ready_us = hpet_dostepny() ? czas_monotoniczny_us() : 0;
 
     wielozadaniowosc_aktywna = true;
@@ -3261,12 +3264,18 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     asm volatile("sti" ::: "memory");
 
     while (true) {
-        hda_wykonaj_prace_odroczona();
         hda_qemu_regression_krok(hda_qemu_regression_requested &&
             __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
             !powitanie_aktywne());
+        const bool pcm_test = hda_pcm_regression_requested &&
+            __atomic_load_n(&system_pulpit_gotowy, __ATOMIC_ACQUIRE) &&
+            !powitanie_aktywne();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_prace_odroczona();
         usb_obsluz();
         diag_service();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_zaplanowana_prace_odroczona();
         input_service_all();
         virtio_input_obsluz();
         ekran_obsluz_timeout();
@@ -3279,6 +3288,8 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
          * Petla kompozytora tylko zglasza zadanie; my je tu realizujemy.
          */
         (void)skladacz_obrazu_wykonaj_zmiane_geometrii();
+        hda_pcm_regression_krok(pcm_test);
+        hda_wykonaj_zaplanowana_prace_odroczona();
         /*
          * STI przed HLT chroni idle przed przypadkowym pozostawieniem IF=0
          * przez kod, ktory w przyszlosci moze wejsc do tej petli.

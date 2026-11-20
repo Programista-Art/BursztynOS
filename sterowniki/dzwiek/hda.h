@@ -14,7 +14,7 @@
  *   - konfiguruje kodek przez Immediate Command,
  *   - posiada bezpieczne DMA przez PMM,
  *   - obsluguje obecnie topologie kodeka QEMU hda-output/hda-duplex,
- *   - udostepnia asynchroniczny test tonu z produkcyjnym deadline.
+ *   - miesza strumienie z jadra i udostepnia asynchroniczny test tonu.
  *
  * Struktury MMIO, Stream Descriptor oraz BDL sa celowo prywatne dla
  * hda.cpp. Inne moduly jadra powinny korzystac tylko z API ponizej.
@@ -131,6 +131,11 @@ void hda_zatrzymaj_ton();
  * Zatrzymuje stream po uplywie zapamietanego czasu i sprawdza RUN=0.
  */
 void hda_obsluz_okresowo();
+
+// Timer IRQ: bounded fail-safe RUN clear. All refill and recovery are deferred.
+void hda_pcm_watchdog_irq(unsigned pid, bool ring0);
+bool hda_pcm_praca_oczekuje();
+bool hda_pcm_pilny_powrot_pid0();
 
 /* Transport wywoluje przed resetem kontrolera; zachowuje powod STOP. */
 void hda_powiadom_reset_kontrolera(uint32_t kontroler_idx);

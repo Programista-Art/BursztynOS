@@ -21,6 +21,9 @@
  * sterownikow, a nie zalozeniem PA==VA.
  */
 
+#if !defined(BURSZTYN_PMM_HOST_TEST) && !defined(BURSZTYN_LOCK_HOST_TEST)
+#include "jadro/arch/diag_opoznienia_irq.h"
+#endif
 #include "pamiec.h"
 #include "pmm_diagnostics.h"
 
@@ -250,12 +253,19 @@ static void odblokuj_pmm() {
 class BlokadaPMM {
 public:
     BlokadaPMM()
-        : stan_(wylacz_przerwania()) {
+        : stan_(wylacz_przerwania())
+#if !defined(BURSZTYN_PMM_HOST_TEST) && !defined(BURSZTYN_LOCK_HOST_TEST)
+        , pomiar_(DiagOpoznieniaIrq::Site::Pmm, (stan_.rflags & (1ULL << 9)) != 0)
+#endif
+    {
         zablokuj_pmm();
     }
 
     ~BlokadaPMM() {
         odblokuj_pmm();
+#if !defined(BURSZTYN_PMM_HOST_TEST) && !defined(BURSZTYN_LOCK_HOST_TEST)
+        pomiar_.finish();
+#endif
         przywroc_przerwania(stan_);
     }
 
@@ -264,6 +274,9 @@ public:
 
 private:
     StanPrzerwan stan_;
+#if !defined(BURSZTYN_PMM_HOST_TEST) && !defined(BURSZTYN_LOCK_HOST_TEST)
+    DiagOpoznieniaIrq::Scope pomiar_;
+#endif
 };
 
 /* =========================================================================
