@@ -1,6 +1,8 @@
 # Bursztyn OS
 
-![Logo Bursztyn OS](image/logo-bursztyn-os.png)
+<p align="center">
+  <img src="image/logo-bursztyn-os.png" alt="Logo Bursztyn OS" width="20%">
+</p>
 
 **Niezależny, polski system operacyjny x86-64 rozwijany od podstaw.**
 
@@ -275,7 +277,27 @@ Kod źródłowy jest przeznaczony do **publicznego udostępniania (source-availa
 
 Nazwa i logo Bursztyn OS mogą podlegać odrębnym prawom; licencja do kodu nie jest automatycznie zezwoleniem na podszywanie się pod oficjalne wydanie projektu.
 
+### Nazwa i logo
+
+Nazwa „Bursztyn OS” oraz oficjalne logo identyfikują projekt
+rozwijany przez Dymitra Wygowskiego.
+
+Oficjalne pliki logo są wyłączone z licencji PolyForm
+Noncommercial License 1.0.0. Zasady korzystania z nazwy
+i logo określa dokument [TRADEMARKS.md](TRADEMARKS.md).
+
+Publicznie rozpowszechniane zmodyfikowane wersje i forki
+powinny posiadać własną nazwę oraz własne logo, chyba że
+autor udzielił pisemnej zgody na użycie oficjalnych oznaczeń.
+Dozwolone pozostaje rzetelne informowanie, że dany projekt
+bazuje na kodzie Bursztyn OS.
+
 Pełna treść warunków dotyczących autorskich składników projektu: **[LICENSE.md](LICENSE.md)**.
+
+## Współtworzenie
+
+Chcesz pomóc rozwijać Bursztyn OS?
+Przeczytaj [zasady współpracy](CONTRIBUTING.md).
 
 ## Społeczność i kontakt
 
