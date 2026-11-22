@@ -19,6 +19,11 @@ int main() {
                           "/gry/snake.cebula/opis.aplikacji", "/gry/snake.cebula/snake.bur", "/menedzer_okien.bur", "/shell.bur",
                           "/aktualizacje/stan_rozruchu.k0", "/aktualizacje/przygotowanie", "/aktualizacje/wykazaktualizacji.wykaz", "/aktualizacje"})
         CHECK(!zapis(NOTATNIK, p, true, false));
+    // Fizyczne sloty A/B (alias /programy i /system po tlumaczeniu PSF) oraz /sterowniki
+    for (const char* p : {"/sloty", "/sloty/a/programy/notatnik.cebula/notatnik.bur", "/sloty/a/programy/evil.cebula/opis.aplikacji",
+                          "/sloty/b/system/wersja", "/sloty/a/system/wersja", "/sterowniki/x"})
+        CHECK(!zapis(NOTATNIK, p, true, false));
+    CHECK(zapis(NOTATNIK, "/sloty2/x", true, false));
     // Aliasy i sztuczki ze sciezka
     for (const char* p : {"/programy/../programy/x", "/tmp/../system/x", "//system/x", "/system//x", "/system/./x", "/uzytkownicy/../jadro/x",
                           "/uzytkownicy/domyslny/Ustawienia/../../../system/konfig", "system/x", ""})
