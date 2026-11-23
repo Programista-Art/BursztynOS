@@ -191,6 +191,7 @@ extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_menedzer_zadan_png_start[], _binary_ikonki_app_menedzer_zadan_png_end[];
 extern "C" uint8_t _binary_ikonki_app_kalendarz_png_start[], _binary_ikonki_app_kalendarz_png_end[];
+extern "C" uint8_t _binary_ikonki_app_grajek_png_start[], _binary_ikonki_app_grajek_png_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
@@ -250,6 +251,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
 extern "C" uint8_t _binary_menedzer_zadan_bin_bz_start[],_binary_menedzer_zadan_bin_bz_end[];
 extern "C" uint8_t _binary_kalendarz_bin_bz_start[],_binary_kalendarz_bin_bz_end[];
+extern "C" uint8_t _binary_grajek_bin_bz_start[],_binary_grajek_bin_bz_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
@@ -1275,6 +1277,87 @@ void importuj_galerie_z_modulu(uint64_t mbi) {
     OdblokujZakres(g->start, g->rozmiar);
 }
 
+/* =========================================================================
+ * MUZYKA (modul Multiboot2 "muzyka.pak", ten sam kontener BZP3 co galeria) - dla Grajka.
+ *
+ * ISO niesie pliki z dane/muzyka/ (WAV, MP3) jako modul; przy rozruchu ZYWEGO systemu trafiaja do /dane/muzyka/.
+ * Zasady jak w galerii: istniejace pliki nie sa nadpisywane, nazwa bez '/', '\\' i "..", CRC-32 przed zapisem,
+ * niepelny plik usuwany, jadro nie dekoduje dzwieku. Dodatkowo: RAM-dysk 128 MiB jest wspoldzielony z systemem,
+ * wiec wpis, po ktorym zostaloby mniej niz REZERWA_RAM_DYSKU_MUZYKA wolnego miejsca (psf_wolne_bajty), jest
+ * pomijany w calosci (log); import od najmniejszych plikow. Instalator NIE kopiuje muzyki na dysk.
+ * ========================================================================= */
+constexpr uint64_t REZERWA_RAM_DYSKU_MUZYKA = 24ULL * 1024ULL * 1024ULL;
+GaleriaModul g_muzyka_modul;
+
+bool muzyka_otworz_modul(uint64_t mbi, GaleriaModul* g) {
+    ModulMB2 mod{};
+    if (!znajdz_modul_mb2(mbi, "muzyka.pak", &mod) || !mod.poprawny || !tekst_rowny(mod.cmdline, "muzyka.pak")) return false;
+    g->start = mod.start; g->rozmiar = mod.rozmiar; g->dane = nullptr; g->liczba = 0;
+    if (mod.start == 0 || mod.start >= 0x100000000ULL || mod.koniec > 0x100000000ULL) {
+        wypisz_log("[MUZYKA] Nieprawidlowy modul muzyka.pak.");
+        return false;
+    }
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(mod.start));
+    const GaleriaPak::Blad b = GaleriaPak::parsuj(d, mod.rozmiar, g->wpisy, &g->liczba, &podpis_sha256, GaleriaPak::rozszerzenie_audio);
+    if (b != GaleriaPak::Blad::OK) {
+        wypisz_log("[MUZYKA] muzyka.pak odrzucony:");
+        wypisz_log(GaleriaPak::opis(b));
+        return false;
+    }
+    g->dane = d;
+    return true;
+}
+
+void importuj_muzyke_z_modulu(uint64_t mbi) {
+    if (mbi == 0 || instalator_tryb()) return;
+    GaleriaModul* g = &g_muzyka_modul;
+    if (!muzyka_otworz_modul(mbi, g)) {
+        if (g->start) OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    PsfStanStartu stan{};
+    (void)zapewnij_katalog_startowy("/dane", &stan);
+    if (!zapewnij_katalog_startowy("/dane/muzyka", &stan)) {
+        wypisz_log("[MUZYKA] Brak katalogu /dane/muzyka.");
+        OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    uint32_t kolejnosc[GaleriaPak::MAKS_WPISOW];
+    for (uint32_t i = 0; i < g->liczba; ++i) kolejnosc[i] = i;
+    for (uint32_t i = 1; i < g->liczba; ++i) {
+        const uint32_t v = kolejnosc[i];
+        uint32_t j = i;
+        while (j > 0 && g->wpisy[kolejnosc[j - 1]].rozmiar > g->wpisy[v].rozmiar) { kolejnosc[j] = kolejnosc[j - 1]; --j; }
+        kolejnosc[j] = v;
+    }
+    GaleriaPak::Io io = galeria_io();
+    io.wolne = []() -> uint64_t { return psf_wolne_bajty(); };
+    io.rezerwa = REZERWA_RAM_DYSKU_MUZYKA;
+    // Pominiecie nie jest ciche: nazwa, rozmiar i wolne miejsce w logu (np. 49 MB WAV na 128 MiB RAM-dysku).
+    io.pominieto_bez_miejsca = [](const char* nazwa, uint32_t dl, uint32_t rozmiar, uint64_t wolne) {
+        char b[160] = {};
+        size_t p = 0;
+        auto dodaj = [&](const char* t) { while (*t && p + 1 < sizeof(b)) b[p++] = *t++; };
+        auto liczba = [&](uint64_t v) { char t[21]; int n = 0; do { t[n++] = char('0' + v % 10U); v /= 10U; } while (v && n < 20); while (n && p + 1 < sizeof(b)) b[p++] = t[--n]; };
+        dodaj("[MUZYKA] pominieto (brak miejsca na RAM-dysku): ");
+        for (uint32_t i = 0; i < dl && p + 1 < sizeof(b) - 48; ++i) b[p++] = nazwa[i];
+        dodaj(" ("); liczba(rozmiar / (1024U * 1024U)); dodaj(" MiB, wolne "); liczba(wolne / (1024ULL * 1024ULL));
+        dodaj(" MiB, rezerwa 24 MiB)");
+        b[p] = '\0';
+        wypisz_log(b);
+    };
+    GaleriaPak::Kopiarka kop;
+    kop.start(g->dane, g->wpisy, g->liczba, io, kolejnosc, GaleriaPak::KATALOG_MUZYKI, GaleriaPak::NAZWA_TMP_MUZYKI);
+    constexpr uint32_t PORCJA = 192U * 1024U;
+    while (kop.krok(PORCJA) == GaleriaPak::Krok::Dalej) {}
+    (void)psf_flush_cache();
+    galeria_log_liczba("[MUZYKA] utwory zaimportowane: ", kop.zainstalowane);
+    galeria_log_liczba("[MUZYKA] utwory pominiete (istnieja): ", kop.pominiete);
+    if (kop.bez_miejsca) galeria_log_liczba("[MUZYKA] pominiete (brak miejsca, rezerwa 24 MiB): ", kop.bez_miejsca);
+    if (kop.bledne) galeria_log_liczba("[MUZYKA] BLEDNE wpisy (CRC/nazwa>55B/zapis): ", kop.bledne);
+    OdblokujZakres(g->start, g->rozmiar);
+}
+
 /*
  * Instalator: opcjonalna kopia przykladowych zdjec na dysk docelowy (best effort). Wywolywana krokami z
  * maszyny stanow instalatora (po tapetach). Nie nadpisuje istniejacych plikow, usuwa niepelny plik przy bledzie,
@@ -1532,6 +1615,17 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"kalendarz.bur\"\n"
         "uprawnienia = [\"okna\"]\n";
 
+    /* Grajek: zwykla aplikacja uzytkownika (PZB 4). Czyta muzyke z /dane/muzyka (pliki_czytaj, bez zapisu plikow
+     * uzytkownika), konfiguracje i liste M3U8 trzyma we wlasnym katalogu ustawien (ustawienia_aplikacji).
+     * Strumien PCM BWS 110 nie wymaga dodatkowego prawa. */
+    static const char MANIFEST_GRAJEK[] =
+        "nazwa = \"Grajek\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"grajek.bur\"\n"
+        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"ustawienia_aplikacji\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1617,6 +1711,7 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
         {"/ikonki/app_menedzer_zadan.png",_binary_ikonki_app_menedzer_zadan_png_start,_binary_ikonki_app_menedzer_zadan_png_end},
         {"/ikonki/app_kalendarz.png",_binary_ikonki_app_kalendarz_png_start,_binary_ikonki_app_kalendarz_png_end},
+        {"/ikonki/app_grajek.png",_binary_ikonki_app_grajek_png_start,_binary_ikonki_app_grajek_png_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -2152,6 +2247,12 @@ void instaluj_wbudowane_programy() {
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
+    if (!instaluj_paczke("/programy/grajek.cebula/opis.aplikacji",MANIFEST_GRAJEK,
+            AppIdentity::MusicPlayer,_binary_grajek_bin_bz_start,_binary_grajek_bin_bz_end)) {
+        wypisz_log("[GRAJEK] Nie udalo sie zainstalowac Grajka.");
+        if (scisla_instalacja) pliki_instalacja_ok = false;
+    }
+
     if (!instaluj_paczke(
             "/programy/test_dzwieku.cebula/opis.aplikacji",
             MANIFEST_TEST_DZWIEKU,
@@ -2323,6 +2424,7 @@ void instaluj_wbudowane_programy() {
 
     importuj_modul_test8k(g_multiboot_info_ptr);
     importuj_galerie_z_modulu(g_multiboot_info_ptr);
+    importuj_muzyke_z_modulu(g_multiboot_info_ptr);
 }
 
 /* =========================================================================

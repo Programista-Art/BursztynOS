@@ -567,6 +567,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_ustawienia_ekranu_blob.o \
 	ikona_app_menedzer_zadan_blob.o \
 	ikona_app_kalendarz_blob.o \
+	ikona_app_grajek_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -590,6 +591,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	menedzer_zadan_blob.o \
 	kalendarz_blob.o \
+	grajek_blob.o \
 	pcm440_blob.o pcm660_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
@@ -1277,7 +1279,15 @@ GALERIA_STAMP := .galeria.stamp
 $(GALERIA_STAMP): FORCE narzedzia/package_galeria.py
 	@$(PYTHON) narzedzia/package_galeria.py --stamp $@
 
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py narzedzia/package_galeria.py $(GALERIA_STAMP) $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
+# Muzyka dla Grajka (dane/muzyka -> modul muzyka.pak, tylko wpisy zywego systemu). MUZYKA_W_ISO=0 wylacza modul.
+# Do ISO trafia wylacznie to, co uzytkownik umiescil w dane/muzyka (repozytorium nie zawiera muzyki).
+MUZYKA_W_ISO ?= 1
+export MUZYKA_W_ISO
+MUZYKA_STAMP := .muzyka.stamp
+$(MUZYKA_STAMP): FORCE narzedzia/package_muzyka.py narzedzia/package_galeria.py
+	@$(PYTHON) narzedzia/package_muzyka.py --stamp $@
+
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py narzedzia/package_galeria.py $(GALERIA_STAMP) narzedzia/package_muzyka.py $(MUZYKA_STAMP) $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -1334,6 +1344,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 	$(PYTHON) narzedzia/package_power_icons.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_desktop_images.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_galeria.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_muzyka.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -2550,6 +2561,47 @@ kalendarz_blob.o: kalendarz_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_li
 	$(PYTHON) narzedzia/kompresuj_blob.py kalendarz.bin kalendarz.bin.bz
 	$(LD) -r -b binary kalendarz.bin.bz -o kalendarz_blob.o
 
+# Grajek 1.0 (.cebula / BUR): odtwarzacz muzyki BursztynUI, WAV + MP3 (dr_mp3, public domain / MIT-0), PCM przez
+# BWS 110. Tylko dekoder MP3 jest kompilowany z SSE2 (minimp3 liczy w float; tak jak BSF i Husarz). Okladki: wspolny
+# dekoder obrazow Ring 3 (image_ring3.o + btp_ring3.o). Prawa: okna, pliki_czytaj, ustawienia_aplikacji.
+GRAJEK_NAGLOWKI := $(wildcard programy/grajek/*.h) programy/grajek/zewnetrzne/dr_mp3.h jadro/bws/pcm_api.h obrazy/dekoder_obrazu.h
+grajek_tmp.o: programy/grajek/grajek.cpp $(GRAJEK_NAGLOWKI) $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -DGRAJEK_RING3=1 -Os -c $< -o $@
+
+grajek_mp3_tmp.o: programy/grajek/dekoder_mp3.cpp $(GRAJEK_NAGLOWKI)
+	$(CXX) $(RING3_FLAGS) -DGRAJEK_RING3=1 -msse2 -mfpmath=sse -mno-avx -Os -c $< -o $@
+
+grajek_blob.o: grajek_tmp.o grajek_mp3_tmp.o image_ring3.o btp_ring3.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) grajek_tmp.o grajek_mp3_tmp.o image_ring3.o btp_ring3.o bursztyn_gui.o -o grajek.elf
+	$(BUR_CONVERT) grajek.elf grajek.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py grajek.bin grajek.bin.bz
+	$(LD) -r -b binary grajek.bin.bz -o grajek_blob.o
+
+ikona_app_grajek_blob.o: ikonki/app_grajek.png
+	$(LD) -r -b binary $< -o $@
+
+# Testy hosta Grajka (ASan/UBSan): logika (WAV, ID3, MP3 z syntetycznych ramek, konwersje, korektor, analiza, silnik na
+# mikserze jadra z symulacja BWS 110, biblioteka, kolejka/M3U8, konfiguracja, okladka) oraz okno BursztynUI.
+GRAJEK_TEST_ZRODLA := programy/grajek/dekoder_mp3.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp
+.PHONY: test-grajek-host test-grajek-ui-host test-grajek
+test-grajek-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek
+
+test-grajek-ui-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_ui_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek-ui
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek-ui
+
+.PHONY: test-muzyka-pak-host
+test-muzyka-pak-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_muzyka_pak_host.cpp -lcrypto -o .bsf-test/muzyka-pak
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/muzyka-pak
+
+test-grajek: test-grajek-host test-grajek-ui-host test-muzyka-pak-host
+
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).
 .PHONY: test-kalendarz-host test-zasobnik-host
@@ -2969,7 +3021,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o grajek_tmp.o grajek_mp3_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:

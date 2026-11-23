@@ -87,6 +87,16 @@ inline bool rozszerzenie_obrazu(const uint8_t* n, uint32_t dl) {
     return rowne("png") || rowne("jpg") || rowne("jpeg") || rowne("btp") || rowne("bmp");
 }
 
+// Muzyka (modul muzyka.pak, ten sam kontener BZP3): tylko formaty odtwarzane przez Grajka 1.0.
+inline bool rozszerzenie_audio(const uint8_t* n, uint32_t dl) {
+    uint32_t kropka = dl;
+    for (uint32_t i = 0; i < dl; ++i) if (n[i] == '.') kropka = i;
+    if (kropka == dl || kropka == 0 || dl - kropka - 1 != 3) return false;
+    const char a = male(static_cast<char>(n[kropka + 1])), b = male(static_cast<char>(n[kropka + 2])), c = male(static_cast<char>(n[kropka + 3]));
+    return (a == 'w' && b == 'a' && c == 'v') || (a == 'm' && b == 'p' && c == '3');
+}
+using PredykatRozszerzenia = bool (*)(const uint8_t* nazwa, uint32_t dl);
+
 inline bool nazwy_rowne_ci(const Wpis& a, const Wpis& b) {
     if (a.dl != b.dl) return false;
     for (uint32_t i = 0; i < a.dl; ++i) if (male(a.nazwa[i]) != male(b.nazwa[i])) return false;
@@ -97,7 +107,8 @@ inline bool nazwy_rowne_ci(const Wpis& a, const Wpis& b) {
  * Waliduje kontener i wypelnia `wpisy` (pojemnosc MAKS_WPISOW). Nie czyta danych wpisow
  * (CRC danych sprawdza wolajacy przy kopiowaniu).
  */
-inline Blad parsuj(const uint8_t* p, uint64_t n, Wpis* wpisy, uint32_t* liczba_out, SkrotSha256 sha) {
+inline Blad parsuj(const uint8_t* p, uint64_t n, Wpis* wpisy, uint32_t* liczba_out, SkrotSha256 sha,
+                  PredykatRozszerzenia rozszerzenie_ok = rozszerzenie_obrazu) {
     if (liczba_out) *liczba_out = 0;
     if (!p || !wpisy || !sha) return Blad::ZaMaly;
     if (n < ROZMIAR_NAGLOWKA) return Blad::ZaMaly;
@@ -128,7 +139,7 @@ inline Blad parsuj(const uint8_t* p, uint64_t n, Wpis* wpisy, uint32_t* liczba_o
         w.nazwa[dl] = '\0';
         poz += dl;
         if (!nazwa_poprawna(t + poz - dl, dl)) return Blad::Nazwa;
-        if (!rozszerzenie_obrazu(t + poz - dl, dl)) return Blad::Rozszerzenie;
+        if (!rozszerzenie_ok || !rozszerzenie_ok(t + poz - dl, dl)) return Blad::Rozszerzenie;
         w.rozmiar = le32(t + poz);
         w.przesuniecie = le32(t + poz + 4);
         w.crc = le32(t + poz + 8);

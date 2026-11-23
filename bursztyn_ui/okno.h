@@ -502,11 +502,19 @@ public:
         brudny_obszar_klienta_ = brudny_obszar_klienta_.suma(r);
     }
 
+    // Opcjonalny hak cyklu rysowania (domyslnie brak, koszt: jedno porownanie). Aplikacje z praca czasu
+    // rzeczywistego w tym samym watku (np. Grajek: dopelnienie kolejki PCM BWS 110) dostaja punkt kontrolny tuz
+    // przed kazda publikacja regionu (BWS 57) oraz znaczniki poczatku i konca cyklu. Hak nie moze rysowac ani
+    // uniewazniac kontrolek; nie zmienia kolejnosci ani zawartosci rysowania.
+    enum class FazaRysowania : uint8_t { Poczatek, PrzedPublikacja, PoPublikacji, Koniec };
+    static inline void (*hak_rysowania)(FazaRysowania) = nullptr;
+
     void rysuj(KontekstRysowania& ctx, bool wymus = false) {
         if (czy_zminimalizowane_) return;
         zastosuj_oczekujaca_geometrie();
         bool pelne = czy_brudne_ || wymus;
         if (!pelne && !czy_wymaga_odrysowania()) return;
+        if (hak_rysowania) hak_rysowania(FazaRysowania::Poczatek);
         ObszaryBrudne regiony;
         Prostokat klient = obszar_klienta();
         if (pelne) {
@@ -539,8 +547,11 @@ public:
                 ctx.rysuj_prostokat(tlo_klienta, motyw_kolor(MOTYW_KOLOR_OKNOTLO));
             if (kontrolka_glowna_) kontrolka_glowna_->rysuj(ctx, false);
             ctx.zdejmij_przyciecie(); ctx.zdejmij_przesuniecie(); ctx.ustaw_cel(nullptr, Prostokat());
-            if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne)
+            if (buforowany && !KontekstRysowania::g_tlum_rysowanie_globalne) {
+                if (hak_rysowania) hak_rysowania(FazaRysowania::PrzedPublikacja);
                 gui_blit(swiat.x, swiat.y, r.szerokosc, r.wysokosc, bufor_regionu_);
+                if (hak_rysowania) hak_rysowania(FazaRysowania::PoPublikacji);
+            }
         }
 
         if (popupy_.czy_otwarty() && (popupy_.czy_brudny() || pelne)) {
@@ -549,6 +560,7 @@ public:
 
         if (kontrolka_glowna_) kontrolka_glowna_->wyczysc_brudny_obszar();
         brudny_obszar_klienta_ = Prostokat(); czy_brudne_ = false;
+        if (hak_rysowania) hak_rysowania(FazaRysowania::Koniec);
     }
 
     void minimalizuj() {

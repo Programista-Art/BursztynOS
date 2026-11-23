@@ -1,0 +1,7 @@
+dr_mp3.h - dr_mp3 v0.7.4 (wersja rozwojowa "TBD"), David Reid, https://github.com/mackron/dr_libs
+Kopia niezmodyfikowana (SHA-256 f0919e1652ffd9469e3440b5c759d26e862a50e6dc93cb4b51cb7e7e90b00f77),
+pobrana z lokalnej kopii raylib (src/external/dr_mp3.h, commit 8e82249f, 2026-04-26).
+Licencja: do wyboru Public Domain (Unlicense) albo MIT No Attribution - patrz LICENSE.
+Dekoder bazuje na minimp3 (lieff, CC0 1.0 Public Domain Dedication) - informacja zachowana w LICENSE.
+Konfiguracja dla Bursztyn OS (bez stdio, bez libc, wlasny alokator i operacje pamieci) znajduje sie wylacznie
+w programy/grajek/dekoder_mp3.cpp - ten plik nie jest edytowany.

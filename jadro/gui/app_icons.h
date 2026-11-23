@@ -20,6 +20,8 @@ inline constexpr Wpis Dodatkowe[] = {
     {"/programy/tapety.cebula/tapety.bur", "/ikonki/app_tapety.png"},
     // Kalendarz: tylko menu Start (bez skrotu na pulpicie) - ta sama ikona na pasku zadan.
     {AppIdentity::Calendar, "/ikonki/app_kalendarz.png"},
+    // Grajek: tylko menu Start - ta sama ikona na pasku zadan (takze gdy gra w tle zminimalizowany).
+    {AppIdentity::MusicPlayer, "/ikonki/app_grajek.png"},
 };
 inline constexpr int LiczbaDodatkowych = sizeof(Dodatkowe) / sizeof(Dodatkowe[0]);
 inline constexpr int Count = DesktopEntries::Count + LiczbaDodatkowych;

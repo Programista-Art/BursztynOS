@@ -538,6 +538,8 @@ bool usun_twor(
  * 0 oznacza zarowno pusty plik, jak i blad/brak pliku - takie zachowanie
  * jest zachowane dla kompatybilnosci z istniejacym API.
  */
+/* Wolne miejsce na dane PSF w bajtach (tylko odczyt bitmapy); 0 = PSF niegotowy. */
+uint64_t psf_wolne_bajty();
 uint32_t rozmiar_pliku(
     const char* sciezka
 );

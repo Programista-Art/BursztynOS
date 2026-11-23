@@ -4489,6 +4489,35 @@ extern "C" bool usun_twor(const char* sciezka) {
  * PUBLICZNE API - ROZMIAR
  * ========================================================================= */
 
+/*
+ * Wolne miejsce na dane PSF w bajtach (bloki danych oznaczone w bitmapie jako wolne). Tylko odczyt: liczy bity
+ * bitmapy blok po bloku (bez zmiany stanu, bez alokacji). Uzywane przez import muzyki z modulu Multiboot2, aby
+ * nie zapelnic RAM-dysku zywego systemu (zostawia rezerwe dla ustawien i dokumentow). 0 = PSF niegotowy / blad.
+ */
+extern "C" uint64_t psf_wolne_bajty() {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !dysk_superblok || calkowita_liczba_blokow_danych == 0) return 0;
+    const uint64_t n = calkowita_liczba_blokow_danych;
+    const uint64_t bajty_bitmapy = (n + 7ULL) / 8ULL;
+    uint64_t wolne = 0;
+    for (uint64_t bajt = 0; bajt < bajty_bitmapy;) {
+        const uint64_t blok = 1ULL + bajt / static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+        if (blok >= dysk_superblok->start_wezlow) return 0;
+        const uint8_t* b = pobierz_blok(blok);
+        if (!b) return 0;
+        uint64_t koniec = bajt + (PSF_ROZMIAR_BLOKU - bajt % PSF_ROZMIAR_BLOKU);
+        if (koniec > bajty_bitmapy) koniec = bajty_bitmapy;
+        for (; bajt < koniec; ++bajt) {
+            const uint8_t v = b[bajt % PSF_ROZMIAR_BLOKU];
+            for (uint32_t k = 0; k < 8; ++k) {
+                if (bajt * 8ULL + k >= n) break;
+                if (!(v & (1U << k))) ++wolne;
+            }
+        }
+    }
+    return wolne * static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+}
+
 extern "C" uint32_t rozmiar_pliku(
     const char* sciezka
 ) {
