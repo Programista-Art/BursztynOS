@@ -15,12 +15,15 @@
  * Koszt odrysowan (Ring 3 nie ma watkow: kazde rysowanie wstrzymuje produkcje PCM, a kolejka BWS 110 to 85 ms):
  *  - stan ustalony uniewaznia wylacznie male obszary: etykieta czasu i suwak (1 Hz), zmienione pola wizualizacji
  *    (4 Hz, tylko gdy wartosci sie zmienily), wiersz wskaznika w tabelach (zmiana stanu), pasek stanu (komunikat),
- *  - pasek stanu ma stala wysokosc: komunikat nie przelicza ukladu i nie wymusza pelnego odrysowania okna,
+ *  - pasek stanu ma stala wysokosc (jeden wiersz, takze z diagnostyka - podsumowanie po prawej, szczegoly na karcie
+ *    "Diagnostyka"): komunikat ani wlaczenie diagnostyki nie przeliczaja ukladu i nie przesuwaja sterowania,
  *  - dlugie teksty sa dopasowywane (wielokropek) tylko przy zmianie tekstu lub szerokosci,
  *  - hak Okno::hak_rysowania dopelnia kolejke PCM tuz przed kazda publikacja regionu (BWS 57) i mierzy czas
  *    rysowania/publikacji (przy wlaczonej diagnostyce).
  * Uklad jest proporcjonalny (PanelElastyczny, ObrazOkladki, kolumny tabel wg szerokosci) - bez stalych pikseli
- * tam, gdzie tekst lub rozmiar okna moze sie zmienic.
+ * tam, gdzie tekst lub rozmiar okna moze sie zmienic. Wysokosci i minima wynikaja z metryk biezacej czcionki (natywnie
+ * TTF przez BSF, inne niz czcionka bitmapowa hosta): naglowek, opis korektora, kolumny tabel, siatki przyciskow
+ * (SiatkaPrzyciskow), wiersze sterowania (kolumny Auto), minima paneli (minimum_lewego / minimum_prawego).
  */
 #include "widoki.h"
 
@@ -31,7 +34,7 @@ public:
     static constexpr int SZEROKOSC = 1180, WYSOKOSC = 660, MIN_SZEROKOSC = 980, MIN_WYSOKOSC = 580;
     static constexpr int BOK_OKLADKI = 176;
 
-    OknoGrajka() : Okno("Grajek", SZEROKOSC, WYSOKOSC), dane_bib_(&o_), dane_kol_(&o_) { ustaw_minimalny_rozmiar(MIN_SZEROKOSC, MIN_WYSOKOSC); }
+    OknoGrajka() : Okno("Grajek", SZEROKOSC, WYSOKOSC), dane_bib_(&o_), dane_kol_(&o_), dane_diag_(&o_) { ustaw_minimalny_rozmiar(MIN_SZEROKOSC, MIN_WYSOKOSC); }
     ~OknoGrajka() override {
         if (aktywne_ == this) { aktywne_ = nullptr; Okno::hak_rysowania = nullptr; g_pompa_pcm = PompaPcm{}; }
         auto* p = kontrolka_glowna(); ustaw_kontrolke_glowna(nullptr); delete p;
@@ -48,6 +51,7 @@ public:
         Okno::hak_rysowania = &OknoGrajka::hak_rysowania_grajka;
         czas_ns_ = platforma.czas_ns;
         buduj();
+        dopasuj_warianty();
         o_.start();
         synchronizuj_ustawienia();
         aktualizuj(true);
@@ -90,6 +94,7 @@ public:
         Okno::zaktualizuj_motyw();
         delete[] domyslna_; domyslna_ = nullptr;
         okladka_wersja_ = 0xFFFFFFFF;           // odswiez grafike domyslna w nowych kolorach
+        dopasuj_warianty();                     // motyw/czcionka mogly zmienic szerokosci tekstow
         aktualizuj(true);
     }
 
@@ -101,36 +106,40 @@ private:
         root.ustaw_wypelnienie(Marginesy(10)); root.ustaw_odstep(8);
 
         // naglowek
+        // naglowek: wysokosc z metryk czcionki (skala 2 + zapas na wydluzenia dolne, np. "j" w TTF), nie stale 40 px
         auto& gora = root.dodaj<PanelDokowany>(Dokowanie::Gora);
-        gora.ustaw_preferowany_rozmiar(Rozmiar(-1, 40)); gora.ustaw_odstep(12);
-        auto& nazwa = gora.dodaj<Etykieta>(Dokowanie::Lewo, "Grajek");
-        nazwa.ustaw_skale_czcionki(2); nazwa.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_AKCENT));
-        nazwa.ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
+        gora.ustaw_odstep(12);
+        nazwa_ = &gora.dodaj<EtykietaJednowierszowa>(Dokowanie::Lewo, "Grajek", 2, MOTYW_KOLOR_AKCENT);
+        nazwa_->ustaw_szerokosc_wg_tekstu(true);
         auto& podtytul = gora.dodaj<EtykietaJednowierszowa>(Dokowanie::Wypelnij, "Odtwarzacz muzyki Bursztyn OS", 1, MOTYW_KOLOR_TEKST_DRUGI);
         (void)podtytul;
 
         // dol: pasek stanu (staly) i sterowanie
         komunikat_ = &root.dodaj<PasekStanuGrajka>(Dokowanie::Dol);
+        komunikat_->przy_kliknieciu_skrotu([](void* p) { auto* o = static_cast<OknoGrajka*>(p); o->karty_->ustaw_aktywna_karte(KARTA_DIAGNOSTYKI); o->aktualizuj_diagnostyke(true); }, this);
         buduj_sterowanie(root);
 
         // lewo: biblioteka (ok. 31 % szerokosci)
         auto& lewy = root.dodaj<PanelElastyczny>(Dokowanie::Lewo, 31, 300, 480);
         lewy.ustaw_odstep(6);
+        lewy.ustaw_minimum_zawartosci(&OknoGrajka::minimum_lewego, this);
         auto& tyt_bib = lewy.dodaj<EtykietaJednowierszowa>(Dokowanie::Gora, "Biblioteka muzyki · /dane/muzyka");
         tyt_bib.ustaw_preferowany_rozmiar(Rozmiar(-1, 22));
         szukaj_ = &lewy.dodaj<PoleWyszukiwania>(Dokowanie::Gora);
         szukaj_->ustaw_placeholder("Szukaj tytułu lub wykonawcy…");
         szukaj_->przy_zmianie([](PoleWyszukiwania*, const char* t, void* p) { static_cast<OknoGrajka*>(p)->o_.filtruj(t); }, this);
-        auto& przyciski_bib = lewy.dodaj<Siatka>(Dokowanie::Gora);
-        przyciski_bib.ustaw_preferowany_rozmiar(Rozmiar(-1, 32)); przyciski_bib.ustaw_odstep(6);
-        przyciski_bib.dodaj_wiersz(); przyciski_bib.dodaj_kolumne(); przyciski_bib.dodaj_kolumne();
-        odswiez_ = new Przycisk("Odśwież bibliotekę");
-        odswiez_->ustaw_podpowiedz("Ponownie przeszukaj /dane/muzyka");
+        auto& przyciski_bib = lewy.dodaj<SiatkaPrzyciskow>(Dokowanie::Gora);
+        przyciski_bib_ = &przyciski_bib;
+        przyciski_bib.ustaw_odstep(6); przyciski_bib.ustaw_wypelnienie(Marginesy(0));
+        przyciski_bib.dodaj_wiersz(DefinicjaWymiaru::automatyczny()); przyciski_bib.dodaj_kolumne(); przyciski_bib.dodaj_kolumne();
+        odswiez_ = new Przycisk("Odśwież");                   // tytul panelu mowi "Biblioteka"; pelny opis w podpowiedzi
+        odswiez_->ustaw_podpowiedz("Odśwież bibliotekę: przeszukaj /dane/muzyka");
         odswiez_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.odswiez_biblioteke(); }, this);
         dodaj_kol_ = new Przycisk("Dodaj do kolejki");
         dodaj_kol_->ustaw_podpowiedz("Dopisz zaznaczony utwór na koniec kolejki");
         dodaj_kol_->przy_kliknieciu([](Przycisk*, void* p) { auto* o = static_cast<OknoGrajka*>(p); o->o_.dodaj_do_kolejki(o->o_.biblioteka().widoczny(uint32_t(o->bib_->wybrany_wiersz()))); }, this);
-        przyciski_bib.dodaj_do_siatki(odswiez_, 0, 0); przyciski_bib.dodaj_do_siatki(dodaj_kol_, 0, 1);
+        odswiez_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij); dodaj_kol_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        przyciski_bib.dodaj_przycisk(odswiez_, 0, 0); przyciski_bib.dodaj_przycisk(dodaj_kol_, 0, 1);
         podkatalogi_ = &lewy.dodaj<PoleWyboru>(Dokowanie::Dol, "Uwzględniaj podkatalogi", true);
         podkatalogi_->ustaw_podpowiedz("Skanuj także podfoldery (do 3 poziomów)");
         podkatalogi_->przy_przelaczeniu([](PoleWyboru*, bool z, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_podkatalogi(z); }, this);
@@ -142,12 +151,16 @@ private:
         bib_->ustaw_przewijanie_poziome(true);
         bib_->przy_aktywacji([](TabelaGrajka*, size_t w, void* p) { static_cast<OknoGrajka*>(p)->o_.odtworz_z_widoku(uint32_t(w)); }, this);
 
-        // prawo: kolejka i korektor (ok. 40 % pozostalej szerokosci; 10 suwakow korektora potrzebuje >= 320 DIP)
+        // prawo: kolejka, korektor i diagnostyka (ok. 40 % pozostalej szerokosci; minimum z zawartosci: 10 kolumn
+        // korektora, przyciski kolejki, kolumny tabel - w biezacej czcionce)
         auto& prawy = root.dodaj<PanelElastyczny>(Dokowanie::Prawo, 42, 330, 420);
+        prawy.ustaw_minimum_zawartosci(&OknoGrajka::minimum_prawego, this);
         auto& karty = prawy.dodaj<Karty>(Dokowanie::Wypelnij);
         karty_ = &karty;
+        karty.ustaw_zawijanie_naglowkow(true);     // wysokosc naglowkow z metryk czcionki (150 %: bez przyciecia)
         karty.dodaj_karte("Kolejka", buduj_kolejke());
         karty.dodaj_karte("Korektor", buduj_korektor());
+        karty.dodaj_karte("Diagnostyka", buduj_diagnostyke());
         karty.ustaw_aktywna_karte(0);
 
         // srodek: biezacy utwor
@@ -185,17 +198,24 @@ private:
         wiz_ = &srodek.dodaj<WidokWizualizacji>(Dokowanie::Wypelnij, &o_.silnik().analizator());
     }
 
-    // Dwa wiersze, kolumny proporcjonalne: transport (5 x 1*), odstep, glosnosc (Wycisz 1*, suwak 2*, wartosc).
-    // Drugi wiersz: przelaczniki pod transportem, Wizualizacja/Diagnostyka pod glosnoscia, Zakoncz na koncu.
+    // Dwa niezalezne wiersze (osobne siatki, wysokosc z zawartosci):
+    //  1: transport (5 x gwiazdka, przyciski rozciagniete), odstep, Wycisz (Auto), glosnosc (2*), wartosc (Auto),
+    //  2: przelaczniki i Zakoncz w kolumnach Auto (naturalna szerokosc tekstu) + odstep gwiazdkowy.
+    // Kolumny Auto nie zachodza na siebie przy zadnej szerokosci >= minimum okna (wczesniej wspolna siatka 2* dawala
+    // przy 980 px ok. 104 px na "Wizualizacja", ktora w TTF potrzebuje wiecej i nachodzila na "Diagnostyka").
     void buduj_sterowanie(PanelDokowany& root) {
-        auto& ster = root.dodaj<Siatka>(Dokowanie::Dol);
-        ster.ustaw_preferowany_rozmiar(Rozmiar(-1, 74)); ster.ustaw_odstep(6, 8);
-        ster.dodaj_wiersz(); ster.dodaj_wiersz();
-        for (int i = 0; i < 5; ++i) ster.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(2));
-        ster.dodaj_kolumne(DefinicjaWymiaru::piksele(12));
-        ster.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(2));
-        ster.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(3));
-        ster.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(2));
+        auto& ster = root.dodaj<PanelDokowany>(Dokowanie::Dol);
+        ster.ustaw_odstep(6);
+        auto& w2 = ster.dodaj<Siatka>(Dokowanie::Dol);
+        auto& w1 = ster.dodaj<Siatka>(Dokowanie::Dol);
+        wiersz_ster_[0] = &w1; wiersz_ster_[1] = &w2;
+        Siatka* wiersze[] = {&w1, &w2};
+        for (Siatka* w : wiersze) { w->ustaw_wypelnienie(Marginesy(0)); w->ustaw_odstep(8, 0); w->dodaj_wiersz(DefinicjaWymiaru::automatyczny()); }
+        for (int i = 0; i < 5; ++i) w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        w1.dodaj_kolumne(DefinicjaWymiaru::piksele(4));
+        w1.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(2));
+        w1.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
         poprz_ = new Przycisk("Poprzedni");
         graj_ = new Przycisk("Odtwórz");
         pauza_ = new Przycisk("Pauza");
@@ -211,8 +231,8 @@ private:
         pauza_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.pauza(); }, this);
         stop_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.stop(); }, this);
         nast_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.nastepny(); }, this);
-        ster.dodaj_do_siatki(poprz_, 0, 0); ster.dodaj_do_siatki(graj_, 0, 1); ster.dodaj_do_siatki(pauza_, 0, 2);
-        ster.dodaj_do_siatki(stop_, 0, 3); ster.dodaj_do_siatki(nast_, 0, 4);
+        w1.dodaj_do_siatki(poprz_, 0, 0); w1.dodaj_do_siatki(graj_, 0, 1); w1.dodaj_do_siatki(pauza_, 0, 2);
+        w1.dodaj_do_siatki(stop_, 0, 3); w1.dodaj_do_siatki(nast_, 0, 4);
         wycisz_ = new Przycisk("Wycisz");
         wycisz_->ustaw_podpowiedz("Wycisz lub przywróć dźwięk");
         wycisz_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.przelacz_wyciszenie(); }, this);
@@ -220,10 +240,12 @@ private:
         glosnosc_->ustaw_zakres(0, 100);
         glosnosc_->ustaw_podpowiedz("Głośność strumienia Grajka");
         glosnosc_->przy_zmianie_wartosci([](Suwak*, int v, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_glosnosc(uint32_t(v)); }, this);
-        glosnosc_proc_ = new Etykieta("80%");
-        glosnosc_proc_->ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
-        ster.dodaj_do_siatki(wycisz_, 0, 6); ster.dodaj_do_siatki(glosnosc_, 0, 7); ster.dodaj_do_siatki(glosnosc_proc_, 0, 8);
+        glosnosc_proc_ = new EtykietaJednowierszowa("80%");
+        w1.dodaj_do_siatki(wycisz_, 0, 6); w1.dodaj_do_siatki(glosnosc_, 0, 7); w1.dodaj_do_siatki(glosnosc_proc_, 0, 8);
 
+        for (int i = 0; i < 3; ++i) w2.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        w2.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        for (int i = 0; i < 3; ++i) w2.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
         losowo_ = new PoleWyboru("Losowo", false);
         losowo_->ustaw_podpowiedz("Odtwarzaj kolejkę w losowej kolejności");
         losowo_->przy_przelaczeniu([](PoleWyboru*, bool z, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_losowo(z); }, this);
@@ -237,25 +259,57 @@ private:
         wizualizacja_->ustaw_podpowiedz("Wskaźniki poziomu i widmo dźwięku");
         wizualizacja_->przy_przelaczeniu([](PoleWyboru*, bool z, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_wizualizacje(z); }, this);
         diagnostyka_ = new PoleWyboru("Diagnostyka", false);
-        diagnostyka_->ustaw_podpowiedz("Pomiar czasu dekodowania, rysowania i przerw w produkcji PCM (pasek stanu)");
+        diagnostyka_->ustaw_podpowiedz("Pomiar czasu sekcji (karta Diagnostyka)");
         diagnostyka_->przy_przelaczeniu([](PoleWyboru*, bool z, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_diagnostyke(z); }, this);
         zakoncz_ = new Przycisk("Zakończ");
         zakoncz_->ustaw_podpowiedz("Zatrzymaj muzykę i zamknij Grajka");
         zakoncz_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->zakoncz_calkowicie(); }, this);
-        ster.dodaj_do_siatki(losowo_, 1, 0); ster.dodaj_do_siatki(powtarzanie_, 1, 1, 1, 2); ster.dodaj_do_siatki(w_tle_, 1, 3, 1, 2);
-        ster.dodaj_do_siatki(wizualizacja_, 1, 6); ster.dodaj_do_siatki(diagnostyka_, 1, 7); ster.dodaj_do_siatki(zakoncz_, 1, 8);
-        // przyciski wypelniaja swoje komorki: rowne, proporcjonalne odstepy przy kazdej szerokosci okna
-        Przycisk* wypelniaja[] = {poprz_, graj_, pauza_, stop_, nast_, wycisz_, powtarzanie_, zakoncz_};
+        w2.dodaj_do_siatki(losowo_, 0, 0); w2.dodaj_do_siatki(powtarzanie_, 0, 1); w2.dodaj_do_siatki(w_tle_, 0, 2);
+        w2.dodaj_do_siatki(wizualizacja_, 0, 4); w2.dodaj_do_siatki(diagnostyka_, 0, 5); w2.dodaj_do_siatki(zakoncz_, 0, 6);
+        Przycisk* wypelniaja[] = {poprz_, graj_, pauza_, stop_, nast_};
         for (Przycisk* b : wypelniaja) b->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        // teksty zmienne: kolumna Auto mierzy najszerszy wariant (inaczej "Powtarzanie: wszystkie" / "Przywróć" /
+        // "wycisz." bylyby przyciete po zmianie tekstu - zmiana tekstu nie przelicza ukladu)
+        static const char* const WARIANTY_POWT[] = {"Powtarzanie: wył.", "Powtarzanie: utwór", "Powtarzanie: wszystkie"};
+        static const char* const WARIANTY_WYC[] = {"Wycisz", "Przywróć"};
+        static const char* const WARIANTY_PROC[] = {"100%", "wycisz."};
+        warianty_[0] = {powtarzanie_, nullptr, WARIANTY_POWT, 3};
+        warianty_[1] = {wycisz_, nullptr, WARIANTY_WYC, 2};
+        warianty_[2] = {nullptr, glosnosc_proc_, WARIANTY_PROC, 2};
+    }
+
+    // Minimalna szerokosc kontrolek o zmiennym tekscie = najszerszy wariant w biezacej czcionce (DIP). Liczone przy
+    // budowie i zmianie motywu/czcionki (bez RTTI: Ring 3 kompiluje z -fno-rtti).
+    struct Warianty { Kontrolka* k = nullptr; EtykietaJednowierszowa* e = nullptr; const char* const* teksty = nullptr; int n = 0; };
+    Warianty warianty_[3];
+    void dopasuj_warianty() {
+        for (Warianty& w : warianty_) {
+            Kontrolka* k = w.e ? static_cast<Kontrolka*>(w.e) : w.k;
+            if (!k) continue;
+            const SkalaUI s = k->skala_dpi();
+            const int p = int(s.procent() ? s.procent() : 100);
+            int maks = 0;
+            if (w.e) {
+                for (int i = 0; i < w.n; ++i) { const int d = dip_tekstu(w.teksty[i], s, 6); if (d > maks) maks = d; }
+                w.e->ustaw_preferowany_rozmiar(Rozmiar(maks, -1));
+            } else {
+                char biezacy[MAKS_DLUGOSC_TEKSTU_GRAJKA]; kopiuj_tekst(biezacy, sizeof(biezacy), k->tekst());
+                k->ustaw_minimalny_rozmiar(Rozmiar(0, 0));
+                for (int i = 0; i < w.n; ++i) { k->ustaw_tekst(w.teksty[i]); const int d = (k->zmierz(Rozmiar(-1, -1)).szerokosc * 100 + p - 1) / p + 4; if (d > maks) maks = d; }
+                k->ustaw_tekst(biezacy);
+                k->ustaw_minimalny_rozmiar(Rozmiar(maks, 0));
+            }
+        }
     }
 
     Kontrolka* buduj_kolejke() {
         auto* p = new PanelDokowany();
         p->ustaw_wypelnienie(Marginesy(6)); p->ustaw_odstep(6);
-        auto& dol = p->dodaj<Siatka>(Dokowanie::Dol);
-        dol.ustaw_preferowany_rozmiar(Rozmiar(-1, 68)); dol.ustaw_odstep(6, 6);
-        dol.dodaj_wiersz(); dol.dodaj_wiersz();
-        dol.dodaj_kolumne(); dol.dodaj_kolumne(); dol.dodaj_kolumne(); dol.dodaj_kolumne();
+        auto& dol = p->dodaj<SiatkaPrzyciskow>(Dokowanie::Dol);
+        przyciski_kol_ = &dol;
+        dol.ustaw_odstep(6, 6); dol.ustaw_wypelnienie(Marginesy(0));
+        for (int w = 0; w < 3; ++w) dol.dodaj_wiersz(DefinicjaWymiaru::automatyczny());
+        dol.dodaj_kolumne(); dol.dodaj_kolumne();
         auto* gora = new Przycisk("W górę"); auto* dol_ = new Przycisk("W dół"); auto* usun = new Przycisk("Usuń"); auto* czysc = new Przycisk("Wyczyść");
         auto* zapisz = new Przycisk("Zapisz listę"); auto* wczytaj = new Przycisk("Wczytaj listę");
         gora->ustaw_podpowiedz("Przesuń utwór wyżej"); dol_->ustaw_podpowiedz("Przesuń utwór niżej");
@@ -268,8 +322,13 @@ private:
         czysc->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.wyczysc_kolejke(); }, this);
         zapisz->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.zapisz_liste(); }, this);
         wczytaj->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.wczytaj_liste(); }, this);
-        dol.dodaj_do_siatki(gora, 0, 0); dol.dodaj_do_siatki(dol_, 0, 1); dol.dodaj_do_siatki(usun, 0, 2); dol.dodaj_do_siatki(czysc, 0, 3);
-        dol.dodaj_do_siatki(zapisz, 1, 0, 1, 2); dol.dodaj_do_siatki(wczytaj, 1, 2, 1, 2);
+        Przycisk* wszystkie[] = {gora, dol_, usun, czysc, zapisz, wczytaj};
+        for (Przycisk* b : wszystkie) b->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
+        // 3 wiersze x 2 kolumny (wagi wg tekstow): miesci sie w waskim panelu bez obcinania "Wyczyść"
+        dol.dodaj_przycisk(gora, 0, 0); dol.dodaj_przycisk(dol_, 0, 1);
+        dol.dodaj_przycisk(usun, 1, 0); dol.dodaj_przycisk(czysc, 1, 1);
+        dol.dodaj_przycisk(zapisz, 2, 0); dol.dodaj_przycisk(wczytaj, 2, 1);
+        czysc_ = czysc;
         kol_ = &p->dodaj<TabelaGrajka>(Dokowanie::Wypelnij);
         kol_->ustaw_dostawce_grajka(&dane_kol_);
         kol_->ustaw_sortowanie_naglowkiem(false);
@@ -278,30 +337,43 @@ private:
         return p;
     }
 
-    // Korektor: opis (Dol) dokowany PRZED siatka (Wypelnij) - inaczej siatka zajmuje cale miejsce, a opis nachodzi
-    // na suwaki i etykiety Hz. Etykiety bez wewnetrznych marginesow: 10 kolumn po ~32 DIP.
+    // Korektor: wiersz [Wlaczony][preset], etykiety dB, suwaki, etykiety Hz, opis. Opis (Dol) dokowany PRZED siatka
+    // (Wypelnij) - inaczej siatka zajmuje cale miejsce, a opis nachodzi na suwaki i etykiety Hz.
     Kontrolka* buduj_korektor() {
         auto* p = new PanelDokowany();
         p->ustaw_wypelnienie(Marginesy(6)); p->ustaw_odstep(6);
-        korektor_ = &p->dodaj<PoleWyboru>(Dokowanie::Gora, "Korektor włączony", false);
+        auto& gora = p->dodaj<Siatka>(Dokowanie::Gora);
+        gora.ustaw_wypelnienie(Marginesy(0)); gora.ustaw_odstep(8, 0);
+        gora.dodaj_wiersz(DefinicjaWymiaru::automatyczny());
+        gora.dodaj_kolumne(DefinicjaWymiaru::automatyczny()); gora.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        korektor_ = new PoleWyboru("Włączony", false);
         korektor_->ustaw_podpowiedz("Wyłączony korektor nie zmienia dźwięku");
         korektor_->przy_przelaczeniu([](PoleWyboru*, bool z, void* q) { auto* o = static_cast<OknoGrajka*>(q); if (!o->sync_) o->o_.ustaw_korektor(z); }, this);
-        preset_ = &p->dodaj<ListaRozwijana>(Dokowanie::Gora);
+        korektor_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        preset_ = new ListaRozwijana();
         for (int i = 0; i < int(PresetKorektora::Liczba); ++i) preset_->dodaj_element(nazwa_presetu(PresetKorektora(i)), uint64_t(i));
         preset_->ustaw_wybrany_indeks(0);
+        preset_->ustaw_podpowiedz("Ustawienie wstępne korektora");
         preset_->przy_zmianie_wyboru([](ListaRozwijana*, int i, void* q) { auto* o = static_cast<OknoGrajka*>(q); if (!o->sync_ && i >= 0) o->o_.ustaw_preset(PresetKorektora(i)); }, this);
-        auto& opis = p->dodaj<Etykieta>(Dokowanie::Dol, "Pasma w Hz, wzmocnienie od -12 do +12 dB. Przy podbiciu sygnał jest wstępnie ściszany (zapas przed przesterowaniem).");
-        opis.ustaw_zawijanie(true); opis.ustaw_preferowany_rozmiar(Rozmiar(-1, 52));
+        gora.dodaj_do_siatki(korektor_, 0, 0); gora.dodaj_do_siatki(preset_, 0, 1);
+        // opis: wysokosc z zawijania przy biezacej szerokosci i czcionce (Etykieta::zmierz liczy wiersze) - stale
+        // 52 px miescily 3 wiersze czcionki bitmapowej, ale nie TTF (natywnie ginal trzeci wiersz)
+        auto& opis = p->dodaj<Etykieta>(Dokowanie::Dol, "Pasma w Hz, ±12 dB. Przy podbiciu sygnał jest wstępnie ściszany.");
+        opis.ustaw_zawijanie(true); opis.ustaw_wypelnienie(Marginesy(2, 2, 2, 2));
         opis_korektora_ = &opis;
         opis.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+        // etykiety dB (gora) i Hz (dol) poza siatka: wyrownane do srodkow kolumn suwakow, w razie potrzeby w dwoch
+        // rzedach (EtykietyPasm) - przy 1080 px w TTF "125", "250", "500" stykaly sie i byly obcinane
+        db_pasm_ = &p->dodaj<EtykietyPasm>(Dokowanie::Gora, WYPELNIENIE_SIATKI_KOR, ODSTEP_SIATKI_KOR, MOTYW_KOLOR_TEKST);
+        hz_pasm_ = &p->dodaj<EtykietyPasm>(Dokowanie::Dol, WYPELNIENIE_SIATKI_KOR, ODSTEP_SIATKI_KOR, MOTYW_KOLOR_TEKST_DRUGI);
         auto& siatka = p->dodaj<Siatka>(Dokowanie::Wypelnij);
-        siatka.ustaw_odstep(2, 4);
-        siatka.dodaj_wiersz(DefinicjaWymiaru::piksele(22)); siatka.dodaj_wiersz(); siatka.dodaj_wiersz(DefinicjaWymiaru::piksele(22));
+        siatka.ustaw_odstep(ODSTEP_SIATKI_KOR, 0); siatka.ustaw_wypelnienie(Marginesy(WYPELNIENIE_SIATKI_KOR, 0, WYPELNIENIE_SIATKI_KOR, 0));
+        siatka.dodaj_wiersz();
         static const char* const HZ[Tabele::LICZBA_PASM] = {"31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
         for (int b = 0; b < Tabele::LICZBA_PASM; ++b) {
             siatka.dodaj_kolumne();
-            db_[b] = new Etykieta("0"); db_[b]->ustaw_wyrownanie_tekstu(WyrownaniePoziome::Srodek);
-            db_[b]->ustaw_wypelnienie(Marginesy(0)); db_[b]->ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
+            db_pasm_->ustaw(b, "0");
+            hz_pasm_->ustaw(b, HZ[b]);
             pasma_[b] = new Suwak();
             pasma_[b]->ustaw_orientacje(Orientacja::Pionowa);
             pasma_[b]->ustaw_zakres(Tabele::MIN_DB, Tabele::MAKS_DB);
@@ -314,12 +386,54 @@ private:
                 if (o->sync_) return;
                 for (int k = 0; k < Tabele::LICZBA_PASM; ++k) if (o->pasma_[k] == s) o->o_.ustaw_pasmo(k, v);
             }, this);
-            hz_[b] = new Etykieta(HZ[b]); hz_[b]->ustaw_wyrownanie_tekstu(WyrownaniePoziome::Srodek);
-            hz_[b]->ustaw_wypelnienie(Marginesy(0)); hz_[b]->ustaw_wyrownanie_pionowe_tekstu(WyrownaniePionowe::Srodek);
-            hz_[b]->ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
-            siatka.dodaj_do_siatki(db_[b], 0, b); siatka.dodaj_do_siatki(pasma_[b], 1, b); siatka.dodaj_do_siatki(hz_[b], 2, b);
+            siatka.dodaj_do_siatki(pasma_[b], 0, b);
         }
+        siatka_korektora_ = &siatka;
         return p;
+    }
+
+    // Diagnostyka: wszystkie liczniki w tabeli (bez obcinania) + objasnienie zrodla czasow.
+    Kontrolka* buduj_diagnostyke() {
+        auto* p = new PanelDokowany();
+        p->ustaw_wypelnienie(Marginesy(6)); p->ustaw_odstep(6);
+        auto& opis = p->dodaj<Etykieta>(Dokowanie::Dol, "Czasy: ostatnia sekunda, zegarowe (z wywłaszczeniem). Bez okresów pominiętych przez HDA.");
+        opis.ustaw_zawijanie(true); opis.ustaw_wypelnienie(Marginesy(2, 2, 2, 2));
+        opis.ustaw_kolor_tekstu(motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI));
+        opis_diagnostyki_ = &opis;
+        diag_tab_ = &p->dodaj<TabelaGrajka>(Dokowanie::Wypelnij);
+        diag_tab_->ustaw_dostawce_grajka(&dane_diag_);
+        diag_tab_->ustaw_sortowanie_naglowkiem(false);
+        diag_tab_->ustaw_szerokosc_wg_naglowkow(true);
+        dane_diag_.odswiez();
+        return p;
+    }
+
+    // ------------------------------------------------------------ minima paneli z zawartosci (piksele)
+    static constexpr int WYPELNIENIE_SIATKI_KOR = 4, ODSTEP_SIATKI_KOR = 2;
+    static constexpr int KARTA_DIAGNOSTYKI = 2;
+    static int minimum_lewego(const void* p, SkalaUI s) {
+        auto* o = static_cast<const OknoGrajka*>(p);
+        int m = o->bib_ ? o->bib_->minimum_px() + o->bib_->margines().poziomo() * s : 0;   // tabela + jej margines
+        const int b = o->przyciski_bib_ ? o->przyciski_bib_->minimum_px() : 0;
+        return m > b ? m : b;
+    }
+    // Korektor: 10 kolumn suwakow; etykiety w dwoch rzedach potrzebuja 2 kolumn na najszerszy tekst ("125", "+12").
+    static int minimum_korektora(SkalaUI s) {
+        static const char* const T[] = {"125", "250", "500", "16k", "+12", "-12"};
+        int tekst = 0;
+        for (const char* t : T) { const int w = CzcionkaUI::zmierz_tekst(t, s); if (w > tekst) tekst = w; }
+        int kol = 20 * s;                                         // suwak pionowy
+        const int z_etykiet = (tekst + 4 * s - ODSTEP_SIATKI_KOR * s + 1) / 2;   // dwa rzedy: tekst <= 2 kolumny
+        if (z_etykiet > kol) kol = z_etykiet;
+        return Tabele::LICZBA_PASM * kol + (Tabele::LICZBA_PASM - 1) * ODSTEP_SIATKI_KOR * s + 2 * WYPELNIENIE_SIATKI_KOR * s;
+    }
+    static int minimum_prawego(const void* p, SkalaUI s) {
+        auto* o = static_cast<const OknoGrajka*>(p);
+        int m = minimum_korektora(s);
+        const int z[] = {o->przyciski_kol_ ? o->przyciski_kol_->minimum_px() : 0, o->kol_ ? o->kol_->minimum_px() : 0,
+                         o->diag_tab_ ? o->diag_tab_->minimum_px() : 0};
+        for (int v : z) if (v > m) m = v;
+        return m + 2 * 6 * s + 2 * 4 * s;            // wypelnienie karty (6) i ramka kart
     }
 
     // ------------------------------------------------------------ akcje
@@ -417,11 +531,34 @@ private:
         if (wszystko || o_.wersja_diagnostyki() != w_diag_) {
             w_diag_ = o_.wersja_diagnostyki();
             const bool d = o_.konfiguracja().diagnostyka;
-            komunikat_->ustaw_diagnostyke(d ? (o_.tekst_diagnostyki()[0] ? o_.tekst_diagnostyki() : "Diagnostyka: zbieranie pomiarów…") : "");
-            if (komunikat_->ustaw_wiersz_diagnostyki(d)) { przelicz_uklad(); uniewaznij(); }
+            // krotkie podsumowanie w stalym wierszu paska (bez zmiany wysokosci i bez przeliczania ukladu)
+            komunikat_->ustaw_skrot(d ? (o_.tekst_diagnostyki()[0] ? o_.tekst_diagnostyki() : "Diagnostyka: pomiar…") : "");
+            aktualizuj_diagnostyke(false);
+        } else if (karty_ && karty_->aktywna_karta() != ostatnia_karta_) {
+            ostatnia_karta_ = karty_->aktywna_karta();
+            aktualizuj_diagnostyke(true);               // karta wlasnie pokazana: od razu aktualne wartosci
+        } else if (ms - ostatnia_diag_ >= 1000) {
+            aktualizuj_diagnostyke(false);              // liczniki ciaglosci (bez pomiaru sekcji) - tez co 1 s
+        }
+        if (nazwa_ && nazwa_->skala_dpi().procent() != ostatnia_skala_) {   // zmiana skali UI: warianty tekstow
+            ostatnia_skala_ = nazwa_->skala_dpi().procent();
+            if (!wszystko) { dopasuj_warianty(); przelicz_uklad(); uniewaznij(); }
         }
         if (!wszystko && najechana_ && kontrolka_glowna())
             podpowiedzi_.obsluz_ruch(zarzadca_popupow(), najechana_, mysz_x_, mysz_y_, ms);
+    }
+
+    // Karta "Diagnostyka": tylko gdy widoczna, najwyzej co ~1 s (albo na zadanie), uniewaznia wylacznie zmienione
+    // wiersze tabeli. Ukryta karta nie kosztuje odrysowan.
+    void aktualizuj_diagnostyke(bool wymus) {
+        const uint64_t ms = teraz_ms();
+        if (!wymus && ms - ostatnia_diag_ < 1000 && ostatnia_diag_) return;
+        ostatnia_diag_ = ms ? ms : 1;
+        if (!karty_ || karty_->aktywna_karta() != KARTA_DIAGNOSTYKI || czy_zminimalizowane()) return;
+        const uint32_t zm = dane_diag_.odswiez();
+        // nazwy sa stale (wypelnione przy budowie), wiec tylko kolumna wartosci zmienionych wierszy
+        for (size_t i = 0; i < DaneDiagnostyki::N; ++i)
+            if (zm & (1u << i)) { diag_tab_->uniewaznij_wiersz(i, 1); ++wiersze_diag_; }   // bez __builtin_popcount (Ring 3: brak libgcc)
     }
 
     void aktualizuj_utwor() {
@@ -521,9 +658,10 @@ private:
             const int v = kor.wzmocnienie(b);
             if (v > 0) x.dodaj("+");
             if (v < 0) { x.dodaj("-"); x.liczba(uint64_t(-v)); } else x.liczba(uint64_t(v));
-            ustaw(db_[b], d);
+            db_pasm_->ustaw(b, d);
             pasma_[b]->ustaw_wlaczona(k.korektor);
         }
+        db_pasm_->ustaw_wlaczona(k.korektor);
         const int p = int(kor.rozpoznaj_preset());
         if (preset_->wybrany_indeks() != p) preset_->ustaw_wybrany_indeks(p);
         preset_->ustaw_wlaczona(k.korektor);
@@ -533,6 +671,7 @@ private:
     Odtwarzacz o_;
     DaneBiblioteki dane_bib_;
     DaneKolejki dane_kol_;
+    DaneDiagnostyki dane_diag_;
     uint64_t (*czas_ns_)() = nullptr;
     ZarzadcaPodpowiedzi podpowiedzi_;
     Kontrolka* najechana_ = nullptr;
@@ -542,10 +681,19 @@ private:
     int wskaznik_bib_ = -1, wskaznik_kol_ = -1;
     uint32_t klatki_wiz_ = 0;            // liczba uniewaznionych pol wizualizacji (testy czestotliwosci)
     uint32_t okladka_wersja_ = 0xFFFFFFFF;
-    uint64_t ostatni_postep_ = 0, ostatnia_wiz_ = 0, ostatni_skan_ = 0;
+    uint64_t ostatni_postep_ = 0, ostatnia_wiz_ = 0, ostatni_skan_ = 0, ostatnia_diag_ = 0;
+    uint32_t ostatnia_skala_ = 0, wiersze_diag_ = 0;
+    int ostatnia_karta_ = -1;
     uint32_t* domyslna_ = nullptr;
 
     PasekStanuGrajka* komunikat_ = nullptr;
+    EtykietaJednowierszowa* nazwa_ = nullptr;
+    SiatkaPrzyciskow *przyciski_bib_ = nullptr, *przyciski_kol_ = nullptr;
+    Przycisk* czysc_ = nullptr;
+    Siatka* siatka_korektora_ = nullptr;
+    Siatka* wiersz_ster_[2]{};
+    TabelaGrajka* diag_tab_ = nullptr;
+    Etykieta* opis_diagnostyki_ = nullptr;
     Karty* karty_ = nullptr;
     PoleWyszukiwania* szukaj_ = nullptr;
     Przycisk *odswiez_ = nullptr, *dodaj_kol_ = nullptr;
@@ -554,7 +702,8 @@ private:
     TabelaGrajka *bib_ = nullptr, *kol_ = nullptr;
     ObrazOkladki* okladka_ = nullptr;
     EtykietaJednowierszowa *tytul_ = nullptr, *wykonawca_ = nullptr, *album_ = nullptr, *rok_ = nullptr, *format_ = nullptr, *stan_ = nullptr;
-    Etykieta *czas_ = nullptr, *calosc_ = nullptr, *glosnosc_proc_ = nullptr;
+    Etykieta *czas_ = nullptr, *calosc_ = nullptr;
+    EtykietaJednowierszowa* glosnosc_proc_ = nullptr;
     SuwakPostepu* pasek_ = nullptr;
     WidokWizualizacji* wiz_ = nullptr;
     Przycisk *poprz_ = nullptr, *graj_ = nullptr, *pauza_ = nullptr, *stop_ = nullptr, *nast_ = nullptr, *wycisz_ = nullptr;
@@ -563,8 +712,7 @@ private:
     PoleWyboru *losowo_ = nullptr, *w_tle_ = nullptr, *wizualizacja_ = nullptr, *diagnostyka_ = nullptr, *korektor_ = nullptr;
     ListaRozwijana* preset_ = nullptr;
     Suwak* pasma_[Tabele::LICZBA_PASM]{};
-    Etykieta* db_[Tabele::LICZBA_PASM]{};
-    Etykieta* hz_[Tabele::LICZBA_PASM]{};
+    EtykietyPasm *db_pasm_ = nullptr, *hz_pasm_ = nullptr;
     Etykieta* opis_korektora_ = nullptr;
 };
 

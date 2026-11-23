@@ -14,6 +14,9 @@
 using namespace Grajek;
 static unsigned g_checks = 0;
 #define CHECK(x) do { ++g_checks; if (!(x)) { std::fprintf(stderr, "FAIL test_grajek_ui_host.cpp:%d: %s\n", __LINE__, #x); std::abort(); } } while (0)
+#define private public
+#include "grajek_uklad_sprawdzenia.h"
+#undef private
 
 static std::map<std::string, std::string> g_ustawienia;
 static bool ust_wczytaj(const char* k, char* b, uint32_t cap) {
@@ -171,7 +174,7 @@ static void test_okno() {
     { KontekstRysowania c; o->rysuj(c, true); }
     // ustawienia z pliku trafily do kontrolek
     CHECK(o->glosnosc_->wartosc() == 55 && o->korektor_->czy_zaznaczone() && o->preset_->wybrany_indeks() == int(PresetKorektora::Basy));
-    CHECK(o->pasma_[0]->wartosc() == 6 && std::strcmp(o->db_[0]->tekst(), "+6") == 0);
+    CHECK(o->pasma_[0]->wartosc() == 6 && std::strcmp(o->db_pasm_->tekst_pasma(0), "+6") == 0);
     kroki(*o, 25);
     CHECK(o->bib_->liczba_wierszy() == 3 && std::strstr(o->stan_bib_->tekst(), "3 z 3"));
     CHECK(o->komunikat_->czy_widoczna() && o->komunikat_->tekst()[0] && std::strstr(o->komunikat_->tekst(), "3 utwor"));
@@ -265,6 +268,84 @@ static void test_okno() {
 
 // =================================================================== odrysowania, punkt kontrolny PCM i uklad
 // Petla jak AplikacjaGUI: tick (4 ms) + rysowanie, gdy okno go wymaga.
+// Regresja (natywny QEMU 2026-11-22): komunikat "X ms w tym utworze" z poprzedniego utworu byl wyswietlany po
+// zmianie utworu (192 ms WAV przy MP3, potem 21 ms nowego utworu - pozorny spadek), a niedobor zgloszony w oknie
+// 5 s czekal na kolejne zdarzenie. Licznik utworu ma byc monotoniczny w obrebie utworu i zerowany tylko w wczytaj().
+static uint64_t ms_z_komunikatu(const char* k, const char* przed) {
+    const char* p = std::strstr(k, przed);
+    if (!p) return ~0ULL;
+    while (p > k && p[-1] == ' ') --p;
+    while (p > k && p[-1] >= '0' && p[-1] <= '9') --p;
+    return std::strtoull(p, nullptr, 10);
+}
+static void test_komunikat_niedoboru() {
+    Jadro j; g_j = &j;
+    wyczysc_fs();
+    using namespace GrajekFixtures;
+    ParametryWav w; w.czestotliwosc = 48000; w.ramki = 48000 * 20;            // 20 s: dosc na przestoje i przewijanie
+    dodaj_plik("/dane/muzyka/A.wav", wav(w));
+    dodaj_plik("/dane/muzyka/B.wav", wav(w));
+    g_ustawienia.clear();
+    Odtwarzacz o; o.konfiguruj(platforma());
+    o.start();
+    kroki_k(o, 30);
+    CHECK(o.biblioteka().widoczne() == 2);
+    auto przestoj = [&](uint32_t ms) { graj(48 * ms); test_monotonic_ns += uint64_t(ms) * 1000000ULL; };   // proces nie pracuje
+    uint64_t utwor_poprz = 0;
+    auto monotoniczny = [&]() { const uint64_t u = o.silnik().ciaglosc().niedobor_utworu; CHECK(u >= utwor_poprz); utwor_poprz = u; };
+
+    // utwor A: przestoj 200 ms -> niedobor; komunikat od razu (pierwszy)
+    CHECK(o.odtworz_z_widoku(0)); kroki_k(o, 60);
+    CHECK(o.silnik().stan() == Stan::Odtwarzanie);
+    const uint32_t pok_a = o.silnik().pokolenie_utworu();
+    przestoj(200); kroki_k(o, 70); monotoniczny();     // statystyki jadra sa czytane co kilkadziesiat pompowan
+    const uint64_t a1 = StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu);
+    std::printf("  niedobor po przestoju 200 ms: %llu ms\n", (unsigned long long)a1);
+    CHECK(a1 >= 100 && a1 <= 130);                                           // 200 ms - kolejka 85 ms (+ okres)
+    CHECK(o.komunikat_niedoboru_aktywny() && ms_z_komunikatu(o.komunikat(), "ms w tym utworze") == a1);
+    // drugi przestoj w oknie 5 s: komunikat jeszcze stary, ale zdarzenie oczekuje (nie ginie)
+    przestoj(0);
+    przestoj(200); kroki_k(o, 70); monotoniczny();
+    const uint64_t a2 = StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu);
+    CHECK(a2 > a1 && o.niedobor_oczekuje() && ms_z_komunikatu(o.komunikat(), "ms w tym utworze") == a1);
+    for (int i = 0; i < 1300; ++i) { kroki_k(o, 1); monotoniczny(); }       // 5,2 s
+    CHECK(!o.niedobor_oczekuje() && ms_z_komunikatu(o.komunikat(), "ms w tym utworze") == a2);
+    CHECK(ms_z_komunikatu(o.komunikat(), "ms od uruchomienia") == a2);
+    // przewijanie i pauza/wznowienie w tym samym utworze: licznik utworu nie maleje i nie jest zerowany
+    CHECK(o.przewin(8000)); kroki_k(o, 40); monotoniczny();
+    CHECK(o.silnik().pauza()); kroki_k(o, 100); monotoniczny();
+    CHECK(o.silnik().wznow()); kroki_k(o, 60); monotoniczny();
+    CHECK(o.silnik().pokolenie_utworu() == pok_a && StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu) >= a2);
+    const uint64_t sesja_a = StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_sesji);
+
+    // zmiana utworu: komunikat natychmiast dotyczy NOWEGO utworu (0 ms), sesja zachowana - bez czekania na okno
+    CHECK(o.odtworz_z_widoku(1));
+    for (int i = 0; i < 8; ++i) kroki_k(o, 1);
+    CHECK(o.silnik().pokolenie_utworu() != pok_a);
+    CHECK(ms_z_komunikatu(o.komunikat(), "ms w tym utworze") == StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu));
+    CHECK(ms_z_komunikatu(o.komunikat(), "ms w tym utworze") == 0 && ms_z_komunikatu(o.komunikat(), "ms od uruchomienia") == sesja_a);
+    // w kazdej chwili wyswietlana wartosc utworu nie przekracza licznika biezacego utworu (brak "starego" utworu)
+    utwor_poprz = 0;
+    for (int i = 0; i < 400; ++i) {
+        kroki_k(o, 1); monotoniczny();
+        if (i == 100) przestoj(150);
+        if (o.komunikat_niedoboru_aktywny())
+            CHECK(ms_z_komunikatu(o.komunikat(), "ms w tym utworze") <= StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu));
+    }
+    CHECK(StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu) > 0);
+    // inny komunikat zastepuje migawke: przy zmianie utworu nie jest nadpisywany starym niedoborem
+    o.ustaw_komunikat("Dodano do kolejki: B", RodzajKomunikatu::Sukces);
+    CHECK(!o.komunikat_niedoboru_aktywny());
+    CHECK(o.odtworz_z_widoku(0)); kroki_k(o, 8);
+    // albo komunikat bez zmian, albo NOWE zdarzenie niedoboru (np. koncowka B policzona przy CLOSE) - wtedy wartosc
+    // dotyczy biezacego utworu
+    if (o.komunikat_niedoboru_aktywny())
+        CHECK(ms_z_komunikatu(o.komunikat(), "ms w tym utworze") <= StatystykiCiaglosci::ms(o.silnik().ciaglosc().niedobor_utworu));
+    else
+        CHECK(std::strcmp(o.komunikat(), "Dodano do kolejki: B") == 0);
+    o.zakoncz();
+}
+
 struct LicznikRysowania { int odrysowania = 0; uint64_t piksele = 0; };
 static LicznikRysowania petla(OknoGrajka& o, int ticki) {
     LicznikRysowania l;
@@ -277,8 +358,6 @@ static LicznikRysowania petla(OknoGrajka& o, int ticki) {
     }
     return l;
 }
-static bool rozlaczne(Prostokat a, Prostokat b) { return a.prawy() <= b.x || b.prawy() <= a.x || a.dolny() <= b.y || b.dolny() <= a.y; }
-static bool wewnatrz(Prostokat r, int w, int h) { return r.x >= 0 && r.y >= 0 && r.prawy() <= w && r.dolny() <= h && r.szerokosc > 0 && r.wysokosc > 0; }
 
 static void test_odrysowania_i_uklad() {
     Jadro j; g_j = &j;
@@ -347,60 +426,44 @@ static void test_odrysowania_i_uklad() {
     CHECK(e.odrysowania == 0 && j.zapisy > zapisy && o->o_.silnik().stan() == Stan::Odtwarzanie && o->o_.silnik().niedobory_ramek() == 0);
     { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_FOCUS; o->obsluz_zdarzenie(ev); }
     CHECK(!o->czy_zminimalizowane());
-    // (F) diagnostyka: wiersz w pasku stanu (jedno przeliczenie ukladu przy przelaczeniu), tekst co ok. 1 s
+    // (F) diagnostyka: podsumowanie w stalym wierszu paska; wlaczenie nie przesuwa sterowania i nie przelicza ukladu
+    GrajekUklad::sprawdz_stabilnosc_diagnostyki(o, [&](int n) { petla(*o, n); });
     o->o_.ustaw_diagnostyke(true);
     petla(*o, 300);
-    CHECK(o->komunikat_->wiersz_diagnostyki() && std::strstr(o->komunikat_->diagnostyka(), "Diagnostyka/s:"));
-    CHECK(std::strstr(o->komunikat_->diagnostyka(), "przerwa prod.") && std::strstr(o->komunikat_->diagnostyka(), "niedobór utworu 0 ms"));
+    CHECK(std::strstr(o->komunikat_->skrot(), "Niedobór 0 ms") && std::strstr(o->komunikat_->skrot(), "GUI"));
+    {   // karta Diagnostyka: odswiezana tylko gdy widoczna; tylko zmienione wiersze
+        const uint32_t w0 = o->wiersze_diag_;
+        petla(*o, 500);
+        CHECK(o->wiersze_diag_ == w0);                                         // karta ukryta: zero aktualizacji
+        o->karty_->ustaw_aktywna_karte(OknoGrajka::KARTA_DIAGNOSTYKI);
+        petla(*o, 2);
+        CHECK(o->wiersze_diag_ > w0);
+        const uint64_t pelne_k = o->liczba_pelnych_odrysowan();                 // (przelaczenie karty - akcja uzytkownika)
+        const LicznikRysowania d = petla(*o, 1000);                            // 4 s: bez pelnych odrysowan
+        CHECK(o->liczba_pelnych_odrysowan() == pelne_k && d.odrysowania <= 4 * (1 + 4 + 1) + 4);
+        std::printf("  karta Diagnostyka: 4 s, %d odrysowan, sr. %llu px\n", d.odrysowania, (unsigned long long)(d.piksele / uint64_t(d.odrysowania ? d.odrysowania : 1)));
+        CHECK(std::strcmp(o->dane_diag_.nazwa(0), "Niedobór – utwór") == 0 && std::strstr(o->dane_diag_.wartosc(7), "ms/s"));
+        o->karty_->ustaw_aktywna_karte(0);
+    }
     o->o_.ustaw_diagnostyke(false);
     petla(*o, 2);
-    CHECK(!o->komunikat_->wiersz_diagnostyki() && !g_profiler.wlaczony());
-
-    // (G) uklad: 3 rozmiary i 2 skale, karta Korektor i Kolejka
-    static const char* const HZ[10] = {"31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
-    int szer_bib_poprz = 0;
-    struct R { int w, h, skala; } rozmiary[] = {{980, 580, 100}, {1280, 680, 100}, {1920, 1040, 100}, {1470, 870, 150}};
-    for (const R& r : rozmiary) {
-        o->ustaw_skale_dpi(SkalaUI::procent(uint32_t(r.skala)));
-        o->ustaw_geometrie(0, 0, r.w, r.h); o->przelicz_uklad();
-        o->karty_->ustaw_aktywna_karte(1); o->przelicz_uklad();
-        { KontekstRysowania c; o->rysuj(c, true); }
-        const SkalaUI s = o->pasma_[0]->skala_dpi();         // ulamkowa skala (150 %): 12 * s = 18 px
-        int dol_hz = 0;
-        for (int b = 0; b < 10; ++b) {
-            const Prostokat h = o->hz_[b]->obszar_ekranu(), d = o->db_[b]->obszar_ekranu(), p = o->pasma_[b]->obszar_ekranu();
-            CHECK(wewnatrz(h, r.w, r.h) && wewnatrz(p, r.w, r.h) && wewnatrz(d, r.w, r.h));
-            CHECK(CzcionkaUI::zmierz_tekst(HZ[b], o->hz_[b]->skala_dpi()) <= h.szerokosc);       // etykieta miesci sie w kolumnie
-            CHECK(CzcionkaUI::zmierz_tekst("+12", o->db_[b]->skala_dpi()) <= d.szerokosc);
-            if (b) CHECK(rozlaczne(o->hz_[b - 1]->obszar_ekranu(), h) && rozlaczne(o->pasma_[b - 1]->obszar_ekranu(), p));
-            CHECK(rozlaczne(h, p) && rozlaczne(d, p) && p.wysokosc >= 60 * s);
-            if (h.dolny() > dol_hz) dol_hz = h.dolny();
-        }
-        CHECK(o->opis_korektora_->obszar_ekranu().y >= dol_hz);                                   // opis pod etykietami Hz
-        CHECK(wewnatrz(o->opis_korektora_->obszar_ekranu(), r.w, r.h));
-        // sterowanie: rozlaczne i w oknie
-        Kontrolka* ster[] = {o->poprz_, o->graj_, o->pauza_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->glosnosc_proc_,
-                             o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_, o->zakoncz_};
-        for (size_t i = 0; i < sizeof(ster) / sizeof(ster[0]); ++i) {
-            CHECK(wewnatrz(ster[i]->obszar_ekranu(), r.w, r.h));
-            for (size_t k = 0; k < i; ++k) CHECK(rozlaczne(ster[i]->obszar_ekranu(), ster[k]->obszar_ekranu()));
-        }
-        Przycisk* przyciski[] = {o->poprz_, o->graj_, o->pauza_, o->stop_, o->nast_, o->wycisz_, o->powtarzanie_, o->zakoncz_};
-        for (Przycisk* b : przyciski) CHECK(CzcionkaUI::zmierz_tekst(b->tekst(), b->skala_dpi()) + 8 * s <= b->obszar().szerokosc);
-        // biblioteka: naglowki nigdy wezsze niz tekst, kolumny rosna z oknem
-        for (size_t k = 1; k < 5; ++k)
-            CHECK(o->bib_->szerokosc_kolumny_px(k) >= CzcionkaUI::zmierz_tekst(o->dane_bib_.naglowek_kolumny(k), o->bib_->skala_dpi()) + 12 * s);
-        if (r.skala == 100) { CHECK(o->bib_->obszar().szerokosc >= szer_bib_poprz); szer_bib_poprz = o->bib_->obszar().szerokosc; }
-        // panele srodkowe nie nachodza na siebie
-        CHECK(rozlaczne(o->bib_->obszar_ekranu(), o->wiz_->obszar_ekranu()) && rozlaczne(o->wiz_->obszar_ekranu(), o->karty_->obszar_ekranu()));
-        CHECK(rozlaczne(o->okladka_->obszar_ekranu(), o->tytul_->obszar_ekranu()) && wewnatrz(o->komunikat_->obszar_ekranu(), r.w, r.h));
-        o->tytul_->dopasuj();
-        CHECK(CzcionkaUI::zmierz_tekst(o->tytul_->tekst_widoczny(), SkalaUI::procent(o->tytul_->skala_dpi().procent() * uint32_t(o->tytul_->skala_widoczna()))) <= o->tytul_->obszar().szerokosc);
-        o->karty_->ustaw_aktywna_karte(0); o->przelicz_uklad();
-        { KontekstRysowania c; o->rysuj(c, true); }
-        for (size_t k = 1; k < 4; ++k)
-            CHECK(o->kol_->szerokosc_kolumny_px(k) >= CzcionkaUI::zmierz_tekst(o->dane_kol_.naglowek_kolumny(k), o->kol_->skala_dpi()) + 12 * s);
+    CHECK(!o->komunikat_->skrot()[0] && !g_profiler.wlaczony());
+    {   // bez pomiaru sekcji: czasy "—", liczniki ciaglosci nadal dostepne
+        char n[48], w[32]; o->o_.pomiar(7, n, sizeof n, w, sizeof w);
+        CHECK(std::strcmp(w, "—") == 0);
+        o->o_.pomiar(1, n, sizeof n, w, sizeof w);
+        CHECK(std::strstr(w, " ms") != nullptr);
     }
+
+    // (G) uklad: rozmiary (minimalny, domyslny, zmaksymalizowany, duzy) i skala 150 %, wszystkie karty
+    int szer_bib_poprz = 0;
+    struct R { int w, h, skala; } rozmiary[] = {{980, 580, 100}, {1080, 640, 100}, {1280, 680, 100}, {1920, 1040, 100}, {1470, 870, 150}};
+    for (const R& r : rozmiary) {
+        GrajekUklad::sprawdz_uklad(o, r.w, r.h, r.skala);
+        if (r.skala == 100) { CHECK(o->bib_->obszar().szerokosc >= szer_bib_poprz); szer_bib_poprz = o->bib_->obszar().szerokosc; }
+    }
+    GrajekUklad::sprawdz_podpowiedz(SkalaUI(1));
+    GrajekUklad::sprawdz_podpowiedz(SkalaUI::procent(150));
     CHECK(szer_bib_poprz > 400);
     // korektor po zmianie ukladu: wszystkie 10 suwakow dziala
     o->o_.ustaw_korektor(true); petla(*o, 1);
@@ -412,6 +475,7 @@ static void test_odrysowania_i_uklad() {
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_kontroler(); std::printf("kontroler OK\n");
+    test_komunikat_niedoboru(); std::printf("komunikat niedoboru OK\n");
     test_okno(); std::printf("okno OK\n");
     test_odrysowania_i_uklad(); std::printf("odrysowania i uklad OK\n");
     std::printf("Grajek UI: %u sprawdzen OK\n", g_checks);

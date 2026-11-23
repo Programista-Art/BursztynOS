@@ -95,13 +95,7 @@ public:
         if (z & ZD_KONIEC_UTWORU) po_koncu_utworu();
         if (z & ZD_BLAD) po_bledzie();
         if (z & ZD_ZALADOWANO) { proby_pod_rzad_ = 0; if (rodzaj_ == RodzajKomunikatu::Blad) ustaw_komunikat("", RodzajKomunikatu::Informacja); automatyczne_ = false; }
-        // Komunikat o niedoborze najwyzej co ODSTEP_NIEDOBORU_NS: kazda zmiana tekstu to odrysowanie paska, a pod
-        // emulacja odrysowanie samo moze wywolac kolejny niedobor (sprzezenie zwrotne zmierzone w QEMU).
-        if ((z & ZD_NIEDOBOR) && (!p_.czas_ns || p_.czas_ns() - ostatni_niedobor_ >= ODSTEP_NIEDOBORU_NS || rodzaj_ != RodzajKomunikatu::Ostrzezenie)) {
-            if (p_.czas_ns) ostatni_niedobor_ = p_.czas_ns();
-            opisz_niedobor(komunikat_niedoboru_, sizeof(komunikat_niedoboru_));
-            ustaw_komunikat(komunikat_niedoboru_, RodzajKomunikatu::Ostrzezenie);
-        }
+        aktualizuj_komunikat_niedoboru(z);
         if (bib_.skanuje()) {
             if (bib_.krok(1)) po_skanie();
         }
@@ -115,6 +109,29 @@ public:
         }
     }
 
+    // Komunikat o niedoborze (migawka licznikow w chwili zlozenia):
+    //  - najwyzej co ODSTEP_NIEDOBORU_NS (kazda zmiana tekstu to odrysowanie paska; pod emulacja odrysowanie samo moze
+    //    wywolac kolejny niedobor - sprzezenie zwrotne zmierzone w QEMU). Niedobor zgloszony w tym oknie NIE ginie:
+    //    zostaje oczekujacy i komunikat jest odswiezany po uplywie okna (wczesniej czekal na kolejne zdarzenie),
+    //  - na granicy utworu (Silnik::pokolenie_utworu) aktywny komunikat jest skladany od nowa natychmiast: inaczej
+    //    tekst "X ms w tym utworze" z poprzedniego utworu byl wyswietlany przy nowym (natywnie: 192 ms WAV z fazy C
+    //    widoczne przy MP3, potem 21 ms nowego utworu - pozorny spadek licznika, ktory sam jest monotoniczny).
+    void aktualizuj_komunikat_niedoboru(uint32_t z) {
+        const uint64_t teraz = p_.czas_ns ? p_.czas_ns() : 0;
+        if (z & ZD_NIEDOBOR) niedobor_oczekuje_ = true;
+        const bool okno_minelo = !p_.czas_ns || teraz - ostatni_niedobor_ >= ODSTEP_NIEDOBORU_NS || !komunikat_niedoboru_aktywny_;
+        const bool inny_utwor = komunikat_niedoboru_aktywny_ && pokolenie_komunikatu_ != silnik_.pokolenie_utworu();
+        if (!(niedobor_oczekuje_ && okno_minelo) && !inny_utwor) return;
+        if (niedobor_oczekuje_ && okno_minelo) ostatni_niedobor_ = teraz;
+        niedobor_oczekuje_ = niedobor_oczekuje_ && !okno_minelo;
+        opisz_niedobor(komunikat_niedoboru_, sizeof(komunikat_niedoboru_));
+        ustaw_komunikat(komunikat_niedoboru_, RodzajKomunikatu::Ostrzezenie);
+        komunikat_niedoboru_aktywny_ = true;
+        pokolenie_komunikatu_ = silnik_.pokolenie_utworu();
+    }
+    bool komunikat_niedoboru_aktywny() const { return komunikat_niedoboru_aktywny_; }
+    bool niedobor_oczekuje() const { return niedobor_oczekuje_; }
+
     // Tresc komunikatu o niedoborze (tez dla testow): utwor i sesja osobno, ze zrodlem liczby.
     void opisz_niedobor(char* bufor, size_t cap) const {
         const StatystykiCiaglosci& c = silnik_.ciaglosc();
@@ -125,23 +142,61 @@ public:
         t.liczba(StatystykiCiaglosci::ms(c.niedobor_sesji));
         t.dodaj(" ms od uruchomienia.");
     }
-    // Podsumowanie ostatniego okna pomiaru (ok. 1 s): czas sekcji w ms z jednym miejscem po przecinku.
+    // Krotkie podsumowanie do paska stanu (pelne liczniki: wiersze_diagnostyki / karta "Diagnostyka").
     void opisz_diagnostyke(char* bufor, size_t cap) const {
         const OknoPomiaru& o = g_profiler.ostatnie();
         const StatystykiCiaglosci& c = silnik_.ciaglosc();
         Tekst t(bufor, cap);
-        auto ms1 = [&t](uint64_t ns) { t.liczba(ns / 1000000ULL); t.dodaj(","); t.liczba((ns / 100000ULL) % 10); };
-        t.dodaj("Diagnostyka/s: dek. "); ms1(o.suma_ns(Sekcja::Dekodowanie));
-        t.dodaj(" · konw. "); ms1(o.suma_ns(Sekcja::Konwersja));
-        t.dodaj(" · EQ "); ms1(o.suma_ns(Sekcja::Korektor));
-        t.dodaj(" · BWS110 "); ms1(o.suma_ns(Sekcja::Bws110));
-        t.dodaj(" · widmo "); ms1(o.suma_ns(Sekcja::Widmo));
-        t.dodaj(" · rys. "); ms1(o.suma_ns(Sekcja::OknoRysowanie));
-        t.dodaj(" (maks "); ms1(o.maks_ns(Sekcja::OknoRysowanie));
-        t.dodaj("; odrysowań "); t.liczba(o.odrysowania); t.dodaj(") · publ. "); ms1(o.suma_ns(Sekcja::OknoPublikacja));
-        t.dodaj(" ms · przerwa prod. maks "); t.liczba(c.maks_przerwa_producenta_ns / 1000000ULL);
-        t.dodaj(" ms, >85 ms: "); t.liczba(c.przerwy_ponad_kolejke);
-        t.dodaj(" · niedobór utworu "); t.liczba(StatystykiCiaglosci::ms(c.niedobor_utworu)); t.dodaj(" ms");
+        t.dodaj("Niedobór "); t.liczba(StatystykiCiaglosci::ms(c.niedobor_utworu));
+        t.dodaj(" ms · przerwa ");  t.liczba(c.maks_przerwa_producenta_ns / 1000000ULL);
+        t.dodaj(" ms · GUI "); t.liczba((o.suma_ns(Sekcja::OknoRysowanie) + o.suma_ns(Sekcja::OknoPublikacja)) / 1000000ULL);
+        t.dodaj(" ms/s");
+    }
+
+    // Pelna lista licznikow (karta "Diagnostyka"): nazwa i wartosc osobno, bez obcinania. Liczniki ciaglosci sa
+    // zawsze dostepne; czasy sekcji - gdy pomiar (opcja Diagnostyka) jest wlaczony. Czasy sekcji to czas zegarowy
+    // TSC z ostatniego okna ~1 s: obejmuja wywlaszczenie procesu i oczekiwanie w wywolaniach systemowych.
+    static constexpr size_t LICZBA_POMIAROW = 21;
+    void pomiar(size_t i, char* nazwa, size_t cap_n, char* wartosc, size_t cap_w) const {
+        Tekst n(nazwa, cap_n), w(wartosc, cap_w);
+        const StatystykiCiaglosci& c = silnik_.ciaglosc();
+        const OknoPomiaru& o = g_profiler.ostatnie();
+        const bool prof = g_profiler.wlaczony() && o.ns;
+        auto ms1 = [&w](uint64_t ns) { w.liczba(ns / 1000000ULL); w.dodaj(","); w.liczba((ns / 100000ULL) % 10); };
+        auto sekcja = [&](const char* nz, Sekcja sk, bool maks) {
+            n.dodaj(nz);
+            if (!prof) { w.dodaj("—"); return; }
+            if (maks) { ms1(o.maks_ns(sk)); w.dodaj(" ms"); } else { ms1(o.suma_ns(sk)); w.dodaj(" ms/s"); }
+        };
+        switch (i) {
+            case 0: n.dodaj("Niedobór – utwór"); w.liczba(StatystykiCiaglosci::ms(c.niedobor_utworu)); w.dodaj(" ms"); break;
+            case 1: n.dodaj("Niedobór – sesja"); w.liczba(StatystykiCiaglosci::ms(c.niedobor_sesji)); w.dodaj(" ms"); break;
+            case 2: n.dodaj("Epizody niedoboru"); w.liczba(c.epizody_utworu); break;
+            case 3: n.dodaj("Maks. przerwa"); w.liczba(c.maks_przerwa_producenta_ns / 1000000ULL); w.dodaj(" ms"); break;
+            case 4: n.dodaj("Przerwy > 85 ms"); w.liczba(c.przerwy_ponad_kolejke); break;
+            case 5: n.dodaj("Min. kolejka PCM");
+                if (c.min_kolejka == 0xFFFFFFFFu) w.dodaj("—");
+                else { w.liczba(StatystykiCiaglosci::ms(c.min_kolejka)); w.dodaj(" ms"); }
+                break;
+            case 6: n.dodaj("Kolejka PCM teraz"); w.liczba(StatystykiCiaglosci::ms(silnik_.w_kolejce())); w.dodaj(" ms"); break;
+            case 7: sekcja("Dekodowanie", Sekcja::Dekodowanie, false); break;
+            case 8: sekcja("Konwersja", Sekcja::Konwersja, false); break;
+            case 9: sekcja("Korektor", Sekcja::Korektor, false); break;
+            case 10: sekcja("Analiza", Sekcja::Analiza, false); break;
+            case 11: sekcja("BWS 110", Sekcja::Bws110, false); break;
+            case 12: sekcja("Widmo (FFT)", Sekcja::Widmo, false); break;
+            case 13: sekcja("Rysowanie", Sekcja::OknoRysowanie, false); break;
+            case 14: sekcja("Maks. rysowanie", Sekcja::OknoRysowanie, true); break;
+            case 15: sekcja("– tabele", Sekcja::Tabele, false); break;
+            case 16: sekcja("– wizualizacja", Sekcja::Wizualizacja, false); break;
+            case 17: sekcja("Publikacja BWS 57", Sekcja::OknoPublikacja, false); break;
+            case 18: sekcja("Maks. publikacja", Sekcja::OknoPublikacja, true); break;
+            case 19: n.dodaj("Odrysowania");
+                if (prof) { w.liczba(o.odrysowania); w.dodaj(" /s"); } else w.dodaj("—");
+                break;
+            case 20: sekcja("Okładka", Sekcja::Okladka, false); break;
+            default: break;
+        }
     }
     void ustaw_diagnostyke(bool w) {
         konf_.diagnostyka = w;
@@ -310,10 +365,12 @@ public:
         if (do_zapisu_) zapisz_konfiguracje(p_.czas_ns ? p_.czas_ns() : 0);
         // Diagnostyka do odczytu po sesji (np. po tescie natywnym): ostatnie okno i liczniki ciaglosci.
         if (konf_.diagnostyka && p_.zapisz_ustawienie && diag_[0]) {
-            char t[640];
+            char t[1536];
             Tekst x(t, sizeof(t));
-            x.dodaj(diag_); x.nowa_linia();
-            char n[192]; opisz_niedobor(n, sizeof(n)); x.dodaj(n); x.nowa_linia();
+            for (size_t i = 0; i < LICZBA_POMIAROW; ++i) {
+                char n[48], w[32]; pomiar(i, n, sizeof(n), w, sizeof(w));
+                x.dodaj(n); x.dodaj(": "); x.dodaj(w); x.nowa_linia();
+            }
             (void)p_.zapisz_ustawienie("diagnostyka", t);
         }
         silnik_.zwolnij();
@@ -348,6 +405,7 @@ private:
     void ustaw_komunikat(const char* t, RodzajKomunikatu r) {
         if (t != komunikat_) kopiuj_tekst(komunikat_, sizeof(komunikat_), t);
         rodzaj_ = r;
+        komunikat_niedoboru_aktywny_ = false;     // inny komunikat zastapil migawke niedoboru
         ++w_kom_;
     }
     bool graj_pozycje(int poz, bool automatycznie) {
@@ -431,12 +489,14 @@ private:
     bool okladka_do_wczytania_ = false, automatyczne_ = false, zminimalizowane_ = false, do_zapisu_ = false;
     uint32_t proby_pod_rzad_ = 0;
     uint64_t ostatni_zapis_ = 0, ostatni_niedobor_ = 0;
+    bool niedobor_oczekuje_ = false, komunikat_niedoboru_aktywny_ = false;
+    uint32_t pokolenie_komunikatu_ = 0;
     char (*stare_)[MAKS_SCIEZKA] = nullptr;
     uint32_t stare_n_ = 0;
     char stara_biezaca_[MAKS_SCIEZKA]{};
     char komunikat_[192]{};
     char komunikat_niedoboru_[192]{};
-    char diag_[384]{};
+    char diag_[128]{};
     char bufor_kom_[192]{};
     RodzajKomunikatu rodzaj_ = RodzajKomunikatu::Informacja;
     uint32_t w_bib_ = 0, w_kol_ = 0, w_utw_ = 0, w_kom_ = 0, w_ust_ = 0, w_diag_ = 0;

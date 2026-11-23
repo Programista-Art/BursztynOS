@@ -1,4 +1,5 @@
-# Bursztyn OS - Windows PowerShell Launcher
+﻿# Bursztyn OS - Windows PowerShell Launcher
+# Plik w UTF-8 z BOM: Windows PowerShell 5.1 czyta skrypt bez BOM jako ANSI i psulby polskie komunikaty.
 # Profil VirtIO zgodny sprzetowo z dzialajacym launcherem Linux/macOS.
 # Windows zachowuje GTK jako domyslny frontend i lokalny sposob obslugi UEFI.
 #
@@ -6,6 +7,13 @@
 #   .\runwindows.ps1                      menu interaktywne
 #   .\runwindows.ps1 -Mode 2              bez menu: tryb 2 (UEFI + VirtIO Full); kod wyjscia = kod QEMU
 #   .\runwindows.ps1 -PrintArgv -Mode 16  tylko raport JSON z argv QEMU (nic nie tworzy, nic nie uruchamia)
+#   .\runwindows.ps1 -Mode 2 -AudioMode sdl                       dzwiek przez SDL zamiast DirectSound
+#   .\runwindows.ps1 -Mode 2 -AudioMode wav -AudioWavPath "nagrania\próba 1.wav"
+#
+# Dzwiek: gosc zawsze ma Intel HDA (-device intel-hda -device hda-output,audiodev=snd, PCI 00:02.0).
+# Zmienia sie tylko backend hosta: dsound (domyslny, zalecany w Windows 11), sdl, wav (nagrywanie do
+# pliku), none (bez dzwieku). Backend jest sprawdzany w `qemu-system-x86_64 -audiodev help`; jawny
+# wybor nigdy nie jest po cichu zamieniany na inny ani na "none". Opis: docs/qemu-dzwiek-launchery.md.
 #
 # wirtualny_dysk.img jest TRWALYM dyskiem uzytkownika: launcher tworzy pusty plik tylko, gdy nie istnieje,
 # nigdy go nie nadpisuje, nie formatuje ani nie usuwa.
@@ -32,12 +40,19 @@ param(
     [switch]$PointerDiagnostics,
     [string]$FirmwarePath = "",
     [ValidatePattern('^$|^([0-9]|1[0-8])$')]
-    [string]$Mode = ""
+    [string]$Mode = "",
+    # Wyjscie dzwieku hosta (gosc: Intel HDA). Puste = dsound (domyslne, zalecane w Windows 11).
+    [ValidateSet("dsound", "sdl", "wav", "none", "")]
+    [string]$AudioMode = "",
+    # Plik nagrania dla -AudioMode wav (domyslnie logi_qemu\nagrania_audio\bursztyn-hda-DATA.wav).
+    [string]$AudioWavPath = "",
+    # Pozwala nadpisac istniejacy plik nagrania (bez tego: unikalna nazwa albo odmowa).
+    [switch]$AudioOverwrite
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-$LauncherVersion = "2026-11-17-AUDYT-LAUNCHEROW"
+$LauncherVersion = "2026-11-23-DZWIEK"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 # Wzgledna sciezka -Iso odnosi sie do katalogu, z ktorego uruchomiono skrypt.
@@ -56,6 +71,17 @@ $IsoNormal = if ([string]::IsNullOrWhiteSpace($Iso)) {
 }
 
 $IsoCiTest = Join-Path $ScriptDir ".bursztyn_ci_test.iso"
+# Wybor dzwieku (menu "A" moze go zmienic w trybie interaktywnym). Jawny -AudioMode wav bez sciezki = domyslna.
+$script:AudioSelection = if ([string]::IsNullOrWhiteSpace($AudioMode)) {
+    if ([string]::IsNullOrWhiteSpace($AudioWavPath)) { "dsound" } else { "wav" }
+} else { $AudioMode }
+if (-not [string]::IsNullOrWhiteSpace($AudioWavPath) -and $script:AudioSelection -ne "wav") {
+    Write-Host "BLAD: -AudioWavPath dziala tylko z -AudioMode wav." -ForegroundColor Red
+    exit 2
+}
+$script:AudioWavSelection = $AudioWavPath
+$script:Interactive = [string]::IsNullOrWhiteSpace($Mode) -and -not ($PrintArgv -or $Audit)
+$script:LastAudioFailure = ""
 $Disk = Join-Path $ScriptDir "wirtualny_dysk.img"
 $LogDir = Join-Path $ScriptDir "logi_qemu"
 
@@ -379,6 +405,259 @@ function Assert-QemuVirtioDevices {
     }
 }
 
+# ============================================================ DZWIEK HOSTA (backend -audiodev)
+# Gosc ma zawsze ten sam Intel HDA (intel-hda + hda-output,audiodev=snd, przed VirtIO). Wybierany jest tylko
+# backend hosta. Lista backendow pochodzi z wykrytego QEMU (-audiodev help); jawny wybor nie jest po cichu
+# zamieniany na inny backend ani na "none". DirectSound (dsound) jest domyslny i zalecany w Windows 11.
+$script:AudioModes = @("dsound", "sdl", "wav", "none")
+# Tylko komunikaty w formacie QEMU (prefiks backendu albo -audiodev), nie linie portu szeregowego goscia.
+$script:AudioQemuLinePattern = '(?i)^(qemu[^ :]*: )?(audio|dsound|sdl|wav|spice|dbus|jack)[^:]{0,24}:|-audiodev|sdl_openaudio'
+
+function Get-AudioModeLabel {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    switch ($Name) {
+        "dsound" { return "DirectSound" }
+        "sdl"    { return "SDL" }
+        "wav"    { return "Nagrywanie dźwięku do WAV" }
+        "none"   { return "Brak dźwięku" }
+        default  { return $Name }
+    }
+}
+
+function Get-AudioModeDescription {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    switch ($Name) {
+        "dsound" { return "głośniki Windows przez DirectSound (zalecane)" }
+        "sdl"    { return "alternatywne wyjście dźwięku przez SDL" }
+        "wav"    { return "zapis dźwięku gościa do pliku WAV, bez odtwarzania" }
+        "none"   { return "bez dźwięku (diagnostyka); Intel HDA zostaje" }
+        default  { return "" }
+    }
+}
+
+# Parsuje wyjscie `-audiodev help`: linie z sama nazwa [a-z0-9_]; naglowki (z ':') i puste linie pomijane.
+function ConvertFrom-AudiodevHelp {
+    param([string[]]$Lines = @())
+    $names = @()
+    foreach ($line in $Lines) {
+        $t = ([string]$line).Trim()
+        if ($t -match '^[a-z0-9_]+$') { $names += $t }
+    }
+    return ,$names
+}
+
+# Zwraca liste backendow albo $null, gdy QEMU nie podal listy (stara wersja / blad uruchomienia).
+function Get-QemuAudioBackends {
+    param([Parameter(Mandatory = $true)][string]$Qemu)
+    try {
+        $probe = Invoke-NativeCapture -Exe $Qemu -Arguments @("-audiodev", "help")
+    }
+    catch {
+        return $null
+    }
+    if ($probe.ExitCode -ne 0) { return $null }
+    $names = ConvertFrom-AudiodevHelp -Lines $probe.Lines
+    if ($names.Count -eq 0) { return $null }
+    return ,$names
+}
+
+function Get-QemuVersionLine {
+    param([Parameter(Mandatory = $true)][string]$Qemu)
+    try {
+        $v = Invoke-NativeCapture -Exe $Qemu -Arguments @("--version")
+        if ($v.Lines.Count -gt 0) { return $v.Lines[0] }
+    }
+    catch { }
+    return "(nieznana - QEMU nie podal wersji)"
+}
+
+# Sciezka nagrania: domyslnie logi_qemu\nagrania_audio\bursztyn-hda-DATA.wav (unikalna); wzgledna wzgledem
+# katalogu wywolania; katalog = nazwa domyslna w nim. Istniejacy plik: tylko z -AudioOverwrite albo po
+# potwierdzeniu w trybie interaktywnym. Dowiazania (reparse point) sa odrzucane.
+function Resolve-AudioWavPath {
+    param([switch]$ReadOnly)
+    $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+    $requested = $script:AudioWavSelection
+    $useDefaultName = $false
+    if ([string]::IsNullOrWhiteSpace($requested)) {
+        $target = Join-Path $LogDir "nagrania_audio"
+        $useDefaultName = $true
+    }
+    elseif ([System.IO.Path]::IsPathRooted($requested)) {
+        $target = [System.IO.Path]::GetFullPath($requested)
+    }
+    else {
+        $target = [System.IO.Path]::GetFullPath((Join-Path $InvocationDir $requested))
+    }
+    if (-not $useDefaultName -and ((Test-Path -LiteralPath $target -PathType Container) -or $requested.EndsWith("\") -or $requested.EndsWith("/"))) {
+        $useDefaultName = $true
+    }
+    if ($useDefaultName) {
+        $base = Join-Path $target "bursztyn-hda-$stamp"
+        $candidate = "$base.wav"
+        $n = 2
+        while (Test-Path -LiteralPath $candidate) {
+            $candidate = "$base-$n.wav"
+            $n++
+        }
+        $target = $candidate
+    }
+    if (Test-Path -LiteralPath $target) {
+        $item = Get-Item -LiteralPath $target -Force
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "Ścieżka nagrania jest dowiązaniem - odmowa: $target"
+        }
+        if ($item.PSIsContainer) {
+            throw "Ścieżka nagrania istnieje i nie jest plikiem: $target"
+        }
+        if (-not $AudioOverwrite -and -not $ReadOnly) {
+            if ($script:Interactive) {
+                $answer = Read-Host "Plik nagrania istnieje: $target - nadpisać? [t/N]"
+                if ($answer -ne "t" -and $answer -ne "T") {
+                    throw "Anulowano - istniejące nagranie nie zostało nadpisane."
+                }
+            }
+            else {
+                throw "Plik nagrania już istnieje (nie nadpisuję bez -AudioOverwrite): $target"
+            }
+        }
+    }
+    if (-not $ReadOnly) {
+        $dir = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+    return $target
+}
+
+# Konfiguracja dzwieku: { Mode; Arg (jedna wartosc -audiodev); WavPath; HostInfo }. Bez cichego fallbacku.
+function Resolve-AudioConfig {
+    param([Parameter(Mandatory = $true)][string]$Qemu, [switch]$ReadOnly)
+    $mode = $script:AudioSelection
+    if ($script:AudioModes -notcontains $mode) {
+        throw "Nieznany tryb dźwięku: $mode (dsound, sdl, wav, none)."
+    }
+    $hostInfo = "$(Get-AudioModeLabel -Name $mode) - $(Get-AudioModeDescription -Name $mode)"
+    if (-not $ReadOnly) {
+        $backends = Get-QemuAudioBackends -Qemu $Qemu
+        if ($null -eq $backends) {
+            Write-Host "UWAGA: nie udało się odczytać listy backendów QEMU (-audiodev help) - nie można sprawdzić '$mode'." -ForegroundColor Yellow
+            $hostInfo += " (niesprawdzony)"
+        }
+        elseif ($backends -notcontains $mode) {
+            throw ("Błąd uruchomienia dźwięku: ta instalacja QEMU nie obsługuje backendu '$mode' ($(Get-AudioModeLabel -Name $mode)).`n" +
+                   "Dostępne backendy: $($backends -join ', ').`nWybierz inne wyjście dźwięku (menu 'A' albo -AudioMode ...).")
+        }
+        if ($mode -eq "dsound") {
+            try {
+                $devices = @(Get-CimInstance -ClassName Win32_SoundDevice -ErrorAction Stop)
+                if ($devices.Count -eq 0) {
+                    Write-Host "UWAGA: Windows nie zgłasza żadnego urządzenia dźwiękowego - DirectSound może nie mieć wyjścia." -ForegroundColor Yellow
+                }
+            }
+            catch { }
+        }
+    }
+    $wav = ""
+    $arg = "$mode,id=snd"
+    if ($mode -eq "wav") {
+        $wav = Resolve-AudioWavPath -ReadOnly:$ReadOnly
+        $qemuWav = ConvertTo-QemuOptionPath -Path $wav
+        if (-not $qemuWav.StartsWith(".\") -and $qemuWav -match '[^\x20-\x7E]') {
+            Write-Host "UWAGA: ścieżka nagrania poza katalogiem launchera zawiera znaki spoza ASCII; QEMU w Windows może jej nie otworzyć. Bezpieczniej: nagranie w katalogu launchera." -ForegroundColor Yellow
+        }
+        $arg = "wav,id=snd,path=$qemuWav"
+        $hostInfo = "nagrywanie do pliku WAV (bez odtwarzania na głośnikach)"
+    }
+    return [pscustomobject]@{ Mode = $mode; Arg = $arg; WavPath = $wav; HostInfo = $hostInfo }
+}
+
+# Klasyfikacja komunikatow QEMU o dzwieku. Ostrzezenia o nagrywaniu (capture - brak mikrofonu) nie
+# blokuja odtwarzania i nie sa bledem. Wynik: unsupported, device, file, init albo "".
+function Get-AudioFailureKind {
+    param([string[]]$Lines = @())
+    $relevant = @($Lines | Where-Object { $_ -match $script:AudioQemuLinePattern -and $_ -notmatch '(?i)capture' })
+    if ($relevant.Count -eq 0) { return "" }
+    $text = $relevant -join "`n"
+    if ($text -match "(?i)unknown audio driver|audiodev.*(invalid|unknown|not supported)|parameter 'driver'|invalid parameter value.*driver") { return "unsupported" }
+    if ($text -match '(?i)no (available )?audio device|no such device|could not open.*device|DSERR_NODRIVER|no sound driver|DSERR_ALLOCATED') { return "device" }
+    if ($text -match '(?i)wav: |wave file') { return "file" }
+    if ($text -match '(?i)could not init|failed to (create|initiali[sz]e)|sdl_openaudio|init.*fail') { return "init" }
+    return ""
+}
+
+function Write-AudioOutcome {
+    param([int]$ExitCode, [string[]]$Lines = @(), [Parameter(Mandatory = $true)]$Audio)
+    $kind = Get-AudioFailureKind -Lines $Lines
+    $script:LastAudioFailure = $kind
+    $label = Get-AudioModeLabel -Name $Audio.Mode
+    Write-Host ""
+    switch ($kind) {
+        "unsupported" { Write-Host "Błąd uruchomienia dźwięku: backend $label nie jest obsługiwany przez to QEMU." -ForegroundColor Red }
+        "device"      { Write-Host "Błąd uruchomienia dźwięku: brak urządzenia wyjściowego dla $label." -ForegroundColor Red }
+        "file"        { Write-Host "Błąd nagrywania: QEMU nie mógł zapisać pliku WAV." -ForegroundColor Red }
+        "init"        { Write-Host "Błąd uruchomienia dźwięku: inicjalizacja $label nie powiodła się." -ForegroundColor Red }
+    }
+    if ($kind) {
+        Write-Host "Komunikaty QEMU:"
+        $Lines | Where-Object { $_ -match $script:AudioQemuLinePattern } | Select-Object -First 8 | ForEach-Object { Write-Host "  $_" }
+        if ($script:Interactive) {
+            Write-Host "Wybierz 'A' w menu, aby zmienić wyjście dźwięku (np. SDL), i uruchom ponownie." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "Uruchom ponownie z innym wyjściem dźwięku, np. -AudioMode sdl. Launcher nie przełącza go samodzielnie." -ForegroundColor Yellow
+        }
+    }
+    elseif ($ExitCode -ne 0) {
+        Write-Host "QEMU zakończył się kodem $ExitCode bez komunikatów o dźwięku - przyczyna niezwiązana z wyborem dźwięku (zob. wyjście powyżej)."
+    }
+    elseif ($Audio.Mode -eq "dsound" -or $Audio.Mode -eq "sdl") {
+        Write-Host "Dźwięk: brak komunikatów o błędach $label (to nie potwierdza słyszalnego odtwarzania)."
+    }
+    if ($Audio.WavPath) {
+        if (Test-Path -LiteralPath $Audio.WavPath -PathType Leaf) {
+            $size = (Get-Item -LiteralPath $Audio.WavPath).Length
+            Write-Host "Nagranie WAV: $($Audio.WavPath) ($size B; dźwięk wyjścia HDA gościa, nie biblioteka muzyki Bursztyn OS)"
+        }
+        else {
+            Write-Host "Nagranie WAV nie powstało: $($Audio.WavPath)" -ForegroundColor Yellow
+        }
+    }
+}
+
+# Interaktywny wybor wyjscia dzwieku (menu glowne: A).
+function Show-AudioMenu {
+    $backends = $null
+    try { $backends = Get-QemuAudioBackends -Qemu (Find-Qemu) } catch { Write-Host "UWAGA: $($_.Exception.Message)" -ForegroundColor Yellow }
+    Write-Host ""
+    Write-Host "================ Wyjście dźwięku (gość: Intel HDA) ================"
+    for ($i = 0; $i -lt $script:AudioModes.Count; $i++) {
+        $m = $script:AudioModes[$i]
+        $state = if ($null -eq $backends) { "dostępność niesprawdzona" } elseif ($backends -contains $m) { "dostępny" } else { "NIEDOSTĘPNY w tej instalacji QEMU" }
+        Write-Host ("  {0} - {1,-26} {2}" -f ($i + 1), (Get-AudioModeLabel -Name $m), (Get-AudioModeDescription -Name $m))
+        Write-Host "      $state"
+    }
+    Write-Host "  0 - powrót (bez zmian; obecnie: $(Get-AudioModeLabel -Name $script:AudioSelection))"
+    $pick = Read-Host "Wybierz wyjście dźwięku"
+    if ([string]::IsNullOrWhiteSpace($pick) -or $pick -eq "0") { return }
+    $index = 0
+    if (-not [int]::TryParse($pick, [ref]$index) -or $index -lt 1 -or $index -gt $script:AudioModes.Count) {
+        Write-Host "Nieprawidłowy wybór." -ForegroundColor Red
+        return
+    }
+    $m = $script:AudioModes[$index - 1]
+    if ($null -ne $backends -and $backends -notcontains $m) {
+        Write-Host "$(Get-AudioModeLabel -Name $m) jest niedostępny w tej instalacji QEMU (dostępne: $($backends -join ', '))." -ForegroundColor Red
+        return
+    }
+    if ($m -eq "wav") {
+        $script:AudioWavSelection = Read-Host "Ścieżka nagrania (Enter = logi_qemu\nagrania_audio\...)"
+    }
+    $script:AudioSelection = $m
+    Write-Host "Wyjście dźwięku: $(Get-AudioModeLabel -Name $m)" -ForegroundColor Green
+}
+
 function Start-QemuWindowLimiter {
     param(
         [Parameter(Mandatory = $true)][string]$TitleFragment,
@@ -459,6 +738,8 @@ function Start-BursztynQemu {
     if ($VirtIoFull -and -not ($PrintArgv -or $Audit)) {
         Assert-QemuVirtioDevices -Qemu $qemu
     }
+    # Dzwiek przed dyskiem: blad konfiguracji dzwieku nie tworzy dysku i nie uruchamia QEMU.
+    $audio = Resolve-AudioConfig -Qemu $qemu -ReadOnly:($PrintArgv -or $Audit)
     if (-not ($PrintArgv -or $Audit)) { Prepare-Disk }
 
     $hasIso = -not [string]::IsNullOrWhiteSpace($IsoPath)
@@ -485,10 +766,10 @@ function Start-BursztynQemu {
         "-display", $displayArg
     )
 
-    # Linux dodaje HDA przed urzadzeniami VirtIO. Na Windows zachowujemy identyczna
-    # topologie PCI, ale uzywamy backendu audio 'none', aby nie wracal blad DirectSound.
+    # Linux dodaje HDA przed urzadzeniami VirtIO; Windows zachowuje identyczna topologie PCI. Jeden
+    # -audiodev (id=snd) i jedno HDA; backend hosta z Resolve-AudioConfig (domyslnie dsound).
     $argsList += @(
-        "-audiodev", "none,id=snd",
+        "-audiodev", $audio.Arg,
         "-device", "intel-hda",
         "-device", "hda-output,audiodev=snd"
     )
@@ -606,10 +887,14 @@ function Start-BursztynQemu {
     $report = [ordered]@{argv=@($qemu)+$argsList;host_os=[Environment]::OSVersion.ToString();qemu_binary=$qemu;topology=$topology}
     $report.pointer_selection = $PointerDevice
     $report.display_backend = $effectiveDisplay
+    $report.audio_mode = $audio.Mode
+    $report.audiodev = $audio.Arg
+    if ($audio.WavPath) { $report.audio_wav_path = $audio.WavPath }
     if ($Audit) {
         $report.version = (Invoke-NativeCapture -Exe $qemu -Arguments @("--version")).Lines
         $report.machines = (Invoke-NativeCapture -Exe $qemu -Arguments @("-machine", "help")).Lines
         $report.virtio_mouse_properties = (Invoke-NativeCapture -Exe $qemu -Arguments @("-device", "virtio-mouse-pci,help")).Lines
+        $report.audio_backends = Get-QemuAudioBackends -Qemu $qemu
     }
     if ($PrintArgv -or $Audit) { $report | ConvertTo-Json -Depth 8; return }
     Write-Host "PCI topology: $($topology | ConvertTo-Json -Compress)"
@@ -639,7 +924,11 @@ function Start-BursztynQemu {
         Write-Host "GPU:          std VGA / Bochs"
         Write-Host "Input:        xHCI + USB HID"
     }
-    Write-Host "Audio guest:  Intel HDA obecne, host audio = none"
+    Write-Host "Wyjście dźwięku: $(Get-AudioModeLabel -Name $audio.Mode) (-audiodev $($audio.Arg))"
+    Write-Host "Wersja QEMU:     $(Get-QemuVersionLine -Qemu $qemu)"
+    Write-Host "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    Write-Host "Dźwięk hosta:    $($audio.HostInfo)"
+    if ($audio.WavPath) { Write-Host "Ścieżka nagrania: $($audio.WavPath)" }
     Write-Host "ISO:          $(if ($hasIso) { $IsoPath } else { '(brak - start z dysku)' })"
     Write-Host "Dysk:         $Disk (trwaly, zapis wlaczony)"
     Write-Host "Boot:         $(if ($hasIso) { 'ISO najpierw' } else { 'dysk' })"
@@ -661,6 +950,9 @@ function Start-BursztynQemu {
     $previousOutputEncoding = [Console]::OutputEncoding
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $exitCode = 0
+    # Kopia komunikatow QEMU o dzwieku (stdout+stderr nadal wypisywane w calosci) do klasyfikacji bledu.
+    $audioLines = New-Object System.Collections.Generic.List[string]
+    $audioPattern = $script:AudioQemuLinePattern
     try {
         $ErrorActionPreference = "Continue"
         try { [Console]::OutputEncoding = $utf8 } catch { }
@@ -681,6 +973,7 @@ function Start-BursztynQemu {
                     Write-Host $line
                     $writer.WriteLine($line)
                     $writer.Flush()
+                    if ($line -match $audioPattern -and $audioLines.Count -lt 40) { $audioLines.Add($line) }
                 }
                 $exitCode = $LASTEXITCODE
             }
@@ -689,7 +982,11 @@ function Start-BursztynQemu {
             }
         }
         else {
-            & $qemu @argsList
+            & $qemu @argsList 2>&1 | ForEach-Object {
+                $line = $_.ToString()
+                Write-Host $line
+                if ($line -match $audioPattern -and $audioLines.Count -lt 40) { $audioLines.Add($line) }
+            }
             $exitCode = $LASTEXITCODE
         }
     }
@@ -703,6 +1000,7 @@ function Start-BursztynQemu {
     }
 
     $script:LastQemuExitCode = $exitCode
+    Write-AudioOutcome -ExitCode $exitCode -Lines $audioLines.ToArray() -Audio $audio
     if ($exitCode -ne 0) {
         Write-Host ""
         Write-Host "QEMU zakonczyl sie kodem $exitCode." -ForegroundColor Red
@@ -749,6 +1047,8 @@ function Invoke-LauncherMode {
         "16" { Start-BursztynQemu -ModeName "BIOS Legacy" -Firmware "BIOS" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
         "17" { Start-BursztynQemu -ModeName "UEFI Legacy" -Firmware "UEFI" -IsoPath $IsoNormal -VirtIoFull $false -SaveLog $false }
         "18" { Start-BursztynQemu -ModeName "Zainstalowany UEFI Legacy" -Firmware "UEFI" -IsoPath "" -VirtIoFull $false -SaveLog $false }
+
+        "A" { Show-AudioMenu }   # switch PowerShell nie rozroznia wielkosci liter: "a" tez trafia tutaj
 
         "0" { exit 0 }
 
@@ -820,11 +1120,14 @@ while ($true) {
  17  - UEFI: AHCI + E1000 + std VGA + USB HID
  18  - Zainstalowany UEFI Legacy, bez ISO
 
+ WYJŚCIE DŹWIĘKU (gość: Intel HDA)
+  A  - zmień (obecnie: $(Get-AudioModeLabel -Name $script:AudioSelection))
+
   0  - Wyjscie
 
 "@
 
-    $choice = Read-Host "Wybierz tryb [0-18]"
+    $choice = Read-Host "Wybierz tryb [0-18, A]"
 
     try {
         Invoke-LauncherMode -Choice $choice

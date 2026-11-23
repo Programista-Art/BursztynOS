@@ -28,7 +28,10 @@
  *    nagranej w samym pliku. Statystyki sa odczytywane okresowo ORAZ tuz przed kazdym CLOSE/FINISH, wiec koncowka
  *    strumienia nie ginie, a zamkniety strumien nie jest liczony podwojnie (jadro liczy od OPEN, delta od ostatniego
  *    odczytu tego samego uchwytu),
- *  - niedobor_utworu zerowany przy wczytaniu utworu; niedobor_sesji - od uruchomienia Grajka,
+ *  - niedobor_utworu jest monotoniczny w obrebie jednego utworu i zerowany WYLACZNIE na granicy utworu:
+ *    wczytaj() (wybor utworu, nastepny/poprzedni, powtorzenie utworu, przejscie automatyczne). Przewijanie,
+ *    pauza/wznowienie i ponowne otwarcie strumienia go nie zeruja. Kazda granica zwieksza pokolenie_utworu(), po
+ *    ktorym interfejs rozpoznaje, ze komunikat dotyczy poprzedniego utworu; niedobor_sesji - od uruchomienia,
  *  - przerwa producenta: najdluzszy odstep miedzy kolejnymi uzupelnieniami kolejki w stanie Odtwarzanie (zegar
  *    platformy). Odstep dluzszy niz pojemnosc kolejki (4096 ramek = 85,3 ms) musi skonczyc sie niedoborem.
  */
@@ -272,6 +275,8 @@ public:
     // Niedobor strumienia Grajka od uruchomienia (ramki 48 kHz); szczegoly: ciaglosc().
     uint64_t niedobory_ramek() const { return ciag_.niedobor_sesji; }
     const StatystykiCiaglosci& ciaglosc() const { return ciag_; }
+    // Numer granicy utworu (zwiekszany przy kazdym wczytaj()): rozpoznanie, do ktorego utworu odnosi sie komunikat.
+    uint32_t pokolenie_utworu() const { return pokolenie_utworu_; }
     uint64_t zajete_odpowiedzi() const { return zajete_; }
     uint64_t czesciowe_zapisy() const { return czesciowe_; }
     uint64_t wszystkie_zapisane() const { return calkowicie_zapisane_; }
@@ -353,6 +358,7 @@ private:
         const uint64_t sesja = ciag_.niedobor_sesji;
         ciag_ = StatystykiCiaglosci{};
         ciag_.niedobor_sesji = sesja;
+        ++pokolenie_utworu_;
     }
     void zmierz_przerwe_producenta() {
         if (!zegar_) return;
@@ -511,6 +517,7 @@ private:
     uint32_t w_kolejce_ = 0;
     uint64_t calkowicie_zapisane_ = 0, ostatnie_starved_ = 0, zajete_ = 0, czesciowe_ = 0;
     StatystykiCiaglosci ciag_{};
+    uint32_t pokolenie_utworu_ = 0;
     uint64_t (*zegar_)() = nullptr;
     uint64_t ostatnie_uzupelnienie_ns_ = 0;
     uint32_t licznik_statystyk_ = 0, proby_otwarcia_ = 0;

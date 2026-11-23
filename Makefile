@@ -2502,6 +2502,11 @@ test-launcher-parity:
 test-unix-launcher:
 	$(PYTHON) testy/test_unix_launcher.py
 
+# Wybor dzwieku w launcherach (Linux: atrapa QEMU/pactl/pw-cli; Windows: statycznie lub pwsh -PrintArgv).
+.PHONY: test-launcher-audio
+test-launcher-audio:
+	$(PYTHON) testy/test_launcher_audio.py
+
 .PHONY: test-virtio-input-qemu-parity-host
 test-virtio-input-qemu-parity-host:
 	$(PYTHON) testy/test_virtio_input_qemu_parity.py
@@ -2583,7 +2588,7 @@ ikona_app_grajek_blob.o: ikonki/app_grajek.png
 # Testy hosta Grajka (ASan/UBSan): logika (WAV, ID3, MP3 z syntetycznych ramek, konwersje, korektor, analiza, silnik na
 # mikserze jadra z symulacja BWS 110, biblioteka, kolejka/M3U8, konfiguracja, okladka) oraz okno BursztynUI.
 GRAJEK_TEST_ZRODLA := programy/grajek/dekoder_mp3.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp
-.PHONY: test-grajek-host test-grajek-ui-host test-grajek
+.PHONY: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-grajek
 test-grajek-host:
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek
@@ -2600,7 +2605,13 @@ test-muzyka-pak-host:
 	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_muzyka_pak_host.cpp -lcrypto -o .bsf-test/muzyka-pak
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/muzyka-pak
 
-test-grajek: test-grajek-host test-grajek-ui-host test-muzyka-pak-host
+# Uklad okna Grajka z prawdziwymi czcionkami TTF (BSF, DejaVu z czcionki/ttf) - metryki natywnego BursztynUI.
+test-grajek-ui-ttf-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_grajek_ui_ttf_host.cpp $(GRAJEK_TEST_ZRODLA) bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -lz -Wl,--gc-sections -o .bsf-test/grajek-ui-ttf
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek-ui-ttf
+
+test-grajek: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host
 
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).

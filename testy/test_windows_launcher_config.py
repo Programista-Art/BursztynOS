@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class WindowsLauncherConfig(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.launcher=(ROOT/'runwindows.ps1').read_text()
+        cls.launcher=(ROOT/'runwindows.ps1').read_text(encoding='utf-8-sig')
         cls.makefile=(ROOT/'Makefile').read_text()
     def test_windows_default_and_empty_override_use_gtk(self):
         self.assertRegex(self.launcher,r'\[string\]\$DisplayBackend\s*=\s*"gtk"')
@@ -60,7 +60,9 @@ class WindowsLauncherConfig(unittest.TestCase):
         positions=[code.index(s) for s in ordered];self.assertEqual(positions,sorted(positions))
         self.assertIn('$argsList = @("-bios", (ConvertTo-QemuPath -Path $ovmf)) + $argsList',code)
         self.assertEqual(code.count('"-drive", "id=disk,file=$diskOpt,format=raw,if=none"'),2)
-        self.assertIn('"-audiodev", "none,id=snd"',code)
+        # Backend dzwieku z wyboru (-AudioMode / menu A, domyslnie dsound); HDA i jego slot PCI bez zmian.
+        self.assertIn('"-audiodev", $audio.Arg,',code)
+        self.assertNotIn('"-audiodev", "none,id=snd"',code)
         self.assertIn('-audiodev alsa,id=snd',self.makefile)
         self.assertIn('"-boot", "order=d,menu=on"',code)
     def test_linux_canonical_and_print_only_policy(self):

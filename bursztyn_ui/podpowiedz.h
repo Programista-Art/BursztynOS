@@ -42,6 +42,16 @@ public:
     int maksymalna_szerokosc() const { return max_szerokosc_; }
 
     Rozmiar obliczony_rozmiar() const { return obliczony_rozmiar_; }
+    // Wynik zawijania (tylko odczyt; testy i diagnostyka ukladu).
+    size_t liczba_linii() const { return liczba_linii_; }
+    void linia(size_t i, char* cel, size_t cap) const {
+        if (!cel || !cap) return;
+        cel[0] = '\0';
+        if (i >= liczba_linii_) return;
+        size_t n = linie_[i].dlugosc < cap - 1 ? linie_[i].dlugosc : cap - 1;
+        for (size_t j = 0; j < n; ++j) cel[j] = tekst_[linie_[i].start + j];
+        cel[n] = '\0';
+    }
 
     void rysuj_siebie(KontekstRysowania& ctx) override {
         Prostokat b(0, 0, obszar_ekranu_.szerokosc, obszar_ekranu_.wysokosc);
@@ -49,27 +59,23 @@ public:
         ctx.rysuj_ramke(b, styl_.normalny.ramka, 1);
 
         SkalaUI s = skala_dpi_;
+        const int lh = wysokosc_linii(s);
         int y = 4 * s;
 
         // Tytuł jeśli obecny
         if (tytul_[0] != '\0') {
             ctx.rysuj_tekst(Punkt(6 * s, y), tytul_, motyw_kolor(MOTYW_KOLOR_AKCENT), s);
-            y += 18 * s;
-            ctx.rysuj_linie_pozioma(4 * s, y - 2 * s, b.szerokosc - 8 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
+            y += lh + 2 * s;
+            ctx.rysuj_linie_pozioma(4 * s, y - 1 * s, b.szerokosc - 8 * s, motyw_kolor(MOTYW_KOLOR_RAMKA));
+            y += 4 * s;
         }
 
-        // Linie tekstu
+        // Linie tekstu (cala linia: zawijanie mierzy ten sam tekst, ktory jest rysowany)
         for (size_t i = 0; i < liczba_linii_; ++i) {
-            char linia_buf[64];
-            size_t len = linie_[i].dlugosc;
-            if (len >= sizeof(linia_buf)) len = sizeof(linia_buf) - 1;
-            for (size_t j = 0; j < len; ++j) {
-                linia_buf[j] = tekst_[linie_[i].start + j];
-            }
-            linia_buf[len] = '\0';
-
+            char linia_buf[MAKS_TEKSTU];
+            kopiuj_zakres(linia_buf, linie_[i]);
             ctx.rysuj_tekst(Punkt(6 * s, y), linia_buf, motyw_kolor(MOTYW_KOLOR_TEKST), s);
-            y += 16 * s;
+            y += lh;
         }
     }
 
@@ -78,6 +84,35 @@ private:
         size_t start{0};
         size_t dlugosc{0};
     };
+
+    // Wysokosc linii i szerokosc z metryk biezacej czcionki (TTF przez BSF albo bitmapowa) - nie ze stalych
+    // 8 px na bajt i 16 px na linie: przy TTF i polskich znakach ramka byla wezsza i nizsza niz tekst (przyciecie).
+    static int wysokosc_linii(SkalaUI s) { return CzcionkaUI::pobierz_wysokosc(s) + 2 * s; }
+    void kopiuj_zakres(char* cel, const ZakresLinii& z) const {
+        size_t len = z.dlugosc < MAKS_TEKSTU - 1 ? z.dlugosc : MAKS_TEKSTU - 1;
+        for (size_t j = 0; j < len; ++j) cel[j] = tekst_[z.start + j];
+        cel[len] = '\0';
+    }
+    int szerokosc_zakresu(size_t start, size_t dlugosc, SkalaUI s) const {
+        char b[MAKS_TEKSTU];
+        kopiuj_zakres(b, ZakresLinii{start, dlugosc});
+        return CzcionkaUI::zmierz_tekst(b, s);
+    }
+    // Dlugosc (bajty) najdluzszego prefiksu od start, ktory miesci sie w limicie; granica znaku UTF-8, min. 1 znak.
+    size_t prefiks_mieszczacy(size_t start, size_t koniec, int limit, SkalaUI s) const {
+        size_t lo = 0, hi = koniec - start;
+        while (lo < hi) {
+            size_t mid = (lo + hi + 1) / 2;
+            while (mid > lo && (uint8_t(tekst_[start + mid]) & 0xC0) == 0x80) --mid;
+            if (mid == lo) break;
+            if (szerokosc_zakresu(start, mid, s) <= limit) lo = mid; else hi = mid - 1;
+        }
+        if (lo == 0) {   // nawet jeden znak sie nie miesci: caly pierwszy znak (moze zostac przyciety)
+            lo = 1;
+            while (start + lo < koniec && (uint8_t(tekst_[start + lo]) & 0xC0) == 0x80) ++lo;
+        }
+        return lo;
+    }
 
     void przelicz_rozmiar() {
         SkalaUI s = skala_dpi_;
@@ -88,38 +123,41 @@ private:
             max_w = CzcionkaUI::zmierz_tekst(tytul_, s);
         }
 
-        // Zawijanie tekstu
-        size_t p = 0;
         size_t len = 0;
         while (tekst_[len] != '\0') ++len;
+        const int limit_px = max_szerokosc_ * s - 12 * s;
 
-        int limit_px = max_szerokosc_ * s - 12 * s;
-
+        // Zawijanie po slowach (pomiar calej kandydackiej linii, O(slowa) pomiarow na linie); slowo dluzsze niz
+        // limit jest dzielone na granicy znaku.
+        size_t p = 0;
         while (p < len && liczba_linii_ < MAKS_LINII) {
-            size_t line_start = p;
-            size_t last_space = p;
-            int cur_w = 0;
-
-            while (p < len && tekst_[p] != '\n') {
-                if (tekst_[p] == ' ') last_space = p;
-                cur_w += 8 * s;
-                if (cur_w > limit_px && last_space > line_start) {
-                    p = last_space;
-                    break;
-                }
-                ++p;
+            while (p < len && tekst_[p] == ' ') ++p;
+            if (p >= len) break;
+            size_t koniec_akapitu = p;
+            while (koniec_akapitu < len && tekst_[koniec_akapitu] != '\n') ++koniec_akapitu;
+            size_t dl = 0;                      // zaakceptowana dlugosc linii
+            size_t q = p;
+            while (q < koniec_akapitu) {
+                size_t k = q;
+                while (k < koniec_akapitu && tekst_[k] != ' ') ++k;   // koniec slowa
+                if (szerokosc_zakresu(p, k - p, s) <= limit_px) { dl = k - p; q = k; while (q < koniec_akapitu && tekst_[q] == ' ') ++q; continue; }
+                if (dl == 0) dl = prefiks_mieszczacy(p, k, limit_px, s);
+                break;
             }
-
-            linie_[liczba_linii_].start = line_start;
-            linie_[liczba_linii_].dlugosc = p - line_start;
-            int lw = static_cast<int>(linie_[liczba_linii_].dlugosc) * 8 * s;
+            if (dl == 0) dl = koniec_akapitu - p;
+            while (dl > 0 && tekst_[p + dl - 1] == ' ') --dl;
+            linie_[liczba_linii_].start = p;
+            linie_[liczba_linii_].dlugosc = dl;
+            const int lw = szerokosc_zakresu(p, dl, s);
             if (lw > max_w) max_w = lw;
             ++liczba_linii_;
-
-            if (p < len && (tekst_[p] == ' ' || tekst_[p] == '\n')) ++p;
+            p += dl;
+            while (p < len && tekst_[p] == ' ') ++p;
+            if (p < len && tekst_[p] == '\n') ++p;
         }
 
-        int h = (tytul_[0] != '\0' ? 22 * s : 0) + static_cast<int>(liczba_linii_) * 16 * s + 8 * s;
+        const int lh = wysokosc_linii(s);
+        int h = (tytul_[0] != '\0' ? lh + 6 * s : 0) + static_cast<int>(liczba_linii_) * lh + 8 * s;
         int w = max_w + 12 * s;
         if (w < 40 * s) w = 40 * s;
         obliczony_rozmiar_ = Rozmiar(w, h);

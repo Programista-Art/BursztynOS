@@ -43,6 +43,8 @@
     "virtio-keyboard-pci",
     "-device",
     "virtio-mouse-pci",
+    "-device",
+    "virtio-tablet-pci",
     "-boot",
     "order=d,menu=on",
     "-cdrom",
@@ -67,7 +69,7 @@
     "-display",
     "gtk",
     "-audiodev",
-    "none,id=snd",
+    "dsound,id=snd",
     "-device",
     "intel-hda",
     "-device",
@@ -136,6 +138,8 @@
     "virtio-keyboard-pci",
     "-device",
     "virtio-mouse-pci",
+    "-device",
+    "virtio-tablet-pci",
     "-boot",
     "order=d,menu=on",
     "-cdrom",
@@ -150,7 +154,7 @@
     "windows": {
       "-serial": "stdio",
       "-display": "gtk",
-      "-audiodev": "none,id=snd",
+      "-audiodev": "dsound,id=snd",
       "-name": "Bursztyn OS - VirtIO UEFI (ISO)"
     }
   }
