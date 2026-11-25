@@ -1,6 +1,7 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
 #include "katalogi_uzytkownika.h"
 #include "bursztyn_gui.h"
+#include "skojarzenia_plikow.h"
 #include "plik_popup_ui.h"
 #include "desktop_entries.h"
 #include "okno_geometria.h"
@@ -46,7 +47,7 @@ constexpr uint32_t LIST_CAP = 64U * 1024U;
 constexpr uint32_t MANIFEST_MAX = 16U * 1024U;
 constexpr int MAX_ENTRIES = 8192;
 constexpr int HISTORY_MAX = 32;
-constexpr int QUICK_MAX = 10;
+constexpr int QUICK_MAX = 12;   // 11 wpisow standardowych (z Obrazami i Muzyka) + zapas
 
 /*
  * Jeden cel zawiera pelna, 512-bajtowa sciezke. Cala tablica celow nie moze
@@ -397,7 +398,7 @@ uint64_t list_hash(const char* data, size_t length) {
     return hash ^ static_cast<uint64_t>(length);
 }
 
-enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE, LAUNCHER };
+enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE, LAUNCHER, IMAGE };
 enum class SortMode : uint8_t { AZ, ZA, TYPE, DATE };
 enum class Change : uint8_t { ERROR, UNCHANGED, DETAILS, CHANGED };
 enum class Activation : uint8_t { STATUS, NAVIGATION };
@@ -472,6 +473,7 @@ const char* entry_type_name(EntryType type) {
         case EntryType::CEBULA: return "Paczka Cebula";
         case EntryType::TXT: return "Dokument tekstowy";
         case EntryType::BMP: return "Obraz BMP";
+        case EntryType::IMAGE: return "Obraz";
         default: return "Plik";
     }
 }
@@ -968,6 +970,10 @@ private:
         add_quick("Gry", "/gry", false, true);
         // Ten sam katalog Dokumentow co w dialogach plikow (jadro zapewnia go przy starcie).
         add_quick("Dokumenty", KatalogiUzytkownika::Dokumenty, false, true);
+        // Trwale katalogi danych (KATALOGI_SYSTEMOWE: tworzy je jadro, Bursztynowy Importer Plikow tam zapisuje).
+        // Skrot nie tworzy katalogu - pokazywany tylko, gdy katalog istnieje (jak pozostale wpisy).
+        add_quick("Obrazy", "/dane/zdjecia", false, true);
+        add_quick("Muzyka", "/dane/muzyka", false, true);
         if (directory_exists("/kosz"))
             add_quick("Kosz", "/kosz", false, false);
         else
@@ -1039,6 +1045,8 @@ private:
             else if (ends_with(item.name, ".bur")) item.type = EntryType::BUR;
             else if (ends_with(item.name, ".txt")) item.type = EntryType::TXT;
             else if (ends_with_ci(item.name, ".bmp")) item.type = EntryType::BMP;
+            // PNG, JPEG, BTP: obraz (tylko opis i kolor) - lista nigdy nie filtruje plikow po rozszerzeniu
+            else if (SkojarzeniaPlikow::obraz(item.name)) item.type = EntryType::IMAGE;
             else item.type = EntryType::FILE;
             char full[PATH_CAP] = {};
             BwsMetadanePliku meta{};
@@ -1072,6 +1080,7 @@ private:
             case EntryType::BUR: return 2;
             case EntryType::TXT: return 3;
             case EntryType::BMP: return 3;
+            case EntryType::IMAGE: return 3;
             default: return 4;
         }
     }
@@ -2119,6 +2128,7 @@ public:
                 y += 23;
                 pinned_header = true;
             }
+            if (y + ROW_H > value.left.y + value.left.h) break;     // jak draw_left_panel: wiersz poza panelem
             const Rect row{value.left.x + 2, y, value.left.w > 4 ? value.left.w - 4 : 0, ROW_H};
             if (hit(mx, my, row)) return i;
             y += ROW_H;
@@ -2551,7 +2561,7 @@ private:
         if (item.type == EntryType::BUR || item.type==EntryType::LAUNCHER) return COLOR_BUR;
         if (item.type == EntryType::CEBULA) return COLOR_CEBULA;
         if (item.type == EntryType::TXT) return COLOR_TXT;
-        if (item.type == EntryType::BMP) return COLOR_BMP;
+        if (item.type == EntryType::BMP || item.type == EntryType::IMAGE) return COLOR_BMP;
         return COLOR_FILE_COLOR;
     }
 

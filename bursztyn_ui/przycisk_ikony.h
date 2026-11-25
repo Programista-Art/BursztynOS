@@ -9,17 +9,24 @@
  * zachowane (dopasowanie do kwadratu, przezroczyste marginesy).
  *
  * PrzyciskIkony (Przycisk): ta sama obsluga myszy, klawiatury (Spacja/Enter), fokusu, polecen i podpowiedzi.
- *  - ikona lezy na "kaflu" w kolorze jasnej powierzchni motywu: grafiki moga byc ciemne (grafitowe) i bez kafla
- *    bylyby niewidoczne na ciemnych przyciskach; kafel nie zmienia samej grafiki,
- *  - stany: normalny, najechany (jasniejszy kafel + obwodka akcentu), wcisniety (ciemniejszy kafel), wylaczony
- *    (przygaszony kafel, ikona z alfa 40 %), fokus klawiatury (pierscien akcentu), zaznaczony/przelaczony
- *    (np. wyciszenie: kafel z odcieniem akcentu + pierscien),
- *  - Rodzaj::Glowny: wiekszy, okragly kafel ze stalym pierscieniem akcentu (np. Odtworz/Pauza),
+ *  - ikona (prosta alfa) lezy BEZPOSREDNIO na tle motywu: w stanie normalnym przycisk nie rysuje zadnego tla ani
+ *    obwodki, wiec przezroczyste piksele pokazuja tlo okna, a wygladzone krawedzie mieszaja sie z nim,
+ *  - stany (kolory motywu, ciemny i jasny; styl_stanu): co najwyzej JEDNA ramka o grubosci 1 DIP, zawsze na
+ *    obwodzie kafla (wewnatrz przycisku, bez wychodzenia na sasiadow) i co najwyzej jedna powierzchnia:
+ *      najechany    - bardzo subtelna powierzchnia (~8 % w strone koloru tekstu), bez ramki,
+ *      wcisniety    - nieco mocniejsza (~16 %) + ikona 1 px nizej, bez ramki,
+ *      zaznaczony   - (przelacznik, np. wyciszenie) miekki odcien akcentu (~19 %) + stonowana ramka akcentu,
+ *      fokus        - ramka w pelnym kolorze akcentu (wyraznie widoczna, ale 1 DIP),
+ *      fokus + zazn.- jedna ramka w pelnym akcencie na odcieniu zaznaczenia (bez podwojnych pierscieni),
+ *      wylaczony    - bez tla i ramki, ikona z alfa 40 %,
+ *  - Rodzaj::Glowny (Odtworz/Pauza): wiekszy, okragly, ze stala cienka (1 DIP) stonowana ramka akcentu; fokus
+ *    zmienia tylko jej kolor na pelny akcent. Stan odtwarzania pokazuje ikona (Odtworz/Pauza), nie ramka,
  *  - bez ikony (brak lub uszkodzony plik) przycisk jest zwyklym przyciskiem tekstowym z tym samym tekstem - akcja
  *    pozostaje dostepna i opisana; tekst jest tez nazwa dostepnosci, a podpowiedz (ustaw_podpowiedz) opisuje akcje.
  */
 #include "przycisk.h"
 #include "../obrazy/dekoder_obrazu.h"
+#include "../obrazy/skalowanie.h"
 
 namespace BursztynUI {
 
@@ -97,34 +104,13 @@ private:
         } else blad_ = BladObrazu::Pamiec;
         zw(o.piksele);
     }
-    // Srednia obszarowa (premnozona alfa) do kwadratu bok x bok z zachowaniem proporcji. Powiekszanie (bok >
-    // zrodlo) sprowadza sie do najblizszego sasiada - ikony sa przygotowane jako 128 x 128, wiec zwykle maleja.
+    // Wspolne skalowanie ikon z alfa (obrazy/skalowanie.h): srednia obszarowa na premnozonej alfie przy
+    // pomniejszaniu, proporcje zachowane, przezroczyste marginesy; kopia 1:1 przy tym samym rozmiarze.
     void skaluj(uint32_t* dst, int bok) const {
-        for (int i = 0; i < bok * bok; ++i) dst[i] = 0;
-        int dw = bok, dh = bok;
-        if (zw_ >= zh_) dh = zh_ * bok / zw_; else dw = zw_ * bok / zh_;
-        if (dw < 1) dw = 1;
-        if (dh < 1) dh = 1;
-        const int ox = (bok - dw) / 2, oy = (bok - dh) / 2;
-        for (int y = 0; y < dh; ++y) {
-            const int y0 = y * zh_ / dh; int y1 = (y + 1) * zh_ / dh; if (y1 <= y0) y1 = y0 + 1;
-            for (int x = 0; x < dw; ++x) {
-                const int x0 = x * zw_ / dw; int x1 = (x + 1) * zw_ / dw; if (x1 <= x0) x1 = x0 + 1;
-                uint32_t a = 0, r = 0, g = 0, b = 0, k = 0;
-                for (int yy = y0; yy < y1 && yy < zh_; ++yy)
-                    for (int xx = x0; xx < x1 && xx < zw_; ++xx) {
-                        const uint32_t c = zrodlo_[size_t(yy) * size_t(zw_) + size_t(xx)];
-                        const uint32_t al = c >> 24;
-                        a += al; r += ((c >> 16) & 0xFF) * al; g += ((c >> 8) & 0xFF) * al; b += (c & 0xFF) * al; ++k;
-                    }
-                uint32_t out = 0;
-                if (a && k) {
-                    const uint32_t aa = (a + k / 2) / k;
-                    out = (aa << 24) | (((r + a / 2) / a) << 16) | (((g + a / 2) / a) << 8) | ((b + a / 2) / a);
-                }
-                dst[size_t(oy + y) * size_t(bok) + size_t(ox + x)] = out;
-            }
-        }
+        const size_t n = size_t(bok) * size_t(bok);
+        if (!skaluj_ikone_alfa(zrodlo_, uint32_t(zw_), uint32_t(zh_), size_t(zw_) * size_t(zh_) * 4, dst, uint32_t(bok),
+                               uint32_t(bok), uint32_t(bok), n * 4))
+            for (size_t i = 0; i < n; ++i) dst[i] = 0;
     }
     uint32_t* zrodlo_ = nullptr;
     int zw_ = 0, zh_ = 0;
@@ -184,26 +170,10 @@ public:
         const Prostokat k = obszar_kafla();
         const bool glowny = rodzaj_ == RodzajPrzyciskuIkony::Glowny;
         const int promien = glowny ? k.szerokosc / 2 : 7 * s;
-        const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
-        const uint32_t tekst = motyw_kolor(MOTYW_KOLOR_TEKST), panel = motyw_kolor(MOTYW_KOLOR_PANEL), ramka = motyw_kolor(MOTYW_KOLOR_RAMKA);
-        const uint32_t jasny = jasnosc(tekst) > jasnosc(panel) ? tekst : panel;   // jasna powierzchnia w kazdym motywie
-        uint32_t kafel = mieszaj(jasny, ramka, 30);
-        if (!czy_wlaczona_) kafel = mieszaj(jasny, panel, 140);
-        else if (czy_wcisnieta_) kafel = mieszaj(jasny, ramka, 80);
-        else if (czy_najechana_) kafel = jasny;
-        if (zaznaczony_ && czy_wlaczona_) kafel = mieszaj(kafel, akcent, 70);
-        // pierscien: fokus (gruby), zaznaczenie / przycisk glowny / najechanie (cienki)
-        if (czy_ma_fokus_ && czy_wlaczona_) {
-            const int g = 2 * s;
-            ctx.rysuj_zaokraglona_ramke(Prostokat(k.x - 2 * g, k.y - 2 * g, k.szerokosc + 4 * g, k.wysokosc + 4 * g), akcent,
-                                        glowny ? (k.szerokosc + 4 * g) / 2 : promien + 2 * g, g);
-        }
-        ctx.rysuj_zaokraglony_prostokat(k, kafel, promien);
-        if (czy_wlaczona_ && (zaznaczony_ || glowny || czy_najechana_))
-            ctx.rysuj_zaokraglona_ramke(k, akcent, promien, (zaznaczony_ || glowny) ? 2 * s : 1 * s);
-        else
-            ctx.rysuj_zaokraglona_ramke(k, ramka, promien, 1);
-        // ikona: proste ARGB nad kaflem; wylaczony przycisk - alfa 40 %
+        const StylStanuIkony st = styl_stanu();
+        if (st.tlo) ctx.rysuj_zaokraglony_prostokat(k, st.kolor_tla, promien);
+        if (st.ramka) ctx.rysuj_zaokraglona_ramke(k, st.kolor_ramki, promien, st.grubosc);
+        // ikona: proste ARGB nad tlem okna (albo powierzchnia stanu); wylaczony przycisk - alfa 40 %
         const int ix = k.x + (k.szerokosc - bok) / 2, iy = k.y + (k.wysokosc - bok) / 2 + (czy_wcisnieta_ ? 1 * s : 0);
         const Punkt off = ctx.pobierz_przesuniecie();
         uint32_t wiersz[ObrazIkony::MAKS_BOK];
@@ -218,9 +188,25 @@ public:
         }
     }
 
+    // Wyglad stanu (uklad i testy): jedna powierzchnia i jedna ramka 1 DIP na obwodzie kafla.
+    struct StylStanuIkony { bool tlo; uint32_t kolor_tla; bool ramka; uint32_t kolor_ramki; int grubosc; };
+    StylStanuIkony styl_stanu() const {
+        const uint32_t akcent = motyw_kolor(MOTYW_KOLOR_AKCENT);
+        const uint32_t tekst = motyw_kolor(MOTYW_KOLOR_TEKST), panel = motyw_kolor(MOTYW_KOLOR_PANEL);
+        StylStanuIkony st{false, panel, false, akcent, 1 * skala_dpi_};
+        if (!czy_wlaczona_) return st;                            // wylaczony: tylko przygaszona ikona
+        const bool glowny = rodzaj_ == RodzajPrzyciskuIkony::Glowny;
+        if (czy_wcisnieta_) { st.kolor_tla = mieszaj(panel, tekst, 40); st.tlo = true; }
+        else if (czy_najechana_) { st.kolor_tla = mieszaj(panel, tekst, 20); st.tlo = true; }
+        if (zaznaczony_) { st.kolor_tla = mieszaj(st.kolor_tla, akcent, 48); st.tlo = true; }
+        const uint32_t stonowany = mieszaj(panel, akcent, 150);  // ~59 % akcentu: zaznaczenie / przycisk glowny
+        if (czy_ma_fokus_) { st.ramka = true; st.kolor_ramki = akcent; }
+        else if (zaznaczony_ || glowny) { st.ramka = true; st.kolor_ramki = stonowany; }
+        return st;
+    }
+
 private:
     void przygotuj() { if (ikona_ && ikona_->jest()) ikona_->przygotuj(bok_ikony_px()); }
-    static unsigned jasnosc(uint32_t c) { return (((c >> 16) & 255) * 54 + ((c >> 8) & 255) * 183 + (c & 255) * 19) >> 8; }
     // t: 0..256 (udzial b)
     static uint32_t mieszaj(uint32_t a, uint32_t b, unsigned t) {
         uint32_t o = 0;

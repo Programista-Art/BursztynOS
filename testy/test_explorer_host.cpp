@@ -24,6 +24,7 @@ static void input(PlikiUI::DialogPlikowy& d,const char* text) {
 #include "text_context_cases.h"
 #include "explorer_launcher_cases.h"
 #include "explorer_input_cases.h"
+#include "explorer_quick_access_cases.h"
 static void remaining_regressions() {
     files={{"/",true},{"/test",true},{"/test/nested",true},{"/test/żółć",true},{"/test/file.txt",false}};
     auto* m=new AktowkaModel();CHECK(m->initialize());CHECK(m->navigate("/test")!=Change::ERROR);
@@ -69,6 +70,7 @@ static void remaining_regressions() {
 int main() {
     g_test_bws_hook=explorer_bws;
     explorer_input_cases();
+    explorer_quick_access_cases();
     files={{"/",true},{"/test",true},{"/dest",true},{"/test/żółć.txt",false},{"/test/program.bur",false},{"/test/folder",true}};
     using namespace PlikiUI;
     CHECK(nazwa_poprawna("zażółć gęślą.txt"));CHECK(!nazwa_poprawna(""));CHECK(!nazwa_poprawna(".."));

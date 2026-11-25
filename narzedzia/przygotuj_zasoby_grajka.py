@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Zasoby Grajka z grafik uzytkownika (krok budowania, oryginaly sa tylko czytane).
 
-Ikony przyciskow: ikonki/grajek/*.png (RGBA, ok. 280-400 px) -> grajek_zasoby/grajek_<akcja>.png, 128x128 RGBA:
-proporcje zachowane (dopasowanie do kwadratu, przezroczyste marginesy), przezroczystosc zachowana (skalowanie
-Lanczos na pikselach z premnozona alfa - bez ciemnych obwodek), bez zmiany kolorow. 128x128 to limit dekodera ikon
+Ikony przyciskow: ikonki/grajek/*.png -> grajek_zasoby/grajek_<akcja>.png, 128x128 RGBA.
+Ikona, ktora JUZ jest 8-bitowym RGBA 128x128 bez przeplotu (obecne grafiki uzytkownika), jest kopiowana BAJT W BAJT:
+zadnego przeliczania, wiec kolory i alfa wygladzonych krawedzi zostaja oryginalne (dawniej przejscie 128 -> 128
+przez premnozona alfe zmienialo RGB pikseli o malej alfie). Inny rozmiar: proporcje zachowane (dopasowanie do
+kwadratu, przezroczyste marginesy), skalowanie Lanczos na premnozonej alfie (bez obwodek), bez zmiany kolorow. 128x128 to limit dekodera ikon
 Ring 3 (dekoduj_ikone_png: <= 128x128, <= 256 KiB); BursztynUI skaluje dalej raz na rozmiar (srednia obszarowa).
 
 Plyta winylowa: ikonki/plyta_winylowa.jpg jest osadzana BEZ zmian (Makefile linkuje oryginalny plik); to narzedzie
@@ -59,7 +61,23 @@ def sprawdz_zrodla():
     return bledy, nadmiarowe
 
 
+def gotowa_ikona(zrodlo):
+    """8-bitowe RGBA (typ koloru 6) BOK x BOK bez przeplotu - dekoder ikon przyjmuje je bez zmian."""
+    with open(zrodlo, "rb") as f:
+        n = f.read(29)
+    if len(n) < 29 or n[:8] != b"\x89PNG\r\n\x1a\n" or n[12:16] != b"IHDR":
+        return False
+    w, h = int.from_bytes(n[16:20], "big"), int.from_bytes(n[20:24], "big")
+    return w == BOK and h == BOK and n[24] == 8 and n[25] == 6 and n[28] == 0
+
+
 def konwertuj(zrodlo, cel):
+    tmp = cel + ".tmp"
+    if gotowa_ikona(zrodlo):
+        with open(zrodlo, "rb") as f, open(tmp, "wb") as g:
+            g.write(f.read())
+        os.replace(tmp, cel)
+        return
     from PIL import Image
     with Image.open(zrodlo) as im:
         im.load()
@@ -71,7 +89,6 @@ def konwertuj(zrodlo, cel):
     male = rgba.convert("RGBa").resize((nw, nh), Image.LANCZOS).convert("RGBA")
     plotno = Image.new("RGBA", (BOK, BOK), (0, 0, 0, 0))
     plotno.paste(male, ((BOK - nw) // 2, (BOK - nh) // 2))
-    tmp = cel + ".tmp"
     plotno.save(tmp, format="PNG", optimize=True)
     os.replace(tmp, cel)
 

@@ -7,6 +7,7 @@
 #include "app_identity.h"
 #include "ui_skala.h"
 #include "wm_belka_hit.h"
+#include "skojarzenia_plikow.h"
 #if defined(BSF_NATIVE)
 #include "bursztyn_ui/czcionka.h"
 #endif
@@ -666,42 +667,12 @@ bool pobierz_argument_startowy(char* bufor, uint32_t pojemnosc) {
         0, 0) == 1ULL;
 }
 
-namespace {
-
-bool tekst_konczy_sie_ci(const char* tekst, const char* sufiks) {
-    if (!tekst || !sufiks) return false;
-    size_t lt = 0;
-    size_t ls = 0;
-    while (lt < 511U && tekst[lt] != '\0') ++lt;
-    while (ls < 32U && sufiks[ls] != '\0') ++ls;
-    if (lt == 511U || ls == 32U || ls > lt) return false;
-    for (size_t i = 0; i < ls; ++i) {
-        char a = tekst[lt - ls + i];
-        char b = sufiks[i];
-        if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + 32);
-        if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + 32);
-        if (a != b) return false;
-    }
-    return true;
-}
-
-} // namespace
-
+// Mapowanie typu pliku na aplikacje: jadro/gui/skojarzenia_plikow.h (txt -> Notatnik; png, jpg, jpeg, bmp, btp ->
+// Przegladarka Obrazow). Uruchomienie: ogolny BWS 10 z argumentem startowym (walidacja sciezek w jadrze, PZB celu).
 wynik_otwarcia_skojarzonego otworz_plik_skojarzony(const char* sciezka) {
-    if (!sciezka || sciezka[0] != '/') return OTWORZ_PLIK_BLAD;
-    if (tekst_konczy_sie_ci(sciezka, ".txt")) {
-        return uruchom_program_z_argumentem_uzytkownika(
-                   "/programy/notatnik.cebula/notatnik.bur", sciezka)
-            ? OTWORZ_PLIK_URUCHOMIONO
-            : OTWORZ_PLIK_BLAD;
-    }
-    if (tekst_konczy_sie_ci(sciezka, ".bmp")) {
-        return uruchom_program_z_argumentem_uzytkownika(
-                   "/programy/przegladarka-obrazow.cebula/przegladarka-obrazow.bur", sciezka)
-            ? OTWORZ_PLIK_URUCHOMIONO
-            : OTWORZ_PLIK_BLAD;
-    }
-    return OTWORZ_PLIK_BRAK_SKOJARZENIA;
+    const char* program = SkojarzeniaPlikow::program_dla_pliku(sciezka);
+    if (!program) return sciezka && sciezka[0] == '/' ? OTWORZ_PLIK_BRAK_SKOJARZENIA : OTWORZ_PLIK_BLAD;
+    return uruchom_program_z_argumentem_uzytkownika(program, sciezka) ? OTWORZ_PLIK_URUCHOMIONO : OTWORZ_PLIK_BLAD;
 }
 
 bool pobierz_rozmiar_pliku(const char* sciezka, uint32_t* rozmiar) {

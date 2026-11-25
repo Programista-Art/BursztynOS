@@ -658,7 +658,7 @@ private:
         char t[16]; { Tekst x(t, sizeof(t)); x.liczba(k.glosnosc); x.dodaj("%"); }
         ustaw(glosnosc_proc_, k.wyciszony ? "wycisz." : t);
         ustaw(wycisz_, k.wyciszony ? "Przywróć dźwięk" : "Wycisz");
-        wycisz_->ustaw_zaznaczony(k.wyciszony);                       // przelacznik: kafel z odcieniem akcentu
+        wycisz_->ustaw_zaznaczony(k.wyciszony);                       // przelacznik: powierzchnia z odcieniem akcentu
         wycisz_->ustaw_podpowiedz(k.wyciszony ? "Przywróć dźwięk (wyciszono)" : "Wycisz dźwięk");
         if (losowo_->czy_zaznaczone() != k.losowo) losowo_->ustaw_zaznaczone(k.losowo);
         if (w_tle_->czy_zaznaczone() != k.w_tle) w_tle_->ustaw_zaznaczone(k.w_tle);

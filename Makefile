@@ -2675,6 +2675,14 @@ test-instalacja-host:
 	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .installertest/test-instalacja .installertest/manifest/manifest.tsv $(ISO_DIR)/boot/zdjecia.pak .installertest
 	rm -rf .installertest/manifest
 
+.PHONY: test-ikony-alfa-host
+# Ikony PNG z alfa (ASan/UBSan): wspolne skalowanie IkonaPNG/ObrazIkony bez obwodek z koloru spod A=0, kompozycja
+# na ciemnym/jasnym/kolorowym tle; syntetyczne i prawdziwe ikony (grajek_zasoby = oryginaly uzytkownika, ikonki).
+test-ikony-alfa-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -I. -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ikony_alfa_host.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/ikony-alfa
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ikony-alfa $(GRAJEK_ZASOBY_DIR) ikonki
+
 .PHONY: test-muzyka-pak-host
 test-muzyka-pak-host:
 	@mkdir -p .bsf-test

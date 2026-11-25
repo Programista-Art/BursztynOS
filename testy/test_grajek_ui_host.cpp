@@ -514,6 +514,42 @@ static uint32_t probka_kafla(OknoGrajka& o, PrzyciskIkony* b) {
     const Prostokat k = b->obszar_kafla();
     return piksel(b->obszar_ekranu().x + k.x + 4, b->obszar_ekranu().y + k.y + k.wysokosc - 4);
 }
+// Tlo okna obok kafla (wewnatrz przycisku, 2 px na lewo od kafla w polowie wysokosci; poza pierscieniem, gdy brak
+// fokusu i najechania) - z ostatniego rysowania.
+static uint32_t tlo_przycisku(PrzyciskIkony* b) {
+    const Prostokat k = b->obszar_kafla();
+    return piksel(b->obszar_ekranu().x + k.x - 2, b->obszar_ekranu().y + k.y + k.wysokosc / 2);
+}
+// Widocznosc ikony: suma |jasnosc - jasnosc tla| w obszarze ikony (z ostatniego rysowania).
+static uint64_t kontrast_ikony(PrzyciskIkony* b) {
+    const Prostokat k = b->obszar_kafla();
+    const int bok = b->bok_ikony_px(), x0 = b->obszar_ekranu().x + k.x + (k.szerokosc - bok) / 2, y0 = b->obszar_ekranu().y + k.y + (k.wysokosc - bok) / 2;
+    auto jas = [](uint32_t c) { return int(((c >> 16) & 255) * 54 + ((c >> 8) & 255) * 183 + (c & 255) * 19) >> 8; };
+    const int t = jas(tlo_przycisku(b));
+    uint64_t suma = 0;
+    for (int y = 0; y < bok; ++y) for (int x = 0; x < bok; ++x) suma += uint64_t(std::abs(jas(piksel(x0 + x, y0 + y)) - t));
+    return suma;
+}
+// Regresja grubych/podwojnych obwodek: w srodkowym wierszu od lewej krawedzi PRZYCISKU do ikony wolno wystapic
+// tylko tlu okna, powierzchni stanu i co najwyzej JEDNEMU pasowi ramki o szerokosci <= limit. Lewa krawedz przycisku
+// = tlo (nic nie wychodzi poza kafel na sasiadow). Zwraca liczbe pasow ramki.
+static int pasy_ramki(OknoGrajka& o, PrzyciskIkony* b, int* szer_max) {
+    (void)probka_kafla(o, b);
+    const auto st = b->styl_stanu();
+    const Prostokat k = b->obszar_kafla();
+    const int bx = b->obszar_ekranu().x, by = b->obszar_ekranu().y, y = by + k.y + k.wysokosc / 2;
+    const int ikona_x = bx + k.x + (k.szerokosc - b->bok_ikony_px()) / 2;
+    const uint32_t tlo = tlo_przycisku(b), wypelnienie = st.kolor_tla & 0xFFFFFFu;
+    std::vector<std::pair<uint32_t, int>> pasy;
+    for (int x = bx; x < ikona_x; ++x) {
+        const uint32_t c = piksel(x, y);
+        if (pasy.empty() || pasy.back().first != c) pasy.push_back({c, 1}); else ++pasy.back().second;
+    }
+    CHECK(!pasy.empty() && pasy.front().first == tlo);
+    int n = 0; *szer_max = 0;
+    for (auto& p : pasy) if (p.first != tlo && !(st.tlo && p.first == wypelnienie)) { ++n; if (p.second > *szer_max) *szer_max = p.second; }
+    return n;
+}
 static void test_ikony_i_grafiki() {
     Jadro j; g_j = &j;
     przygotuj_muzyke();
@@ -576,12 +612,22 @@ static void test_ikony_i_grafiki() {
     CHECK(o->stop_->bok_ikony_px() == 36 && o->ikony_[IK_STOP].przygotowany_bok() == 36 && o->ikony_[IK_STOP].liczba_dekodowan() == 1);
     o->ustaw_skale_dpi(SkalaUI(1)); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
     { KontekstRysowania c; o->rysuj(c, true); }
-    // (3) stany: najechanie (jasniejszy kafel), wylaczenie (przygaszony), zaznaczenie (wyciszenie), wcisniecie
+    // (3) stany. Normalny i wylaczony: BEZ tla pod ikona (dawniej jasny "kafel") - w miejscu kafla widac tlo okna,
+    //     przezroczyste piksele ikony nie zmieniaja tla; najechanie, zaznaczenie, wcisniecie: powierzchnia stanu;
+    //     wylaczenie: ikona przygaszona (mniejszy kontrast z tlem).
+    CHECK(o->stop_->czy_wlaczona());
+    (void)probka_kafla(*o, o->stop_);
+    const uint64_t kontrast_wl = kontrast_ikony(o->stop_);
     o->o_.stop(); kroki(*o, 3);
     CHECK(!o->stop_->czy_wlaczona());
     const uint32_t wyl = probka_kafla(*o, o->stop_);
+    CHECK(wyl == tlo_przycisku(o->stop_) && kontrast_ikony(o->stop_) * 10 < kontrast_wl * 6 && kontrast_ikony(o->stop_) > 0);
     const uint32_t norm = probka_kafla(*o, o->nast_);
-    CHECK(wyl != norm);
+    CHECK(norm == tlo_przycisku(o->nast_));
+    for (auto& m : mapa) if (m.b->czy_wlaczona() && !m.b->czy_zaznaczony() && m.b != o->graj_) {
+        CHECK(probka_kafla(*o, m.b) == tlo_przycisku(m.b));          // zadnego jasnego tla pod zadna ikona
+        CHECK(kontrast_ikony(m.b) > 0);                               // ikona narysowana
+    }
     o->nast_->obsluz_wejscie_myszy();
     CHECK(o->nast_->czy_najechana());
     const uint32_t naj = probka_kafla(*o, o->nast_);
@@ -600,6 +646,51 @@ static void test_ikony_i_grafiki() {
         const uint32_t kol = o->o_.kolejka().biezaca() < 0 ? 0u : uint32_t(o->o_.kolejka().biezaca());
         o->nast_->obsluz_zwolnienie_myszy(u);                     // zwolnienie poza przyciskiem: bez akcji
         CHECK(!o->nast_->czy_wcisnieta() && (o->o_.kolejka().biezaca() < 0 ? 0u : uint32_t(o->o_.kolejka().biezaca())) == kol);
+    }
+    // (3b) styl stanow: jedna ramka 1 DIP (bez podwojnych pierscieni i grubych obwodek), takze w stanach laczonych
+    {
+        int szer = 0;
+        auto stan = [&](PrzyciskIkony* b, bool fokus, bool najechany, bool wcisniety, int oczek_pasow, const char* opis) {
+            if (fokus) b->obsluz_uzyskanie_skupienia();
+            if (najechany) b->obsluz_wejscie_myszy();
+            ZdarzenieMyszki e{}; e.typ = TypZdarzenia::WcisniecieMyszy; e.przycisk = 1;
+            e.x = b->obszar_ekranu().x + 5; e.y = b->obszar_ekranu().y + 5;
+            if (wcisniety) b->obsluz_wcisniecie_myszy(e);
+            const auto st = b->styl_stanu();
+            CHECK(st.grubosc == 1 && (st.ramka ? 1 : 0) == oczek_pasow);
+            const int n = pasy_ramki(*o, b, &szer);
+            if (n != oczek_pasow || szer > (b->rodzaj() == RodzajPrzyciskuIkony::Glowny ? 2 : 1))
+                std::fprintf(stderr, "stan %s: pasow ramki %d (oczekiwano %d), szerokosc %d\n", opis, n, oczek_pasow, szer);
+            CHECK(n == oczek_pasow && szer <= (b->rodzaj() == RodzajPrzyciskuIkony::Glowny ? 2 : 1));
+            if (wcisniety) { ZdarzenieMyszki u = e; u.typ = TypZdarzenia::ZwolnienieMyszy; u.x = -100; u.y = -100; b->obsluz_zwolnienie_myszy(u); }
+            if (najechany) b->obsluz_opuszczenie_myszy();
+            if (fokus) b->obsluz_utrate_skupienia();
+            return st;
+        };
+        const auto n0 = stan(o->nast_, false, false, false, 0, "normalny");
+        CHECK(!n0.tlo && !n0.ramka);                                         // bez tla i ramki
+        const auto h = stan(o->nast_, false, true, false, 0, "najechany");    // subtelne tlo, bez ramki
+        const auto w = stan(o->nast_, false, true, true, 0, "wcisniety");
+        CHECK(h.tlo && w.tlo && h.kolor_tla != w.kolor_tla);
+        const auto f = stan(o->nast_, true, false, false, 1, "fokus");
+        CHECK(f.kolor_ramki == motyw_kolor(MOTYW_KOLOR_AKCENT));             // fokus: pelny akcent motywu
+        (void)stan(o->nast_, true, true, true, 1, "fokus+wcisniety");
+        klik(*o->wycisz_); kroki(*o, 1);
+        CHECK(o->wycisz_->czy_zaznaczony());
+        const auto z = stan(o->wycisz_, false, false, false, 1, "zaznaczony");
+        const auto zf = stan(o->wycisz_, true, false, false, 1, "zaznaczony+fokus");   // JEDNA ramka
+        CHECK(z.tlo && z.kolor_ramki != zf.kolor_ramki && zf.kolor_ramki == motyw_kolor(MOTYW_KOLOR_AKCENT));
+        (void)stan(o->wycisz_, true, true, false, 1, "zaznaczony+fokus+najechany");
+        klik(*o->wycisz_); kroki(*o, 1);
+        CHECK(!o->wycisz_->czy_zaznaczony());
+        const auto g = stan(o->graj_, false, false, false, 1, "glowny");
+        const auto gf = stan(o->graj_, true, true, false, 1, "glowny+fokus+najechany");
+        CHECK(g.kolor_ramki != gf.kolor_ramki && !g.tlo);
+        for (auto* b : o->przyciski_kolejki_) (void)stan(b, true, false, false, 1, "kolejka+fokus");
+        (void)stan(o->odswiez_, false, true, false, 0, "odswiez+najechany");
+        CHECK(!o->stop_->czy_wlaczona());                                    // Stop po zatrzymaniu: wylaczony
+        const auto d = stan(o->stop_, true, true, false, 0, "wylaczony+fokus+najechany");
+        CHECK(!d.tlo && !d.ramka);                                           // bez tla i ramki, ikona przygaszona
     }
     // (4) klawiatura: Spacja i Enter na przycisku z fokusem wykonuja akcje (Odtworz/Pauza)
     CHECK(o->graj_->czy_moze_miec_fokus());
