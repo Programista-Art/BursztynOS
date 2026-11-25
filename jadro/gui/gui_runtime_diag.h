@@ -19,7 +19,10 @@ enum GuiPerfMetric { GP_CPU_NS,GP_IDLE_NS,GP_WAKE,GP_WAIT,GP_BWS,GP_MOVE,GP_TIME
     // Cooperative crypto yield points: HLT yields performed / skipped (interrupts masked).
     GP_YIELD_HLT,GP_YIELD_SKIP,
     // Cooperative yields between bands of a large BWS57 blit.
-    GP_SYSCALL_YIELD,GP_METRICS };
+    GP_SYSCALL_YIELD,
+    // Layer shadow maintenance: full-surface copies (first draw after an out-of-band content change) and
+    // pixels copied in total (full copies + published dirty rectangles).
+    GP_SHADOW_FULL_COPY,GP_SHADOW_COPY_PX,GP_METRICS };
 #if BURSZTYNDIAGGUIRUNTIME
 #include "scheduler.h"
 #include "sterowniki/czas/hpet.h"
@@ -121,7 +124,7 @@ inline void gui_perf_report(){
         "present","cursor_present","copy","present_ns","present_max_ns","lock_wait_ns","lock_wait_max_ns",
         "compose_ns","copy_ns","gpu_ns","gpu_max_ns","precise_requested","bws_refresh","frame_present",
         "frame_interval_ns","frame_interval_max_ns","input_present_ns","input_present_max_ns",
-        "deferred_ticks","deferred_run_max_ns","torn_compose","shadow_compose","yield_hlt","yield_skip","syscall_yield"};
+        "deferred_ticks","deferred_run_max_ns","torn_compose","shadow_compose","yield_hlt","yield_skip","syscall_yield","shadow_full_copy","shadow_copy_px"};
     for(unsigned pid=0;pid<MAKS_PROCESOW;++pid){
         uint64_t sample[GP_METRICS]{};bool nonzero=false;
         for(unsigned i=0;i<GP_METRICS;++i){sample[i]=__atomic_exchange_n(&gui_perf_counts[pid][i],0,__ATOMIC_RELAXED);nonzero|=sample[i]!=0;}

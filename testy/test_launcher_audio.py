@@ -5,7 +5,7 @@ Linux: wykonywane na kopii skryptu w katalogu tymczasowym z atrapa QEMU (lista -
 -device help, symulowane komunikaty stderr i kod wyjscia), atrapami pactl/pw-cli, sztucznym XDG_RUNTIME_DIR
 (gniazda Unix) i plikiem kart ALSA. Prawdziwy wirtualny_dysk.img, ISO i uslugi dzwieku hosta nie sa dotykane.
 Windows: sprawdzenia statyczne skryptu; gdy jest PowerShell (pwsh), takze -PrintArgv dla kazdego trybu."""
-import json, os, shlex, shutil, socket, stat, subprocess, sys, tempfile
+import json, os, re, shlex, shutil, socket, stat, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -194,6 +194,22 @@ try:
     check(p.returncode == 3 and "nie ma backendu 'sdl'" in p.stderr and not e.log.exists(), 'backend nieobslugiwany')
     p = e.run('--dry-run', '--mode', '1', '--audio', 'pa', MOCK_PA_OK=0)
     check(p.returncode == 0 and 'dry-run - tylko ostrzeżenie' in p.stderr and check_hda(argv_of(p), 'dry pa')[0] == 'pa,id=snd', 'dry-run: ostrzezenie')
+    # --- kontroler dzwieku GOSCIA: AC97 tylko jawnie (--guest-audio ac97), w miejscu HDA (ten sam slot 00:02.0)
+    for args, kw in ((('--guest-audio', 'ac97'), {}), (('--guest-audio=ac97',), {}), ((), {'GUEST_AUDIO': 'ac97'})):
+        p = e.run('--dry-run', '--mode', '1', *args, **kw)
+        check(p.returncode == 0, f'ac97 {args}: {p.stderr}')
+        audiodevs, devices = audio_and_devices(argv_of(p))
+        check(audiodevs == ['alsa,id=snd'] and devices[0] == 'AC97,audiodev=snd', f'ac97: {devices}')
+        check('intel-hda' not in devices and 'hda-output,audiodev=snd' not in devices, 'ac97: bez HDA (jedno urzadzenie)')
+        check(devices[1:] == base_devices[2:], 'ac97: pozostala topologia PCI bez zmian')
+        check('Intel ICH AC97' in p.stderr and 'tryb deweloperski' in p.stderr, 'ac97: podsumowanie')
+    p = e.run('--dry-run', '--mode', '1', '--guest-audio', 'hda')
+    check(p.returncode == 0 and check_hda(argv_of(p), 'guest hda')[1] == base_devices, 'jawne hda = domyslne')
+    for bad in (['--guest-audio', 'sb16'], ['--guest-audio']):
+        p = e.run('--dry-run', '--mode', '1', *bad)
+        check(p.returncode == 2, f'{bad}: kod 2')
+    p = e.run('--mode', '1', '--guest-audio', 'ac97', '--audio', 'none')       # atrapa QEMU nie ma AC97
+    check(p.returncode == 3 and 'nie ma urzadzenia AC97' in p.stderr and not e.log.exists(), f'ac97 bez urzadzenia:\n{p.stderr}')
     for bad in (['--audio', 'dsound'], ['--audio', 'directsound'], ['--audio', 'coreaudio'], ['--audio', 'xyz'], ['--audio']):
         p = e.run('--dry-run', '--mode', '1', *bad)
         check(p.returncode == 2, f'{bad}: kod 2')
@@ -297,9 +313,22 @@ check('"wav,id=snd,path=$qemuWav"' in w and '$qemuWav = ConvertTo-QemuOptionPath
 check('nie nadpisuję bez -AudioOverwrite' in w and 'ReparsePoint' in w, 'WAV: brak nadpisywania, dowiazania')
 check('Write-AudioOutcome -ExitCode $exitCode -Lines $audioLines.ToArray() -Audio $audio' in w, 'raport po zakonczeniu QEMU')
 check('to nie potwierdza słyszalnego odtwarzania' in w and "-notmatch '(?i)capture'" in w, 'bez falszywego sukcesu; capture nie jest bledem')
+# DirectSoundCapture (blad potwierdzony natywnie na Windows 11): blad inicjalizacji dzwieku hosta, nie "niezwiazany".
+check("$_ -match '(?i)DirectSoundCapture' }).Count -gt 0) { return \"capture\" }" in w, 'DirectSoundCapture -> rodzaj capture')
+check('"capture"     {' in w and 'nie sterownika Intel HDA Bursztyn OS' in w and '-AudioMode sdl' in w, 'komunikat capture: problem hosta, SDL/WAV jako alternatywa')
+_m = re.search(r"\$script:AudioQemuLinePattern = '([^']+)'", w)
+check(bool(_m), 'wzorzec linii QEMU (Windows)')
+_wzor = re.compile(_m.group(1))
+for _l in ("dsound: Could not initialize DirectSoundCapture", "qemu-system-x86_64.exe: dsound: Could not initialize DirectSoundCapture"):
+    check(bool(_wzor.search(_l)) and bool(re.search(r"(?i)DirectSoundCapture", _l)), f'rozpoznana linia QEMU: {_l}')
+check(not _wzor.search("Grajek: Could not initialize DirectSoundCapture"), 'linia goscia (port szeregowy) nie jest komunikatem QEMU')
 check('"A" { Show-AudioMenu }' in w and 'Wybierz tryb [0-18, A]' in w, 'menu A')
 check(w.index('$audio = Resolve-AudioConfig') < w.index('{ Prepare-Disk }'), 'dzwiek sprawdzany przed dyskiem')
 check('-ReadOnly:($PrintArgv -or $Audit)' in w, '-PrintArgv/-Audit bez tworzenia katalogow i sond')
+check('[ValidateSet("hda", "ac97", "")]' in w and '[string]$GuestAudio = ""' in w, 'parametr -GuestAudio')
+check('if ($script:GuestAudio -eq "ac97") { $argsList = Use-Ac97GuestDevice -Arguments $argsList }' in w, 'AC97 zastepuje HDA w miejscu')
+check('$out.Add("-device"); $out.Add("AC97,audiodev=snd")' in w and 'Assert-QemuGuestAudioDevice -Qemu $qemu' in w, 'AC97: urzadzenie i kontrola QEMU')
+check('elseif ($env:GUEST_AUDIO -in @("hda", "ac97")) { $env:GUEST_AUDIO } else { "hda" }' in w, 'domyslnie HDA')
 for label in ('Wyjście dźwięku', 'Wykryte urządzenie Intel HDA', 'Błąd uruchomienia dźwięku', 'Ścieżka nagrania', 'Brak dźwięku', 'Nagrywanie dźwięku do WAV'):
     check(label in w, f'etykieta: {label}')
 

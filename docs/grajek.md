@@ -90,7 +90,51 @@ tabele, wizualizacja, okładka.
   wewnątrz wywołań systemowych (np. oddanie CPU między pasami BWS 57). Nie widzą czasu, w którym proces nie był
   wykonywany – to pokazuje przerwa producenta. Okresy pominięte przez transport HDA nie są tu liczone (statystyki
   HDA jądra: `bezpieczna_cisza`, `utracone_okresy`).
+* **Maks. czekanie na CPU** i **Maks. uśpienie procesu** (2026-11-23): liczniki planisty jądra z `PCM_QUERY_STATS`
+  (BwsPcmStats V2, od uruchomienia): najdłuższy czas, gdy Grajek był gotowy, a CPU miał inny wątek (PID 0 –
+  kompozytor/HDA, inne aplikacje), oraz najdłuższe dobrowolne uśpienie. Interpretacja: przerwa producenta ≈ czekanie
+  na CPU → opóźniał inny wątek; przerwa producenta ≫ obu → Grajek sam był zajęty (praca Ring 3 albo długie wywołanie
+  systemowe, np. BWS 57 – czas w Ring 0 liczy się jako czas procesu).
 * Przy zakończeniu Grajka wszystkie wiersze trafiają do ustawień aplikacji (`…/Ustawienia/grajek/diagnostyka`).
+
+## Przerwy przy zmaksymalizowanym oknie i wizualizacji (analiza 2026-11-23)
+Zgłoszenie (Windows 11, QEMU SDL/WAV): wyraźnie więcej przerw przy zmaksymalizowanym oknie, jeszcze więcej z
+wizualizacją, WAV płynniej niż MP3. Zrzuty (różne chwile/sesje – nie łączone w jeden pomiar): niedobór utworu 640 ms,
+sesji 693 ms, 3 epizody, maks. przerwa producenta 333 ms, 26 przerw > 85 ms, maks. rysowanie 48,2 ms, maks.
+publikacja BWS 57 98,3 ms, dekodowanie ≈ 286 ms/s (czas zegarowy).
+
+**Potwierdzone w kodzie (przyczyna zależna od rozmiaru okna):** cień warstwy (ochrona przed rozdartą klatką,
+`sterowniki/grafika/grafika.cpp`) kopiował przy **pierwszym zapisie każdej klatki całą warstwę okna** (szer × wys
+pikseli) – w nieprzerywalnym BWS 57, pod blokadą ekranu, bez punktów kontrolnych HDA – także gdy Grajek zmieniał
+tylko etykietę czasu albo słupki widma. Dla okna 1920×1040 to 2 mln pikseli (8 MiB) na każdą klatkę
+(wizualizacja 4 Hz + postęp 1 Hz + diagnostyka 1 Hz). Drugi koszt: wszystkie zmiany klatki trafiały do kompozytora
+jako **jeden prostokąt obejmujący**. Model hosta (rzeczywiste regiony publikowane przez Grajka, 10 s z wizualizacją;
+nie pomiar natywny): kopia cienia 1920×1040 ≈ 6,0 mln px/s przed poprawką, ≈ 0,17 mln px/s po; 1180×660 – 2,3 mln
+→ 0,07 mln px/s. Praca samego Grajka (rysowanie Ring 3) była już ograniczona i niezależna od rozmiaru okna.
+
+**Poprawka (jądro, wąska):** cień jest utrzymywany przyrostowo – po publikacji (BWS 17) kopiowane są tylko
+opublikowane prostokąty, więc na początku następnej klatki cień już zawiera ostatnią klatkę. Pełna kopia (jak
+dotąd) tylko przy niepewnej zgodności: nowy bufor cienia, zmiana bufora/rozmiaru warstwy, zmiana **epoki treści**
+(`skladacz_obrazu_epoka_tresci()`: tworzenie, zmiana rozmiaru, czyszczenie, usunięcie warstwy, zmiana trybu
+ekranu), porzucone oczekujące obszary (aktywacja warstwy, zmiana trybu), zbiorcza wymiana regionów (BWS 57/4).
+Pełna kopia ma punkty kontrolne HDA co ~64 tys. px. Oczekujące obszary procesu: do 8 prostokątów (łączenie przy
+stracie ≤ 1/8, przepełnienie = prostokąt obejmujący), we współrzędnych warstwy; kompozytor dostaje każdy osobno.
+Przy okazji naprawiony prostokąt pełnej klatki BWS 19 (był podawany jako (0,0,szer,wys) **ekranu**). Synchronizacja
+(blokada ekranu, zawór 1 s, zwalnianie cienia z procesem) bez zmian. Testy: `test_boot_graphics` (190 sprawdzeń, w
+tym sonda „zapis bez śledzenia” dowodząca braku pełnej kopii, okno przesunięte między rysowaniem a publikacją,
+zmiana epoki, aktywacja, BWS 19, punkty HDA).
+
+**Hipotezy (bez dowodu natywnego):** (1) okresy HDA Skip z pomiaru 2026-11-22 (praca odroczona HDA spóźniona
+> ~37 ms) mogły powstawać właśnie w tej nieprzerywalnej kopii – nowa wersja ją usuwa w stanie ustalonym; (2) czas
+dekodowania 286 ms/s obejmuje wywłaszczenie (TSC zegarowy) – nie jest wyłącznym czasem CPU. Potwierdzenie wymaga
+natywnego nagrania WAV i liczników (poniżej).
+
+**WAV kontra MP3:** oba pliki testowe mają 48 kHz (brak resamplingu). Pomiar hosta (`dr_mp3` 0.7.4, ta sama
+konfiguracja): MP3 ≈ 1,1–1,25 ms CPU na 1 s audio, WAV ≈ 0,15 ms – ok. 8×; dekodowanie porcjami ≤ 2048 ramek
+(maks. ≈ 0,5 ms na hoście). minimp3 liczy w float/SSE, które pod emulacją TCG jest wielokrotnie droższe niż
+arytmetyka całkowita – większy udział CPU dekodera zmniejsza zapas na rysowanie i kompozycję. Odczyt pliku:
+okno 64 KiB (przy 64 kbit/s ≈ co 8 s), metadane i tablica punktów przewijania poza odtwarzaniem – nie wpływają na
+ciągłość. Pomiar natywny WAV vs MP3 w tych samych warunkach nie został wykonany.
 
 ### BWS 110 – cykl życia strumienia
 * `PCM_OPEN` (48000 Hz, 2 kanały, S16) przy starcie odtwarzania; `PCM_BUSY`/`PCM_LIMIT` → ponowienie w kolejnym ticku
@@ -134,7 +178,48 @@ ID3v1/v1.1 jako uzupełnienie, RIFF LIST/INFO (INAM, IART, IPRD, ICRD, ITRK). Po
 albumu), album, rok, numer. Brak tytułu → nazwa pliku. Limity: okno tagu 256 KiB, tekst ramki 1 KiB, pola 96 B,
 512 ramek. Okładka (APIC/PIC, JPEG/PNG, preferowana „front cover”): ≤ 2 MiB danych, ≤ 3000×3000 i ≤ 4 Mpx
 sprawdzane z nagłówka **przed** dekodowaniem (wspólny dekoder `obrazy/dekoder_obrazu`), skalowana raz do 220 px.
-Brak okładki → domyślna grafika Grajka (generowana, bez plików).
+Brak okładki w tagu → **płyta winylowa użytkownika** (`ikonki/plyta_winylowa.jpg`, patrz „Grafiki”); okładka z tagu
+ma pierwszeństwo. Kontrolka okładki skaluje obraz **raz na rozmiar** (średnia obszarowa przy zmniejszaniu, dwuliniowo
+przy powiększaniu, proporcje zachowane) w `rozmiesc()` i rysuje go 1:1 – wcześniej najbliższy sąsiad przy każdym
+rysowaniu. Wygenerowana grafika płyty (`grafika_domyslna`) została usunięta.
+
+## Grafiki (ikony przycisków i płyta)
+Źródła użytkownika (repozytorium, tylko czytane – nigdy nie zmieniane ani przerysowywane):
+* `ikonki/plyta_winylowa.jpg` – progresywny JPEG 492×492, 146 235 B; osadzony w obrazie systemu **bez zmian** jako
+  `/ikonki/grajek_plyta_winylowa.jpg` (live i instalacja – te same strumienie bajtów co pozostałe ikony systemu;
+  ścieżki hosta nie są dostępne w gościu). Grajek czyta go i dekoduje **raz** przy starcie (`GrafikaPlyty`,
+  `okladka.h`: limit 256 KiB, wymiary z nagłówka przed dekodowaniem, wspólny dekoder stb_image), skaluje raz do
+  352 px (zapas na 200 % skali okładki 176 DIP) i zwalnia oryginał.
+* `ikonki/grajek/*.png` – 14 ikon RGBA (284–404 px). Krok budowania `narzedzia/przygotuj_zasoby_grajka.py` (Pillow,
+  zależność budowania jak generator tapet) tworzy `grajek_zasoby/grajek_<akcja>.png` 128×128 RGBA: proporcje i
+  przezroczystość zachowane (Lanczos na premnożonej alfie), kolory bez zmian. 128×128 to limit dekodera ikon Ring 3.
+
+| Plik użytkownika | Akcja | Przycisk |
+|---|---|---|
+| `previovs.png` | poprzedni utwór | transport |
+| `play.png` / `pause.png` | Odtwórz / Pauza | jeden przycisk główny (ikona wg stanu) |
+| `stop.png` | Stop | transport |
+| `next.png` | następny utwór | transport |
+| `mute.png` | wycisz / przywróć dźwięk | przełącznik (stan zaznaczony) przy suwaku głośności |
+| `refresh.png` | odśwież bibliotekę | biblioteka |
+| `add to.png` | dodaj do kolejki | biblioteka |
+| `move up.png` / `move down.png` | przesuń w kolejce | kolejka |
+| `delete.png` | usuń z kolejki | kolejka |
+| `clear.png` | wyczyść kolejkę | kolejka |
+| `save list.png` / `load list.png` | zapisz / wczytaj listę M3U8 | kolejka |
+
+Bez pasującej grafiki (zostają tekstowe): **Zakończ** (brak ikony zamknięcia), Powtarzanie, Losowo, W tle,
+Wizualizacja, Diagnostyka, karty i nagłówki. Brak pliku lub plik uszkodzony/zbyt duży → przycisk tekstowy z tą samą
+akcją i podpowiedzią (nic nie jest zastępowane inną grafiką ani emoji).
+
+Komponent **`BursztynUI::PrzyciskIkony`** (`bursztyn_ui/przycisk_ikony.h`, wielokrotnego użytku): `ObrazIkony`
+dekoduje PNG raz (także porażka jest zapamiętana) i skaluje raz na bok (średnia obszarowa, premnożona alfa) w
+`zmierz()`/układzie – nigdy przy rysowaniu. Stany: normalny, najechany (jaśniejszy kafel + obwódka akcentu),
+wciśnięty, wyłączony (przygaszony kafel, ikona z alfą 40 %), fokus klawiatury (pierścień akcentu), zaznaczony
+(odcień akcentu + pierścień), rodzaj Główny (większy, okrągły, stały pierścień). Klawiatura: Spacja/Enter;
+podpowiedzi po polsku (`ustaw_podpowiedz`). Ikona leży na **jasnym kaflu motywu**: korpus większości grafik ma kolor
+#25252A, praktycznie taki jak przycisk ciemnego motywu (#262B31) – bez kafla „Stop”, strzałki i „Odśwież” byłyby
+niewidoczne. Kafel nie zmienia samej grafiki.
 
 ## Biblioteka, kolejka, listy
 * Skan przyrostowy przy starcie i po „Odśwież bibliotekę”; podkatalogi opcjonalnie (≤ 3 poziomy, ≤ 32 katalogi);
@@ -164,19 +249,22 @@ czcionka bitmapowa hosta, na której wcześniej sprawdzano układ):
 * biblioteka ≈ 31 % szerokości, karty ≈ 42 % reszty; **minimum panelu liczone z zawartości** (kolumny tabel z
   pomiaru nagłówków i typowych wartości, siatki przycisków, 10 kolumn korektora) – przy 1080 px nagłówki
   biblioteki („Format”) mieszczą się bez przewijania,
-* siatki przycisków (`SiatkaPrzyciskow`): kolumny z wagą naturalnej szerokości tekstów; kolejka 3×2 (bez
-  obcinania „Wyczyść”), biblioteka „Odśwież” (pełny opis w podpowiedzi) i „Dodaj do kolejki”,
+* kolejka: jeden wiersz 6 ikon (w górę, w dół, usuń, wyczyść, zapisz, wczytaj) w równych odstępach; biblioteka:
+  ikony „Odśwież” i „Dodaj do kolejki” wyrównane do lewej (pełne opisy w podpowiedziach),
 * korektor: wiersz [Włączony][preset], etykiety dB i Hz w kontrolce `EtykietyPasm` wyśrodkowane nad/pod
   suwakami, a gdy kolumna jest węższa niż tekst – naprzemiennie w dwóch rzędach (wcześniej „125”, „250”, „500”
   stykały się). `SkalaUI` nie schodzi poniżej 100 %, więc zmniejszanie czcionki nie jest możliwe. Opis korektora ma
   wysokość z zawijania tekstu (wcześniej stałe 52 px ucinały trzeci wiersz w TTF),
-* sterowanie: dwa niezależne wiersze; drugi (Losowo, Powtarzanie, W tle, Wizualizacja, Diagnostyka, Zakończ) w
-  kolumnach Auto – bez nachodzenia przy minimalnym oknie; teksty zmienne („Powtarzanie: wszystkie”, „Przywróć”,
-  „wycisz.”) mają minimum najszerszego wariantu,
+* sterowanie: wiersz transportu [stop][poprzedni][**Odtwórz/Pauza**][następny] – grupa symetryczna, przycisk
+  główny dokładnie na środku okna, większy i okrągły; po prawej wyciszenie tuż przy suwaku głośności i wartość %.
+  Drugi wiersz (Losowo, Powtarzanie, W tle, Wizualizacja, Diagnostyka, Zakończ) w kolumnach Auto – bez nachodzenia
+  przy minimalnym oknie; teksty zmienne („Powtarzanie: wszystkie”, „wycisz.”) mają minimum najszerszego wariantu.
+  Cel kliknięcia ikony ≥ 34 DIP,
 * nagłówki kart z wysokością z czcionki (`Karty::ustaw_zawijanie_naglowkow`) – przy 150 % nie są przycięte,
 * podpowiedzi BursztynUI (`podpowiedz.h`) zawijane i mierzone rzeczywistą czcionką (wcześniej stałe 8 px na bajt i
   16 px na wiersz – ramka węższa i niższa niż tekst TTF z polskimi znakami). Bufor podpowiedzi kontrolki: 63 B.
-Sprawdzane testami hosta z czcionką bitmapową i z TTF przy 980×580, 1080×640, 1280×680, 1920×1040 i 1470×870 (150 %).
+Sprawdzane testami hosta z czcionką bitmapową i z TTF przy 980×580, 1080×640, 1280×680, 1280×720, 1920×1040,
+1920×1080 i 1470×870 (150 %).
 
 ## Odtwarzanie w tle
 Opcja „Odtwarzanie w tle”: zamknięcie okna (X lub zdarzenie zamknięcia) minimalizuje je, a muzyka gra dalej;
@@ -192,11 +280,27 @@ odtwarzanie, a zamknięcie zamyka strumień PCM i kończy proces. Żadnej usług
   (uszkodzony plik kończy się błędem zamiast pętli).
 * Całe dekodowanie i DSP w Ring 3; jądro dostaje tylko PCM przez BWS 110 (kopiowane i sprawdzane przez jądro).
 
-## Muzyka w ISO (moduł `muzyka.pak`)
-`narzedzia/package_muzyka.py` pakuje pliki z `dane/muzyka/` (uzupełnione przez użytkownika; repozytorium nie zawiera
+## Muzyka na dysku zainstalowanego systemu
+Zainstalowany Bursztyn OS montuje system plików BSP2 z partycji dysku, więc `/dane/muzyka` jest **trwałe**: Grajek
+czyta WAV i MP3 bezpośrednio z dysku (`czytaj_fragment_pliku`, okno 64 KiB, przesunięcia 64‑bitowe – cały plik nigdy
+nie trafia do RAM), także pliki większe niż dawny 128 MiB RAM‑dysk (limit formatu ok. 1,0 GiB na plik). Muzykę
+dodaje się bez przebudowy ISO:
+* z komputera hosta – **Bursztynowy Importer Plików** (`docs/bursztynowy-importer.md`), przy wyłączonej maszynie,
+* w Bursztyn OS – Eksploratorem (kopiowanie, przenoszenie, foldery; pasek stanu pokazuje wolne miejsce).
+
+Po skanie komunikat biblioteki mówi, gdzie leżą pliki (BWS 111, `jadro/bws/bws_magazyn.h`):
+„Pliki są na dysku trwałym.” albo – w sesji Live / awaryjnym RAM FS – „Sesja Live: system plików działa w RAM –
+pliki znikną po restarcie.” (komunikat ostrzegawczy). Grajek nie opisuje RAM‑dysku jako pamięci trwałej i nie ma
+żadnego specjalnego uprawnienia do plików (manifest: `okna`, `pliki_czytaj`).
+
+## Muzyka demonstracyjna w ISO (moduł `muzyka.pak`, tylko na żądanie)
+**Domyślne ISO nie zawiera muzyki i nie czyta katalogu `dane/muzyka/`** (`MUZYKA_W_ISO ?= 0`). Moduł służy wyłącznie
+do testów i demonstracji sesji Live: `make MUZYKA_W_ISO=1 iso`. Osoba budująca ISO odpowiada za prawa do
+umieszczonych nagrań.
+`narzedzia/package_muzyka.py` pakuje wtedy pliki z `dane/muzyka/` (uzupełnione przez użytkownika; repozytorium nie zawiera
 muzyki) do modułu Multiboot2 w kontenerze BZP3 (jak galeria). Jądro przy rozruchu **żywego** systemu kopiuje je do
 `/dane/muzyka/` (bez nadpisywania, od najmniejszych, CRC przed zapisem, wpis pomijany w całości, gdy na RAM‑dysku
-zostałoby < 24 MiB – `psf_wolne_bajty()`). Instalator muzyki nie kopiuje. Wyłączenie: `make MUZYKA_W_ISO=0`.
+zostałoby < 24 MiB – `psf_wolne_bajty()`). Instalator muzyki nie kopiuje.
 Nazwy plików ≤ 55 bajtów (limit PSF). RAM‑dysk żywego systemu ma 128 MiB wspólne z systemem – duże pliki WAV mogą
 się nie zmieścić: każdy pominięty plik jest wypisywany z nazwą, rozmiarem i wolnym miejscem
 (`[MUZYKA] pominieto (brak miejsca na RAM-dysku): <nazwa> (N MiB, wolne M MiB, rezerwa 24 MiB)`), a paker przy
@@ -226,7 +330,17 @@ moduł, 256 plików. Prywatne nagrania w `dane/muzyka/` są ignorowane przez git
   suwakami, opis w całości, wiersz sterowania, pasek stanu), stabilność położenia przy przełączaniu diagnostyki,
   odrysowania częściowe, tło, podpowiedzi BursztynUI. Wspólne sprawdzenia: `testy/grajek_uklad_sprawdzenia.h`.
 * `make -j1 test-muzyka-pak-host` – moduł muzyki (rozszerzenia, katalog, rezerwa, brak nadpisywania).
-* `make -j1 test-grajek` – wszystkie powyższe.
+* `test_ikony_i_grafiki` (w `test-grajek-ui-host`): 14 ikon zdekodowanych raz i przypisanych do akcji, płyta =
+  oryginalny plik bajt w bajt, dekodowana raz, okładka skalowana raz na rozmiar (zero skalowań w 2 s odtwarzania),
+  okładka z tagu ma pierwszeństwo, 150 % (ikony w nowym boku bez ponownego dekodowania), stany (najechanie,
+  wyłączenie, wciśnięcie i zwolnienie poza przyciskiem, zaznaczenie), Spacja/Enter, fokus, podpowiedź w obszarze
+  roboczym przy kursorze, brak grafik (przyciski tekstowe działają), uszkodzony PNG, za duży PNG, obcięty JPEG.
+* `test_grafika_plyty`, `test_opoznienia_wav_mp3` (w `test-grajek-host`): JPEG użytkownika (progresywny) – jeden
+  odczyt i dekodowanie, zachowany średni kolor; MP3 i WAV przy przestojach 40/120/333/200 ms – niedobór dokładnie
+  = przestój − kolejka, wyjście bez przerw = dekodowanie referencyjne (bez duplikatów i pominięć).
+* `make -j1 test-zasoby-grajka` – narzędzie konwersji (mapa = pliki użytkownika, 128×128 RGBA, przezroczystość i
+  proporcje, determinizm, oryginały niezmienione) i spójność listy akcji w narzędziu, Makefile, jądrze i Grajku.
+* `make -j1 test-grajek` – wszystkie powyższe (zależą od `grajek_zasoby/`, tworzonego automatycznie).
 
 ## Znane ograniczenia
 * Brak wątków Ring 3: produkcja PCM współdzieli pętlę z GUI. Długie operacje (pierwsze przewinięcie MP3 buduje

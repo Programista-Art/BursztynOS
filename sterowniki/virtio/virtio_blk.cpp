@@ -273,6 +273,25 @@ static bool virtio_blk_reset_locked(VirtioBlkDriver* drv) {
  * i weryfikuje zakonczenie (id deskryptora, used.len, status).
  * Funkcja wywolywana w sekcji krytycznej (pod lockiem sterownika).
  */
+// Diagnostyka zadania (ograniczona linia, bez danych): operacja, LBA, sektory i wartosc dodatkowa.
+static void blk_log_zadania(const char* prefiks, BlkReqOp op, uint64_t lba, uint32_t count,
+                            const char* nazwa1, uint64_t w1, const char* nazwa2 = nullptr, uint64_t w2 = 0,
+                            const char* przyczyna = nullptr) {
+    char b[192];
+    size_t p = 0;
+    auto t = [&](const char* s) { while (s && *s && p + 1 < sizeof(b)) b[p++] = *s++; };
+    auto u = [&](uint64_t v) { char d[21]; int n = 0; do { d[n++] = char('0' + v % 10); v /= 10; } while (v && n < 20); while (n && p + 1 < sizeof(b)) b[p++] = d[--n]; };
+    t(prefiks);
+    t(" op="); t(op == BlkReqOp::Read ? "read" : op == BlkReqOp::Write ? "write" : "flush");
+    t(" lba="); u(lba); t(" sectors="); u(count);
+    if (nazwa1) { t(" "); t(nazwa1); t("="); u(w1); }
+    if (nazwa2) { t(" "); t(nazwa2); t("="); u(w2); }
+    if (przyczyna) { t(" reason="); t(przyczyna); }
+    b[p] = 0;
+    blk_klog(b);
+}
+static uint32_t blk_krotkie_odczyty = 0;   // licznik krotkich odczytow (used.len < dane + status)
+
 static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
                                                    BlkReqOp op,
                                                    uint64_t lba,
@@ -444,6 +463,11 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
 
     if (!completed) {
         blk_klog("[VIRTIO-BLK] ERROR: request timed out");
+        const uint64_t teraz_ns = blk_monotonic_ns();
+        blk_log_zadania("[VIRTIO-BLK] TIMEOUT", op, lba, count,
+                        "elapsed_ms", (teraz_ns > start_ns ? teraz_ns - start_ns : 0) / 1000000ULL,
+                        "limit_ms", VIRTIO_BLK_DEFAULT_TIMEOUT_MS,
+                        spin_guard == 0 ? "spin-guard" : (teraz_ns == 0 ? "no-clock" : "deadline"));
         drv->has_error = true;
         virtio_blk_reset_locked(drv);
         if (op == BlkReqOp::Read && buf) blk_secure_zero(buf, data_bytes);
@@ -496,12 +520,20 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
             uint32_t data_written = completed_len - 1U;
             if (data_written > data_bytes) data_written = data_bytes;
 
-            blk_memcpy(buf, drv->data_vaddr, data_written);
-
-            // Jesli urzadzenie zwrocilo mniej niz zadano: zerujemy niezapelniona czesc bufora wyjsciowego
+            // Krotki odczyt (used.len < dane + status) przy statusie OK: VIRTIO 1.x (negocjujemy wylacznie
+            // VIRTIO_F_VERSION_1) - sterownik nie moze zakladac niczego o danych poza pierwszymi `len` bajtami
+            // bufora zapisywalnego przez urzadzenie. Dawniej brakujaca czesc byla zerowana i zwracano Ok, czyli
+            // niepelne dane wygladaly jak poprawny odczyt. Teraz: caly bufor wyzerowany i blad I/O (bez resetu -
+            // urzadzenie zakonczylo zadanie i zglosilo status, kolejka pozostaje spojna).
             if (data_written < data_bytes) {
-                blk_secure_zero(static_cast<uint8_t*>(buf) + data_written, data_bytes - data_written);
+                if (blk_krotkie_odczyty < UINT32_MAX) ++blk_krotkie_odczyty;
+                if (blk_krotkie_odczyty <= 16)
+                    blk_log_zadania("[VIRTIO-BLK] ERROR short read", op, lba, count, "bytes", data_written, "expected", data_bytes);
+                blk_secure_zero(buf, data_bytes);
+                return BlockError::IOError;
             }
+
+            blk_memcpy(buf, drv->data_vaddr, data_bytes);
 
             if (drv->total_reads < UINT64_MAX) drv->total_reads++;
             if (drv->total_sectors_read <= UINT64_MAX - count) drv->total_sectors_read += count;

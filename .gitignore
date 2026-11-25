@@ -124,3 +124,7 @@ jadro/siec/tls_test_ca.generated.h
 /.graphics-perf/
 # Dowody w docs/ sa wersjonowane mimo globalnych regul *.log
 !/docs/zakonczenie-procesow-2026-11-16/**
+
+# --- Grajek: ikony przeskalowane przy budowaniu (narzedzia/przygotuj_zasoby_grajka.py) ---
+/grajek_zasoby/
+/.importer-test/

@@ -8,6 +8,16 @@
 #   .\runwindows.ps1 -Mode 2              bez menu: tryb 2 (UEFI + VirtIO Full); kod wyjscia = kod QEMU
 #   .\runwindows.ps1 -PrintArgv -Mode 16  tylko raport JSON z argv QEMU (nic nie tworzy, nic nie uruchamia)
 #   .\runwindows.ps1 -Mode 2 -AudioMode sdl                       dzwiek przez SDL zamiast DirectSound
+#   .\runwindows.ps1 -Mode 2 -DisplayBackend gtk                  frontend okna QEMU: gtk (domyslny,
+#                                         -display gtk,zoom-to-fit=on) albo sdl (diagnostycznie)
+#   .\runwindows.ps1 -Mode 15 -TestDisk instalacja-test.img -IsoSha256 <sha256> -AudioMode sdl
+#                                         instalator na NOWYM jednorazowym dysku testowym (tworzony tylko,
+#                                         gdy nie istnieje; nigdy wirtualny_dysk.img / wirtualnydysk.img)
+#   .\runwindows.ps1 -Mode 14 -TestDisk instalacja-test.img -UseExistingTestDisk -SerialLog -AudioMode sdl
+#                                         start systemu zainstalowanego na tym dysku testowym, z logiem COM1
+#   -DisplayBackend sam niczego nie uruchamia: bez -Mode otwiera sie menu, a wybrany frontend dotyczy
+#   trybow uruchamianych z menu (pozycje 11/12 zmieniaja go w trakcie). Skrypt z biezacego katalogu
+#   wywoluje sie z prefiksem .\ (np. .\runwindows.ps1), inaczej PowerShell go nie znajdzie.
 #   .\runwindows.ps1 -Mode 2 -AudioMode wav -AudioWavPath "nagrania\próba 1.wav"
 #
 # Dzwiek: gosc zawsze ma Intel HDA (-device intel-hda -device hda-output,audiodev=snd, PCI 00:02.0).
@@ -47,12 +57,28 @@ param(
     # Plik nagrania dla -AudioMode wav (domyslnie logi_qemu\nagrania_audio\bursztyn-hda-DATA.wav).
     [string]$AudioWavPath = "",
     # Pozwala nadpisac istniejacy plik nagrania (bez tego: unikalna nazwa albo odmowa).
-    [switch]$AudioOverwrite
+    [switch]$AudioOverwrite,
+    # Kontroler dzwieku GOSCIA (nie wyjscie hosta): hda = Intel HDA (domyslnie, profile produkcyjne),
+    # ac97 = Intel ICH AC97 wylacznie do rozwoju/testow sterownika AC97 (zamiast HDA, ten sam slot PCI).
+    [ValidateSet("hda", "ac97", "")]
+    [string]$GuestAudio = "",
+    # Jednorazowy dysk TESTOWY zamiast trwalego wirtualny_dysk.img (np. instalacja-test.img). Plik .img na
+    # zwyklej sciezce; bez -UseExistingTestDisk musi NIE istniec (jest tworzony, nigdy nadpisywany).
+    [string]$TestDisk = "",
+    # Jawna zgoda na uzycie ISTNIEJACEGO dysku testowego (np. start zainstalowanego systemu, tryb 14).
+    [switch]$UseExistingTestDisk,
+    # Oczekiwana suma SHA-256 obrazu ISO; niezgodnosc przerywa przed uruchomieniem QEMU.
+    [ValidatePattern('^$|^[0-9a-fA-F]{64}$')]
+    [string]$IsoSha256 = "",
+    # Zapis pelnego logu COM1 do logi_qemu\ rowniez w trybach, ktore domyslnie go nie zapisuja (np. 14).
+    [switch]$SerialLog
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $LauncherVersion = "2026-11-23-DZWIEK"
+# ValidateSet nie rozroznia wielkosci liter ("GTK" przechodzi), a QEMU wymaga nazwy backendu malymi literami.
+$DisplayBackend = $DisplayBackend.ToLowerInvariant()
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 # Wzgledna sciezka -Iso odnosi sie do katalogu, z ktorego uruchomiono skrypt.
@@ -71,6 +97,9 @@ $IsoNormal = if ([string]::IsNullOrWhiteSpace($Iso)) {
 }
 
 $IsoCiTest = Join-Path $ScriptDir ".bursztyn_ci_test.iso"
+# Kontroler dzwieku goscia: -GuestAudio > zmienna GUEST_AUDIO > hda. Bez cichego powrotu: brak AC97 w QEMU = blad.
+$script:GuestAudio = if (-not [string]::IsNullOrWhiteSpace($GuestAudio)) { $GuestAudio }
+    elseif ($env:GUEST_AUDIO -in @("hda", "ac97")) { $env:GUEST_AUDIO } else { "hda" }
 # Wybor dzwieku (menu "A" moze go zmienic w trybie interaktywnym). Jawny -AudioMode wav bez sciezki = domyslna.
 $script:AudioSelection = if ([string]::IsNullOrWhiteSpace($AudioMode)) {
     if ([string]::IsNullOrWhiteSpace($AudioWavPath)) { "dsound" } else { "wav" }
@@ -84,6 +113,42 @@ $script:Interactive = [string]::IsNullOrWhiteSpace($Mode) -and -not ($PrintArgv 
 $script:LastAudioFailure = ""
 $Disk = Join-Path $ScriptDir "wirtualny_dysk.img"
 $LogDir = Join-Path $ScriptDir "logi_qemu"
+$script:DiskIsTest = $false
+
+# -TestDisk: jawnie wybrany jednorazowy dysk testowy. Odmowa dla trwalych dyskow uzytkownika, urzadzen
+# fizycznych/sciezek UNC, plikow innych niz .img, istniejacego pliku bez -UseExistingTestDisk
+# i brakujacego pliku z -UseExistingTestDisk (literowka nie tworzy nowego dysku po cichu).
+function Resolve-TestDisk {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if ($Path -match '^\\\\' -or $Path -match '^//' -or $Path -match '(?i)physicaldrive|harddisk|volume\{') {
+        throw "-TestDisk: sciezki urzadzen i UNC sa niedozwolone: $Path"
+    }
+    $full = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $InvocationDir $Path }))
+    if ([System.IO.Path]::GetExtension($full) -ine ".img") { throw "-TestDisk: wymagane rozszerzenie .img: $full" }
+    $leaf = [System.IO.Path]::GetFileName($full)
+    foreach ($trwaly in @("wirtualny_dysk.img", "wirtualnydysk.img")) {
+        if ($leaf -ieq $trwaly) { throw "-TestDisk: $leaf to nazwa TRWALEGO dysku uzytkownika - wybierz inna nazwe (np. instalacja-test.img)." }
+        if ($full -ieq [System.IO.Path]::GetFullPath((Join-Path $ScriptDir $trwaly))) { throw "-TestDisk wskazuje trwaly dysk: $full" }
+    }
+    $parent = [System.IO.Path]::GetDirectoryName($full)
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) { throw "-TestDisk: katalog nie istnieje: $parent" }
+    if (Test-Path -LiteralPath $full) {
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "-TestDisk: istnieje, ale nie jest plikiem: $full" }
+        if (-not $UseExistingTestDisk) {
+            throw "-TestDisk: plik juz istnieje i NIE zostanie nadpisany: $full`nAby go uzyc (np. tryb 14), dodaj -UseExistingTestDisk; na nowa instalacje podaj nowa nazwe."
+        }
+    } elseif ($UseExistingTestDisk) {
+        throw "-UseExistingTestDisk: plik nie istnieje: $full"
+    }
+    return $full
+}
+if (-not [string]::IsNullOrWhiteSpace($TestDisk)) {
+    try { $Disk = Resolve-TestDisk -Path $TestDisk; $script:DiskIsTest = $true }
+    catch { Write-Host "BLAD: $($_.Exception.Message)" -ForegroundColor Red; exit 2 }
+} elseif ($UseExistingTestDisk) {
+    Write-Host "BLAD: -UseExistingTestDisk wymaga -TestDisk." -ForegroundColor Red
+    exit 2
+}
 
 # Natywne polecenie z przechwyceniem stdout/stderr. W Windows PowerShell 5.1 linia stderr przy
 # $ErrorActionPreference = "Stop" i przekierowaniu 2>&1 staje sie bledem konczacym skrypt.
@@ -319,6 +384,28 @@ function Convert-DiskSizeToBytes {
 }
 
 function Prepare-Disk {
+    if ($script:DiskIsTest) {
+        Write-Host "Dysk testowy (jednorazowy): $Disk" -ForegroundColor Cyan
+        if (Test-Path -LiteralPath $Disk -PathType Leaf) {
+            if (-not $UseExistingTestDisk) { throw "Dysk testowy pojawil sie w miedzyczasie - odmowa nadpisania: $Disk" }
+            Write-Host "Uzywam ISTNIEJACEGO dysku testowego (-UseExistingTestDisk), rozmiar $((Get-Item -LiteralPath $Disk).Length) B."
+            return
+        }
+        # Bez qemu-img (ono nadpisuje istniejacy plik): CreateNew odmawia, gdy plik juz istnieje.
+        $bytes = Convert-DiskSizeToBytes -Value $DiskSize
+        $drive = New-Object System.IO.DriveInfo([System.IO.Path]::GetPathRoot($Disk))
+        $need = $bytes + 1GB
+        if ($drive.AvailableFreeSpace -lt $need) {
+            throw "Za malo miejsca na $($drive.Name): wolne $([math]::Round($drive.AvailableFreeSpace/1GB,2)) GiB, wymagane $([math]::Round($need/1GB,2)) GiB (dysk $DiskSize moze zajac cala pojemnosc + 1 GiB zapasu na logi)."
+        }
+        $fs = $null
+        try {
+            $fs = [System.IO.File]::Open($Disk, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $fs.SetLength($bytes)
+        } finally { if ($null -ne $fs) { $fs.Dispose() } }
+        Write-Host "Utworzono nowy pusty dysk testowy RAW $DiskSize ($bytes B): $Disk"
+        return
+    }
     if (Test-Path -LiteralPath $Disk -PathType Leaf) {
         return
     }
@@ -380,6 +467,32 @@ function Assert-QemuDisplay {
         $list = $available -join [Environment]::NewLine
         throw "QEMU nie udostepnia backendu '$Backend'.`n`nQEMU -display help:`n$list"
     }
+}
+
+# AC97 tylko na jawne zadanie: ta instalacja QEMU musi miec urzadzenie AC97.
+function Assert-QemuGuestAudioDevice {
+    param([Parameter(Mandatory = $true)][string]$Qemu)
+    if ($script:GuestAudio -ne "ac97") { return }
+    $probe = Invoke-NativeCapture -Exe $Qemu -Arguments @("-device", "help")
+    if ($probe.ExitCode -ne 0 -or -not (($probe.Lines -join "`n") -match '(?m)name "AC97"')) {
+        throw "Ta instalacja QEMU nie ma urzadzenia AC97 (-GuestAudio ac97). QEMU nie zostalo uruchomione; uzyj domyslnego -GuestAudio hda."
+    }
+}
+
+# Zamienia kontroler goscia HDA na AC97 w tym samym miejscu listy argumentow (ten sam slot PCI 00:02.0).
+function Use-Ac97GuestDevice {
+    param([Parameter(Mandatory = $true)][object[]]$Arguments)
+    $out = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        if ($Arguments[$i] -eq "-device" -and $i + 1 -lt $Arguments.Count -and $Arguments[$i+1] -eq "intel-hda") {
+            $out.Add("-device"); $out.Add("AC97,audiodev=snd"); $i++; continue
+        }
+        if ($Arguments[$i] -eq "-device" -and $i + 1 -lt $Arguments.Count -and $Arguments[$i+1] -eq "hda-output,audiodev=snd") {
+            $i++; continue
+        }
+        $out.Add($Arguments[$i])
+    }
+    return ,$out.ToArray()
 }
 
 function Assert-QemuVirtioDevices {
@@ -577,6 +690,10 @@ function Resolve-AudioConfig {
 # blokuja odtwarzania i nie sa bledem. Wynik: unsupported, device, file, init albo "".
 function Get-AudioFailureKind {
     param([string[]]$Lines = @())
+    # DirectSoundCapture (przechwytywanie DirectSound) to czesc inicjalizacji backendu dsound w QEMU: jej blad jest
+    # bledem inicjalizacji dzwieku hosta (nie bledem sterownika HDA Bursztyn OS i nie bledem niezwiazanym z dzwiekiem).
+    if (@($Lines | Where-Object { $_ -match $script:AudioQemuLinePattern -and $_ -match '(?i)DirectSoundCapture' }).Count -gt 0) { return "capture" }
+    # Pozostale komunikaty o nagrywaniu (np. brak mikrofonu) nie dotycza odtwarzania - pomijane.
     $relevant = @($Lines | Where-Object { $_ -match $script:AudioQemuLinePattern -and $_ -notmatch '(?i)capture' })
     if ($relevant.Count -eq 0) { return "" }
     $text = $relevant -join "`n"
@@ -598,6 +715,11 @@ function Write-AudioOutcome {
         "device"      { Write-Host "Błąd uruchomienia dźwięku: brak urządzenia wyjściowego dla $label." -ForegroundColor Red }
         "file"        { Write-Host "Błąd nagrywania: QEMU nie mógł zapisać pliku WAV." -ForegroundColor Red }
         "init"        { Write-Host "Błąd uruchomienia dźwięku: inicjalizacja $label nie powiodła się." -ForegroundColor Red }
+        "capture"     {
+            if ($ExitCode -ne 0) { Write-Host "Błąd inicjalizacji dźwięku: QEMU nie mógł zainicjalizować DirectSoundCapture (przechwytywanie DirectSound na hoście)." -ForegroundColor Red }
+            else { Write-Host "Ostrzeżenie dźwięku: QEMU zgłosił błąd inicjalizacji DirectSoundCapture (przechwytywanie DirectSound na hoście); odtwarzanie DirectSound mogło nie działać." -ForegroundColor Yellow }
+            Write-Host "To problem backendu dźwięku hosta Windows, nie sterownika Intel HDA Bursztyn OS. Działające wyjścia: -AudioMode sdl (odsłuch), -AudioMode wav (nagranie)."
+        }
     }
     if ($kind) {
         Write-Host "Komunikaty QEMU:"
@@ -740,6 +862,20 @@ function Start-BursztynQemu {
     }
     # Dzwiek przed dyskiem: blad konfiguracji dzwieku nie tworzy dysku i nie uruchamia QEMU.
     $audio = Resolve-AudioConfig -Qemu $qemu -ReadOnly:($PrintArgv -or $Audit)
+    if (-not ($PrintArgv -or $Audit)) { Assert-QemuGuestAudioDevice -Qemu $qemu }
+    # Suma ISO PRZED utworzeniem dysku testowego: niezgodne ISO nie zostawia pustego dysku i nie uruchamia QEMU.
+    if (-not ($PrintArgv -or $Audit) -and -not [string]::IsNullOrWhiteSpace($IsoSha256)) {
+        if ([string]::IsNullOrWhiteSpace($IsoPath)) {
+            Write-Host "-IsoSha256: ten tryb nie uzywa ISO - suma nie jest sprawdzana." -ForegroundColor Yellow
+        } else {
+            if (-not (Test-Path -LiteralPath $IsoPath -PathType Leaf)) { throw "Nie znaleziono obrazu ISO: $IsoPath" }
+            $actualSha = (Get-FileHash -LiteralPath $IsoPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualSha -ne $IsoSha256.ToLowerInvariant()) {
+                throw "SHA-256 ISO niezgodne - przerwano przed utworzeniem dysku i uruchomieniem QEMU.`n  plik:       $IsoPath`n  oczekiwano: $($IsoSha256.ToLowerInvariant())`n  jest:       $actualSha"
+            }
+            Write-Host "SHA-256 ISO zgodne: $actualSha ($IsoPath)" -ForegroundColor Green
+        }
+    }
     if (-not ($PrintArgv -or $Audit)) { Prepare-Disk }
 
     $hasIso = -not [string]::IsNullOrWhiteSpace($IsoPath)
@@ -773,6 +909,7 @@ function Start-BursztynQemu {
         "-device", "intel-hda",
         "-device", "hda-output,audiodev=snd"
     )
+    if ($script:GuestAudio -eq "ac97") { $argsList = Use-Ac97GuestDevice -Arguments $argsList }
 
     if ($VirtIoFull) {
         $blkSpec = "virtio-blk-pci,drive=disk,disable-legacy=on"
@@ -863,19 +1000,19 @@ function Start-BursztynQemu {
     if ($QmpPort -gt 0) {
         $argsList += @("-qmp", "tcp:127.0.0.1:$QmpPort,server=on,wait=off")
     }
-    if ($PointerDiagnostics) { $SaveLog = $true }
+    if ($PointerDiagnostics -or $SerialLog) { $SaveLog = $true }
 
     $argsList += @("-name", "Bursztyn OS - $ModeName")
 
     $pciDevices = @()
     for ($i=0; $i -lt $argsList.Count-1; $i++) {
-        if ($argsList[$i] -eq "-device" -and $argsList[$i+1] -match '^(intel-hda|virtio-.*-pci|virtio-vga)(,|$)') {
+        if ($argsList[$i] -eq "-device" -and $argsList[$i+1] -match '^(intel-hda|AC97|virtio-.*-pci|virtio-vga)(,|$)') {
             $pciDevices += $argsList[$i+1]
         }
     }
     $topology = @()
     $classes = @{
-        "intel-hda"="audio"; "virtio-blk-pci"="storage"; "virtio-net-pci"="network"
+        "intel-hda"="audio"; "AC97"="audio"; "virtio-blk-pci"="storage"; "virtio-net-pci"="network"
         "virtio-rng-pci"="rng"; "virtio-vga"="gpu"; "virtio-keyboard-pci"="keyboard"
         "virtio-mouse-pci"="relative mouse"; "virtio-tablet-pci"="absolute tablet"
     }
@@ -886,6 +1023,8 @@ function Start-BursztynQemu {
     }
     $report = [ordered]@{argv=@($qemu)+$argsList;host_os=[Environment]::OSVersion.ToString();qemu_binary=$qemu;topology=$topology}
     $report.pointer_selection = $PointerDevice
+    $report.disk = $Disk
+    $report.disk_is_test = $script:DiskIsTest
     $report.display_backend = $effectiveDisplay
     $report.audio_mode = $audio.Mode
     $report.audiodev = $audio.Arg
@@ -926,11 +1065,15 @@ function Start-BursztynQemu {
     }
     Write-Host "Wyjście dźwięku: $(Get-AudioModeLabel -Name $audio.Mode) (-audiodev $($audio.Arg))"
     Write-Host "Wersja QEMU:     $(Get-QemuVersionLine -Qemu $qemu)"
-    Write-Host "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    if ($script:GuestAudio -eq "ac97") {
+        Write-Host "Kontroler dźwięku gościa: Intel ICH AC97 (AC97,audiodev=snd, PCI 00:02.0) - tryb deweloperski, bez Intel HDA"
+    } else {
+        Write-Host "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    }
     Write-Host "Dźwięk hosta:    $($audio.HostInfo)"
     if ($audio.WavPath) { Write-Host "Ścieżka nagrania: $($audio.WavPath)" }
     Write-Host "ISO:          $(if ($hasIso) { $IsoPath } else { '(brak - start z dysku)' })"
-    Write-Host "Dysk:         $Disk (trwaly, zapis wlaczony)"
+    Write-Host "Dysk:         $Disk $(if ($script:DiskIsTest) { '(TESTOWY, jednorazowy - -TestDisk)' } else { '(trwaly, zapis wlaczony)' })"
     Write-Host "Boot:         $(if ($hasIso) { 'ISO najpierw' } else { 'dysk' })"
     Write-Host "============================================================"
     Write-Host ""
@@ -1076,6 +1219,9 @@ if (-not [string]::IsNullOrWhiteSpace($Mode)) {
     }
     exit $script:LastQemuExitCode
 }
+if ($PSBoundParameters.ContainsKey("DisplayBackend")) {
+    Write-Host "Frontend z parametru -DisplayBackend: $($DisplayBackend.ToUpperInvariant()). Wybierz tryb z menu albo podaj -Mode (np. -Mode 2)." -ForegroundColor Cyan
+}
 while ($true) {
     Write-Host @"
 
@@ -1105,7 +1251,7 @@ while ($true) {
   9  - BIOS
  10  - UEFI
 
- FRONTEND WINDOWS
+ FRONTEND WINDOWS (obecnie: $(if ([string]::IsNullOrWhiteSpace($script:DisplayBackend)) { "GTK" } else { $script:DisplayBackend.ToUpperInvariant() }))
  11  - GTK (zalecany, domyslny)
  12  - SDL (diagnostycznie)
 

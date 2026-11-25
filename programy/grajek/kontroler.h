@@ -19,6 +19,7 @@
 #include "kolejka.h"
 #include "konfiguracja.h"
 #include "okladka.h"
+#include "../../jadro/bws/bws_magazyn.h"
 
 namespace Grajek {
 
@@ -156,7 +157,7 @@ public:
     // Pelna lista licznikow (karta "Diagnostyka"): nazwa i wartosc osobno, bez obcinania. Liczniki ciaglosci sa
     // zawsze dostepne; czasy sekcji - gdy pomiar (opcja Diagnostyka) jest wlaczony. Czasy sekcji to czas zegarowy
     // TSC z ostatniego okna ~1 s: obejmuja wywlaszczenie procesu i oczekiwanie w wywolaniach systemowych.
-    static constexpr size_t LICZBA_POMIAROW = 21;
+    static constexpr size_t LICZBA_POMIAROW = 23;
     void pomiar(size_t i, char* nazwa, size_t cap_n, char* wartosc, size_t cap_w) const {
         Tekst n(nazwa, cap_n), w(wartosc, cap_w);
         const StatystykiCiaglosci& c = silnik_.ciaglosc();
@@ -195,6 +196,9 @@ public:
                 if (prof) { w.liczba(o.odrysowania); w.dodaj(" /s"); } else w.dodaj("—");
                 break;
             case 20: sekcja("Okładka", Sekcja::Okladka, false); break;
+            // planista jadra (sesja): gotowy, ale CPU zajete przez inny watek / najdluzsze dobrowolne uspienie
+            case 21: n.dodaj("Maks. czekanie na CPU"); w.liczba(c.maks_czekanie_cpu_ns / 1000000ULL); w.dodaj(" ms"); break;
+            case 22: n.dodaj("Maks. uśpienie procesu"); w.liczba(c.maks_uspienie_ns / 1000000ULL); w.dodaj(" ms"); break;
             default: break;
         }
     }
@@ -204,6 +208,20 @@ public:
         diag_[0] = '\0';
         ++w_diag_;
         zmieniono();
+    }
+
+    // ------------------------------------------------------------ rodzaj pamieci (BWS 111)
+    // Trwaly: /dane/muzyka na zainstalowanym dysku BSP2. Ram: sesja Live (albo awaryjny RAM FS) - pliki
+    // znikna po restarcie. Nieznany: starsze jadro bez BWS 111 (komunikat bez dopisku).
+    enum class RodzajMagazynu : uint8_t { Nieznany, Trwaly, Ram };
+    RodzajMagazynu rodzaj_magazynu() const { return rodzaj_magazynu_; }
+    void sprawdz_magazyn() {
+        rodzaj_magazynu_ = RodzajMagazynu::Nieznany;
+        if (!p_.bws) return;
+        BwsMagazynV1 m{};
+        if (p_.bws(111, reinterpret_cast<uint64_t>(&m), sizeof(m), BWS_MAGAZYN_V1, 0) != BWS_MAG_OK) return;
+        if (m.wersja != BWS_MAGAZYN_V1 || m.rozmiar != sizeof(m) || !(m.flagi & BWS_MAG_GOTOWY)) return;
+        rodzaj_magazynu_ = (m.flagi & BWS_MAG_TRWALY) ? RodzajMagazynu::Trwaly : RodzajMagazynu::Ram;
     }
 
     // ------------------------------------------------------------ biblioteka
@@ -455,7 +473,13 @@ private:
         const Utwor* b = utwor_biezacy();
         kopiuj_tekst(stara_biezaca_, sizeof(stara_biezaca_), b ? b->sciezka : "");
     }
+    void dopisz_magazyn(Tekst& t) const {
+        if (rodzaj_magazynu_ == RodzajMagazynu::Trwaly) t.dodaj(" Pliki są na dysku trwałym.");
+        else if (rodzaj_magazynu_ == RodzajMagazynu::Ram)
+            t.dodaj(" Sesja Live: system plików działa w RAM – pliki znikną po restarcie.");
+    }
     void po_skanie() {
+        sprawdz_magazyn();
         if (stare_) { (void)kol_.przemapuj(stare_, bib_); delete[] stare_; stare_ = nullptr; stare_n_ = 0; }
         biezacy_ = stara_biezaca_[0] ? bib_.znajdz(stara_biezaca_) : -1;
         ++w_bib_; ++w_kol_; ++w_utw_;
@@ -463,12 +487,14 @@ private:
         Tekst t(bufor_kom_, sizeof(bufor_kom_));
         if (!w.katalog_istnieje) {
             t.dodaj("Katalog /dane/muzyka nie istnieje. Utwórz go i umieść w nim pliki WAV lub MP3, potem kliknij „Odśwież bibliotekę”.");
+            dopisz_magazyn(t);
             ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Ostrzezenie);
             return;
         }
         if (!bib_.liczba()) {
             t.dodaj("Brak obsługiwanych plików w /dane/muzyka (WAV, MP3).");
             if (w.odrzucone) { t.dodaj(" Odrzucono: "); t.liczba(w.odrzucone); t.dodaj(" – "); t.dodaj(w.ostatni_blad); }
+            dopisz_magazyn(t);
             ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Informacja);
             return;
         }
@@ -476,7 +502,9 @@ private:
         if (w.odrzucone) { t.dodaj(", pominięte (nieprawidłowe): "); t.liczba(w.odrzucone); }
         if (w.pominiete_limit) { t.dodaj(", poza limitem: "); t.liczba(w.pominiete_limit); }
         t.dodaj(".");
-        ustaw_komunikat(bufor_kom_, w.odrzucone || w.pominiete_limit ? RodzajKomunikatu::Ostrzezenie : RodzajKomunikatu::Sukces);
+        dopisz_magazyn(t);
+        ustaw_komunikat(bufor_kom_, w.odrzucone || w.pominiete_limit || rodzaj_magazynu_ == RodzajMagazynu::Ram
+                                        ? RodzajKomunikatu::Ostrzezenie : RodzajKomunikatu::Sukces);
     }
 
     Platforma p_{};
@@ -497,7 +525,8 @@ private:
     char komunikat_[192]{};
     char komunikat_niedoboru_[192]{};
     char diag_[128]{};
-    char bufor_kom_[192]{};
+    char bufor_kom_[320]{};
+    RodzajMagazynu rodzaj_magazynu_ = RodzajMagazynu::Nieznany;
     RodzajKomunikatu rodzaj_ = RodzajKomunikatu::Informacja;
     uint32_t w_bib_ = 0, w_kol_ = 0, w_utw_ = 0, w_kom_ = 0, w_ust_ = 0, w_diag_ = 0;
 

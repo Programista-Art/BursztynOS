@@ -2,12 +2,14 @@
 // Grajek - wspolne srodowisko testow hosta: wirtualny system plikow (odczyt fragmentu, rozmiar, listing BWS 6)
 // oraz symulacja BWS 110 na PRAWDZIWYM mikserze jadra (jadro/dzwiek/mikser_pcm.h) z wstrzykiwaniem BUSY,
 // czesciowych zapisow i brakiem urzadzenia. graj() odgrywa role DMA HDA: pobiera ramki z miksera.
+#include "../jadro/bws/bws_magazyn.h"
 #include "grajek_fixtures.h"
 #include "programy/grajek/zrodlo.h"
 #include "programy/grajek/biblioteka.h"
 #include "jadro/bws/pcm_api.h"
 #include "jadro/dzwiek/mikser_pcm.h"
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -62,7 +64,33 @@ static void dodaj_plik(const std::string& s, Bajty b) {
     g_pliki[s] = std::move(b);
     for (size_t p = s.find('/', 1); p != std::string::npos; p = s.find('/', p + 1)) g_katalogi[s.substr(0, p)] = true;
 }
-static void wyczysc_fs() { g_pliki.clear(); g_katalogi.clear(); }
+// Grafiki Grajka jak w systemie: prawdziwe pliki z repozytorium (ikony po konwersji przy budowaniu - Makefile:
+// $(GRAJEK_ZASOBY_DIR)/.gotowe - i oryginalna plyta winylowa) pod /ikonki/. wyczysc_fs() dodaje je ponownie, chyba
+// ze test wylaczy je (g_zasoby_grajka = false), np. aby sprawdzic brak lub uszkodzenie grafiki.
+static bool g_zasoby_grajka = true;
+static const char* const AKCJE_IKON_GRAJKA[] = {"poprzedni", "odtworz", "pauza", "stop", "nastepny", "wycisz", "odswiez",
+                                               "dodaj", "w_gore", "w_dol", "usun", "wyczysc", "zapisz", "wczytaj"};
+static Bajty plik_repozytorium(const std::string& sciezka) {
+    Bajty b;
+    if (FILE* f = std::fopen(sciezka.c_str(), "rb")) {
+        unsigned char buf[65536]; size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) b.insert(b.end(), buf, buf + n);
+        std::fclose(f);
+    }
+    return b;
+}
+static void dodaj_plik(const std::string& s, Bajty b);
+static size_t dodaj_zasoby_grajka() {
+    size_t n = 0;
+    for (const char* a : AKCJE_IKON_GRAJKA) {
+        Bajty b = plik_repozytorium(std::string("grajek_zasoby/grajek_") + a + ".png");
+        if (!b.empty()) { dodaj_plik(std::string("/ikonki/grajek_") + a + ".png", std::move(b)); ++n; }
+    }
+    Bajty p = plik_repozytorium("ikonki/plyta_winylowa.jpg");
+    if (!p.empty()) { dodaj_plik("/ikonki/grajek_plyta_winylowa.jpg", std::move(p)); ++n; }
+    return n;
+}
+static void wyczysc_fs() { g_pliki.clear(); g_katalogi.clear(); if (g_zasoby_grajka) dodaj_zasoby_grajka(); }
 
 // =================================================================== symulowany BWS 110 na mikserze jadra
 struct Jadro {
@@ -73,12 +101,26 @@ struct Jadro {
     uint32_t limit_zapisu = 0;     // maks. ramek akceptowanych w jednym zapisie (0 = bez limitu)
     uint64_t wywolania = 0, otwarcia = 0, zamkniecia = 0, finish = 0, gain_ost_v = 999, gain_ost_m = 9, zapisy = 0;
     std::vector<int16_t> wyjscie;  // to, co "zagral" mikser (stereo)
+    // planista (PcmSchedDiag w jadrze): wartosci zwracane w BwsPcmStats V2
+    uint64_t czekanie_cpu_ns = 0, uspienie_ns = 0;
+    // BWS 111: 0 = brak wywolania (starsze jadro), 1 = trwaly dysk BSP2, 2 = RAM (Live)
+    int magazyn = 0;
     void reset() { *this = Jadro{}; }
 };
 static Jadro* g_j = nullptr;
 
 static uint64_t fake_bws(uint64_t nr, uint64_t op, uint64_t a, uint64_t b, uint64_t c) {
     Jadro& j = *g_j;
+    if (nr == 111) {
+        if (!j.magazyn) return 1;   // nieznane wywolanie: blad wersji
+        if (b != BWS_MAGAZYN_V1 || a < sizeof(BwsMagazynV1)) return 1;   // (bufor, rozmiar, wersja)
+        BwsMagazynV1 m{};
+        m.wersja = BWS_MAGAZYN_V1; m.rozmiar = sizeof(m);
+        m.flagi = BWS_MAG_GOTOWY | (j.magazyn == 1 ? BWS_MAG_TRWALY | BWS_MAG_ZAINSTALOWANY : 0u);
+        m.pojemnosc_bajty = 1ULL << 31; m.wolne_bajty = 1ULL << 30;
+        std::memcpy(reinterpret_cast<void*>(op), &m, sizeof(m));
+        return BWS_MAG_OK;
+    }
     if (nr != BWS_PCM) return 0;
     ++j.wywolania;
     auto r = [](Pcm::Result x) -> int64_t {
@@ -121,6 +163,7 @@ static uint64_t fake_bws(uint64_t nr, uint64_t op, uint64_t a, uint64_t b, uint6
         BwsPcmStats st{};
         const auto rc = j.mikser->statistics(j.wlasciciel, a, st);
         if (rc != Pcm::OK) return uint64_t(r(rc));
+        st.max_runnable_wait_ns = j.czekanie_cpu_ns; st.max_voluntary_wait_ns = j.uspienie_ns;
         std::memcpy(reinterpret_cast<void*>(b), &st, size_t(c));
         return PCM_OK;
     }

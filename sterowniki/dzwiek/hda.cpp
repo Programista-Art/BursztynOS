@@ -3302,7 +3302,7 @@ bool slad_pcm(uint32_t index, SladPcm& out) {
 }
 }
 
-#include "jadro/dzwiek/pcm_aplikacji.h"
+#include "sterowniki/dzwiek/hda_pcm_aplikacji.h"
 struct PcmFinalStats { Pcm::Owner owner; BwsPcmStats stats; };
 PcmFinalStats pcm_final_stats[Pcm::MAX_STREAMS]{};
 uint32_t pcm_final_count = 0;
@@ -3322,7 +3322,9 @@ void pcm_archive(Pcm::Owner owner, uint64_t handle) {
         pcm_final_stats[pcm_final_count++] = {owner, stats};
     }
 }
-namespace PcmAplikacji {
+// Implementacja BWS 110 dla HDA. Publiczne PcmAplikacji:: (jadro/dzwiek/wyjscie_audio.cpp) kieruje tu
+// wywolania tylko wtedy, gdy HDA jest wybranym wyjsciem audio.
+namespace HdaPcmAplikacji {
 static int64_t result(Pcm::Result rc) {
     switch (rc) {
         case Pcm::OK: return PCM_OK;
@@ -3417,7 +3419,7 @@ int64_t finish(Pcm::Owner owner, uint64_t handle) {
     return result(rc);
 }
 }
-extern "C" bool pcm_posprzataj_proces(uint32_t pid, uint64_t generation) {
+extern "C" bool hda_pcm_posprzataj_proces(uint32_t pid, uint64_t generation) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return false;
     const Pcm::Owner owner{pid, generation};
@@ -3432,7 +3434,7 @@ extern "C" bool pcm_posprzataj_proces(uint32_t pid, uint64_t generation) {
 }
 
 
-extern "C" bool pcm_diag_stream(uint32_t pid, uint64_t generation, BwsPcmStats& out) {
+extern "C" bool hda_pcm_diag_stream(uint32_t pid, uint64_t generation, BwsPcmStats& out) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return false;
     for (uint32_t i = 0; i < pcm_final_count; ++i)
@@ -3444,7 +3446,7 @@ extern "C" bool pcm_diag_stream(uint32_t pid, uint64_t generation, BwsPcmStats& 
 }
 
 
-extern "C" bool pcm_diag_starvation(uint32_t index, Pcm::Starvation& out) {
+extern "C" bool hda_pcm_diag_starvation(uint32_t index, Pcm::Starvation& out) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     return guard.aktywny() && pcm_mixer.starvation(index, out);
 }

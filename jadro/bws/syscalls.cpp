@@ -85,6 +85,7 @@
 #include "heap.h"
 #include "psf.h"
 #include "instalator.h"
+#include "jadro/fs/magazyn_info.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
@@ -3360,6 +3361,17 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             scheduler_generacja_procesu(aktualny_pid)};
         return static_cast<uint64_t>(bws_pcm_obsluz(owner, arg1, arg2, arg3, arg4,
             skopiuj_z_przestrzeni_uzytkownika, skopiuj_do_przestrzeni_uzytkownika));
+    }
+    if (nr_funkcji == BWS_INFORMACJA_MAGAZYNU) {
+        // Tylko odczyt statystyk PSF; bez sciezek i bez danych innych procesow.
+        if (arg3 != BWS_MAGAZYN_V1) return BWS_MAG_ZLA_WERSJA;
+        if (arg2 < sizeof(BwsMagazynV1) || !arg1) return BWS_MAG_ZLY_BUFOR;
+        PsfStatystyki statystyki{};
+        if (!psf_statystyki(&statystyki)) return BWS_MAG_NIEGOTOWY;
+        BwsMagazynV1 odp{};
+        wypelnij_informacje_magazynu(odp, statystyki, instalator_system_zainstalowany());
+        return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg1), &odp, sizeof(odp))
+                   ? BWS_MAG_OK : BWS_MAG_ZLY_BUFOR;
     }
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
         nr_funkcji <= BWS_POWIADOMIENIA) {

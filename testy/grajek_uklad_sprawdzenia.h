@@ -18,6 +18,17 @@ inline bool tekst_miesci(Kontrolka* k) {
     const SkalaUI s = k->skala_dpi();
     return CzcionkaUI::zmierz_tekst(k->tekst(), s) + 8 * s <= k->obszar().szerokosc;
 }
+// Przycisk z ikona: kafel (z pierscieniem fokusu) w calosci w obszarze przycisku, cel klikniecia >= 34 DIP,
+// ikona przygotowana w biezacym rozmiarze (bez skalowania przy rysowaniu). Bez ikony - tekst miesci sie.
+inline bool ikona_miesci(PrzyciskIkony* b) {
+    if (!b->uzywa_ikony()) return tekst_miesci(b);
+    const SkalaUI s = b->skala_dpi();
+    const Prostokat k = b->obszar_kafla();
+    const int pierscien = 4 * s;
+    return k.x - pierscien >= 0 && k.y - pierscien >= 0 && k.prawy() + pierscien <= b->obszar().szerokosc &&
+           k.dolny() + pierscien <= b->obszar().wysokosc && b->obszar().szerokosc >= 34 * s && b->obszar().wysokosc >= 34 * s &&
+           b->obraz_ikony()->piksele(b->bok_ikony_px()) != nullptr;
+}
 // Wszystkie kolumny tabeli mieszcza sie bez przewijania poziomego, naglowki nie sa wezsze niz tekst.
 inline void sprawdz_tabele(TabelaGrajka* t, DostawcaKolumnGrajka* d) {
     const SkalaUI s = t->skala_dpi();
@@ -48,16 +59,37 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
     CHECK(CzcionkaUI::zmierz_tekst(o->tytul_->tekst_widoczny(), o->tytul_->skala_tekstu()) <= o->tytul_->obszar().szerokosc);
     // biblioteka: naglowki w calosci, bez przewijania poziomego; przyciski bez obcinania
     sprawdz_tabele(o->bib_, &o->dane_bib_);
-    CHECK(tekst_miesci(o->odswiez_) && tekst_miesci(o->dodaj_kol_) && rozlaczne(o->odswiez_->obszar_ekranu(), o->dodaj_kol_->obszar_ekranu()));
+    CHECK(ikona_miesci(o->odswiez_) && ikona_miesci(o->dodaj_kol_) && rozlaczne(o->odswiez_->obszar_ekranu(), o->dodaj_kol_->obszar_ekranu()));
     // sterowanie: rozlaczne, w oknie, teksty w calosci (takze najszersze warianty zmiennych tekstow)
-    Kontrolka* ster[] = {o->poprz_, o->graj_, o->pauza_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->glosnosc_proc_,
+    Kontrolka* ster[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->glosnosc_proc_,
                          o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_, o->zakoncz_};
     for (size_t i = 0; i < sizeof(ster) / sizeof(ster[0]); ++i) {
         CHECK(wewnatrz(ster[i]->obszar_ekranu(), W, H));
         for (size_t k = 0; k < i; ++k) CHECK(rozlaczne(ster[i]->obszar_ekranu(), ster[k]->obszar_ekranu()));
     }
-    Przycisk* przyciski[] = {o->poprz_, o->graj_, o->pauza_, o->stop_, o->nast_, o->wycisz_, o->powtarzanie_, o->zakoncz_};
+    Przycisk* przyciski[] = {o->powtarzanie_, o->zakoncz_};
     for (Przycisk* b : przyciski) CHECK(tekst_miesci(b));
+    PrzyciskIkony* ikony[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_};
+    for (PrzyciskIkony* b : ikony) CHECK(ikona_miesci(b));
+    // transport wysrodkowany w wierszu (dwie rowne kolumny gwiazdkowe), Odtworz/Pauza wiekszy niz pozostale
+    {
+        const Prostokat w = o->wiersz_ster_[0]->obszar_ekranu();
+        const Prostokat g = o->graj_->obszar_ekranu();
+        const int srodek = g.x + g.szerokosc / 2 - (w.x + w.szerokosc / 2);
+        CHECK(srodek <= 2 * s && srodek >= -2 * s);                                          // Odtworz/Pauza na srodku
+        PrzyciskIkony* tr[] = {o->stop_, o->poprz_, o->nast_, o->wycisz_};                     // kafle w jednej linii
+        for (PrzyciskIkony* b : tr) {
+            const int dy = (b->obszar_ekranu().y + b->obszar_ekranu().wysokosc / 2) - (g.y + g.wysokosc / 2);
+            CHECK(dy <= 1 * s && dy >= -1 * s);
+        }
+        CHECK(o->stop_->obszar_ekranu().prawy() <= o->poprz_->obszar_ekranu().x && o->poprz_->obszar_ekranu().prawy() <= g.x &&
+              g.prawy() <= o->nast_->obszar_ekranu().x);
+        if (o->graj_->uzywa_ikony() && o->stop_->uzywa_ikony()) CHECK(o->graj_->bok_kafla_px() > o->stop_->bok_kafla_px());
+        // glosnosc po prawej: wyciszenie tuz przy suwaku
+        CHECK(o->wycisz_->obszar_ekranu().prawy() <= o->glosnosc_->obszar_ekranu().x &&
+              o->glosnosc_->obszar_ekranu().x - o->wycisz_->obszar_ekranu().prawy() <= 12 * s);
+        CHECK(o->wycisz_->obszar_ekranu().x > o->nast_->obszar_ekranu().prawy());
+    }
     PoleWyboru* pola[] = {o->losowo_, o->w_tle_, o->wizualizacja_, o->diagnostyka_};
     for (PoleWyboru* p : pola) CHECK(CzcionkaUI::zmierz_tekst(p->tekst(), s) + 16 * s <= p->obszar().szerokosc);   // pole + tekst
     {   // warianty zmiennych tekstow mieszcza sie w kolumnach Auto
@@ -65,8 +97,10 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
         static const char* const W3[] = {"Powtarzanie: wył.", "Powtarzanie: utwór", "Powtarzanie: wszystkie"};
         for (const char* t : W3) { o->powtarzanie_->ustaw_tekst(t); CHECK(tekst_miesci(o->powtarzanie_)); }
         o->powtarzanie_->ustaw_tekst(b);
-        kopiuj_tekst(b, sizeof(b), o->wycisz_->tekst());
-        o->wycisz_->ustaw_tekst("Przywróć"); CHECK(tekst_miesci(o->wycisz_)); o->wycisz_->ustaw_tekst(b);
+        if (!o->wycisz_->uzywa_ikony()) {
+            kopiuj_tekst(b, sizeof(b), o->wycisz_->tekst());
+            o->wycisz_->ustaw_tekst("Przywróć dźwięk"); CHECK(tekst_miesci(o->wycisz_)); o->wycisz_->ustaw_tekst(b);
+        }
         CHECK(CzcionkaUI::zmierz_tekst("wycisz.", s) <= o->glosnosc_proc_->obszar().szerokosc);
     }
     // pasek stanu: jeden wiersz o wysokosci czcionki; komunikat i podsumowanie rozlaczne
@@ -75,12 +109,21 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
     if (o->komunikat_->skrot()[0])
         CHECK(8 * s + 8 * s + 8 * s + CzcionkaUI::zmierz_tekst(o->komunikat_->tekst_widoczny(), s) <= o->komunikat_->obszar_skrotu().x);
 
-    // karta Kolejka: przyciski 3 x 2 bez obcinania (w tym "Wyczyść"), tabela bez przewijania poziomego
+    // karta Kolejka: wiersz 6 ikon (rozlaczne, w panelu, rowne odstepy), tabela bez przewijania poziomego
     o->karty_->ustaw_aktywna_karte(0); o->przelicz_uklad();
     { KontekstRysowania c; o->rysuj(c, true); }
     CHECK(o->karty_->wysokosc_paska() >= CzcionkaUI::pobierz_wysokosc(s) + 8 * s);
-    CHECK(o->czysc_ && tekst_miesci(o->czysc_));
-    for (size_t i = 0; i < o->przyciski_kol_->liczba_dzieci(); ++i) CHECK(tekst_miesci(o->przyciski_kol_->dziecko(i)));
+    CHECK(o->czysc_ && ikona_miesci(o->czysc_));
+    for (int i = 0; i < 6; ++i) {
+        PrzyciskIkony* b = o->przyciski_kolejki_[i];
+        CHECK(ikona_miesci(b) && zawiera(o->karty_->obszar_ekranu(), b->obszar_ekranu()));
+        for (int k = 0; k < i; ++k) CHECK(rozlaczne(b->obszar_ekranu(), o->przyciski_kolejki_[k]->obszar_ekranu()));
+        if (i >= 2) {   // rowne odstepy srodkow (+-2 px zaokraglen siatki)
+            const int d1 = b->obszar_ekranu().x + b->obszar_ekranu().szerokosc / 2 - (o->przyciski_kolejki_[i - 1]->obszar_ekranu().x + o->przyciski_kolejki_[i - 1]->obszar_ekranu().szerokosc / 2);
+            const int d0 = o->przyciski_kolejki_[i - 1]->obszar_ekranu().x + o->przyciski_kolejki_[i - 1]->obszar_ekranu().szerokosc / 2 - (o->przyciski_kolejki_[i - 2]->obszar_ekranu().x + o->przyciski_kolejki_[i - 2]->obszar_ekranu().szerokosc / 2);
+            CHECK(d1 - d0 <= 2 && d0 - d1 <= 2);
+        }
+    }
     sprawdz_tabele(o->kol_, &o->dane_kol_);
 
     // karta Korektor: etykiety Hz i dB rozlaczne (w razie potrzeby w dwoch rzedach), opis w calosci pod nimi
@@ -134,7 +177,7 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
 // kursora natywnie).
 template <class Petla>
 inline void sprawdz_stabilnosc_diagnostyki(OknoGrajka* o, Petla petla) {
-    Kontrolka* ster[] = {o->poprz_, o->graj_, o->pauza_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->losowo_,
+    Kontrolka* ster[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->losowo_,
                          o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_, o->zakoncz_, o->komunikat_, o->karty_};
     petla(10);                                         // zalegle odrysowania wczesniejszych krokow
     Prostokat przed[sizeof(ster) / sizeof(ster[0])];

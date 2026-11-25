@@ -4,6 +4,7 @@
 #include "grafika.h"
 #include "scheduler.h"
 #include "tapety.h"
+#include "instalacja_plikow.h"
 extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem);
 extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe);
 extern "C" void galeria_instaluj_zakoncz();
@@ -36,7 +37,7 @@ uint64_t verify_meta_done=0,verify_meta_total=0;
 uint64_t perf_stage_us=0,perf_longest_us=0,perf_irq=0,perf_switches=0;
 uint64_t perf_stage_irq_start=0,perf_stage_switch_start=0;
 uint32_t bsp_phase=0;uint64_t bsp_done=0,bsp_total=0;
-char error[160]{};
+char error[256]{};   // = InstalatorOdpowiedz::blad
 const char config[]=
     "set default=0\nset gfxmode=auto\nset gfxpayload=keep\n"
     "insmod all_video\ninsmod gfxterm\nterminal_output gfxterm\n"
@@ -77,6 +78,14 @@ bool fingerprint_disk(Storage::Device*d,uint32_t*out){
     *out=c;return true;
 }
 void fail(uint32_t code,const char*why){status=code;stage=INST_BLAD;text_copy(error,why,sizeof(error));klog_serial("[INSTALL] Instalacja nie powiodla sie:");klog_serial(why);}
+// Blad plikow systemowych: komunikat GUI wskazuje konkretny plik i przyczyne (kernel_diagnoza_instalacji),
+// a gdy diagnozy brak - ogolny tekst etapu. Kod bledu i zatrzymanie zapisow bez zmian.
+void fail_pliki(uint32_t code,const char*ogolny){
+    const InstalacjaPlikow::Diagnoza*d=kernel_diagnoza_instalacji();
+    if(!d){fail(code,ogolny);return;}
+    char opis[sizeof(error)];InstalacjaPlikow::opisz(*d,opis,sizeof(opis));
+    fail(code,opis);
+}
 const char* progress_name(uint32_t value){
     static const char* names[]={"PREPARE","GPT","ESP","BSP2FORMAT","SYSTEMFILES","WALLPAPERS","VERIFY","COMPLETE"};
     return value<=POSTEP_COMPLETE?names[value]:"INVALID";
@@ -215,7 +224,7 @@ void perform(){
         for(int b=0;b<4&&!done;++b){
             if(!system_started||system_bytes_total>UINT32_MAX||
                !kernel_instaluj_system_step(&system_bytes_done,&files_done,&files_total,&done)){
-                fail(INST_PLIKI,"Pliki systemowe: kopiowanie lub FLUSH nie powiodły się.");return;}
+                fail_pliki(INST_PLIKI,"Pliki systemowe: kopiowanie lub FLUSH nie powiodły się.");return;}
         }
         set_progress(instalator_podpostep(45,75,uint32_t(system_bytes_done),uint32_t(system_bytes_total)),
                      POSTEP_SYSTEM,uint32_t(system_bytes_done),uint32_t(system_bytes_total));
@@ -263,7 +272,7 @@ void perform(){
             bool done=false;
             for(int b=0;b<8&&!done;++b){
                 if(!kernel_weryfikuj_system_step(&verify_system_done,&done)){
-                    fail(INST_IO,"Weryfikacja: pliki systemowe.");return;}
+                    fail_pliki(INST_IO,"Weryfikacja: pliki systemowe.");return;}
             }
             if(done)verify_phase=3;
         }else{

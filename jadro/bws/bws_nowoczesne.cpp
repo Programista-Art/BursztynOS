@@ -44,6 +44,7 @@
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "sterowniki/dzwiek/hda_diag.h"
+#include "jadro/dzwiek/wyjscie_audio.h"
 #include "sterowniki/dzwiek/hda_transport.h"
 #include "sterowniki/dzwiek/hda_wewnetrzny.h"
 
@@ -1916,7 +1917,7 @@ uint64_t zasobnik_stan(const proces_t& p, uint64_t bufor, uint64_t rozmiar, uint
     odp.wersja = static_cast<uint32_t>(BWS_ZASOBNIK_V1);
     odp.rozmiar = sizeof(odp);
     HdaGlosnoscInfo h{};
-    hda_glosnosc_info(&h);
+    wyjscie_audio_glosnosc_info(&h);
     ZasobnikJadro::dzwiek(odp.dzwiek, h);
     uint8_t ip[4], maska[4], brama[4], dns[4];
     const bool ipv4 = siec_pobierz_konfiguracje_ipv4(ip, maska, brama, dns);
@@ -1955,11 +1956,11 @@ uint64_t zasobnik_polecenie(const proces_t& p, uint64_t pol, uint64_t arg) {
     if (!ZasobnikJadro::menedzer_okien(zasobnik_wywolujacy(p))) return BWS_ZAS_BRAK_UPRAWNIEN;
     if (pol == BWS_ZAS_POL_GLOSNOSC) {
         if (arg > 100) return BWS_ZAS_ZLE_ARGUMENTY;
-        return ZasobnikJadro::wynik_glosnosci(hda_glosnosc_ustaw(static_cast<uint32_t>(arg)));
+        return ZasobnikJadro::wynik_glosnosci(wyjscie_audio_glosnosc_ustaw(static_cast<uint32_t>(arg)));
     }
     if (pol == BWS_ZAS_POL_WYCISZENIE) {
         if (arg > 1) return BWS_ZAS_ZLE_ARGUMENTY;
-        return ZasobnikJadro::wynik_glosnosci(hda_wyciszenie_ustaw(arg == 1));
+        return ZasobnikJadro::wynik_glosnosci(wyjscie_audio_wyciszenie_ustaw(arg == 1));
     }
     BezPrzerwan bez_przerwan;
     return ZasobnikJadro::polecenie_powiadomien(g_powiadomienia, pol, arg);

@@ -1056,6 +1056,8 @@ warstwa_obrazu* pobierz_warstwe(
  * 10. TWORZENIE WARSTWY
  * ========================================================================= */
 
+static void zmieniono_tresc_warstw();
+
 int utworz_warstwe(
     int pid,
     int x,
@@ -1106,6 +1108,7 @@ int utworz_warstwe(
         skladacz_obrazu_oznacz_dirty_rect(p_geom.old_x,p_geom.old_y,p_geom.width,p_geom.height);
         skladacz_obrazu_oznacz_dirty_rect(p_geom.x,p_geom.y,p_geom.width,p_geom.height);
     }
+    zmieniono_tresc_warstw();   // reuse/realokacja zmienia piksele poza transakcja rysowania (cien warstwy)
     const bool nowe_okno = !warstwa_bufor_spojny(pid);
     // Zmiana rozmiaru zywego okna (zmien_geometrie_warstwy): zachowujemy
     // ostatnia opublikowana tresc (lewy gorny rog) i widocznosc, wiec okno nie
@@ -1482,6 +1485,7 @@ void wyczysc_warstwe(
         warstwa->bufor_pikseli,
         liczba_pikseli
     );
+    zmieniono_tresc_warstw();
     skladacz_obrazu_oznacz_dirty_warstwy(pid);
 }
 
@@ -1492,6 +1496,7 @@ void wyczysc_warstwe(
 void usun_warstwe(
     int pid
 ) {
+    zmieniono_tresc_warstw();
     if(pid_poprawny(pid)){kfree(title_coverage[pid].alpha);title_coverage[pid]=TitleCoverage{};}
     if (application_popup.pid == pid)
         skladacz_obrazu_ustaw_popup_aplikacji(pid, false, 0, 0, 0, 0);
@@ -2457,6 +2462,10 @@ uint64_t skladacz_obrazu_id_okna(int pid) {
            static_cast<uint32_t>(pid);
 }
 
+static uint64_t epoka_tresci_warstw=1;
+static void zmieniono_tresc_warstw(){__atomic_add_fetch(&epoka_tresci_warstw,1ULL,__ATOMIC_RELEASE);}
+uint64_t skladacz_obrazu_epoka_tresci(){return __atomic_load_n(&epoka_tresci_warstw,__ATOMIC_ACQUIRE);}
+
 bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int pid){
     return pid_poprawny(pid) && tresc_zachowana[pid] && !klatka_gotowa[pid];
 }
@@ -2862,6 +2871,7 @@ void skladacz_reset_ekranu(){
     irq_restore(f);skladacz_obrazu_oznacz_dirty();
 }
 void skladacz_zastosuj_ekran(ZmianaWarstwEkranu*z){
+    zmieniono_tresc_warstw();
     for(int pid=1;pid<MAKS_WARSTW;++pid){auto&p=z->warstwy[pid];if(!p.generacja)continue;
         tablica_warstw[pid]=p.nowa;rozmiar_alokacji_warstwy[pid]=p.nowe_bajty;
         zajete_bajty_warstw=zajete_bajty_warstw-p.stare_bajty+p.nowe_bajty;
@@ -2869,6 +2879,7 @@ void skladacz_zastosuj_ekran(ZmianaWarstwEkranu*z){
     skladacz_reset_ekranu();
 }
 void skladacz_cofnij_ekran(ZmianaWarstwEkranu*z){
+    zmieniono_tresc_warstw();
     for(int pid=1;pid<MAKS_WARSTW;++pid){auto&p=z->warstwy[pid];if(!p.generacja)continue;
         auto*w=pobierz_warstwe(pid);
         if(!w||generacja_okna[pid]!=p.generacja){if(p.zmiana_bufora)bufor_grafiki_zwolnij(p.stara.bufor_pikseli);p={};continue;}

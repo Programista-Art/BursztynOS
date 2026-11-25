@@ -9,6 +9,8 @@
 #include "../../bursztyn_ui/tabela_wirtualna.h"
 #include "../../bursztyn_ui/przycisk_obrazkowy.h"
 #include "../../bursztyn_ui/ikony_eksplorator_dane.h"
+#include "jadro/bws/bws_magazyn_tekst.h"
+#include "jadro/bws/bws_api.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -1154,7 +1156,15 @@ private:
         int rzeczywiste = visible_count_;
         if (!equal_text(path_, "/") && rzeczywiste > 0) --rzeczywiste;
         (void)append_unsigned(message, sizeof(message), static_cast<uint64_t>(rzeczywiste));
-        (void)append_text(message, sizeof(message), ".");
+        (void)append_text(message, sizeof(message), ". ");
+        // BWS 111: wolne miejsce i rodzaj pamieci (dysk trwaly albo RAM sesji Live).
+        BwsMagazynV1 magazyn{};
+        if (bws_wywolaj(BWS_INFORMACJA_MAGAZYNU, reinterpret_cast<uint64_t>(&magazyn), sizeof(magazyn),
+                        BWS_MAGAZYN_V1, 0) == BWS_MAG_OK) {
+            char wolne[96] = {};
+            MagazynTekst::opis_wolnego(wolne, sizeof(wolne), magazyn);
+            (void)append_text(message, sizeof(message), wolne);
+        }
         set_status(message);
     }
 

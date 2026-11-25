@@ -13,16 +13,43 @@
  *  - ObrazOkladki: kwadratowa okladka zmniejszana w waskim oknie,
  *  - PasekStanuGrajka: staly, jednowierszowy pasek komunikatow (+ opcjonalny wiersz diagnostyki); zmiana tekstu
  *    uniewaznia tylko pasek - bez przeliczania ukladu i pelnego odrysowania okna,
- *  - grafika_domyslna(): domyslna okladka Grajka (generowana raz, bez zasobow zewnetrznych).
+ *  - ObrazOkladki: okladka z tagu albo grafika plyty uzytkownika, skalowana raz na rozmiar kontrolki.
  * Kolory pochodza z globalnego motywu Bursztyn OS (motyw_kolor), wiec okno podaza za motywem systemu.
  */
 #include "kontroler.h"
+#include "../../bursztyn_ui/przycisk_ikony.h"
 
 namespace Grajek {
 
 using namespace BursztynUI;
 
 constexpr size_t MAKS_DLUGOSC_TEKSTU_GRAJKA = Kontrolka::MAKS_DLUGOSC_TEKSTU;
+
+// Ikony przyciskow: grafiki uzytkownika (ikonki/grajek/), przy budowaniu 128x128 -> /ikonki/grajek_<akcja>.png
+// (narzedzia/przygotuj_zasoby_grajka.py). Akcje bez pasujacej grafiki (Zakoncz, Powtarzanie, przelaczniki) maja tekst.
+enum IkonaGrajka : int { IK_POPRZEDNI, IK_ODTWORZ, IK_PAUZA, IK_STOP, IK_NASTEPNY, IK_WYCISZ, IK_ODSWIEZ, IK_DODAJ,
+                         IK_W_GORE, IK_W_DOL, IK_USUN, IK_WYCZYSC, IK_ZAPISZ, IK_WCZYTAJ, LICZBA_IKON };
+inline const char* sciezka_ikony(int i) {
+    static const char* const S[LICZBA_IKON] = {
+        "/ikonki/grajek_poprzedni.png", "/ikonki/grajek_odtworz.png", "/ikonki/grajek_pauza.png", "/ikonki/grajek_stop.png",
+        "/ikonki/grajek_nastepny.png", "/ikonki/grajek_wycisz.png", "/ikonki/grajek_odswiez.png", "/ikonki/grajek_dodaj.png",
+        "/ikonki/grajek_w_gore.png", "/ikonki/grajek_w_dol.png", "/ikonki/grajek_usun.png", "/ikonki/grajek_wyczysc.png",
+        "/ikonki/grajek_zapisz.png", "/ikonki/grajek_wczytaj.png"};
+    return i >= 0 && i < LICZBA_IKON ? S[i] : "";
+}
+// Odczyt (<= 256 KiB) przez dostep do plikow Grajka i dekodowanie RAZ; brak/uszkodzenie = przycisk tekstowy.
+inline bool wczytaj_ikone(ObrazIkony& ik, const DostepDoPlikow& d, const char* sciezka) {
+    if (ik.proba()) return ik.jest();
+    uint64_t n = 0;
+    if (!d.rozmiar || !d.odczyt || !d.rozmiar(d.kontekst, sciezka, &n) || !n || n > 256U * 1024U) return ik.wczytaj_dane(nullptr, 0);
+    auto* b = static_cast<uint8_t*>(alokuj(size_t(n)));
+    if (!b) return ik.wczytaj_dane(nullptr, 0);
+    uint32_t got = 0;
+    const bool ok = d.odczyt(d.kontekst, sciezka, 0, b, uint32_t(n), &got) && got == n;
+    const bool wynik = ik.wczytaj_dane(ok ? b : nullptr, ok ? size_t(n) : 0);
+    zwolnij(b);
+    return wynik;
+}
 
 // Dopelnienie kolejki PCM tuz przed kosztownym rysowaniem (tabela, wizualizacja) i przed publikacja regionu
 // (hak Okno::hak_rysowania). Petla BursztynUI rysuje synchronicznie, a kolejka BWS 110 to tylko 85 ms.
@@ -231,6 +258,22 @@ private:
 // Siatka przyciskow: kolumny gwiazdkowe z waga = naturalna szerokosc przyciskow danej kolumny (tekst + ramka),
 // liczona przy kazdym rozmieszczeniu z biezacej czcionki. Nadmiar miejsca dzieli sie proporcjonalnie, wiec
 // dopoki siatka ma co najmniej minimum_px(), zaden tekst nie jest przyciety (rowne kolumny przycinaly "Wyczyść").
+// Pusta kontrolka o rozmiarze innej (symetria wiersza: odstep po prawej rowny przyciskowi po lewej).
+class OdstepJak : public Kontrolka {
+public:
+    explicit OdstepJak(Kontrolka* wzor) : wzor_(wzor) {}
+    Rozmiar zmierz(Rozmiar d) override { return wzor_ ? wzor_->zmierz(d) : Rozmiar(0, 0); }
+    void rysuj_siebie(KontekstRysowania&) override {}
+private:
+    Kontrolka* wzor_;
+};
+
+// Siatka bez tla i ramki panelu (grupy zagniezdzone w wierszu, np. glosnosc, ikony biblioteki): bez podwojnych ramek.
+class SiatkaBezTla : public Siatka {
+public:
+    void rysuj_tlo_i_ramke(KontekstRysowania&, const StylStanu&) override {}
+};
+
 class SiatkaPrzyciskow : public Siatka {
 public:
     int minimum_px() {
@@ -274,14 +317,21 @@ private:
 };
 
 // Kwadratowa okladka: bok = min(wysokosc, procent szerokosci srodka) w granicach [min, maks] DIP.
+// Okladka (z tagu albo grafika plyty): zrodlo jest skalowane RAZ na rozmiar kontrolki (rozmiesc - uklad, nie
+// rysowanie) - srednia obszarowa przy zmniejszaniu, dwuliniowo przy powiekszaniu, z zachowaniem proporcji - i
+// rysowane 1:1 z pamieci podrecznej (wczesniej: najblizszy sasiad przy kazdym rysowaniu). Bez obrazu: pusty panel.
 class ObrazOkladki : public BursztynUI::Obraz {
 public:
     explicit ObrazOkladki(int maks_dip) : maks_(maks_dip) { preferowany_rozmiar_ = Rozmiar(-1, -1); }
+    ~ObrazOkladki() override { delete[] cache_; }
     // Obraz::ustaw_obraz ustawia preferowany rozmiar na wymiary bitmapy; okladka liczy bok sama (zmierz).
     void ustaw_okladke(const uint32_t* px, int w, int h, bool kopiuj) {
         ustaw_obraz(px, w, h, kopiuj);
         preferowany_rozmiar_ = Rozmiar(-1, -1);
+        przelicz_cache();
+        uniewaznij();
     }
+    void wyczysc_okladke() { wyczysc_obraz(); przelicz_cache(); uniewaznij(); }
     Rozmiar zmierz(Rozmiar dostepny) override {
         const int s = skala_dpi_;
         int bok = dostepny.szerokosc * 36 / 100;
@@ -290,8 +340,59 @@ public:
         if (bok < 72 * s) bok = 72 * s;
         return Rozmiar(bok, bok);
     }
+    void rozmiesc(Prostokat r) override {
+        Obraz::rozmiesc(r);
+        if (obszar_.szerokosc != cache_obszar_w_ || obszar_.wysokosc != cache_obszar_h_) przelicz_cache();
+    }
+    void rysuj_siebie(KontekstRysowania& ctx) override {
+        if (!czy_ma_obraz()) {
+            ctx.rysuj_zaokraglony_prostokat(Prostokat(0, 0, obszar_.szerokosc, obszar_.wysokosc), motyw_kolor(MOTYW_KOLOR_PANEL), 6 * skala_dpi_);
+            return;
+        }
+        if (!cache_ || cache_obszar_w_ != obszar_.szerokosc || cache_obszar_h_ != obszar_.wysokosc) { Obraz::rysuj_siebie(ctx); return; }
+        const Punkt off = ctx.pobierz_przesuniecie();
+        const int x0 = (obszar_.szerokosc - cw_) / 2, y0 = (obszar_.wysokosc - ch_) / 2;
+        for (int y = 0; y < ch_; ++y) ctx.rysuj_wiersz_ekranu(off.x + x0, off.y + y0 + y, cw_, cache_ + size_t(y) * size_t(cw_));
+    }
+    int szerokosc_wyswietlana() const { return cache_ ? cw_ : 0; }
+    int wysokosc_wyswietlana() const { return cache_ ? ch_ : 0; }
+    uint32_t liczba_skalowan() const { return skalowania_; }
+    const uint32_t* piksele_wyswietlane() const { return cache_; }
 private:
+    void przelicz_cache() {
+        delete[] cache_; cache_ = nullptr; cw_ = ch_ = 0;
+        cache_obszar_w_ = obszar_.szerokosc; cache_obszar_h_ = obszar_.wysokosc;
+        const int sw = szerokosc_oryginalna(), sh = wysokosc_oryginalna();
+        if (!czy_ma_obraz() || obszar_.szerokosc <= 0 || obszar_.wysokosc <= 0) return;
+        int dw = obszar_.szerokosc, dh = int(int64_t(sh) * dw / sw);
+        if (dh > obszar_.wysokosc) { dh = obszar_.wysokosc; dw = int(int64_t(sw) * dh / sh); }
+        if (dw < 1 || dh < 1 || dw > 2048 || dh > 2048) return;
+        auto* d = new uint32_t[size_t(dw) * size_t(dh)];
+        if (!d) return;
+        const uint32_t* zr = piksele();
+        if (dw <= sw && dh <= sh) {           // srednia obszarowa
+            for (int y = 0; y < dh; ++y) {
+                const int y0 = int(int64_t(y) * sh / dh); int y1 = int(int64_t(y + 1) * sh / dh); if (y1 <= y0) y1 = y0 + 1;
+                for (int x = 0; x < dw; ++x) {
+                    const int x0 = int(int64_t(x) * sw / dw); int x1 = int(int64_t(x + 1) * sw / dw); if (x1 <= x0) x1 = x0 + 1;
+                    uint32_t r = 0, g = 0, b = 0, k = 0;
+                    for (int yy = y0; yy < y1; ++yy)
+                        for (int xx = x0; xx < x1; ++xx) { const uint32_t c = zr[size_t(yy) * size_t(sw) + size_t(xx)]; r += (c >> 16) & 0xFF; g += (c >> 8) & 0xFF; b += c & 0xFF; ++k; }
+                    d[size_t(y) * size_t(dw) + size_t(x)] = 0xFF000000u | ((r / k) << 16) | ((g / k) << 8) | (b / k);
+                }
+            }
+        } else if (!skaluj_obraz_bilinear(zr, uint32_t(sw), uint32_t(sh), size_t(sw) * size_t(sh) * 4, d, uint32_t(dw), uint32_t(dh),
+                                          uint32_t(dw), size_t(dw) * size_t(dh) * 4, TrybSkalowaniaObrazu::Rozciagnij, 0xFF000000u)) {
+            delete[] d; return;
+        } else {
+            for (size_t i = 0; i < size_t(dw) * size_t(dh); ++i) d[i] |= 0xFF000000u;   // nieprzezroczyste (0 = przezroczysty w UI)
+        }
+        cache_ = d; cw_ = dw; ch_ = dh; ++skalowania_;
+    }
     int maks_;
+    uint32_t* cache_ = nullptr;
+    int cw_ = 0, ch_ = 0, cache_obszar_w_ = -1, cache_obszar_h_ = -1;
+    uint32_t skalowania_ = 0;
 };
 
 // Pasek komunikatow: zawsze JEDEN wiersz o stalej wysokosci (wysokosc czcionki): ikona rodzaju + komunikat z
@@ -728,41 +829,5 @@ private:
     int widmo_[PASMA_WIDMA]{};
 };
 
-// Domyslna okladka Grajka: bursztynowa plyta z etykieta i nuta, generowana arytmetyka calkowita.
-inline uint32_t* grafika_domyslna(int bok, uint32_t akcent, uint32_t tlo) {
-    if (bok < 16 || bok > 512) return nullptr;
-    uint32_t* px = new uint32_t[size_t(bok) * bok];
-    if (!px) return nullptr;
-    const int c = bok / 2, r2 = (bok * 46 / 100) * (bok * 46 / 100), e2 = (bok * 16 / 100) * (bok * 16 / 100), d2 = (bok * 3 / 100 + 1) * (bok * 3 / 100 + 1);
-    auto mieszaj = [](uint32_t a, uint32_t b, int t) {     // t: 0..256
-        const uint32_t ra = (a >> 16) & 0xFF, ga = (a >> 8) & 0xFF, ba = a & 0xFF;
-        const uint32_t rb = (b >> 16) & 0xFF, gb = (b >> 8) & 0xFF, bb = b & 0xFF;
-        return 0xFF000000u | (((ra * uint32_t(256 - t) + rb * uint32_t(t)) >> 8) << 16) | (((ga * uint32_t(256 - t) + gb * uint32_t(t)) >> 8) << 8) |
-               ((ba * uint32_t(256 - t) + bb * uint32_t(t)) >> 8);
-    };
-    for (int y = 0; y < bok; ++y)
-        for (int x = 0; x < bok; ++x) {
-            const int dx = x - c, dy = y - c, q = dx * dx + dy * dy;
-            uint32_t v = 0xFF000000u | (tlo & 0xFFFFFF);
-            if (q <= r2) {
-                // rowki plyty: pierscienie co ~4 px
-                const int rr = q * 64 / (r2 ? r2 : 1);
-                v = mieszaj(0x1C1410, 0x2A1E16, (rr & 3) * 40);
-                if (q <= e2) v = mieszaj(akcent, 0xFFFFFF, (dy + c) * 40 / bok);
-                if (q <= d2) v = 0xFF000000u | (tlo & 0xFFFFFF);
-            }
-            px[size_t(y) * bok + x] = v;
-        }
-    // nuta (glowka + laska) w prawym gornym rogu, kolor akcentu
-    const int nx = bok * 72 / 100, ny = bok * 30 / 100, nr = bok / 16 + 1;
-    for (int y = -nr; y <= nr; ++y)
-        for (int x = -nr - nr / 2; x <= nr + nr / 2; ++x)
-            if (x * x * 4 + y * y * 9 <= nr * nr * 9 && nx + x >= 0 && nx + x < bok && ny + y >= 0 && ny + y < bok)
-                px[size_t(ny + y) * bok + (nx + x)] = 0xFF000000u | (akcent & 0xFFFFFF);
-    for (int y = ny - bok / 5; y <= ny; ++y)
-        for (int x = nx + nr; x <= nx + nr + bok / 60 + 1; ++x)
-            if (x >= 0 && x < bok && y >= 0 && y < bok) px[size_t(y) * bok + x] = 0xFF000000u | (akcent & 0xFFFFFF);
-    return px;
-}
 
 } // namespace Grajek

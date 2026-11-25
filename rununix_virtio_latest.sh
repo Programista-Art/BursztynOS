@@ -160,11 +160,15 @@ Bursztyn OS - launcher QEMU (Linux/macOS)
   --audio-wav PLIK    plik nagrania dla --audio wav (domyslnie logi_qemu/nagrania_audio/...)
   --audio-overwrite   pozwol nadpisac istniejacy plik nagrania
   --audio-diag        diagnostyka dzwieku hosta (tylko odczyt: QEMU, PipeWire/PulseAudio, ALSA, VM)
+  --guest-audio KONTROLER
+                      kontroler dzwieku GOSCIA (nie mylic z --audio, ktore wybiera wyjscie hosta):
+                        hda   - Intel HDA (domyslnie, wszystkie profile produkcyjne)
+                        ac97  - Intel ICH AC97 (TYLKO do rozwoju/testow sterownika AC97; zamiast HDA)
   --help, -h          ta pomoc
 
 Kody wyjscia: kod QEMU; 2 = zla opcja; 3 = blad konfiguracji dzwieku (QEMU nie uruchomiono).
 
-Zmienne: QEMU, QEMU_IMG, QEMU_DISPLAY_ARGS, QEMU_EXTRA_ARGS, AUDIO_BACKEND, AUDIO_WAV_PATH, GUEST_WIDTH,
+Zmienne: QEMU, QEMU_IMG, QEMU_DISPLAY_ARGS, QEMU_EXTRA_ARGS, AUDIO_BACKEND, AUDIO_WAV_PATH, GUEST_AUDIO, GUEST_WIDTH,
 GUEST_HEIGHT, DISK_SIZE, OVMF_MONO, OVMF_CODE, OVMF_VARS, QEMU_SDL_BEZ_IME (1/0).
 EOF
 }
@@ -201,6 +205,15 @@ while [[ $# -gt 0 ]]; do
         --audio-wav=*) AUDIO_WAV_CLI="${1#--audio-wav=}" ;;
         --audio-overwrite) AUDIO_OVERWRITE=true ;;
         --audio-diag) AUDIO_DIAG=true ;;
+        --guest-audio)
+            if [[ $# -lt 2 ]]; then
+                echo "BLAD: --guest-audio wymaga nazwy kontrolera (hda, ac97)." >&2
+                exit 2
+            fi
+            GUEST_AUDIO_CLI="$2"
+            shift
+            ;;
+        --guest-audio=*) GUEST_AUDIO_CLI="${1#--guest-audio=}" ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "BLAD: nieznana opcja: $1" >&2
@@ -242,6 +255,15 @@ case "$HOST_NAME:$AUDIO_REQUEST" in
         ;;
     *)
         echo "BLAD: nieznany tryb dzwieku: $AUDIO_REQUEST (auto, pipewire, pa, alsa, sdl, wav, none)." >&2
+        exit 2
+        ;;
+esac
+# Kontroler dzwieku goscia: --guest-audio > GUEST_AUDIO > hda. AC97 jest wylacznie jawnym wyborem deweloperskim.
+GUEST_AUDIO="${GUEST_AUDIO_CLI:-${GUEST_AUDIO:-hda}}"
+case "$GUEST_AUDIO" in
+    hda|ac97) ;;
+    *)
+        echo "BLAD: nieznany kontroler dzwieku goscia: $GUEST_AUDIO (hda, ac97)." >&2
         exit 2
         ;;
 esac
@@ -294,18 +316,21 @@ brew_prefix_qemu() {
     fi
 }
 
+# Wyjscie QEMU jest najpierw zapisywane w zmiennej: przy `set -o pipefail` potok "qemu | grep -q" bywal falszywie
+# nieudany (grep -q konczy po pierwszym trafieniu, piszacy QEMU dostaje SIGPIPE -> "BRAK QEMU device").
 qemu_has_device() {
-    local device_name="$1"
-    "$QEMU" -device help 2>/dev/null | grep -Eq \
-        "(^|[[:space:]\"'])${device_name}([[:space:]\"',]|$)"
+    local device_name="$1" lista
+    lista="$("$QEMU" -device help 2>/dev/null)" || return 1
+    grep -Eq "(^|[[:space:]\"'])${device_name}([[:space:]\"',]|$)" <<< "$lista"
 }
 
 qemu_device_supports_property() {
     local device_name="$1"
     local property_name="$2"
 
-    "$QEMU" -device "${device_name},help" 2>&1 | \
-        grep -Eq "(^|[[:space:]])${property_name}([=<[:space:]]|$)"
+    local wlasciwosci
+    wlasciwosci="$("$QEMU" -device "${device_name},help" 2>&1)" || true
+    grep -Eq "(^|[[:space:]])${property_name}([=<[:space:]]|$)" <<< "$wlasciwosci"
 }
 
 append_disable_legacy_if_supported() {
@@ -520,7 +545,7 @@ probe_qemu_audio_backends() {
 }
 
 qemu_has_audio_backend() {
-    printf '%s\n' "$QEMU_AUDIO_BACKENDS" | grep -qx -- "$1"
+    grep -qx -- "$1" <<< "$QEMU_AUDIO_BACKENDS"
 }
 
 qemu_version_line() {
@@ -745,7 +770,11 @@ resolve_audio() {
 print_audio_summary() {
     echo "Wyjście dźwięku: $(audio_label "$AUDIO_REQUEST")$([[ "$AUDIO_REQUEST" == "auto" ]] && printf ' -> %s' "$(audio_label "$AUDIO_EFFECTIVE")") (-audiodev $AUDIO_ARG)"
     echo "Wersja QEMU:     $(qemu_version_line)"
-    echo "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    if [[ "$GUEST_AUDIO" == "ac97" ]]; then
+        echo "Kontroler dźwięku gościa: Intel ICH AC97 (AC97,audiodev=snd, PCI 00:02.0) - tryb deweloperski, bez Intel HDA"
+    else
+        echo "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    fi
     echo "Dźwięk hosta:    $AUDIO_HOST_INFO"
     if [[ -n "$AUDIO_WAV_FINAL" ]]; then
         echo "Ścieżka nagrania: $AUDIO_WAV_FINAL"
@@ -944,12 +973,34 @@ append_common_machine_args() {
 }
 
 append_audio_args() {
-    # Jeden -audiodev (id=snd) i jedno HDA; backend z resolve_audio. Wyciszenie zachowuje HDA i jego slot PCI.
+    # Jeden -audiodev (id=snd) i jeden kontroler goscia; backend z resolve_audio. Wyciszenie zachowuje kontroler
+    # i jego slot PCI. AC97 (--guest-audio ac97) zajmuje ten sam slot zamiast HDA - nigdy oba naraz.
+    if [[ "$GUEST_AUDIO" == "ac97" ]]; then
+        QEMU_ARGS+=(
+            -audiodev "$AUDIO_ARG"
+            -device AC97,audiodev=snd
+        )
+        return
+    fi
     QEMU_ARGS+=(
         -audiodev "$AUDIO_ARG"
         -device intel-hda
         -device hda-output,audiodev=snd
     )
+}
+
+# AC97 tylko na jawne zadanie i tylko, gdy ta instalacja QEMU je ma (bez cichego powrotu do HDA).
+check_guest_audio_device() {
+    [[ "$GUEST_AUDIO" == "ac97" ]] || return 0
+    if [[ "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+    if ! qemu_has_device AC97; then
+        show_error "Ta instalacja QEMU nie ma urzadzenia AC97 (--guest-audio ac97)."
+        echo "QEMU nie zostalo uruchomione. Uzyj domyslnego --guest-audio hda albo zainstaluj QEMU z AC97." >&2
+        return 1
+    fi
+    return 0
 }
 
 append_optional_cli_args() {
@@ -1159,6 +1210,7 @@ run_qemu() {
     check_iso_fresh "$iso"
     # Dzwiek przed dyskiem: blad konfiguracji dzwieku nie tworzy dysku i nie uruchamia QEMU.
     resolve_audio || return "$AUDIO_EXIT_CODE"
+    check_guest_audio_device || return "$AUDIO_EXIT_CODE"
     prepare_disk
 
     if [[ "$profile" == "virtio" ]]; then
@@ -1228,6 +1280,7 @@ run_installed() {
     assert_disk_path_safe
     require_file "$DISK" "zainstalowanego wirtualny_dysk.img"
     resolve_audio || return "$AUDIO_EXIT_CODE"
+    check_guest_audio_device || return "$AUDIO_EXIT_CODE"
 
     if [[ "$profile" == "virtio" ]]; then
         validate_virtio_environment

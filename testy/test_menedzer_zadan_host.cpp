@@ -228,7 +228,7 @@ static void pamiec_procesu() {
 static void abi_i_polityka() {
     using namespace ProcesyMigawka;
     CHECK(BWS_PROCESY_MIGAWKA == 103 && BWS_PROCES_ZAKONCZ == 104 && BWS_URZADZENIA_TELEMETRIA == 105 &&
-          BWS_PROCESY_IO == 106 && BWS_PIERWSZY_WOLNY == 111);
+          BWS_PROCESY_IO == 106 && BWS_PIERWSZY_WOLNY == 112 && BWS_INFORMACJA_MAGAZYNU == 111);
     uint32_t n = 99;
     CHECK(!pojemnosc_bufora(0, &n));
     CHECK(!pojemnosc_bufora(sizeof(BwsProcesyNaglowek) - 1, &n));

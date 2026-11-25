@@ -32,7 +32,7 @@ class WindowsLauncherConfig(unittest.TestCase):
         self.assertIn('"usb-tablet,bus=$tabletBus"',self.launcher)
         self.assertIn('tcp:127.0.0.1:$QmpPort,server=on,wait=off',self.launcher)
         self.assertIn('if ($QmpPort -gt 0)',self.launcher)
-        self.assertIn('if ($PointerDiagnostics) { $SaveLog = $true }',self.launcher)
+        self.assertIn('if ($PointerDiagnostics -or $SerialLog) { $SaveLog = $true }',self.launcher)
     def test_tcg_single_for_canonical_profiles(self):
         self.assertIn('"-accel", "tcg,thread=single"',self.launcher)
         self.assertRegex(self.makefile,r'(?m)^QEMUACCEL\s*\?=\s*tcg,thread=single$')
@@ -44,6 +44,29 @@ class WindowsLauncherConfig(unittest.TestCase):
     def test_display_status(self):
         self.assertIn('Write-Host "Display:      $($effectiveDisplay.ToUpperInvariant())"',self.launcher)
         self.assertIn('Assert-QemuDisplay -Qemu $qemu -Backend $effectiveDisplay',self.launcher)
+    def test_disposable_test_disk_is_explicit_and_never_overwrites(self):
+        code=self.launcher
+        self.assertIn('[string]$TestDisk = ""',code)
+        self.assertIn('[switch]$UseExistingTestDisk',code)
+        self.assertIn("[ValidatePattern('^$|^[0-9a-fA-F]{64}$')]",code)
+        # trwale nazwy dyskow uzytkownika sa odrzucane, istniejacy plik wymaga jawnej zgody
+        self.assertIn('foreach ($trwaly in @("wirtualny_dysk.img", "wirtualnydysk.img"))',code)
+        self.assertIn('plik juz istnieje i NIE zostanie nadpisany',code)
+        self.assertIn('-UseExistingTestDisk: plik nie istnieje',code)
+        self.assertIn('physicaldrive|harddisk',code)
+        # dysk testowy: tylko CreateNew (qemu-img create nadpisalby plik), kontrola wolnego miejsca
+        prep=code.split('function Prepare-Disk {',1)[1].split('\n}\n',1)[0]
+        test_part=prep.split('if (Test-Path -LiteralPath $Disk -PathType Leaf) {\n        return',1)[0]
+        self.assertIn('[System.IO.FileMode]::CreateNew',test_part)
+        self.assertNotIn('qemu-img',test_part.split('# Bez qemu-img',1)[1])
+        self.assertIn('AvailableFreeSpace -lt $need',test_part)
+        # trwaly dysk bez -TestDisk bez zmian
+        self.assertIn('$Disk = Join-Path $ScriptDir "wirtualny_dysk.img"',code)
+        self.assertIn('Get-FileHash -LiteralPath $IsoPath -Algorithm SHA256',code)
+        self.assertIn('if ($PointerDiagnostics -or $SerialLog) { $SaveLog = $true }',code)
+        self.assertIn("'(TESTOWY, jednorazowy - -TestDisk)'",code)
+        # suma ISO sprawdzana przed utworzeniem dysku testowego
+        self.assertLess(code.index('Get-FileHash -LiteralPath $IsoPath -Algorithm SHA256'),code.index('{ Prepare-Disk }'))
     def test_legacy_usb_profile(self):
         self.assertIn('"usb-kbd,id=usbkbd,bus=xhci.0"',self.launcher)
         self.assertIn('"usb-mouse,id=usbmouse,bus=xhci.0"',self.launcher)

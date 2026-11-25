@@ -120,6 +120,11 @@ struct StatystykiCiaglosci {
     uint64_t maks_przerwa_producenta_ns = 0;   // utwor
     uint32_t przerwy_ponad_kolejke = 0;        // odstepy producenta > pojemnosc kolejki (utwor)
     uint32_t min_kolejka = 0xFFFFFFFFu;        // najmniejsza zajetosc kolejki widziana przez jadro (utwor)
+    // Planista jadra (BwsPcmStats V2, od uruchomienia procesu; sesja): najdluzszy czas, gdy Grajek byl GOTOWY, ale
+    // CPU mial inny watek (PID 0: kompozytor/HDA, inne aplikacje), i najdluzsze dobrowolne uspienie. Przerwa
+    // producenta >> obu = Grajek sam byl zajety (praca Ring 3 albo dlugie wywolanie systemowe, np. BWS 57).
+    uint64_t maks_czekanie_cpu_ns = 0;
+    uint64_t maks_uspienie_ns = 0;
     static uint64_t ms(uint64_t ramki) { return ramki * 1000ULL / CZESTOTLIWOSC_WYJSCIA; }
 };
 
@@ -356,8 +361,10 @@ private:
     }
     void nowy_utwor_statystyk() {
         const uint64_t sesja = ciag_.niedobor_sesji;
+        const uint64_t czekanie = ciag_.maks_czekanie_cpu_ns, uspienie = ciag_.maks_uspienie_ns;
         ciag_ = StatystykiCiaglosci{};
         ciag_.niedobor_sesji = sesja;
+        ciag_.maks_czekanie_cpu_ns = czekanie; ciag_.maks_uspienie_ns = uspienie;   // liczniki planisty: sesja
         ++pokolenie_utworu_;
     }
     void zmierz_przerwe_producenta() {
@@ -413,6 +420,8 @@ private:
             zdarzenia_ |= ZD_NIEDOBOR;
         }
         if (st.min_queued < ciag_.min_kolejka && st.writes) ciag_.min_kolejka = uint32_t(st.min_queued);
+        if (st.max_runnable_wait_ns > ciag_.maks_czekanie_cpu_ns) ciag_.maks_czekanie_cpu_ns = st.max_runnable_wait_ns;
+        if (st.max_voluntary_wait_ns > ciag_.maks_uspienie_ns) ciag_.maks_uspienie_ns = st.max_voluntary_wait_ns;
         ostatnie_starved_ = st.starved;
     }
     // Produkuje do PORCJA ramek wyjsciowych w buforze posrednim; false, gdy nic nie powstalo.

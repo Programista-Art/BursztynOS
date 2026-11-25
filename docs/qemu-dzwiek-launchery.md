@@ -44,6 +44,21 @@ AUDIO_BACKEND=pipewire ./rununix_virtio_latest.sh --mode 2  # dotychczasowa zmie
 Kody wyjścia (Linux i Windows z `-Mode`): kod QEMU; `2` – zła opcja; `3` (Linux) / `1` (Windows) – błąd
 konfiguracji dźwięku, QEMU **nie** zostało uruchomione.
 
+## Kontroler dźwięku gościa (HDA albo AC97)
+
+Opcje powyżej wybierają **wyjście hosta**. Niezależnie od nich gość ma jeden kontroler dźwięku w slocie
+PCI 00:02.0: domyślnie zawsze **Intel HDA** (wszystkie profile produkcyjne, bez zmian). **Intel ICH AC97**
+(`-device AC97,audiodev=snd`, sterownik `docs/ac97.md`) jest wyłącznie jawnym wyborem do rozwoju i testów:
+
+| | Windows | Linux/macOS | Makefile |
+|---|---|---|---|
+| Intel HDA (domyślnie) | `-GuestAudio hda` | `--guest-audio hda` | `QEMU_GUEST_AUDIO=hda` |
+| Intel ICH AC97 (deweloperski) | `-GuestAudio ac97` | `--guest-audio ac97` lub `GUEST_AUDIO=ac97` | `QEMU_GUEST_AUDIO=ac97` |
+
+AC97 zastępuje HDA (nigdy oba naraz). Jeżeli ta instalacja QEMU nie ma urządzenia `AC97`, launcher kończy
+się błędem bez uruchamiania maszyny (bez cichego powrotu do HDA). AC97 w VirtualBox: kontroler audio
+„ICH AC97” w ustawieniach maszyny – konfiguracja VirtualBox nie jest zmieniana przez repozytorium.
+
 ## Wykrywanie backendów
 * Lista pochodzi z **wykrytego** pliku QEMU: `qemu-system-x86_64 -audiodev help` (Windows: ścieżka z `Find-Qemu`
   / `-QemuPath`, nie zakładane `C:\Program Files\qemu`). Parser bierze linie zawierające samą nazwę (`[a-z0-9_]`),
@@ -88,9 +103,16 @@ gościa nie:
 | brak urządzenia wyjściowego | `alsa: Could not initialize DAC`, `No such device`, `DSERR_NODRIVER` |
 | błąd zapisu WAV | `wav: Failed to open wave file` |
 | inicjalizacja nieudana | `audio: Could not init 'sdl' audio driver`, `SDL_OpenAudio failed` |
+| inicjalizacja DirectSoundCapture (Windows) | `dsound: Could not initialize DirectSoundCapture` |
 | inny błąd QEMU | kod ≠ 0 bez komunikatów o dźwięku – „przyczyna niezwiązana z wyborem dźwięku” |
 
-Ostrzeżenia o **nagrywaniu** (capture, np. brak mikrofonu w DirectSound) nie są błędem odtwarzania. Brak
+**DirectSoundCapture** (2026-11-23, potwierdzone natywnie na Windows 11): `-AudioMode dsound` kończy się błędem
+inicjalizacji DirectSoundCapture. Launcher klasyfikuje ten komunikat jako błąd inicjalizacji dźwięku hosta (przy kodzie
+QEMU ≠ 0 – błąd, przy 0 – ostrzeżenie), nie jako błąd niezwiązany z dźwiękiem, i wskazuje działające wyjścia:
+`-AudioMode sdl` (odsłuch – potwierdzony na Windows 11) i `-AudioMode wav` (nagranie – potwierdzone). To osobny
+problem backendu hosta; sterownik HDA Bursztyn OS ani Grajek nie są pod niego zmieniane.
+
+Pozostałe ostrzeżenia o **nagrywaniu** (capture, np. brak mikrofonu) nie są błędem odtwarzania. Brak
 komunikatów nie jest raportowany jako „dźwięk działa” – tylko „brak komunikatów o błędach (to nie potwierdza
 słyszalnego odtwarzania)”.
 

@@ -875,6 +875,14 @@ static void test_ciaglosc() {
     CHECK(c.niedobor_utworu == oczek2 + (120ULL * 48 - q3));
     const uint64_t sesja = c.niedobor_sesji;
 
+    // (4b) liczniki planisty jadra (BwsPcmStats V2): maksimum sesji, nie maleje, przetrwa granice utworu
+    j.czekanie_cpu_ns = 333000000ULL; j.uspienie_ns = 12000000ULL;
+    tykaj_z(s, 60);
+    CHECK(c.maks_czekanie_cpu_ns == 333000000ULL && c.maks_uspienie_ns == 12000000ULL);
+    j.czekanie_cpu_ns = 5000000ULL;
+    tykaj_z(s, 60);
+    CHECK(c.maks_czekanie_cpu_ns == 333000000ULL);
+
     // (5) nowy utwor: licznik utworu od zera, sesji zachowany; dopompuj w Ladowaniu nie laduje ani nie otwiera
     CHECK(s.zaplanuj("/dane/muzyka/drugi.wav", FormatAudio::WAV, true) && s.stan() == Stan::Ladowanie);
     const uint64_t otw2 = j.otwarcia;
@@ -882,6 +890,7 @@ static void test_ciaglosc() {
     CHECK(s.stan() == Stan::Ladowanie && j.otwarcia == otw2);
     s.pompuj();
     CHECK(s.stan() == Stan::Odtwarzanie && c.niedobor_utworu == 0 && c.niedobor_sesji == sesja && c.przerwy_ponad_kolejke == 0);
+    CHECK(c.maks_czekanie_cpu_ns == 333000000ULL && c.maks_uspienie_ns == 12000000ULL);
     // koniec utworu (FINISH + dogrywka + CLOSE): bez niedoboru, sesja bez zmian
     for (int i = 0; i < 2000 && s.stan() == Stan::Odtwarzanie; ++i) tykaj_z(s, 1);
     CHECK(s.stan() == Stan::Zatrzymany && c.niedobor_utworu == 0 && c.niedobor_sesji == sesja);
@@ -889,6 +898,54 @@ static void test_ciaglosc() {
     const uint64_t zap = j.zapisy;
     s.dopompuj();
     CHECK(j.zapisy == zap);
+}
+
+// MP3 i WAV przy symulowanych opoznieniach planisty (przestoje procesu): ten sam format wyjscia (48 kHz stereo S16),
+// identyczne liczenie niedoboru (ramki ponad zawartosc kolejki, bez ukrywania), a po usunieciu ciszy przerw zagrane
+// probki == dekodowanie referencyjne w kolejnosci (zadnych duplikatow ani pominiec ramek). Dekoder pracuje porcjami
+// <= Silnik::RAMKI_ZRODLA ramek (praca ograniczona w jednym wywolaniu).
+static void test_opoznienia_wav_mp3() {
+    for (int fmt = 0; fmt < 2; ++fmt) {
+        Jadro j; g_j = &j;
+        wyczysc_fs();
+        const char* sc = fmt ? "/dane/muzyka/t.mp3" : "/dane/muzyka/t.wav";
+        if (fmt) { GrajekFixtures::ParametryMp3 m; m.ramki = 250; dodaj_plik(sc, GrajekFixtures::mp3(m)); }            // 6 s, 48 kHz
+        else { GrajekFixtures::ParametryWav w; w.czestotliwosc = 48000; w.ramki = 48000 * 6; w.amplituda = 0.4; dodaj_plik(sc, GrajekFixtures::wav(w)); }
+        const FormatAudio f = fmt ? FormatAudio::MP3 : FormatAudio::WAV;
+        const auto ref = potok_referencyjny(sc, f, 0, nullptr);
+        Silnik s; s.konfiguruj(dostep(), fake_bws); s.ustaw_zegar(zegar_testu); s.ustaw_glosnosc(100, false);
+        CHECK(s.zaplanuj(sc, f, true));
+        s.pompuj();
+        CHECK(s.stan() == Stan::Odtwarzanie && s.parametry() && s.parametry()->czestotliwosc == 48000);
+        tykaj_z(s, 60);
+        const StatystykiCiaglosci& c = s.ciaglosc();
+        // przestoj krotszy niz kolejka (40 ms): bez niedoboru
+        przestoj(40); tykaj_z(s, 60);
+        CHECK(c.niedobor_utworu == 0);
+        // przestoje dluzsze niz kolejka: niedobor dokladnie = przestoj - zawartosc kolejki (jak dla WAV)
+        uint64_t oczek = 0;
+        const uint32_t dl[] = {120, 333, 200};
+        for (uint32_t ms : dl) {
+            tykaj_z(s, 3);
+            const uint32_t q = w_kolejce_jadra();
+            przestoj(ms);
+            tykaj_z(s, 60);
+            oczek += uint64_t(ms) * 48 - q;
+            CHECK(c.niedobor_utworu == oczek);
+        }
+        CHECK(c.przerwy_ponad_kolejke == 3 && c.maks_przerwa_producenta_ns >= 333000000ULL);
+        for (int i = 0; i < 4000 && s.stan() == Stan::Odtwarzanie; ++i) tykaj_z(s, 1);
+        CHECK(s.stan() == Stan::Zatrzymany);
+        // kolejnosc probek: wyjscie bez przerw (zera) == referencja od poczatku do konca
+        size_t i = poczatek_dzwieku(j.wyjscie) & ~size_t(1), r = poczatek_dzwieku(ref) & ~size_t(1);   // granica ramki L/P
+        while (i + 1 < j.wyjscie.size() && r + 1 < ref.size()) {
+            if (j.wyjscie[i] == ref[r] && j.wyjscie[i + 1] == ref[r + 1]) { i += 2; r += 2; continue; }
+            if (j.wyjscie[i] == 0 && j.wyjscie[i + 1] == 0) { i += 2; continue; }
+            break;
+        }
+        CHECK(r + 1 >= ref.size());
+        for (; i < j.wyjscie.size(); ++i) CHECK(j.wyjscie[i] == 0);          // po koncu: cisza, nie powtorzenia
+    }
 }
 
 // =================================================================== konfiguracja
@@ -929,6 +986,46 @@ static void test_okladka() {
     CHECK(!o.wczytaj(dostep(), "/t/o.mp3", m));                                  // poza plikiem
 }
 
+// Plyta winylowa uzytkownika (ikonki/plyta_winylowa.jpg, progresywny JPEG 492x492) - dokladnie ten plik trafia do
+// /ikonki/grajek_plyta_winylowa.jpg: dekodowanie raz, wynik 352x352 (proporcje zachowane), bledy bez awarii.
+static void test_grafika_plyty() {
+    wyczysc_fs();
+    CHECK(g_pliki.count("/ikonki/grajek_plyta_winylowa.jpg"));
+    const Bajty oryginal = g_pliki["/ikonki/grajek_plyta_winylowa.jpg"];
+    CHECK(oryginal.size() == 146235);
+    uint32_t w = 0, h = 0;
+    CHECK(sprawdz_jpeg(oryginal.data(), oryginal.size(), &w, &h) == BladObrazu::OK && w == 492 && h == 492);
+    GrafikaPlyty g;
+    const uint64_t odczyty0 = g_odczyty;
+    CHECK(g.wczytaj(dostep()) && g.jest() && g.dekodowania() == 1);
+    CHECK(g.szerokosc() == GrafikaPlyty::BOK_POSREDNI && g.wysokosc() == GrafikaPlyty::BOK_POSREDNI);
+    const uint64_t odczyty1 = g_odczyty;
+    CHECK(odczyty1 > odczyty0);
+    // kolejne wywolania: bez odczytu i bez dekodowania
+    for (int i = 0; i < 5; ++i) CHECK(g.wczytaj(dostep()));
+    CHECK(g.dekodowania() == 1 && g_odczyty == odczyty1);
+    // pikseli nieprzezroczyste; srodek plyty ciemny, tlo zdjecia jasniejsze (tresc z pliku, nie generowana grafika)
+    const uint32_t* px = g.piksele();
+    for (uint32_t i = 0; i < g.szerokosc() * g.wysokosc(); i += 97) CHECK((px[i] >> 24) == 0xFF);
+    {   // zgodnosc z dekodowaniem pelnej rozdzielczosci: sredni kolor obrazu zachowany (skalowanie obszarowe)
+        DekodowanyObraz o{};
+        CHECK(dekoduj_jpeg(oryginal.data(), oryginal.size(), &o, [](size_t n) { return alokuj(n); }, [](void* p) { zwolnij(p); }) == BladObrazu::OK);
+        uint64_t a = 0, b = 0;
+        for (uint32_t y = 0; y < 492; ++y) for (uint32_t x = 0; x < 492; ++x) a += reinterpret_cast<const uint32_t*>(o.piksele + y * o.stride)[x] & 0xFF;
+        for (uint32_t i = 0; i < 352 * 352; ++i) b += px[i] & 0xFF;
+        const uint64_t sa = a / (492 * 492), sb = b / (352 * 352);
+        CHECK(sa >= sb ? sa - sb <= 2 : sb - sa <= 2);
+        zwolnij(o.piksele);
+    }
+    // brak pliku, obciety JPEG, zbyt duzy plik: porazka zapamietana, bez awarii i bez ponownych prob
+    GrafikaPlyty brak; CHECK(!brak.wczytaj(dostep(), "/ikonki/nie_ma.jpg") && brak.blad()[0] && !brak.jest());
+    CHECK(!brak.wczytaj(dostep(), "/ikonki/nie_ma.jpg") && brak.dekodowania() == 0);
+    dodaj_plik("/ikonki/obciety.jpg", Bajty(oryginal.begin(), oryginal.begin() + 2000));
+    GrafikaPlyty obc; CHECK(!obc.wczytaj(dostep(), "/ikonki/obciety.jpg") && !obc.jest() && obc.dekodowania() == 1);
+    dodaj_plik("/ikonki/duzy.jpg", Bajty(GrafikaPlyty::MAKS_BAJTY + 1, 0xFF));
+    GrafikaPlyty duzy; CHECK(!duzy.wczytaj(dostep(), "/ikonki/duzy.jpg") && std::strstr(duzy.blad(), "zbyt duża"));
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::printf("Grajek - testy hosta\n");
@@ -941,10 +1038,12 @@ int main() {
     test_analiza(); std::printf("analiza OK\n");
     test_silnik(); std::printf("silnik OK\n");
     test_ciaglosc(); std::printf("ciaglosc OK\n");
+    test_opoznienia_wav_mp3(); std::printf("opoznienia planisty WAV/MP3 OK\n");
     test_biblioteka(); std::printf("biblioteka OK\n");
     test_kolejka(); std::printf("kolejka OK\n");
     test_konfiguracja(); std::printf("konfiguracja OK\n");
     test_okladka(); std::printf("okladka OK\n");
+    test_grafika_plyty(); std::printf("grafika plyty (JPEG uzytkownika) OK\n");
     std::printf("Grajek: %u sprawdzen OK\n", g_checks);
     return 0;
 }

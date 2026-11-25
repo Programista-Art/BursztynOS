@@ -7,7 +7,8 @@ systemu kopiuje pliki do /dane/muzyka/ (istniejace nie sa nadpisywane; import od
 
 Do ISO trafia WYLACZNIE to, co uzytkownik umiescil w dane/muzyka/ (pliki .wav/.mp3, nazwa UTF-8 1..55 bajtow -
 limit nazwy PSF). Odpowiedzialnosc za prawa do tych nagran spoczywa na osobie budujacej ISO; repozytorium nie zawiera
-zadnej muzyki. Wylaczenie: MUZYKA_W_ISO=0 (zmienna srodowiskowa / zmienna make).
+zadnej muzyki. Modul jest WYLACZNIE opcjonalny (demonstracja/test): domyslnie (brak zmiennej albo MUZYKA_W_ISO=0)
+nic nie jest pakowane i dane/muzyka nie jest czytane. Wlaczenie: MUZYKA_W_ISO=1 (zmienna srodowiskowa / make).
 Kontener jest binarny i bez kodowania (patrz jadro/fs/galeria_pak.h); skaner wydania skanuje go jak kazdy plik.
 Uzycie: package_muzyka.py <katalog-staging> [<grub.cfg>]   |   package_muzyka.py --stamp <plik>
 """
@@ -30,7 +31,7 @@ RAM_DYSK_ORIENTACYJNIE = 64 * 1024 * 1024   # orientacyjnie: wolne miejsce zyweg
 
 
 def wlaczona():
-    return os.environ.get('MUZYKA_W_ISO', '1') not in ('0', 'nie', 'no', 'false')
+    return os.environ.get('MUZYKA_W_ISO', '0').strip().lower() in ('1', 'tak', 'yes', 'true')
 
 
 def zbierz(katalog=ZRODLO):
@@ -62,7 +63,7 @@ def package(stage, cfg=None):
         if cel.exists():
             cel.unlink()
         cfg.write_text(text)
-        print('Muzyka: dane/muzyka puste lub wylaczone (MUZYKA_W_ISO=0) - modul muzyka.pak nie jest dodawany')
+        print('Muzyka: modul muzyka.pak nie jest dodawany (domyslnie wylaczony; MUZYKA_W_ISO=1 wlacza muzyke demonstracyjna z dane/muzyka)')
         return
     suma = 0
     wybrane = []

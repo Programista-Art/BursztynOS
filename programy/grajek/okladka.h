@@ -22,7 +22,10 @@ public:
     static constexpr uint32_t MAKS_WYMIAR = 3000;
     static constexpr uint32_t MAKS_PIKSELI = 4U * 1024U * 1024U;
 
+    explicit Okladka(uint32_t maks_bok = MAKS_BOK) : maks_bok_(maks_bok ? maks_bok : MAKS_BOK) {}
     ~Okladka() { wyczysc(); }
+    Okladka(const Okladka&) = delete;
+    Okladka& operator=(const Okladka&) = delete;
     void wyczysc() { delete[] px_; px_ = nullptr; w_ = h_ = 0; }
     bool jest() const { return px_ && w_ && h_; }
     uint32_t szerokosc() const { return w_; }
@@ -88,12 +91,13 @@ private:
     static void* al(size_t n) { return alokuj(n); }
     static void zw(void* p) { zwolnij(p); }
     bool odrzuc(const char* t) { kopiuj_tekst(blad_, sizeof(blad_), t); return false; }
-    // Usrednianie obszarowe (calkowite) do MAKS_BOK z zachowaniem proporcji; alfa = 0xFF (0 jest przezroczyste w UI).
+    // Usrednianie obszarowe (calkowite) do maks_bok_ z zachowaniem proporcji; alfa = 0xFF (0 jest przezroczyste w UI).
     void skaluj(const uint32_t* zr, uint32_t w, uint32_t h, uint32_t stride) {
         uint32_t nw = w, nh = h;
-        if (w > MAKS_BOK || h > MAKS_BOK) {
-            if (w >= h) { nw = MAKS_BOK; nh = uint32_t(uint64_t(h) * MAKS_BOK / w); }
-            else { nh = MAKS_BOK; nw = uint32_t(uint64_t(w) * MAKS_BOK / h); }
+        const uint32_t MB = maks_bok_;
+        if (w > MB || h > MB) {
+            if (w >= h) { nw = MB; nh = uint32_t(uint64_t(h) * MB / w); }
+            else { nh = MB; nw = uint32_t(uint64_t(w) * MB / h); }
             if (!nw) nw = 1;
             if (!nh) nh = 1;
         }
@@ -117,8 +121,59 @@ private:
             }
         }
     }
+    uint32_t maks_bok_;
     uint32_t* px_ = nullptr;
     uint32_t w_ = 0, h_ = 0;
+    char blad_[64]{};
+};
+
+/*
+ * Domyslna okladka Grajka: grafika uzytkownika ikonki/plyta_winylowa.jpg, osadzona bez zmian w obrazie systemu jako
+ * /ikonki/grajek_plyta_winylowa.jpg (live i instalacja; sciezki hosta nie sa dostepne w gosciu). Uzywana, gdy utwor
+ * nie ma okladki w tagach (okladka z tagu ma pierwszenstwo). Plik jest czytany i dekodowany RAZ na proces (takze
+ * porazka jest zapamietana); te same limity i ten sam dekoder co okladki z tagow (rozmiar <= 256 KiB, wymiary z
+ * naglowka przed dekodowaniem). Wynik: bitmapa <= BOK_POSREDNI (zapas na 200 % skali okladki 176 DIP), oryginal
+ * zwalniany od razu; do rozmiaru kontrolki skaluje ObrazOkladki (raz na zmiane rozmiaru).
+ */
+class GrafikaPlyty {
+public:
+    static constexpr const char* SCIEZKA = "/ikonki/grajek_plyta_winylowa.jpg";
+    static constexpr uint32_t MAKS_BAJTY = 256U * 1024U;
+    static constexpr uint32_t BOK_POSREDNI = 352;
+    GrafikaPlyty() : obraz_(BOK_POSREDNI) {}
+    bool wczytaj(const DostepDoPlikow& dostep, const char* sciezka = SCIEZKA) {
+        if (proba_) return obraz_.jest();
+        proba_ = true;
+        uint64_t rozmiar = 0;
+        if (!dostep.rozmiar || !dostep.rozmiar(dostep.kontekst, sciezka, &rozmiar) || !rozmiar) return odrzuc("Brak grafiki płyty.");
+        if (rozmiar > MAKS_BAJTY) return odrzuc("Grafika płyty jest zbyt duża.");
+        Czytnik c;
+        if (!c.otworz(dostep, sciezka, 64U * 1024U)) return odrzuc("Nie można odczytać grafiki płyty.");
+        auto* bufor = static_cast<uint8_t*>(alokuj(size_t(rozmiar)));
+        if (!bufor) return odrzuc("Brak pamięci dla grafiki płyty.");
+        const bool ok = c.czytaj_w(0, bufor, uint32_t(rozmiar)) && obraz_.dekoduj(bufor, uint32_t(rozmiar));
+        zwolnij(bufor);
+        ++dekodowania_;
+        if (!ok) return odrzuc(obraz_.blad()[0] ? obraz_.blad() : "Nie można zdekodować grafiki płyty.");
+        return true;
+    }
+    bool dekoduj(const uint8_t* dane, uint32_t n) {   // testy
+        if (proba_) return obraz_.jest();
+        proba_ = true; ++dekodowania_;
+        return obraz_.dekoduj(dane, n) || odrzuc(obraz_.blad());
+    }
+    bool jest() const { return obraz_.jest(); }
+    bool proba() const { return proba_; }
+    uint32_t dekodowania() const { return dekodowania_; }
+    const uint32_t* piksele() const { return obraz_.piksele(); }
+    uint32_t szerokosc() const { return obraz_.szerokosc(); }
+    uint32_t wysokosc() const { return obraz_.wysokosc(); }
+    const char* blad() const { return blad_; }
+private:
+    bool odrzuc(const char* t) { kopiuj_tekst(blad_, sizeof(blad_), t); return false; }
+    Okladka obraz_;
+    bool proba_ = false;
+    uint32_t dekodowania_ = 0;
     char blad_[64]{};
 };
 

@@ -5,8 +5,12 @@
  *   lewy panel    : biblioteka /dane/muzyka (szukaj, Odswiez biblioteke, Dodaj do kolejki, tabela utworow)
  *   srodek        : biezacy utwor (okladka, tytul, wykonawca, album, format, stan), postep z przewijaniem, wizualizacja
  *   prawy panel   : karty Kolejka (kolejnosc, usuwanie, zapis/odczyt M3U8) i Korektor (10 pasm, presety)
- *   dol           : sterowanie (poprzedni, odtworz, pauza, stop, nastepny, wyciszenie, glosnosc, losowo,
- *                   powtarzanie, odtwarzanie w tle, wizualizacja, zakoncz) i pasek komunikatow.
+ *   dol           : sterowanie - wiersz transportu (ikony: poprzedni, stop, Odtworz/Pauza - wiekszy, nastepny; po prawej
+ *                   wyciszenie z glosnoscia), wiersz przelacznikow (losowo, powtarzanie, w tle, wizualizacja,
+ *                   diagnostyka, zakoncz) i pasek komunikatow.
+ * Ikony przyciskow to grafiki uzytkownika (ikonki/grajek/, w systemie /ikonki/grajek_*.png), dekodowane raz przy
+ * starcie (ObrazIkony); bez pliku przycisk pozostaje tekstowy. Domyslna okladka: plyta winylowa uzytkownika
+ * (/ikonki/grajek_plyta_winylowa.jpg, GrafikaPlyty) - okladka z tagu utworu ma pierwszenstwo.
  *
  * Interfejs nie wykonuje pracy audio: tick() wola kontroler (produkcja PCM) przy kazdym ticku petli, a elementy
  * okna sa aktualizowane z ograniczona czestotliwoscia (postep 1 Hz, wizualizacja 4 Hz) i tylko gdy zmienil sie
@@ -38,13 +42,15 @@ public:
     ~OknoGrajka() override {
         if (aktywne_ == this) { aktywne_ = nullptr; Okno::hak_rysowania = nullptr; g_pompa_pcm = PompaPcm{}; }
         auto* p = kontrolka_glowna(); ustaw_kontrolke_glowna(nullptr); delete p;
-        delete[] domyslna_;
     }
 
     Odtwarzacz& odtwarzacz() { return o_; }
 
     void init(const Platforma& platforma) {
         o_.konfiguruj(platforma);
+        // grafiki: odczyt i dekodowanie RAZ (przed budowa - przyciski mierza sie wg ikon); brak = tekst / pusty panel
+        for (int i = 0; i < LICZBA_IKON; ++i) wczytaj_ikone(ikony_[i], platforma.pliki, sciezka_ikony(i));
+        plyta_.wczytaj(platforma.pliki);
         g_pompa_pcm.f = [](void* p) { static_cast<OknoGrajka*>(p)->o_.silnik().dopompuj(); };
         g_pompa_pcm.kontekst = this;
         aktywne_ = this;
@@ -92,8 +98,7 @@ public:
     }
     void zaktualizuj_motyw() override {
         Okno::zaktualizuj_motyw();
-        delete[] domyslna_; domyslna_ = nullptr;
-        okladka_wersja_ = 0xFFFFFFFF;           // odswiez grafike domyslna w nowych kolorach
+        okladka_wersja_ = 0xFFFFFFFF;
         dopasuj_warianty();                     // motyw/czcionka mogly zmienic szerokosci tekstow
         aktualizuj(true);
     }
@@ -128,18 +133,20 @@ private:
         szukaj_ = &lewy.dodaj<PoleWyszukiwania>(Dokowanie::Gora);
         szukaj_->ustaw_placeholder("Szukaj tytułu lub wykonawcy…");
         szukaj_->przy_zmianie([](PoleWyszukiwania*, const char* t, void* p) { static_cast<OknoGrajka*>(p)->o_.filtruj(t); }, this);
-        auto& przyciski_bib = lewy.dodaj<SiatkaPrzyciskow>(Dokowanie::Gora);
+        // ikony biblioteki (odswiez, dodaj do kolejki) w jednym wierszu, wyrownane do lewej
+        auto& przyciski_bib = lewy.dodaj<SiatkaBezTla>(Dokowanie::Gora);
         przyciski_bib_ = &przyciski_bib;
-        przyciski_bib.ustaw_odstep(6); przyciski_bib.ustaw_wypelnienie(Marginesy(0));
-        przyciski_bib.dodaj_wiersz(DefinicjaWymiaru::automatyczny()); przyciski_bib.dodaj_kolumne(); przyciski_bib.dodaj_kolumne();
-        odswiez_ = new Przycisk("Odśwież");                   // tytul panelu mowi "Biblioteka"; pelny opis w podpowiedzi
+        przyciski_bib.ustaw_odstep(6, 0); przyciski_bib.ustaw_wypelnienie(Marginesy(0));
+        przyciski_bib.dodaj_wiersz(DefinicjaWymiaru::automatyczny());
+        przyciski_bib.dodaj_kolumne(DefinicjaWymiaru::automatyczny()); przyciski_bib.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        przyciski_bib.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        odswiez_ = new PrzyciskIkony("Odśwież", &ikony_[IK_ODSWIEZ]);
         odswiez_->ustaw_podpowiedz("Odśwież bibliotekę: przeszukaj /dane/muzyka");
         odswiez_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.odswiez_biblioteke(); }, this);
-        dodaj_kol_ = new Przycisk("Dodaj do kolejki");
+        dodaj_kol_ = new PrzyciskIkony("Dodaj do kolejki", &ikony_[IK_DODAJ]);
         dodaj_kol_->ustaw_podpowiedz("Dopisz zaznaczony utwór na koniec kolejki");
         dodaj_kol_->przy_kliknieciu([](Przycisk*, void* p) { auto* o = static_cast<OknoGrajka*>(p); o->o_.dodaj_do_kolejki(o->o_.biblioteka().widoczny(uint32_t(o->bib_->wybrany_wiersz()))); }, this);
-        odswiez_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij); dodaj_kol_->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-        przyciski_bib.dodaj_przycisk(odswiez_, 0, 0); przyciski_bib.dodaj_przycisk(dodaj_kol_, 0, 1);
+        przyciski_bib.dodaj_do_siatki(odswiez_, 0, 0); przyciski_bib.dodaj_do_siatki(dodaj_kol_, 0, 1);
         podkatalogi_ = &lewy.dodaj<PoleWyboru>(Dokowanie::Dol, "Uwzględniaj podkatalogi", true);
         podkatalogi_->ustaw_podpowiedz("Skanuj także podfoldery (do 3 poziomów)");
         podkatalogi_->przy_przelaczeniu([](PoleWyboru*, bool z, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_podkatalogi(z); }, this);
@@ -199,10 +206,11 @@ private:
     }
 
     // Dwa niezalezne wiersze (osobne siatki, wysokosc z zawartosci):
-    //  1: transport (5 x gwiazdka, przyciski rozciagniete), odstep, Wycisz (Auto), glosnosc (2*), wartosc (Auto),
+    //  1: transport - [*] stop, poprzedni, Odtworz/Pauza (wiekszy, okragly), nastepny, odstep = stop [*]; w prawej
+    //     kolumnie gwiazdkowej wyciszenie + glosnosc + wartosc. Dwie rowne kolumny gwiazdkowe i symetryczna grupa
+    //     ustawiaja Odtworz/Pauza dokladnie na srodku wiersza.
     //  2: przelaczniki i Zakoncz w kolumnach Auto (naturalna szerokosc tekstu) + odstep gwiazdkowy.
-    // Kolumny Auto nie zachodza na siebie przy zadnej szerokosci >= minimum okna (wczesniej wspolna siatka 2* dawala
-    // przy 980 px ok. 104 px na "Wizualizacja", ktora w TTF potrzebuje wiecej i nachodzila na "Diagnostyka").
+    // Kolumny Auto nie zachodza na siebie przy zadnej szerokosci >= minimum okna.
     void buduj_sterowanie(PanelDokowany& root) {
         auto& ster = root.dodaj<PanelDokowany>(Dokowanie::Dol);
         ster.ustaw_odstep(6);
@@ -211,37 +219,42 @@ private:
         wiersz_ster_[0] = &w1; wiersz_ster_[1] = &w2;
         Siatka* wiersze[] = {&w1, &w2};
         for (Siatka* w : wiersze) { w->ustaw_wypelnienie(Marginesy(0)); w->ustaw_odstep(8, 0); w->dodaj_wiersz(DefinicjaWymiaru::automatyczny()); }
-        for (int i = 0; i < 5; ++i) w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
-        w1.dodaj_kolumne(DefinicjaWymiaru::piksele(4));
-        w1.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
-        w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(2));
-        w1.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
-        poprz_ = new Przycisk("Poprzedni");
-        graj_ = new Przycisk("Odtwórz");
-        pauza_ = new Przycisk("Pauza");
-        stop_ = new Przycisk("Stop");
-        nast_ = new Przycisk("Następny");
+        w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        for (int i = 0; i < 5; ++i) w1.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        w1.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
+        poprz_ = new PrzyciskIkony("Poprzedni", &ikony_[IK_POPRZEDNI], 24);
+        stop_ = new PrzyciskIkony("Stop", &ikony_[IK_STOP], 24);
+        graj_ = new PrzyciskIkony("Odtwórz", &ikony_[IK_ODTWORZ], 32, RodzajPrzyciskuIkony::Glowny);
+        nast_ = new PrzyciskIkony("Następny", &ikony_[IK_NASTEPNY], 24);
         poprz_->ustaw_podpowiedz("Poprzedni utwór (lub początek)");
         graj_->ustaw_podpowiedz("Odtwórz albo wznów");
-        pauza_->ustaw_podpowiedz("Wstrzymaj odtwarzanie");
         stop_->ustaw_podpowiedz("Zatrzymaj i wróć na początek");
         nast_->ustaw_podpowiedz("Następny utwór z kolejki");
         poprz_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.poprzedni(); }, this);
-        graj_->przy_kliknieciu([](Przycisk*, void* p) { auto* o = static_cast<OknoGrajka*>(p); o->odtworz_zaznaczony_lub_kolejke(); }, this);
-        pauza_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.pauza(); }, this);
+        graj_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->odtworz_lub_pauza(); }, this);
         stop_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.stop(); }, this);
         nast_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.nastepny(); }, this);
-        w1.dodaj_do_siatki(poprz_, 0, 0); w1.dodaj_do_siatki(graj_, 0, 1); w1.dodaj_do_siatki(pauza_, 0, 2);
-        w1.dodaj_do_siatki(stop_, 0, 3); w1.dodaj_do_siatki(nast_, 0, 4);
-        wycisz_ = new Przycisk("Wycisz");
-        wycisz_->ustaw_podpowiedz("Wycisz lub przywróć dźwięk");
+        w1.dodaj_do_siatki(stop_, 0, 1); w1.dodaj_do_siatki(poprz_, 0, 2); w1.dodaj_do_siatki(graj_, 0, 3); w1.dodaj_do_siatki(nast_, 0, 4);
+        w1.dodaj_do_siatki(new OdstepJak(stop_), 0, 5);
+        // glosnosc: przy prawej krawedzi, wyciszenie bezposrednio przy suwaku
+        auto* gl = new SiatkaBezTla();
+        gl->ustaw_wypelnienie(Marginesy(0)); gl->ustaw_odstep(6, 0); gl->dodaj_wiersz(DefinicjaWymiaru::automatyczny());
+        gl->dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1)); gl->dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        gl->dodaj_kolumne(DefinicjaWymiaru::piksele(150)); gl->dodaj_kolumne(DefinicjaWymiaru::automatyczny());
+        wycisz_ = new PrzyciskIkony("Wycisz", &ikony_[IK_WYCISZ], 22);
+        wycisz_->ustaw_podpowiedz("Wycisz dźwięk");
         wycisz_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->o_.przelacz_wyciszenie(); }, this);
         glosnosc_ = new Suwak();
         glosnosc_->ustaw_zakres(0, 100);
+        glosnosc_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
         glosnosc_->ustaw_podpowiedz("Głośność strumienia Grajka");
         glosnosc_->przy_zmianie_wartosci([](Suwak*, int v, void* p) { auto* o = static_cast<OknoGrajka*>(p); if (!o->sync_) o->o_.ustaw_glosnosc(uint32_t(v)); }, this);
         glosnosc_proc_ = new EtykietaJednowierszowa("80%");
-        w1.dodaj_do_siatki(wycisz_, 0, 6); w1.dodaj_do_siatki(glosnosc_, 0, 7); w1.dodaj_do_siatki(glosnosc_proc_, 0, 8);
+        glosnosc_proc_->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        gl->dodaj_do_siatki(wycisz_, 0, 1); gl->dodaj_do_siatki(glosnosc_, 0, 2); gl->dodaj_do_siatki(glosnosc_proc_, 0, 3);
+        gl->ustaw_wyrownanie_pionowe(WyrownaniePionowe::Srodek);
+        w1.dodaj_do_siatki(gl, 0, 6);
+        glosnosc_grupa_ = gl;
 
         for (int i = 0; i < 3; ++i) w2.dodaj_kolumne(DefinicjaWymiaru::automatyczny());
         w2.dodaj_kolumne(DefinicjaWymiaru::gwiazdka(1));
@@ -266,12 +279,10 @@ private:
         zakoncz_->przy_kliknieciu([](Przycisk*, void* p) { static_cast<OknoGrajka*>(p)->zakoncz_calkowicie(); }, this);
         w2.dodaj_do_siatki(losowo_, 0, 0); w2.dodaj_do_siatki(powtarzanie_, 0, 1); w2.dodaj_do_siatki(w_tle_, 0, 2);
         w2.dodaj_do_siatki(wizualizacja_, 0, 4); w2.dodaj_do_siatki(diagnostyka_, 0, 5); w2.dodaj_do_siatki(zakoncz_, 0, 6);
-        Przycisk* wypelniaja[] = {poprz_, graj_, pauza_, stop_, nast_};
-        for (Przycisk* b : wypelniaja) b->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
         // teksty zmienne: kolumna Auto mierzy najszerszy wariant (inaczej "Powtarzanie: wszystkie" / "Przywróć" /
         // "wycisz." bylyby przyciete po zmianie tekstu - zmiana tekstu nie przelicza ukladu)
         static const char* const WARIANTY_POWT[] = {"Powtarzanie: wył.", "Powtarzanie: utwór", "Powtarzanie: wszystkie"};
-        static const char* const WARIANTY_WYC[] = {"Wycisz", "Przywróć"};
+        static const char* const WARIANTY_WYC[] = {"Wycisz", "Przywróć dźwięk"};   // tekst zastepczy bez ikony
         static const char* const WARIANTY_PROC[] = {"100%", "wycisz."};
         warianty_[0] = {powtarzanie_, nullptr, WARIANTY_POWT, 3};
         warianty_[1] = {wycisz_, nullptr, WARIANTY_WYC, 2};
@@ -305,15 +316,17 @@ private:
     Kontrolka* buduj_kolejke() {
         auto* p = new PanelDokowany();
         p->ustaw_wypelnienie(Marginesy(6)); p->ustaw_odstep(6);
+        // jeden wiersz ikon: kolejnosc (w gore, w dol), usuwanie (usun, wyczysc), listy M3U8 (zapisz, wczytaj)
         auto& dol = p->dodaj<SiatkaPrzyciskow>(Dokowanie::Dol);
         przyciski_kol_ = &dol;
         dol.ustaw_odstep(6, 6); dol.ustaw_wypelnienie(Marginesy(0));
-        for (int w = 0; w < 3; ++w) dol.dodaj_wiersz(DefinicjaWymiaru::automatyczny());
-        dol.dodaj_kolumne(); dol.dodaj_kolumne();
-        auto* gora = new Przycisk("W górę"); auto* dol_ = new Przycisk("W dół"); auto* usun = new Przycisk("Usuń"); auto* czysc = new Przycisk("Wyczyść");
-        auto* zapisz = new Przycisk("Zapisz listę"); auto* wczytaj = new Przycisk("Wczytaj listę");
+        dol.dodaj_wiersz(DefinicjaWymiaru::automatyczny());
+        for (int k = 0; k < 6; ++k) dol.dodaj_kolumne();
+        auto* gora = new PrzyciskIkony("W górę", &ikony_[IK_W_GORE]); auto* dol_ = new PrzyciskIkony("W dół", &ikony_[IK_W_DOL]);
+        auto* usun = new PrzyciskIkony("Usuń", &ikony_[IK_USUN]); auto* czysc = new PrzyciskIkony("Wyczyść", &ikony_[IK_WYCZYSC]);
+        auto* zapisz = new PrzyciskIkony("Zapisz listę", &ikony_[IK_ZAPISZ]); auto* wczytaj = new PrzyciskIkony("Wczytaj listę", &ikony_[IK_WCZYTAJ]);
         gora->ustaw_podpowiedz("Przesuń utwór wyżej"); dol_->ustaw_podpowiedz("Przesuń utwór niżej");
-        usun->ustaw_podpowiedz("Usuń zaznaczony z kolejki"); czysc->ustaw_podpowiedz("Opróżnij kolejkę");
+        usun->ustaw_podpowiedz("Usuń zaznaczony z kolejki"); czysc->ustaw_podpowiedz("Wyczyść kolejkę");
         zapisz->ustaw_podpowiedz("Zapisz kolejkę jako M3U8 w ustawieniach");
         wczytaj->ustaw_podpowiedz("Wczytaj zapisaną listę M3U8");
         gora->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->przesun_zaznaczony(-1); }, this);
@@ -322,12 +335,8 @@ private:
         czysc->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.wyczysc_kolejke(); }, this);
         zapisz->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.zapisz_liste(); }, this);
         wczytaj->przy_kliknieciu([](Przycisk*, void* q) { static_cast<OknoGrajka*>(q)->o_.wczytaj_liste(); }, this);
-        Przycisk* wszystkie[] = {gora, dol_, usun, czysc, zapisz, wczytaj};
-        for (Przycisk* b : wszystkie) b->ustaw_wyrownanie_poziome(WyrownaniePoziome::Rozciagnij);
-        // 3 wiersze x 2 kolumny (wagi wg tekstow): miesci sie w waskim panelu bez obcinania "Wyczyść"
-        dol.dodaj_przycisk(gora, 0, 0); dol.dodaj_przycisk(dol_, 0, 1);
-        dol.dodaj_przycisk(usun, 1, 0); dol.dodaj_przycisk(czysc, 1, 1);
-        dol.dodaj_przycisk(zapisz, 2, 0); dol.dodaj_przycisk(wczytaj, 2, 1);
+        PrzyciskIkony* wszystkie[] = {gora, dol_, usun, czysc, zapisz, wczytaj};
+        for (int k = 0; k < 6; ++k) { dol.dodaj_przycisk(wszystkie[k], 0, k); przyciski_kolejki_[k] = wszystkie[k]; }
         czysc_ = czysc;
         kol_ = &p->dodaj<TabelaGrajka>(Dokowanie::Wypelnij);
         kol_->ustaw_dostawce_grajka(&dane_kol_);
@@ -414,7 +423,7 @@ private:
     static int minimum_lewego(const void* p, SkalaUI s) {
         auto* o = static_cast<const OknoGrajka*>(p);
         int m = o->bib_ ? o->bib_->minimum_px() + o->bib_->margines().poziomo() * s : 0;   // tabela + jej margines
-        const int b = o->przyciski_bib_ ? o->przyciski_bib_->minimum_px() : 0;
+        const int b = o->odswiez_ && o->dodaj_kol_ ? o->odswiez_->zmierz(Rozmiar(-1, -1)).szerokosc + o->dodaj_kol_->zmierz(Rozmiar(-1, -1)).szerokosc + 6 * s : 0;
         return m > b ? m : b;
     }
     // Korektor: 10 kolumn suwakow; etykiety w dwoch rzedach potrzebuja 2 kolumn na najszerszy tekst ("125", "+12").
@@ -445,6 +454,11 @@ private:
             return;
         }
         o_.odtworz();
+    }
+    // Odtworz/Pauza: jeden przycisk glowny (ikona i podpowiedz wg stanu).
+    void odtworz_lub_pauza() {
+        if (o_.silnik().stan() == Stan::Odtwarzanie) { o_.pauza(); return; }
+        odtworz_zaznaczony_lub_kolejke();
     }
     void przesun_zaznaczony(int kierunek) {
         const size_t w = kol_->wybrany_wiersz();
@@ -580,21 +594,21 @@ private:
         { Tekst x(t, sizeof(t)); x.dodaj(nazwa_stanu(s.stan()));
           if (s.stan() == Stan::Odtwarzanie && o_.konfiguracja().w_tle) x.dodaj(" · w tle dozwolone");
           ustaw(stan_, t); }
-        // okladka: dekodowana raz przez kontroler; tutaj tylko przekazanie bitmapy do kontrolki Obraz
+        // okladka: z tagu (dekodowana raz przez kontroler) albo grafika plyty uzytkownika (dekodowana raz przy starcie);
+        // kontrolka skaluje ja raz na rozmiar - tutaj tylko przekazanie bitmapy
         const uint32_t wersja = o_.okladka().jest() ? uint32_t(o_.biezacy_utwor()) ^ 0x8000u : 0xFFFFFFFEu;
         if (wersja != okladka_wersja_) {
             okladka_wersja_ = wersja;
             if (o_.okladka().jest()) okladka_->ustaw_okladke(o_.okladka().piksele(), int(o_.okladka().szerokosc()), int(o_.okladka().wysokosc()), true);
-            else {
-                if (!domyslna_) domyslna_ = grafika_domyslna(BOK_OKLADKI, motyw_kolor(MOTYW_KOLOR_AKCENT), motyw_kolor(MOTYW_KOLOR_PANEL));
-                if (domyslna_) okladka_->ustaw_okladke(domyslna_, BOK_OKLADKI, BOK_OKLADKI, false);
-            }
+            else if (plyta_.jest()) okladka_->ustaw_okladke(plyta_.piksele(), int(plyta_.szerokosc()), int(plyta_.wysokosc()), false);
+            else okladka_->wyczysc_okladke();
         }
         const bool gra = s.stan() == Stan::Odtwarzanie;
-        pauza_->ustaw_wlaczona(gra);
         stop_->ustaw_wlaczona(s.zaladowany() && (gra || s.stan() == Stan::Pauza || s.pozycja_ms() > 0));
-        graj_->ustaw_tekst(s.stan() == Stan::Pauza ? "Wznów" : "Odtwórz");
-        graj_->ustaw_wlaczona(!gra);
+        // jeden przycisk Odtworz/Pauza: podczas odtwarzania ikona i akcja pauzy
+        graj_->ustaw_obraz_ikony(&ikony_[gra ? IK_PAUZA : IK_ODTWORZ]);
+        ustaw(graj_, gra ? "Pauza" : (s.stan() == Stan::Pauza ? "Wznów" : "Odtwórz"));
+        graj_->ustaw_podpowiedz(gra ? "Wstrzymaj odtwarzanie" : (s.stan() == Stan::Pauza ? "Wznów odtwarzanie" : "Odtwórz albo wznów"));
         pasek_->ustaw_wlaczona(s.zaladowany() && s.czas_ms() > 0);
         uniewaznij_wskazniki();
         aktualizuj_postep();
@@ -643,7 +657,9 @@ private:
         if (glosnosc_->wartosc() != int(k.glosnosc)) glosnosc_->ustaw_wartosc(int(k.glosnosc));
         char t[16]; { Tekst x(t, sizeof(t)); x.liczba(k.glosnosc); x.dodaj("%"); }
         ustaw(glosnosc_proc_, k.wyciszony ? "wycisz." : t);
-        wycisz_->ustaw_tekst(k.wyciszony ? "Przywróć" : "Wycisz");
+        ustaw(wycisz_, k.wyciszony ? "Przywróć dźwięk" : "Wycisz");
+        wycisz_->ustaw_zaznaczony(k.wyciszony);                       // przelacznik: kafel z odcieniem akcentu
+        wycisz_->ustaw_podpowiedz(k.wyciszony ? "Przywróć dźwięk (wyciszono)" : "Wycisz dźwięk");
         if (losowo_->czy_zaznaczone() != k.losowo) losowo_->ustaw_zaznaczone(k.losowo);
         if (w_tle_->czy_zaznaczone() != k.w_tle) w_tle_->ustaw_zaznaczone(k.w_tle);
         if (wizualizacja_->czy_zaznaczone() != k.wizualizacja) wizualizacja_->ustaw_zaznaczone(k.wizualizacja);
@@ -684,19 +700,23 @@ private:
     uint64_t ostatni_postep_ = 0, ostatnia_wiz_ = 0, ostatni_skan_ = 0, ostatnia_diag_ = 0;
     uint32_t ostatnia_skala_ = 0, wiersze_diag_ = 0;
     int ostatnia_karta_ = -1;
-    uint32_t* domyslna_ = nullptr;
+    ObrazIkony ikony_[LICZBA_IKON];
+    GrafikaPlyty plyta_;
+    Siatka* glosnosc_grupa_ = nullptr;
+    PrzyciskIkony* przyciski_kolejki_[6]{};
 
     PasekStanuGrajka* komunikat_ = nullptr;
     EtykietaJednowierszowa* nazwa_ = nullptr;
-    SiatkaPrzyciskow *przyciski_bib_ = nullptr, *przyciski_kol_ = nullptr;
-    Przycisk* czysc_ = nullptr;
+    Siatka* przyciski_bib_ = nullptr;
+    SiatkaPrzyciskow* przyciski_kol_ = nullptr;
+    PrzyciskIkony* czysc_ = nullptr;
     Siatka* siatka_korektora_ = nullptr;
     Siatka* wiersz_ster_[2]{};
     TabelaGrajka* diag_tab_ = nullptr;
     Etykieta* opis_diagnostyki_ = nullptr;
     Karty* karty_ = nullptr;
     PoleWyszukiwania* szukaj_ = nullptr;
-    Przycisk *odswiez_ = nullptr, *dodaj_kol_ = nullptr;
+    PrzyciskIkony *odswiez_ = nullptr, *dodaj_kol_ = nullptr;
     PoleWyboru* podkatalogi_ = nullptr;
     EtykietaJednowierszowa* stan_bib_ = nullptr;
     TabelaGrajka *bib_ = nullptr, *kol_ = nullptr;
@@ -706,7 +726,7 @@ private:
     EtykietaJednowierszowa* glosnosc_proc_ = nullptr;
     SuwakPostepu* pasek_ = nullptr;
     WidokWizualizacji* wiz_ = nullptr;
-    Przycisk *poprz_ = nullptr, *graj_ = nullptr, *pauza_ = nullptr, *stop_ = nullptr, *nast_ = nullptr, *wycisz_ = nullptr;
+    PrzyciskIkony *poprz_ = nullptr, *graj_ = nullptr, *stop_ = nullptr, *nast_ = nullptr, *wycisz_ = nullptr;
     Przycisk *powtarzanie_ = nullptr, *zakoncz_ = nullptr;
     Suwak* glosnosc_ = nullptr;
     PoleWyboru *losowo_ = nullptr, *w_tle_ = nullptr, *wizualizacja_ = nullptr, *diagnostyka_ = nullptr, *korektor_ = nullptr;

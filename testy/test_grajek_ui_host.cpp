@@ -160,6 +160,31 @@ static void test_kontroler() {
     g_katalogi["/dane"] = true; g_katalogi["/dane/muzyka"] = true;
     o.odswiez_biblioteke(); kroki_k(o, 5);
     CHECK(std::strstr(o.komunikat(), "Brak obsługiwanych plików"));
+    CHECK(o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Nieznany && !std::strstr(o.komunikat(), "dysku"));
+}
+
+// BWS 111: Grajek odroznia trwaly dysk zainstalowanego systemu od RAM sesji Live i nie opisuje RAM jako trwalego.
+static void test_magazyn() {
+    Jadro j; g_j = &j;
+    przygotuj_muzyke();
+    g_ustawienia.clear();
+    Odtwarzacz o; o.konfiguruj(platforma());
+    j.magazyn = 1;
+    o.start(); kroki_k(o, 20);
+    CHECK(o.biblioteka().liczba() == 3 && o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Trwaly);
+    CHECK(std::strstr(o.komunikat(), "dysku trwałym") && !std::strstr(o.komunikat(), "RAM"));
+    CHECK(o.rodzaj_komunikatu() == RodzajKomunikatu::Sukces);
+    j.magazyn = 2;
+    o.odswiez_biblioteke(); kroki_k(o, 20);
+    CHECK(o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Ram);
+    CHECK(std::strstr(o.komunikat(), "Sesja Live") && std::strstr(o.komunikat(), "znikną po restarcie"));
+    CHECK(!std::strstr(o.komunikat(), "trwałym") && o.rodzaj_komunikatu() == RodzajKomunikatu::Ostrzezenie);
+    wyczysc_fs();
+    o.odswiez_biblioteke(); kroki_k(o, 5);
+    CHECK(std::strstr(o.komunikat(), "nie istnieje") && std::strstr(o.komunikat(), "RAM"));
+    j.magazyn = 0;
+    o.odswiez_biblioteke(); kroki_k(o, 5);
+    CHECK(o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Nieznany);
 }
 
 static void test_okno() {
@@ -185,11 +210,16 @@ static void test_okno() {
     CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && std::strcmp(o->tytul_->tekst(), "Piosenka2 mono") == 0);
     CHECK(std::strstr(o->format_->tekst(), "WAV · 16 bit") && std::strstr(o->format_->tekst(), "mono"));
     CHECK(j.gain_ost_v == 55);
-    CHECK(!o->graj_->czy_wlaczona() && o->pauza_->czy_wlaczona());
-    // okladka domyslna (WAV bez okladki)
-    CHECK(o->okladka_->czy_ma_obraz() && o->okladka_->szerokosc_oryginalna() == OknoGrajka::BOK_OKLADKI);
-    // pauza i wznowienie przyciskami
-    klik(*o->pauza_); kroki(*o, 1);
+    // jeden przycisk Odtworz/Pauza: podczas odtwarzania ikona pauzy (grafika uzytkownika), wlaczony
+    CHECK(o->graj_->czy_wlaczona() && o->graj_->obraz_ikony() == &o->ikony_[IK_PAUZA] && o->graj_->uzywa_ikony());
+    CHECK(std::strcmp(o->graj_->tekst(), "Pauza") == 0 && std::strstr(o->graj_->podpowiedz(), "Wstrzymaj"));
+    // okladka domyslna (WAV bez okladki): plyta winylowa uzytkownika (JPEG 492x492 -> raz do 352 px, potem do kontrolki)
+    CHECK(o->okladka_->czy_ma_obraz() && o->okladka_->piksele() == o->plyta_.piksele());
+    CHECK(o->okladka_->szerokosc_oryginalna() == int(GrafikaPlyty::BOK_POSREDNI) && o->okladka_->wysokosc_oryginalna() == int(GrafikaPlyty::BOK_POSREDNI));
+    CHECK(o->plyta_.dekodowania() == 1);
+    // pauza i wznowienie tym samym przyciskiem
+    klik(*o->graj_); kroki(*o, 1);
+    CHECK(o->graj_->obraz_ikony() == &o->ikony_[IK_ODTWORZ]);
     CHECK(o->o_.silnik().stan() == Stan::Pauza && std::strcmp(o->graj_->tekst(), "Wznów") == 0);
     klik(*o->graj_); kroki(*o, 1);
     CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie);
@@ -210,8 +240,10 @@ static void test_okno() {
     // glosnosc i wyciszenie
     o->glosnosc_->ustaw_wartosc(30); CHECK(j.gain_ost_v == 30 && o->o_.konfiguracja().glosnosc == 30);
     klik(*o->wycisz_); kroki(*o, 1);
-    CHECK(j.gain_ost_m == 1 && std::strcmp(o->wycisz_->tekst(), "Przywróć") == 0);
-    klik(*o->wycisz_); kroki(*o, 1); CHECK(j.gain_ost_m == 0);
+    // wyciszenie = przelacznik z ikona uzytkownika (mute.png): stan zaznaczony i podpowiedz wg stanu
+    CHECK(j.gain_ost_m == 1 && std::strcmp(o->wycisz_->tekst(), "Przywróć dźwięk") == 0 && o->wycisz_->czy_zaznaczony());
+    CHECK(std::strstr(o->wycisz_->podpowiedz(), "Przywróć") && o->wycisz_->uzywa_ikony());
+    klik(*o->wycisz_); kroki(*o, 1); CHECK(j.gain_ost_m == 0 && !o->wycisz_->czy_zaznaczony());
     // korektor: preset Rock z listy, suwak pasma -> Wlasne ustawienia
     o->preset_->ustaw_wybrany_indeks(int(PresetKorektora::Rock));
     o->o_.ustaw_preset(PresetKorektora::Rock); kroki(*o, 1);
@@ -472,12 +504,173 @@ static void test_odrysowania_i_uklad() {
     delete o;
 }
 
+// Ikony uzytkownika i plyta winylowa: mapowanie, jednokrotne dekodowanie i skalowanie, stany przyciskow ikonowych,
+// klawiatura, podpowiedzi, brak i uszkodzenie plikow (przycisk tekstowy / pusty panel okladki).
+static uint32_t piksel(int x, int y) { return test_surface[size_t(y) * size_t(test_surface_width) + size_t(x)] & 0xFFFFFF; }
+static uint32_t probka_kafla(OknoGrajka& o, PrzyciskIkony* b) {
+    test_surface_width = o.szerokosc(); test_surface_height = o.wysokosc();
+    test_surface.assign(size_t(test_surface_width) * size_t(test_surface_height), 0x123456);
+    { KontekstRysowania c; o.rysuj(c, true); }
+    const Prostokat k = b->obszar_kafla();
+    return piksel(b->obszar_ekranu().x + k.x + 4, b->obszar_ekranu().y + k.y + k.wysokosc - 4);
+}
+static void test_ikony_i_grafiki() {
+    Jadro j; g_j = &j;
+    przygotuj_muzyke();
+    { GrajekFixtures::ParametryWav d; d.czestotliwosc = 48000; d.ramki = 48000 * 30; d.info = false;
+      dodaj_plik("/dane/muzyka/Zz długi utwór.wav", GrajekFixtures::wav(d)); }
+    for (const char* a : AKCJE_IKON_GRAJKA) CHECK(g_pliki.count(std::string("/ikonki/grajek_") + a + ".png"));
+    CHECK(g_pliki.count("/ikonki/grajek_plyta_winylowa.jpg"));
+    {   // plyta w systemie = oryginalny plik uzytkownika bajt w bajt (bez konwersji)
+        const Bajty& p = g_pliki["/ikonki/grajek_plyta_winylowa.jpg"];
+        CHECK(p.size() == 146235 && p[0] == 0xFF && p[1] == 0xD8);
+    }
+    g_ustawienia.clear();
+    auto* o = new OknoGrajka;
+    o->init(platforma());
+    o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    // (1) 14 ikon: kazda zdekodowana dokladnie raz, 128x128 po konwersji przy budowaniu; przypisanie do akcji
+    for (int i = 0; i < LICZBA_IKON; ++i)
+        CHECK(o->ikony_[i].jest() && o->ikony_[i].liczba_dekodowan() == 1 && o->ikony_[i].szerokosc_zrodla() == 128 && o->ikony_[i].wysokosc_zrodla() == 128);
+    struct { PrzyciskIkony* b; int ik; } mapa[] = {{o->poprz_, IK_POPRZEDNI}, {o->graj_, IK_ODTWORZ}, {o->stop_, IK_STOP}, {o->nast_, IK_NASTEPNY},
+        {o->wycisz_, IK_WYCISZ}, {o->odswiez_, IK_ODSWIEZ}, {o->dodaj_kol_, IK_DODAJ}, {o->przyciski_kolejki_[0], IK_W_GORE},
+        {o->przyciski_kolejki_[1], IK_W_DOL}, {o->przyciski_kolejki_[2], IK_USUN}, {o->przyciski_kolejki_[3], IK_WYCZYSC},
+        {o->przyciski_kolejki_[4], IK_ZAPISZ}, {o->przyciski_kolejki_[5], IK_WCZYTAJ}};
+    for (auto& m : mapa) CHECK(m.b->obraz_ikony() == &o->ikony_[m.ik] && m.b->uzywa_ikony() && m.b->podpowiedz()[0] && std::strlen(m.b->podpowiedz()) < 63);
+    // akcje bez grafiki uzytkownika pozostaja tekstowe
+    CHECK(std::strcmp(o->zakoncz_->tekst(), "Zakończ") == 0 && std::strstr(o->powtarzanie_->tekst(), "Powtarzanie"));
+    // (2) plyta: zdekodowana raz (przy starcie), okladka skalowana raz na rozmiar kontrolki - nie w kazdej klatce
+    CHECK(o->plyta_.jest() && o->plyta_.dekodowania() == 1 && o->plyta_.szerokosc() == GrafikaPlyty::BOK_POSREDNI);
+    CHECK(o->okladka_->czy_ma_obraz() && o->okladka_->piksele_wyswietlane());
+    CHECK(o->okladka_->szerokosc_wyswietlana() == o->okladka_->obszar().szerokosc || o->okladka_->wysokosc_wyswietlana() == o->okladka_->obszar().wysokosc);
+    kroki(*o, 25);
+    auto indeks = [&](const char* tytul) { for (uint32_t w = 0; w < o->o_.biblioteka().widoczne(); ++w) if (const Utwor* u = o->o_.biblioteka().utwor(uint32_t(o->o_.biblioteka().widoczny(w)))) if (std::strcmp(u->tytul(), tytul) == 0) return w; return 0xFFFFFFFFu; };
+    // dlugi WAV bez okladki w tagu: plyta uzytkownika; 2 s odtwarzania z odrysowaniami = zero skalowan i dekodowan
+    const uint32_t i_dlugi = indeks("Zz długi utwór");
+    CHECK(i_dlugi != 0xFFFFFFFFu && o->o_.odtworz_z_widoku(i_dlugi));
+    for (int i = 0; i < 20; ++i) { kroki(*o, 1); KontekstRysowania c; o->rysuj(c); }
+    CHECK(!o->o_.okladka().jest() && o->okladka_->piksele() == o->plyta_.piksele());
+    const uint32_t sk_okl = o->okladka_->liczba_skalowan();
+    uint32_t sk_ik[LICZBA_IKON]; for (int i = 0; i < LICZBA_IKON; ++i) sk_ik[i] = o->ikony_[i].liczba_skalowan();
+    for (int i = 0; i < 500; ++i) { kroki(*o, 1); KontekstRysowania c; o->rysuj(c); }
+    CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && o->plyta_.dekodowania() == 1 && o->okladka_->liczba_skalowan() == sk_okl);
+    for (int i = 0; i < LICZBA_IKON; ++i) CHECK(o->ikony_[i].liczba_dekodowan() == 1);
+    for (int i = 0; i < LICZBA_IKON; ++i) if (i != IK_PAUZA && i != IK_ODTWORZ) CHECK(o->ikony_[i].liczba_skalowan() == sk_ik[i]);
+    // MP3 z okladka w tagu: ma pierwszenstwo przed plyta; jedno skalowanie nowego obrazu
+    const uint32_t i_mp3 = indeks("Bursztynowy test");
+    CHECK(i_mp3 != 0xFFFFFFFFu && o->o_.odtworz_z_widoku(i_mp3));
+    for (int i = 0; i < 20; ++i) { kroki(*o, 1); KontekstRysowania c; o->rysuj(c); }
+    CHECK(o->o_.okladka().jest() && o->okladka_->piksele() != o->plyta_.piksele() && o->okladka_->liczba_skalowan() == sk_okl + 1);
+    CHECK(o->o_.odtworz_z_widoku(i_dlugi));
+    for (int i = 0; i < 20; ++i) { kroki(*o, 1); KontekstRysowania c; o->rysuj(c); }
+    const uint32_t sk_okl2 = o->okladka_->liczba_skalowan();
+    CHECK(sk_okl2 == sk_okl + 2 && o->okladka_->piksele() == o->plyta_.piksele() && o->plyta_.dekodowania() == 1);
+    // zmiana rozmiaru okna: okladka przeskalowana raz (nowy bok), bez ponownego dekodowania
+    o->ustaw_geometrie(0, 0, 1920, 1040); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    CHECK(o->okladka_->liczba_skalowan() == sk_okl2 + 1 && o->plyta_.dekodowania() == 1);
+    // 150 %: ikony przygotowane w nowym boku (uklad), dekodowanie bez zmian
+    o->ustaw_skale_dpi(SkalaUI::procent(150)); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    CHECK(o->stop_->bok_ikony_px() == 36 && o->ikony_[IK_STOP].przygotowany_bok() == 36 && o->ikony_[IK_STOP].liczba_dekodowan() == 1);
+    o->ustaw_skale_dpi(SkalaUI(1)); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    // (3) stany: najechanie (jasniejszy kafel), wylaczenie (przygaszony), zaznaczenie (wyciszenie), wcisniecie
+    o->o_.stop(); kroki(*o, 3);
+    CHECK(!o->stop_->czy_wlaczona());
+    const uint32_t wyl = probka_kafla(*o, o->stop_);
+    const uint32_t norm = probka_kafla(*o, o->nast_);
+    CHECK(wyl != norm);
+    o->nast_->obsluz_wejscie_myszy();
+    CHECK(o->nast_->czy_najechana());
+    const uint32_t naj = probka_kafla(*o, o->nast_);
+    CHECK(naj != norm);
+    o->nast_->obsluz_opuszczenie_myszy();
+    klik(*o->wycisz_); kroki(*o, 1);
+    CHECK(o->wycisz_->czy_zaznaczony() && probka_kafla(*o, o->wycisz_) != norm);
+    klik(*o->wycisz_); kroki(*o, 1);
+    CHECK(!o->wycisz_->czy_zaznaczony());
+    {
+        ZdarzenieMyszki e{}; e.typ = TypZdarzenia::WcisniecieMyszy; e.przycisk = 1;
+        e.x = o->nast_->obszar_ekranu().x + 5; e.y = o->nast_->obszar_ekranu().y + 5;
+        o->nast_->obsluz_wcisniecie_myszy(e);
+        CHECK(o->nast_->czy_wcisnieta() && probka_kafla(*o, o->nast_) != norm);
+        e.x = -100; e.y = -100; ZdarzenieMyszki u = e; u.typ = TypZdarzenia::ZwolnienieMyszy;
+        const uint32_t kol = o->o_.kolejka().biezaca() < 0 ? 0u : uint32_t(o->o_.kolejka().biezaca());
+        o->nast_->obsluz_zwolnienie_myszy(u);                     // zwolnienie poza przyciskiem: bez akcji
+        CHECK(!o->nast_->czy_wcisnieta() && (o->o_.kolejka().biezaca() < 0 ? 0u : uint32_t(o->o_.kolejka().biezaca())) == kol);
+    }
+    // (4) klawiatura: Spacja i Enter na przycisku z fokusem wykonuja akcje (Odtworz/Pauza)
+    CHECK(o->graj_->czy_moze_miec_fokus());
+    {
+        ZdarzenieKlawiatury k{}; k.kod_klawisza = 32;
+        o->graj_->obsluz_wcisniecie_klawisza(k); kroki(*o, 3);
+        CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && o->graj_->obraz_ikony() == &o->ikony_[IK_PAUZA]);
+        ZdarzenieKlawiatury e{}; e.kod_klawisza = 13;
+        o->graj_->obsluz_wcisniecie_klawisza(e); kroki(*o, 2);
+        CHECK(o->o_.silnik().stan() == Stan::Pauza && o->graj_->obraz_ikony() == &o->ikony_[IK_ODTWORZ]);
+        CHECK(std::strstr(o->graj_->podpowiedz(), "Wznów"));
+    }
+    // fokus: pierscien rysowany wewnatrz obszaru przycisku (bez wychodzenia na sasiadow)
+    o->graj_->obsluz_uzyskanie_skupienia();
+    CHECK(o->graj_->czy_ma_fokus() && GrajekUklad::ikona_miesci(o->graj_));
+    (void)probka_kafla(*o, o->graj_);
+    o->graj_->obsluz_utrate_skupienia();
+    // (5) podpowiedz: po najechaniu i opoznieniu - w obszarze roboczym, przy kursorze, z polskim tekstem akcji
+    {
+        bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_MYSZ_RUCH;
+        e.x = o->x() + o->przyciski_kolejki_[5]->obszar_ekranu().x + 10; e.y = o->y() + o->przyciski_kolejki_[5]->obszar_ekranu().y + 10;
+        o->obsluz_zdarzenie(e);
+        kroki(*o, 200);                                            // 800 ms > opoznienie 500 ms
+        ZarzadcaPopupow& z = o->zarzadca_popupow();
+        CHECK(z.czy_otwarty() && z.liczba_powierzchni() == 1);
+        const Prostokat r = z.powierzchnia(0)->obszar(), d = z.obszar_roboczy_ekranu();
+        CHECK(r.x >= d.x && r.y >= d.y && r.prawy() <= d.prawy() && r.dolny() <= d.dolny());
+        CHECK(r.x <= e.x + 12 && r.y <= e.y + 18 && r.szerokosc > 0);
+        CHECK(std::strstr(o->podpowiedzi_.podpowiedz().tekst(), "M3U8"));
+        bws_zdarzenie b{}; b.typ = BWS_ZDARZENIE_BLUR; o->obsluz_zdarzenie(b);
+        CHECK(!z.czy_otwarty());
+    }
+    o->o_.zakoncz(); delete o;
+
+    // (6) brak grafik: przyciski tekstowe (dzialaja), okladka - pusty panel; bez awarii i bez ponownych odczytow
+    g_zasoby_grajka = false;
+    przygotuj_muzyke();
+    o = new OknoGrajka; o->init(platforma()); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    for (int i = 0; i < LICZBA_IKON; ++i) CHECK(!o->ikony_[i].jest() && o->ikony_[i].proba());
+    CHECK(!o->graj_->uzywa_ikony() && GrajekUklad::tekst_miesci(o->graj_) && std::strcmp(o->graj_->tekst(), "Odtwórz") == 0);
+    CHECK(!o->plyta_.jest() && !o->okladka_->czy_ma_obraz());
+    kroki(*o, 25);
+    klik(*o->graj_); kroki(*o, 3);
+    CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie);
+    { KontekstRysowania c; o->rysuj(c, true); }
+    o->o_.zakoncz(); delete o;
+    // (7) uszkodzone grafiki: zly PNG i obciety JPEG odrzucone (przycisk tekstowy / pusty panel), pozostale dzialaja
+    g_zasoby_grajka = true;
+    przygotuj_muzyke();
+    { Bajty z(g_pliki["/ikonki/grajek_stop.png"]); for (size_t i = 40; i < z.size(); i += 7) z[i] ^= 0x5A; g_pliki["/ikonki/grajek_stop.png"] = z; }
+    { Bajty& z = g_pliki["/ikonki/grajek_plyta_winylowa.jpg"]; z.resize(900); }
+    g_pliki["/ikonki/grajek_usun.png"] = Bajty(300 * 1024, 0x89);               // za duzy (> 256 KiB)
+    o = new OknoGrajka; o->init(platforma()); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    CHECK(!o->ikony_[IK_STOP].jest() && !o->stop_->uzywa_ikony() && std::strcmp(o->stop_->tekst(), "Stop") == 0);
+    CHECK(!o->ikony_[IK_USUN].jest() && !o->przyciski_kolejki_[2]->uzywa_ikony());
+    CHECK(o->ikony_[IK_NASTEPNY].jest() && o->nast_->uzywa_ikony());
+    CHECK(!o->plyta_.jest() && o->plyta_.blad()[0] && !o->okladka_->czy_ma_obraz());
+    o->o_.zakoncz(); delete o;
+    przygotuj_muzyke();
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_kontroler(); std::printf("kontroler OK\n");
+    test_magazyn(); std::printf("magazyn OK\n");
     test_komunikat_niedoboru(); std::printf("komunikat niedoboru OK\n");
     test_okno(); std::printf("okno OK\n");
     test_odrysowania_i_uklad(); std::printf("odrysowania i uklad OK\n");
+    test_ikony_i_grafiki(); std::printf("ikony i grafiki uzytkownika OK\n");
     std::printf("Grajek UI: %u sprawdzen OK\n", g_checks);
     return 0;
 }

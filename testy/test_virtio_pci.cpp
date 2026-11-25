@@ -3315,6 +3315,36 @@ void test_virtio_blk_timeout_and_reset() {
 }
 
 // ----------------------------------------------------------------------------
+// 61b. VirtIO-BLK: krotki odczyt (used.len < dane + status) przy statusie OK nie moze wygladac jak poprawny
+//      odczyt (VIRTIO 1.x: dane poza `len` sa nieokreslone): blad I/O, caly bufor wyzerowany, log z LBA,
+//      licznik udanych odczytow bez zmian, a nastepny pelny odczyt dziala (kolejka spojna).
+void test_virtio_blk_short_read_logged() {
+    virtio_blk_reset_all();
+    VirtioPciDevice dev{};
+    TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+    TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+    VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+    g_klog_lines.clear();
+    const uint64_t odczyty_przed = drv->total_reads;
+    g_mock.blk_override_len = 257;   // 256 B danych + status zamiast 512 + 1
+    uint8_t buf[512];
+    for (auto& b : buf) b = 0xEE;
+    TEST_ASSERT(drv->bdev.read(7, 1, buf) == BlockError::IOError, "Krotki odczyt: blad I/O, nie Ok");
+    bool log = false;
+    for (const auto& l : g_klog_lines)
+        log |= l.find("[VIRTIO-BLK] ERROR short read op=read lba=7 sectors=1 bytes=256 expected=512") != std::string::npos;
+    TEST_ASSERT(log, "Krotki odczyt zalogowany z LBA, bajtami i oczekiwana dlugoscia");
+    bool zera = true;
+    for (auto b : buf) zera &= b == 0;
+    TEST_ASSERT(zera, "Caly bufor wyzerowany (zadne czesciowe dane nie wychodza do wywolujacego)");
+    TEST_ASSERT(drv->total_reads == odczyty_przed, "Krotki odczyt nie liczy sie jako udany");
+    g_mock.blk_override_len = -1;
+    TEST_ASSERT(drv->bdev.read(7, 1, buf) == BlockError::Ok, "Nastepny pelny odczyt dziala");
+    TEST_ASSERT(drv->total_reads == odczyty_przed + 1, "Pelny odczyt liczony");
+    virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
 // 61. VirtIO-BLK: Odrzucenie used.len > submitted buffer length jako korupcji
 // ----------------------------------------------------------------------------
 void test_virtio_blk_invalid_used_len_rejected() {
@@ -7416,6 +7446,7 @@ int main() {
     RUN_TEST(test_virtio_blk_bounds_and_overflow);
     RUN_TEST(test_virtio_blk_timeout_and_reset);
     RUN_TEST(test_virtio_blk_invalid_used_len_rejected);
+    RUN_TEST(test_virtio_blk_short_read_logged);
     RUN_TEST(test_virtio_blk_invalid_desc_id_rejected);
     RUN_TEST(test_virtio_blk_dma_quarantine_on_stuck_reset);
     RUN_TEST(test_virtio_blk_repeated_requests_and_recycling);
