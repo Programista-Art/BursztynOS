@@ -71,6 +71,7 @@ int main() {
     g_test_bws_hook=explorer_bws;
     explorer_input_cases();
     explorer_quick_access_cases();
+    explorer_sidebar_scroll_cases();
     files={{"/",true},{"/test",true},{"/dest",true},{"/test/żółć.txt",false},{"/test/program.bur",false},{"/test/folder",true}};
     using namespace PlikiUI;
     CHECK(nazwa_poprawna("zażółć gęślą.txt"));CHECK(!nazwa_poprawna(""));CHECK(!nazwa_poprawna(".."));

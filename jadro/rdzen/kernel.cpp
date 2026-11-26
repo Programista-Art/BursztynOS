@@ -1496,6 +1496,9 @@ void instaluj_wbudowane_programy() {
         "    \"okno_podrzedne\"\n"
         "]\n";
 
+    // ustawienia_aplikacji: prawa dziecka (BWS 10) = prawa rodzica & manifest dziecka - bez tego Grajek otwarty
+    // dwuklikiem MP3/WAV nie moglby zapisac WLASNYCH ustawien i kolejki (prawo ogranicza zapis do katalogu
+    // ustawien danej aplikacji; Eksplorator i tak ma pliki_zapisz).
     static const char MANIFEST_EKSPLORATORA[] =
         "nazwa = \"Eksplorator Plików\"\n"
         "autor = \"Programista Art\"\n"
@@ -1506,7 +1509,8 @@ void instaluj_wbudowane_programy() {
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
         "    \"pliki_zapisz\",\n"
-        "    \"uruchom_program\"\n"
+        "    \"uruchom_program\",\n"
+        "    \"ustawienia_aplikacji\"\n"
         "]\n";
 
     static const char MANIFEST_KALKULATORA[] =

@@ -11,6 +11,10 @@
  *    oraz zbyt dlugie sciezki sa pomijane. PSF nie ma dowiazan, a limity i tak wykluczaja nieskonczona rekurencje.
  *  - Pliki muzyczne sa tylko czytane: biblioteka nigdy ich nie modyfikuje, nie przenosi ani nie usuwa.
  *  - Kolekcja ma staly limit (MAKS_UTWOROW), przydzielana dynamicznie raz na skan.
+ *  - Pliki otwarte przez system (argument startowy, np. dwuklik w Eksploratorze; takze spoza /dane/muzyka):
+ *    analizowane ta sama droga co w skanie (analizuj_plik), dopisywane ZA utworami skanu (dodaj_zewnetrzny) -
+ *    maja zwykle indeksy (kolejka, odtwarzanie, okladka), ale nie sa widoczne w widoku biblioteki i przetrwaja
+ *    kolejne publikacje skanu. Plik znaleziony tez przez skan nie jest dublowany. Nic nie jest kopiowane.
  */
 #include "dekoder.h"
 
@@ -22,6 +26,8 @@ constexpr uint32_t MAKS_KANDYDATOW = 1024;
 constexpr uint32_t MAKS_KATALOGOW = 32;
 constexpr uint32_t MAKS_GLEBOKOSC = 3;
 constexpr uint32_t MAKS_LISTING = 64U * 1024U;     // limit BWS 6 (MAX_LISTA_KATALOGU_BWS)
+constexpr uint32_t MAKS_ZEWNETRZNYCH = 32;          // pliki otwarte spoza skanu w jednej sesji
+constexpr uint32_t POJEMNOSC_UTWOROW = MAKS_UTWOROW + MAKS_ZEWNETRZNYCH;
 
 // Listing katalogu (BWS 6): "[KAT]  nazwa\n" / "[PLIK] nazwa\n" w buforze; true = katalog istnieje.
 using FunkcjaListowania = bool (*)(void* kontekst, const char* sciezka, char* bufor, uint32_t pojemnosc);
@@ -71,7 +77,7 @@ inline void opis_formatu(const Utwor& u, char* out, size_t cap) {
 class Biblioteka {
 public:
     Biblioteka() = default;
-    ~Biblioteka() { delete[] utwory_; delete[] nowe_; delete[] kandydaci_; delete[] bufor_listingu_; delete[] bufor_id3_; delete[] widoczne_; delete[] porzadek_; }
+    ~Biblioteka() { delete[] utwory_; delete[] nowe_; delete[] kandydaci_; delete[] bufor_listingu_; delete[] bufor_id3_; delete[] widoczne_; delete[] porzadek_; delete[] zewn_; }
     Biblioteka(const Biblioteka&) = delete;
     Biblioteka& operator=(const Biblioteka&) = delete;
 
@@ -88,7 +94,7 @@ public:
         if (!bufor_listingu_) bufor_listingu_ = new char[MAKS_LISTING];
         if (!bufor_id3_) bufor_id3_ = new uint8_t[Id3::MAKS_OKNO_TAGU];
         if (!kandydaci_ || !bufor_listingu_ || !bufor_id3_) return false;
-        delete[] nowe_; nowe_ = new Utwor[MAKS_UTWOROW];
+        delete[] nowe_; nowe_ = new Utwor[POJEMNOSC_UTWOROW];   // miejsce tez na pliki zewnetrzne
         if (!nowe_) return false;
         nowe_n_ = 0; kand_n_ = 0; kand_poz_ = 0;
         wynik_nowy_ = WynikSkanu{};
@@ -127,14 +133,51 @@ public:
 
     // ------------------------------------------------------------ wyniki
     // Indeksy utworow sa stabilne do nastepnej publikacji skanu; kolejnosc wyswietlania daje posortowany(k).
+    // liczba(): wszystkie indeksy (skan + pliki zewnetrzne); liczba_skanu(): tylko utwory z /dane/muzyka.
     uint32_t liczba() const { return n_; }
-    int posortowany(uint32_t k) const { return k < n_ ? int(porzadek_ ? porzadek_[k] : k) : -1; }
+    uint32_t liczba_skanu() const { return n_skan_; }
+    bool zewnetrzny(uint32_t i) const { return i >= n_skan_ && i < n_; }
+    int posortowany(uint32_t k) const { return k < n_skan_ ? int(porzadek_ ? porzadek_[k] : k) : -1; }
     const Utwor* utwor(uint32_t i) const { return i < n_ ? &utwory_[i] : nullptr; }
     const WynikSkanu& wynik() const { return wynik_; }
     uint64_t generacja() const { return generacja_; }   // rosnie przy kazdej publikacji
     int znajdz(const char* sciezka) const {
         for (uint32_t i = 0; i < n_; ++i) if (rowne(utwory_[i].sciezka, sciezka)) return int(i);
         return -1;
+    }
+
+    /*
+     * Analiza JEDNEGO pliku (np. argument startowy): ta sama walidacja co w skanie - o formacie decyduje zawartosc
+     * (RIFF/WAVE albo spojne ramki MPEG Layer III), nie rozszerzenie; odczyt ograniczony (naglowek + okno tagu).
+     * true = `u` wypelniony; false = *powod (polski opis).
+     */
+    bool analizuj_plik(const char* sciezka, Utwor& u, const char** powod) {
+        const char* p = nullptr;
+        uint64_t r = 0;
+        if (!sciezka || sciezka[0] != '/' || dlugosc(sciezka, MAKS_SCIEZKA) >= MAKS_SCIEZKA) p = "nieprawidłowa ścieżka pliku.";
+        else if (!dostep_.rozmiar || !dostep_.rozmiar(dostep_.kontekst, sciezka, &r))
+            p = "plik nie istnieje, jest katalogiem albo brak uprawnień do odczytu.";
+        else if (r == 0) p = "plik jest pusty.";
+        else if (!bufor_id3_ && !(bufor_id3_ = new uint8_t[Id3::MAKS_OKNO_TAGU])) p = "brak pamięci do analizy pliku.";
+        else {
+            const char* nazwa = sciezka;
+            for (const char* c = sciezka; *c; ++c) if (*c == '/') nazwa = c + 1;
+            if (!*nazwa) p = "nieprawidłowa ścieżka pliku.";
+            else p = analizuj_do(sciezka, nazwa, u);
+        }
+        if (powod) *powod = p;
+        return p == nullptr;
+    }
+    // Dopisuje plik zewnetrzny (wynik analizuj_plik); zwraca indeks (istniejacy, gdy sciezka juz jest) albo -1.
+    int dodaj_zewnetrzny(const Utwor& u) {
+        const int jest = znajdz(u.sciezka);
+        if (jest >= 0) return jest;
+        if (!zewn_) zewn_ = new Utwor[MAKS_ZEWNETRZNYCH];
+        if (!utwory_) { utwory_ = new Utwor[POJEMNOSC_UTWOROW]; n_ = n_skan_ = 0; }
+        if (!zewn_ || !utwory_ || zewn_n_ >= MAKS_ZEWNETRZNYCH || n_ >= POJEMNOSC_UTWOROW) return -1;
+        zewn_[zewn_n_++] = u;
+        utwory_[n_] = u;
+        return int(n_++);
     }
 
     // Filtr widoku (tytul, wykonawca, album, nazwa pliku). Zwraca liczbe widocznych.
@@ -243,17 +286,23 @@ private:
     }
     void analizuj(const Kandydat& k) {
         if (nowe_n_ >= MAKS_UTWOROW) { ++wynik_nowy_.pominiete_limit; return; }
+        const char* b = analizuj_do(k.sciezka, k.nazwa, nowe_[nowe_n_]);
+        if (b) { odrzuc(b); return; }
+        ++nowe_n_;
+        ++wynik_nowy_.przyjete;
+    }
+    // Wspolna analiza (skan i analizuj_plik): nullptr = przyjety (u wypelniony), inaczej powod odrzucenia.
+    const char* analizuj_do(const char* sciezka, const char* nazwa, Utwor& u) {
         Czytnik c;
-        if (!c.otworz(dostep_, k.sciezka, 16U * 1024U)) { odrzuc("Nie można odczytać pliku."); return; }
+        if (!c.otworz(dostep_, sciezka, 16U * 1024U)) return "Nie można odczytać pliku.";
         uint8_t h[16] = {};
-        if (!c.czytaj_w(0, h, c.rozmiar() < 16 ? uint32_t(c.rozmiar()) : 16)) { odrzuc("Nie można odczytać pliku."); return; }
+        if (!c.czytaj_w(0, h, c.rozmiar() < 16 ? uint32_t(c.rozmiar()) : 16)) return "Nie można odczytać pliku.";
         const FormatAudio f = format_z_naglowka(h, c.rozmiar() < 16 ? size_t(c.rozmiar()) : 16);
-        Utwor& u = nowe_[nowe_n_];
         u = Utwor{};
-        kopiuj_tekst(u.sciezka, sizeof(u.sciezka), k.sciezka);
-        kopiuj_tekst(u.nazwa_pliku, sizeof(u.nazwa_pliku), k.nazwa);
+        kopiuj_tekst(u.sciezka, sizeof(u.sciezka), sciezka);
+        kopiuj_tekst(u.nazwa_pliku, sizeof(u.nazwa_pliku), nazwa);
         {
-            kopiuj_tekst(u.nazwa_bez_rozszerzenia_, sizeof(u.nazwa_bez_rozszerzenia_), k.nazwa);
+            kopiuj_tekst(u.nazwa_bez_rozszerzenia_, sizeof(u.nazwa_bez_rozszerzenia_), nazwa);
             size_t n = dlugosc(u.nazwa_bez_rozszerzenia_);
             while (n > 0 && u.nazwa_bez_rozszerzenia_[n - 1] != '.') --n;
             if (n > 1) u.nazwa_bez_rozszerzenia_[n - 1] = '\0';
@@ -261,7 +310,7 @@ private:
         if (f == FormatAudio::WAV) {
             Wav::Info wi{};
             const Wav::Blad b = Wav::parsuj(c, wi, &u.meta);
-            if (b != Wav::Blad::OK) { odrzuc(Wav::opis(b)); return; }
+            if (b != Wav::Blad::OK) return Wav::opis(b);
             u.format = FormatAudio::WAV;
             u.czestotliwosc = wi.czestotliwosc; u.kanaly = wi.kanaly; u.bity = wi.bity;
             u.czas_ms = uint32_t(wi.ramki * 1000ULL / wi.czestotliwosc > 0xFFFFFFFFULL ? 0xFFFFFFFFULL : wi.ramki * 1000ULL / wi.czestotliwosc);
@@ -269,17 +318,15 @@ private:
         } else if (f == FormatAudio::MP3) {
             Mp3::Info mi{};
             const Mp3::Blad b = Mp3::analizuj(c, mi, &u.meta, bufor_id3_, Id3::MAKS_OKNO_TAGU);
-            if (b != Mp3::Blad::OK) { odrzuc(Mp3::opis(b)); return; }
+            if (b != Mp3::Blad::OK) return Mp3::opis(b);
             u.format = FormatAudio::MP3;
             u.czestotliwosc = mi.czestotliwosc; u.kanaly = mi.kanaly;
             u.przeplywnosc = mi.przeplywnosc; u.vbr = mi.vbr;
             u.czas_ms = uint32_t(mi.czas_ms > 0xFFFFFFFFULL ? 0xFFFFFFFFULL : mi.czas_ms);
         } else {
-            odrzuc("Zawartość pliku nie odpowiada formatowi WAV ani MP3.");
-            return;
+            return "Zawartość pliku nie odpowiada formatowi WAV ani MP3.";
         }
-        ++nowe_n_;
-        ++wynik_nowy_.przyjete;
+        return nullptr;
     }
     void odrzuc(const char* powod) {
         ++wynik_nowy_.odrzucone;
@@ -300,7 +347,10 @@ private:
         delete[] porzadek_;
         utwory_ = nowe_; nowe_ = nullptr;
         porzadek_ = p;
-        n_ = nowe_n_;
+        n_ = n_skan_ = nowe_n_;
+        // pliki zewnetrzne za utworami skanu (bez duplikatu, gdy skan znalazl ten sam plik)
+        for (uint32_t i = 0; i < zewn_n_ && n_ < POJEMNOSC_UTWOROW; ++i)
+            if (znajdz(zewn_[i].sciezka) < 0) utwory_[n_++] = zewn_[i];
         wynik_ = wynik_nowy_;
         ++generacja_;
         stan_ = StanSkanu::Gotowy;
@@ -310,7 +360,7 @@ private:
         if (!widoczne_) widoczne_ = new uint16_t[MAKS_UTWOROW];
         widoczne_n_ = 0;
         if (!widoczne_) return;
-        for (uint32_t k = 0; k < n_; ++k) {
+        for (uint32_t k = 0; k < n_skan_; ++k) {                 // widok biblioteki: tylko utwory skanu
             const uint32_t i = porzadek_ ? porzadek_[k] : k;
             if (pasuje(utwory_[i], filtr_)) widoczne_[widoczne_n_++] = uint16_t(i);
         }
@@ -322,7 +372,9 @@ private:
     bool podkatalogi_ = true;
     StanSkanu stan_ = StanSkanu::Bezczynny;
     Utwor* utwory_ = nullptr;
-    uint32_t n_ = 0;
+    uint32_t n_ = 0, n_skan_ = 0;
+    Utwor* zewn_ = nullptr;            // kopie plikow zewnetrznych (dopisywane przy kazdej publikacji)
+    uint32_t zewn_n_ = 0;
     Utwor* nowe_ = nullptr;
     uint32_t nowe_n_ = 0;
     Kandydat* kandydaci_ = nullptr;

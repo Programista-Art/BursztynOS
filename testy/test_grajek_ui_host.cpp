@@ -754,6 +754,152 @@ static void test_ikony_i_grafiki() {
     przygotuj_muzyke();
 }
 
+// Plik od systemu (skojarzenie .mp3/.wav): argument startowy przy uruchomieniu i BWS_ZDARZENIE_OTWORZ_PLIK w dzialajacym
+// Grajku - kolejka bez duplikatow, automatyczne odtwarzanie przez BWS 110, pliki spoza /dane/muzyka, bledy po polsku.
+static std::string g_argument;
+static bool argument_fn(char* b, uint32_t cap) {
+    if (g_argument.empty() || g_argument.size() + 1 > cap) return false;   // jak BWS 45: pelny albo zaden
+    std::memcpy(b, g_argument.c_str(), g_argument.size() + 1);
+    return true;
+}
+static void test_otwieranie_pliku() {
+    using namespace GrajekFixtures;
+    // (1) zwykly start bez argumentu: biblioteka z /dane/muzyka, brak automatycznego odtwarzania
+    {
+        Jadro j; g_j = &j; przygotuj_muzyke(); g_ustawienia.clear(); g_argument.clear();
+        Platforma p = platforma(); p.argument_startowy = argument_fn;
+        auto* o = new OknoGrajka; o->init(p); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+        CHECK(!o->otworz_argument_startowy());
+        kroki(*o, 40);
+        CHECK(o->o_.biblioteka().liczba() == 3 && o->o_.kolejka().liczba() == 0 && !o->o_.silnik().zaladowany());
+        CHECK(o->o_.silnik().stan() == Stan::Zatrzymany && j.otwarcia == 0);
+        delete o;
+    }
+    // (2) pusty katalog muzyki + plik spoza /dane/muzyka podany przy starcie
+    {
+        Jadro j; g_j = &j; wyczysc_fs(); g_katalogi["/dane/muzyka"] = true; g_ustawienia.clear();
+        ParametryWav w; w.czestotliwosc = 48000; w.ramki = 48000 * 2;
+        dodaj_plik("/uzytkownicy/domyslny/Dokumenty/Głos ąę.WAV", wav(w));
+        g_argument = "/uzytkownicy/domyslny/Dokumenty/Głos ąę.WAV";
+        Platforma p = platforma(); p.argument_startowy = argument_fn;
+        auto* o = new OknoGrajka; o->init(p); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+        CHECK(o->otworz_argument_startowy());
+        kroki(*o, 30);
+        CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && o->o_.utwor_biezacy() && std::strcmp(o->o_.utwor_biezacy()->sciezka, g_argument.c_str()) == 0);
+        CHECK(o->o_.biblioteka().liczba_skanu() == 0 && o->o_.biblioteka().widoczne() == 0 && o->o_.kolejka().liczba() == 1);
+        CHECK(o->o_.utwor_biezacy() && std::strcmp(o->o_.utwor_biezacy()->tytul(), "Głos ąę") == 0);
+        CHECK(o->graj_->obraz_ikony() == &o->ikony_[IK_PAUZA]);              // Odtworz/Pauza zgodnie ze stanem
+        CHECK(!g_pliki.count("/dane/muzyka/Głos ąę.WAV"));                      // bez kopiowania / importu
+        delete o;
+    }
+    // (3) start z argumentem w trakcie skanu biblioteki + kolejne pliki w dzialajacym Grajku (zdarzenie)
+    Jadro j; g_j = &j; przygotuj_muzyke(); g_ustawienia.clear();
+    ParametryWav dl; dl.czestotliwosc = 48000; dl.ramki = 48000 * 20;
+    dodaj_plik("/dane/muzyka/Album/Electric Pulse.WAV", wav(dl));                // podkatalog, wielkie litery
+    dodaj_plik("/inne/Bursztyn OS2.mp3", g_pliki["/dane/muzyka/Piosenka3.mp3"]);   // poza biblioteka, spacja
+    dodaj_plik("/inne/udaje.mp3", wav(dl));                                     // mylace rozszerzenie: WAV w .mp3
+    dodaj_plik("/inne/pusty.mp3", Bajty());
+    dodaj_plik("/inne/obraz.wav", png(8, 8, 0x123456));
+    { Bajty b(4000); for (size_t i = 0; i < b.size(); ++i) b[i] = uint8_t(i * 37 + 11); dodaj_plik("/inne/uszkodzony.mp3", b); }
+    { ParametryWav w6; w6.kanaly = 6; w6.ramki = 1000; dodaj_plik("/inne/szesc kanalow.wav", wav(w6)); }
+    dodaj_plik("/inne/blad odczytu.mp3", g_pliki["/dane/muzyka/Piosenka3.mp3"]); g_bledy_odczytu.insert("/inne/blad odczytu.mp3");
+    g_argument = "/dane/muzyka/Album/Electric Pulse.WAV";
+    Platforma p = platforma(); p.argument_startowy = argument_fn;
+    auto* o = new OknoGrajka; o->init(p); o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    CHECK(o->o_.biblioteka().skanuje());
+    CHECK(o->otworz_argument_startowy());
+    CHECK(o->o_.kolejka().liczba() == 1 && o->o_.silnik().stan() == Stan::Ladowanie);
+    kroki(*o, 60);                                                               // skan konczy sie podczas odtwarzania
+    CHECK(!o->o_.biblioteka().skanuje() && o->o_.biblioteka().liczba_skanu() == 4 && o->o_.biblioteka().liczba() == 4);   // bez duplikatu
+    CHECK(o->o_.kolejka().liczba() == 1 && o->o_.kolejka().biezaca() == 0);     // kolejka przemapowana wg sciezki
+    CHECK(o->o_.utwor_biezacy() && std::strcmp(o->o_.utwor_biezacy()->sciezka, "/dane/muzyka/Album/Electric Pulse.WAV") == 0);
+    CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && j.otwarcia == 1);
+    auto zdarzenie = [&](const char* sciezka) {
+        g_argument = sciezka; bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_OTWORZ_PLIK; o->obsluz_zdarzenie(e); kroki(*o, 6);
+    };
+    // ten sam plik ponownie: bez duplikatu i bez restartu
+    const uint64_t poz = o->o_.silnik().pozycja_ms();
+    zdarzenie("/dane/muzyka/Album/Electric Pulse.WAV");
+    CHECK(o->o_.kolejka().liczba() == 1 && j.otwarcia == 1 && o->o_.silnik().pozycja_ms() >= poz);
+    CHECK(o->o_.pauza() && o->o_.silnik().stan() == Stan::Pauza);
+    zdarzenie("/dane/muzyka/Album/Electric Pulse.WAV");                         // w pauzie: wznowienie, bez restartu
+    CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && o->o_.kolejka().liczba() == 1 && o->o_.silnik().pozycja_ms() >= poz);
+    // plik spoza biblioteki: dopisany na koniec kolejki i odtwarzany od razu; widok biblioteki bez zmian
+    zdarzenie("/inne/Bursztyn OS2.mp3");
+    CHECK(o->o_.kolejka().liczba() == 2 && o->o_.kolejka().biezaca() == 1 && o->o_.biblioteka().widoczne() == 4);
+    CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && std::strcmp(o->o_.utwor_biezacy()->sciezka, "/inne/Bursztyn OS2.mp3") == 0);
+    CHECK(std::strcmp(o->o_.utwor_biezacy()->tytul(), "Bursztynowy test") == 0 && std::strcmp(o->o_.utwor_biezacy()->meta.wykonawca, "Grajek") == 0);
+    CHECK(o->o_.okladka().jest());                                              // okladka z tagu
+    // plik z biblioteki juz w kolejce? nie - dopisany; ponowne otwarcie przechodzi do jego pozycji
+    zdarzenie("/dane/muzyka/Piosenka1.wav");
+    CHECK(o->o_.kolejka().liczba() == 3 && o->o_.kolejka().biezaca() == 2);
+    zdarzenie("/inne/Bursztyn OS2.mp3");
+    CHECK(o->o_.kolejka().liczba() == 3 && o->o_.kolejka().biezaca() == 1 && o->o_.silnik().stan() == Stan::Odtwarzanie);
+    // mylace rozszerzenie: o formacie decyduje zawartosc (WAV w .mp3 gra jako WAV)
+    zdarzenie("/inne/udaje.mp3");
+    CHECK(o->o_.utwor_biezacy()->format == FormatAudio::WAV && o->o_.silnik().stan() == Stan::Odtwarzanie && o->o_.kolejka().liczba() == 4);
+    // ponowny skan: pliki zewnetrzne i kolejka zachowane
+    o->o_.odswiez_biblioteke(); kroki(*o, 60);
+    CHECK(o->o_.biblioteka().liczba_skanu() == 4 && o->o_.biblioteka().liczba() == 6 && o->o_.kolejka().liczba() == 4);
+    CHECK(o->o_.utwor_biezacy() && std::strcmp(o->o_.utwor_biezacy()->sciezka, "/inne/udaje.mp3") == 0);
+    // (4) bledy: komunikat po polsku, kolejka bez zmian, biezacy utwor gra dalej (bez przelaczenia na inny)
+    struct { const char* sciezka; const char* fragment; } bledy[] = {
+        {"/inne/brak.mp3", "nie istnieje"},
+        {"/inne/pusty.mp3", "pusty"},
+        {"/inne/obraz.wav", "nie odpowiada formatowi"},
+        {"/inne/uszkodzony.mp3", "„uszkodzony.mp3”"},
+        {"/inne/szesc kanalow.wav", "liczba kanałów"},
+        {"/inne/blad odczytu.mp3", "odczytać"},
+        {"wzgledna.mp3", "Nieprawidłowa ścieżka"},
+        {"/dane/muzyka/../inne/Bursztyn OS2.mp3", "Nieprawidłowa ścieżka"},
+        {"/dane/muzyka/", "Nieprawidłowa ścieżka"},
+        {"/dane//muzyka/Piosenka1.wav", "Nieprawidłowa ścieżka"},
+        {"/dane/muzyka/zły\x01znak.mp3", "Nieprawidłowa ścieżka"},
+    };
+    for (auto& b : bledy) {
+        const uint32_t n = o->o_.kolejka().liczba(); const uint64_t otw = j.otwarcia;
+        zdarzenie(b.sciezka);
+        if (!std::strstr(o->o_.komunikat(), b.fragment)) std::fprintf(stderr, "%s -> %s\n", b.sciezka, o->o_.komunikat());
+        CHECK(o->o_.rodzaj_komunikatu() == RodzajKomunikatu::Blad && std::strstr(o->o_.komunikat(), b.fragment));
+        CHECK(o->o_.kolejka().liczba() == n && j.otwarcia == otw && o->o_.silnik().stan() == Stan::Odtwarzanie);
+        CHECK(std::strcmp(o->o_.utwor_biezacy()->sciezka, "/inne/udaje.mp3") == 0);
+    }
+    {   // za dluga sciezka (limit Grajka 191 B; jadro przekazuje do 511 B bez obcinania)
+        const std::string dluga = "/inne/" + std::string(250, 'a') + ".mp3";
+        zdarzenie(dluga.c_str());
+        CHECK(o->o_.rodzaj_komunikatu() == RodzajKomunikatu::Blad && std::strstr(o->o_.komunikat(), "za długa"));
+        g_argument = std::string(600, 'b');                                     // za dlugi dla bufora: brak argumentu
+        bws_zdarzenie e{}; e.typ = BWS_ZDARZENIE_OTWORZ_PLIK; o->obsluz_zdarzenie(e);
+        CHECK(!o->otworz_argument_startowy());
+    }
+    // (5) brak urzadzenia dzwieku: blad PCM pokazany wprost, bez przejscia na inny utwor
+    {
+        o->o_.stop(); kroki(*o, 2); j.urzadzenie = false;
+        zdarzenie("/dane/muzyka/Piosenka2 mono.wav"); kroki(*o, 10);
+        CHECK(o->o_.silnik().stan() == Stan::Blad && std::strstr(o->o_.komunikat(), "Brak dostępnego urządzenia dźwięku"));
+        CHECK(std::strcmp(o->o_.utwor_biezacy()->sciezka, "/dane/muzyka/Piosenka2 mono.wav") == 0 && o->o_.kolejka().biezaca() >= 0);
+        j.urzadzenie = true;
+        zdarzenie("/dane/muzyka/Piosenka2 mono.wav"); kroki(*o, 6);
+        CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie);
+    }
+    // (6) wielokrotne uruchomienia: limit plikow zewnetrznych sesji zamiast nadpisania pamieci
+    {
+        int ok = 0;
+        for (int i = 0; i < 40; ++i) {
+            char sc[64]; std::snprintf(sc, sizeof(sc), "/inne/seria %02d.wav", i);
+            ParametryWav w; w.ramki = 4800; dodaj_plik(sc, wav(w));
+            zdarzenie(sc);
+            if (o->o_.rodzaj_komunikatu() != RodzajKomunikatu::Blad) ++ok;
+        }
+        CHECK(ok > 0 && ok < 40 && std::strstr(o->o_.komunikat(), "Za dużo otwartych plików"));
+        CHECK(o->o_.biblioteka().liczba() <= POJEMNOSC_UTWOROW && o->o_.biblioteka().widoczne() == 4);
+    }
+    g_bledy_odczytu.clear(); g_argument.clear();
+    o->o_.zakoncz();
+    delete o;
+    std::printf("otwieranie pliku z systemu OK\n");
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_kontroler(); std::printf("kontroler OK\n");
@@ -762,6 +908,7 @@ int main() {
     test_okno(); std::printf("okno OK\n");
     test_odrysowania_i_uklad(); std::printf("odrysowania i uklad OK\n");
     test_ikony_i_grafiki(); std::printf("ikony i grafiki uzytkownika OK\n");
+    test_otwieranie_pliku();
     std::printf("Grajek UI: %u sprawdzen OK\n", g_checks);
     return 0;
 }

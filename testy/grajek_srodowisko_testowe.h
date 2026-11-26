@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <set>
 
 using GrajekFixtures::Bajty;
 using Grajek::DostepDoPlikow;
@@ -23,12 +24,13 @@ using Grajek::DostepDoPlikow;
 static std::map<std::string, Bajty> g_pliki;
 static std::map<std::string, bool> g_katalogi;
 static uint64_t g_odczyty = 0;
+static std::set<std::string> g_bledy_odczytu;   // pliki, ktorych odczyt zwraca blad I/O (rozmiar dostepny)
 
 static bool fs_odczyt(void*, const char* s, uint64_t off, void* buf, uint32_t n, uint32_t* got) {
     ++g_odczyty;
     *got = 0;
     auto it = g_pliki.find(s);
-    if (it == g_pliki.end() || n == 0 || n > 1024 * 1024) return false;
+    if (it == g_pliki.end() || n == 0 || n > 1024 * 1024 || g_bledy_odczytu.count(s)) return false;
     if (off >= it->second.size()) return true;
     const size_t k = std::min<size_t>(n, it->second.size() - off);
     std::memcpy(buf, it->second.data() + off, k);

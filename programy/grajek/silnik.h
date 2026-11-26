@@ -315,7 +315,7 @@ public:
         if (!pcm_.otwarty()) {
             const int64_t r = pcm_.otworz();
             if (r <= 0) {
-                if (r == PCM_DEVICE) { porazka("Brak urządzenia dźwięku (Intel HDA)."); return; }
+                if (r == PCM_DEVICE) { porazka("Brak dostępnego urządzenia dźwięku (Intel HDA ani AC97)."); return; }
                 if (r == PCM_UNSUPPORTED || r == PCM_INVALID) { porazka("System odrzucił format strumienia PCM."); return; }
                 if (++proby_otwarcia_ > MAKS_PROB_OTWARCIA) {
                     porazka(r == PCM_LIMIT ? "Za dużo otwartych strumieni dźwięku w systemie." : "Urządzenie dźwięku jest zajęte.");

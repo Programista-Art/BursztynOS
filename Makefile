@@ -2178,6 +2178,7 @@ test-abs-map-diag:
 .PHONY: test-explorer-host
 test-explorer-host:
 	@mkdir -p .bursztyn-ui-test
+	$(PYTHON) testy/test_skojarzenia_uprawnienia.py
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 

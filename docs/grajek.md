@@ -405,3 +405,23 @@ Fazy (po ~82 s analizy każda, bez ładowania/pauzy/końca utworu), cisza = pró
   ostatni punkt kontrolny, PID, numer ostatniego BWS, czy trwała kompozycja), a po wskazaniu odcinka – wąska zmiana
   (np. punkt kontrolny HDA w pętli składania kompozytora albo dzielenie blitów > 64 tys. px) z deterministycznym
   testem modelu hosta. Bez zmian w buforach PCM i ochronie DMA.
+
+## Otwieranie pliku z systemu (dwuklik MP3/WAV)
+
+* Skojarzenie: `jadro/gui/skojarzenia_plikow.h` (`.mp3`, `.wav` → `/programy/grajek.cebula/grajek.bur`, bez
+  rozróżniania wielkości liter) – to samo miejsce co `.txt` (Notatnik) i obrazy (Przeglądarka Obrazów);
+  `otworz_plik_skojarzony` używa go w Eksploratorze i na pulpicie.
+* Przekazanie ścieżki: ogólny BWS 10 (program + argument startowy, do 511 B, bez obcinania). Grajek nie działa →
+  nowy proces, argument przez BWS 45 przy starcie (`grajek.cpp`). Grajek działa → jądro podmienia argument
+  istniejącego procesu i wysyła `BWS_ZDARZENIE_OTWORZ_PLIK` (`OknoGrajka::otworz_argument_startowy`).
+* `Odtwarzacz::otworz_plik`: ścieżka bezwzględna bez `.`/`..`/pustych składników i znaków sterujących, < 192 B;
+  utwór z biblioteki albo analiza tego jednego pliku (`Biblioteka::analizuj_plik` – ta sama droga co skan, o formacie
+  decyduje zawartość). Pliki spoza `/dane/muzyka` (jeśli PZB pozwala je czytać) są dopisywane jako „zewnętrzne”
+  (`dodaj_zewnetrzny`, maks. 32 na sesję): mają zwykłe indeksy, nie pojawiają się w widoku biblioteki, przetrwają
+  ponowny skan, nic nie jest kopiowane. Kolejka: utwór już w kolejce → przejście do jego pozycji, inaczej dopisanie
+  na koniec; start od razu (BWS 110, strumieniowo). Ten sam utwór już grający – gra dalej; w pauzie – wznowienie.
+  Błąd → polski komunikat, brak automatycznego przejścia na inny utwór.
+* Grajek otwarty z Eksploratora dziedziczy prawa `rodzic & manifest`; Eksplorator ma więc `ustawienia_aplikacji`
+  (zapis wyłącznie w katalogu ustawień danej aplikacji), żeby Grajek mógł zapisać konfigurację i kolejkę.
+* Ograniczenia: zminimalizowane okno Grajka nie jest przywracane (brak API samoaktywacji okna); kolejka M3U8 po
+  ponownym starcie odtwarza tylko utwory z biblioteki.

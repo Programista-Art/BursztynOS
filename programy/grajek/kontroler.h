@@ -35,6 +35,8 @@ struct Platforma {
     bool (*wczytaj_ustawienie)(const char* klucz, char* bufor, uint32_t pojemnosc) = nullptr;
     bool (*zapisz_ustawienie)(const char* klucz, const char* wartosc) = nullptr;
     uint64_t (*czas_ns)() = nullptr;
+    // Argument startowy procesu (BWS 45; pelny albo zaden - jadro nie obcina). nullptr = brak (testy, narzedzia).
+    bool (*argument_startowy)(char* bufor, uint32_t pojemnosc) = nullptr;
 };
 
 enum class RodzajKomunikatu : uint8_t { Informacja, Sukces, Ostrzezenie, Blad };
@@ -285,6 +287,82 @@ public:
     }
     bool przewin(uint64_t ms) { const bool r = silnik_.przewin(ms); ++w_utw_; return r; }
 
+    /*
+     * Plik przekazany przez system (argument startowy przy uruchomieniu albo BWS_ZDARZENIE_OTWORZ_PLIK, gdy Grajek
+     * juz dziala) - np. dwuklik MP3/WAV w Eksploratorze. Polityka:
+     *  - sciezka bezwzgledna, bez skladnikow "." / ".." / pustych i znakow sterujacych, < MAKS_SCIEZKA bajtow;
+     *  - utwor z biblioteki albo analiza tego jednego pliku (zawartosc, nie rozszerzenie) - takze spoza /dane/muzyka,
+     *    jesli PZB pozwala go czytac; plik NIE jest kopiowany ani importowany, odtwarzanie strumieniowe z dysku;
+     *  - kolejka: jesli utwor juz w niej jest - przejscie do tej pozycji (bez duplikatu), inaczej dopisanie NA KONIEC;
+     *    wybrany utwor startuje od razu (BWS 110). Ten sam utwor juz grajacy - gra dalej (bez restartu), w pauzie -
+ *    wznowienie;
+     *  - blad: polski komunikat, nic innego nie jest uruchamiane (brak automatycznego przejscia na inny utwor).
+     */
+    static bool sciezka_argumentu_poprawna(const char* s) {
+        if (!s || s[0] != '/') return false;
+        const size_t n = dlugosc(s, MAKS_SCIEZKA);
+        if (n < 2 || n >= MAKS_SCIEZKA || s[n - 1] == '/') return false;
+        size_t pocz = 1;
+        for (size_t i = 1; i <= n; ++i) {
+            const uint8_t c = i < n ? uint8_t(s[i]) : uint8_t('/');
+            if (i < n && (c < 0x20 || c == 0x7F || c == '\\')) return false;
+            if (c == '/') {
+                const size_t dl = i - pocz;
+                if (dl == 0 || (dl == 1 && s[pocz] == '.') || (dl == 2 && s[pocz] == '.' && s[pocz + 1] == '.')) return false;
+                pocz = i + 1;
+            }
+        }
+        return true;
+    }
+    bool otworz_plik(const char* sciezka) {
+        Tekst t(bufor_kom_, sizeof(bufor_kom_));
+        if (sciezka && sciezka[0] == '/' && dlugosc(sciezka, 4096) >= MAKS_SCIEZKA) {
+            ustaw_komunikat("Ścieżka pliku jest za długa dla Grajka (maksymalnie 191 bajtów).", RodzajKomunikatu::Blad);
+            return false;
+        }
+        if (!sciezka_argumentu_poprawna(sciezka)) {
+            ustaw_komunikat("Nieprawidłowa ścieżka pliku przekazana do Grajka.", RodzajKomunikatu::Blad);
+            return false;
+        }
+        int idx = bib_.znajdz(sciezka);
+        if (idx < 0) {
+            Utwor* u = new Utwor;
+            if (!u) { ustaw_komunikat("Brak pamięci, aby otworzyć wybrany plik.", RodzajKomunikatu::Blad); return false; }
+            const char* powod = nullptr;
+            const bool ok = bib_.analizuj_plik(sciezka, *u, &powod);
+            if (ok) idx = bib_.dodaj_zewnetrzny(*u);
+            delete u;
+            if (!ok) {
+                const char* nazwa = sciezka;
+                for (const char* c = sciezka; *c; ++c) if (*c == '/') nazwa = c + 1;
+                t.dodaj("Nie można odtworzyć „"); t.dodaj(nazwa); t.dodaj("”: "); t.dodaj(powod ? powod : "nieznany błąd.");
+                ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Blad);
+                return false;
+            }
+            if (idx < 0) {
+                ustaw_komunikat("Za dużo otwartych plików spoza biblioteki w tej sesji Grajka.", RodzajKomunikatu::Blad);
+                return false;
+            }
+        }
+        int poz = kol_.pozycja_utworu(idx);
+        if (poz < 0) {
+            if (!kol_.dodaj(uint16_t(idx))) { ustaw_komunikat("Kolejka jest pełna – nie można dodać wybranego pliku.", RodzajKomunikatu::Blad); return false; }
+            poz = int(kol_.liczba()) - 1;
+        }
+        const Stan st = silnik_.stan();
+        if (kol_.biezaca() == poz && biezacy_ == idx && silnik_.zaladowany() && st != Stan::Blad && st != Stan::Zatrzymany) {
+            ++w_kol_;
+            // ten sam utwor juz gra (albo sie laduje): bez restartu i bez duplikatu; w pauzie - wznowienie
+            return st == Stan::Pauza ? silnik_.wznow() : true;
+        }
+        kol_.ustaw_biezaca(poz);
+        ++w_kol_;
+        proby_pod_rzad_ = 0;
+        const bool ok = graj_pozycje(poz, false);
+        if (bib_.skanuje()) zapamietaj_sciezki();          // po ustawieniu biezacego: publikacja skanu przemapuje wg sciezek
+        return ok;
+    }
+
     // ------------------------------------------------------------ kolejka
     bool dodaj_do_kolejki(int indeks) {
         if (indeks < 0 || uint32_t(indeks) >= bib_.liczba()) return false;
@@ -491,14 +569,14 @@ private:
             ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Ostrzezenie);
             return;
         }
-        if (!bib_.liczba()) {
+        if (!bib_.liczba_skanu()) {
             t.dodaj("Brak obsługiwanych plików w /dane/muzyka (WAV, MP3).");
             if (w.odrzucone) { t.dodaj(" Odrzucono: "); t.liczba(w.odrzucone); t.dodaj(" – "); t.dodaj(w.ostatni_blad); }
             dopisz_magazyn(t);
             ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Informacja);
             return;
         }
-        t.dodaj("Biblioteka: "); t.liczba(bib_.liczba()); t.dodaj(bib_.liczba() == 1 ? " utwór" : " utworów");
+        t.dodaj("Biblioteka: "); t.liczba(bib_.liczba_skanu()); t.dodaj(bib_.liczba_skanu() == 1 ? " utwór" : " utworów");
         if (w.odrzucone) { t.dodaj(", pominięte (nieprawidłowe): "); t.liczba(w.odrzucone); }
         if (w.pominiete_limit) { t.dodaj(", poza limitem: "); t.liczba(w.pominiete_limit); }
         t.dodaj(".");

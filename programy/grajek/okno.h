@@ -56,6 +56,7 @@ public:
         aktywne_ = this;
         Okno::hak_rysowania = &OknoGrajka::hak_rysowania_grajka;
         czas_ns_ = platforma.czas_ns;
+        argument_ = platforma.argument_startowy;
         buduj();
         dopasuj_warianty();
         o_.start();
@@ -86,7 +87,24 @@ public:
     }
     void zakoncz_calkowicie() { o_.zakoncz(); Okno::zamknij(); }
 
+    /*
+     * Plik od systemu (dwuklik MP3/WAV w Eksploratorze / na pulpicie): przy starcie (grajek.cpp) i gdy Grajek juz
+     * dziala - jadro (BWS 10) podmienia wtedy argument startowy istniejacego procesu i wysyla
+     * BWS_ZDARZENIE_OTWORZ_PLIK (ten sam ogolny mechanizm co Notatnik i Przegladarka Obrazow). Bufor 512 B = limit
+     * argumentu w jadrze; jadro nie obcina (za maly bufor = brak argumentu). Zwraca true, gdy byl argument.
+     */
+    bool otworz_argument_startowy() {
+        if (!argument_) return false;
+        char sc[512] = {};
+        if (!argument_(sc, sizeof(sc)) || !sc[0]) return false;
+        sc[sizeof(sc) - 1] = '\0';
+        (void)o_.otworz_plik(sc);
+        aktualizuj(true);
+        return true;
+    }
+
     void obsluz_zdarzenie(const bws_zdarzenie& e) override {
+        if (e.typ == BWS_ZDARZENIE_OTWORZ_PLIK) { (void)otworz_argument_startowy(); return; }
         if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN || e.typ == BWS_ZDARZENIE_MYSZ_PRAWY_DOWN) podpowiedzi_.ukryj(&zarzadca_popupow());
         Okno::obsluz_zdarzenie(e);
         if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH && kontrolka_glowna()) {
@@ -516,7 +534,7 @@ private:
             bib_->uniewaznij();
             char t[96]; Tekst s(t, sizeof(t));
             if (o_.biblioteka().skanuje()) { s.dodaj("Skanowanie… "); s.liczba(o_.biblioteka().postep()); s.dodaj(" / "); s.liczba(o_.biblioteka().kandydaci()); }
-            else { s.liczba(n); s.dodaj(" z "); s.liczba(o_.biblioteka().liczba()); s.dodaj(" utworów"); }
+            else { s.liczba(n); s.dodaj(" z "); s.liczba(o_.biblioteka().liczba_skanu()); s.dodaj(" utworów"); }
             ustaw(stan_bib_, t);
         } else if (o_.biblioteka().skanuje() && ms - ostatni_skan_ >= 250) {
             ostatni_skan_ = ms;
@@ -697,6 +715,7 @@ private:
     int wskaznik_bib_ = -1, wskaznik_kol_ = -1;
     uint32_t klatki_wiz_ = 0;            // liczba uniewaznionych pol wizualizacji (testy czestotliwosci)
     uint32_t okladka_wersja_ = 0xFFFFFFFF;
+    bool (*argument_)(char*, uint32_t) = nullptr;
     uint64_t ostatni_postep_ = 0, ostatnia_wiz_ = 0, ostatni_skan_ = 0, ostatnia_diag_ = 0;
     uint32_t ostatnia_skala_ = 0, wiersze_diag_ = 0;
     int ostatnia_karta_ = -1;

@@ -7,6 +7,10 @@
  * dodatkowego prawa; jadro sprzata strumienie procesu przy jego zakonczeniu.
  *
  * Jedna instancja: menu Start uzywa uruchom_lub_aktywuj (aktywuje istniejace okno, takze grajace w tle).
+ *
+ * Plik z systemu (skojarzenie .mp3/.wav, jadro/gui/skojarzenia_plikow.h): argument startowy (BWS 45) przy starcie,
+ * a w dzialajacym procesie BWS_ZDARZENIE_OTWORZ_PLIK (jadro przekazuje nowy argument istniejacemu procesowi).
+ * Bez argumentu start jest jak dotad: skan /dane/muzyka, bez automatycznego odtwarzania.
  */
 #define BURSZTYN_UI_CZCIONKA_SYSTEMOWA 1
 #include "bursztyn_gui.h"
@@ -33,6 +37,7 @@ bool wczytaj_ustawienie(const char* klucz, char* bufor, uint32_t pojemnosc) {
 }
 bool zapisz_ustawienie(const char* klucz, const char* wartosc) { return ustawienia_zapisz(Grajek::ID_APLIKACJI, klucz, wartosc); }
 uint64_t czas_ns() { return gui_czas_monotoniczny_ns(); }
+bool argument_startowy(char* bufor, uint32_t pojemnosc) { return pobierz_argument_startowy(bufor, pojemnosc); }
 
 BursztynUI::AplikacjaGUI* g_aplikacja = nullptr;
 uint32_t g_odstep = 1;
@@ -62,7 +67,9 @@ extern "C" __attribute__((noreturn)) void _start() {
     p.wczytaj_ustawienie = wczytaj_ustawienie;
     p.zapisz_ustawienie = zapisz_ustawienie;
     p.czas_ns = czas_ns;
+    p.argument_startowy = argument_startowy;
     okno->init(p);
+    (void)okno->otworz_argument_startowy();    // plik od systemu: kolejka + automatyczne odtwarzanie
     app.ustaw_odstep_animacji(1);
     app.ustaw_zadanie_okresowe(1, zadanie, okno);
     (void)app.uruchom(*okno);
