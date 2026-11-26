@@ -489,6 +489,45 @@ static void test_api_pcm() {
     CHECK(t.s.query(o, uint64_t(a), st) == PCM_HANDLE);
 }
 
+// Gleboka kolejka (BwsPcmFormat.reserved) i PCM_PAUSE/RESUME przez prawdziwy SilnikPcm AC97: 400 ms bez dopisywania
+// nie daje brakow, pauza nie zuzywa kolejki, wznowienie kontynuuje sekwencje bez duplikatow i pominiec.
+static void test_gleboka_kolejka_i_pauza() {
+    Stanowisko t; CHECK(t.init() == Blad::Brak);
+    const Pcm::Owner o{21, 4};
+    BwsPcmFormat f{BWS_PCM_V1, sizeof(BwsPcmFormat), 48000, 2, Pcm::FORMAT_S16, BWS_PCM_DEEP_FRAMES};
+    BwsPcmFormat zly = f; zly.reserved = BWS_PCM_DEEP_FRAMES + 1; CHECK(t.s.open(o, zly) == PCM_INVALID);
+    zly.reserved = 4095; CHECK(t.s.open(o, zly) == PCM_INVALID);
+    const int64_t h = t.s.open(o, f);
+    CHECK(h > 0);
+    BwsPcmState st{};
+    CHECK(t.s.query(o, uint64_t(h), st) == PCM_OK && st.capacity == Pcm::DEEP_CAPACITY_FRAMES);
+    uint32_t wyslane = 0;
+    const uint32_t razem = 48000 * 4;
+    for (int i = 0; i < 60; ++i) { podaj(t, o, uint64_t(h), wyslane, razem); t.biegnij(5000000, 5000000); }
+    CHECK(t.s.query(o, uint64_t(h), st) == PCM_OK && st.queued > 20000);
+    const uint32_t braki0 = t.k.diag().niedobory;
+    BwsPcmStats ps{};
+    t.biegnij(400000000, 5000000);                      // producent stoi 400 ms (rezerwa 512 ms)
+    CHECK(t.s.statistics(o, uint64_t(h), ps) == PCM_OK && ps.starved == 0);
+    CHECK(t.s.pause(o, uint64_t(h)) == PCM_OK);
+    CHECK(t.s.query(o, uint64_t(h), st) == PCM_OK);
+    const uint32_t w_pauzie = st.queued;
+    t.biegnij(300000000, 5000000);
+    CHECK(t.s.query(o, uint64_t(h), st) == PCM_OK && st.queued == w_pauzie);   // pauza nie zuzywa kolejki
+    CHECK(t.s.statistics(o, uint64_t(h), ps) == PCM_OK && ps.starved == 0);
+    CHECK(t.s.resume(o, uint64_t(h)) == PCM_OK);
+    for (int i = 0; i < 1200 && wyslane < razem; ++i) { podaj(t, o, uint64_t(h), wyslane, razem); t.biegnij(5000000, 5000000); }
+    t.biegnij(800000000, 5000000);
+    CHECK(wyslane == razem);
+    CHECK(ciagle(t.e.wyjscie, razem));                  // kazda ramka dokladnie raz, w kolejnosci
+    CHECK(t.e.naruszenia_wlasnosci == 0 && t.k.diag().niedobory >= braki0);
+    CHECK(t.s.pause({99, 1}, uint64_t(h)) == PCM_HANDLE);
+    t.s.posprzataj(o, t.p.czas);
+    // slot glebokiej kolejki wraca do puli po zakonczeniu procesu
+    const int64_t h2 = t.s.open({22, 1}, f);
+    CHECK(h2 > 0 && t.s.query({22, 1}, uint64_t(h2), st) == PCM_OK && st.capacity == Pcm::DEEP_CAPACITY_FRAMES);
+}
+
 static void test_polityka() {
     using namespace WyjscieAudio;
     CHECK(wybierz({true, true, true, true}) == Urzadzenie::Hda);       // HDA ma pierwszenstwo
@@ -512,6 +551,7 @@ int main() {
     test_niedobor_i_bledy();
     test_pozycja_i_stop();
     test_api_pcm();
+    test_gleboka_kolejka_i_pauza();
     test_polityka();
     std::printf("AC97 host: %u sprawdzen OK (emulator ICH AC97 + kodek, bez QEMU i bez sprzetu)\n", checks);
     return 0;

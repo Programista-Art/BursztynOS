@@ -51,6 +51,12 @@ struct Info {
     uint64_t ramki_pcm = 0;      // z Xing/VBRI (0 = nieznane)
     uint64_t pierwsza_ramka = 0; // przesuniecie pierwszej ramki audio w pliku
     uint32_t rozmiar_id3 = 0;
+    // Tablica TOC naglowka Xing (100 punktow procent czasu -> 1/256 bajtow strumienia). Uzywana WYLACZNIE do
+    // przyblizonego skoku przy przewijaniu, gdy indeks ramek nie siega celu; przyjeta tylko, gdy jest niemalejaca.
+    bool ma_toc = false;
+    uint8_t toc[100]{};
+    uint64_t bajty_xing = 0;     // dlugosc strumienia z Xing/VBRI (0 = nieznana)
+    uint32_t dlugosc_pierwszej = 0;
 };
 
 enum class Blad : uint8_t { OK, Odczyt, BrakRamek };
@@ -128,7 +134,15 @@ inline Blad analizuj(Czytnik& c, Info& out, Metadane* meta, uint8_t* bufor_id3, 
             const uint32_t flagi = be32(pr + x + 4);
             uint32_t p = x + 8;
             if (flagi & 1) { ramek_mpeg = be32(pr + p); p += 4; }
-            if ((flagi & 2) && p + 4 <= ile) { bajtow = be32(pr + p); }
+            if ((flagi & 2) && p + 4 <= ile) { bajtow = be32(pr + p); p += 4; }
+            if ((flagi & 4) && p + 100 <= ile) {
+                bool rosnie = true;
+                for (uint32_t i = 1; i < 100 && rosnie; ++i) rosnie = pr[p + i] >= pr[p + i - 1];
+                if (rosnie && pr[p + 99] > pr[p]) {           // stala tablica (same zera itp.) nie niesie informacji
+                    for (uint32_t i = 0; i < 100; ++i) out.toc[i] = pr[p + i];
+                    out.ma_toc = true;
+                }
+            }
             out.vbr = pr[x] == 'X';
         } else if (36 + 18 <= ile && pr[36] == 'V' && pr[37] == 'B' && pr[38] == 'R' && pr[39] == 'I') {
             bajtow = be32(pr + 36 + 10);
@@ -136,6 +150,9 @@ inline Blad analizuj(Czytnik& c, Info& out, Metadane* meta, uint8_t* bufor_id3, 
             out.vbr = true;
         }
     }
+    out.dlugosc_pierwszej = r.dlugosc;
+    // dlugosc strumienia z naglowka przyjmujemy tylko, gdy miesci sie w pliku (zly naglowek = oszacowanie z rozmiaru)
+    if (bajtow && bajtow <= c.rozmiar() - out.pierwsza_ramka) out.bajty_xing = bajtow;
     if (ramek_mpeg > 0 && ramek_mpeg < (1ULL << 32)) {
         out.ramki_pcm = ramek_mpeg * r.probki;
         out.czas_ms = out.ramki_pcm * 1000ULL / r.czestotliwosc;

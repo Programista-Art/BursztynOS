@@ -80,6 +80,20 @@ int64_t finish(Pcm::Owner o, uint64_t h) {
         default: return PCM_DEVICE;
     }
 }
+int64_t pause(Pcm::Owner o, uint64_t h) {
+    switch (aktywne()) {
+        case Urzadzenie::Hda: return HdaPcmAplikacji::pause(o, h);
+        case Urzadzenie::Ac97: return Ac97Pcm::pause(o, h);
+        default: return PCM_DEVICE;
+    }
+}
+int64_t resume(Pcm::Owner o, uint64_t h) {
+    switch (aktywne()) {
+        case Urzadzenie::Hda: return HdaPcmAplikacji::resume(o, h);
+        case Urzadzenie::Ac97: return Ac97Pcm::resume(o, h);
+        default: return PCM_DEVICE;
+    }
+}
 } // namespace PcmAplikacji
 
 // C linkage: planista wola ten hak przez slaby symbol extern "C".

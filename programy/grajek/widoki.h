@@ -692,16 +692,16 @@ private:
 class DaneDiagnostyki : public DostawcaKolumnGrajka {
 public:
     static constexpr size_t N = Odtwarzacz::LICZBA_POMIAROW;
-    static_assert(N <= 32, "maska zmian ma 32 bity");
+    static_assert(N <= 64, "maska zmian ma 64 bity");
     explicit DaneDiagnostyki(Odtwarzacz* o) : o_(o) {}
-    uint32_t odswiez() {
-        uint32_t zm = 0;
+    uint64_t odswiez() {
+        uint64_t zm = 0;
         for (size_t i = 0; i < N; ++i) {
             char n[sizeof(nazwy_[0])], w[sizeof(wartosci_[0])];
             o_->pomiar(i, n, sizeof(n), w, sizeof(w));
             if (!rowne(n, nazwy_[i]) || !rowne(w, wartosci_[i])) {
                 kopiuj_tekst(nazwy_[i], sizeof(nazwy_[i]), n); kopiuj_tekst(wartosci_[i], sizeof(wartosci_[i]), w);
-                zm |= 1u << i;
+                zm |= uint64_t(1) << i;
             }
         }
         return zm;

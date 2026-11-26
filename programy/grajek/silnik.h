@@ -4,7 +4,10 @@
  *
  * Model wykonania: Ring 3 nie ma watkow uzytkownika, wiec silnik jest kooperacyjnym zadaniem petli BursztynUI
  * (zadanie okresowe co 1 tick = ~4 ms, uruchamiane takze przed kazdym odrysowaniem). pompuj() uzupelnia kolejke
- * strumienia BWS 110 (4096 ramek = 85 ms) do pelna, gdy wolne jest >= 512 ramek, z budzetem zapisow na wywolanie.
+ * strumienia BWS 110 do pelna, gdy wolne jest >= 512 ramek, z budzetem zapisow na wywolanie. Kolejka jadra jest
+ * JEDYNA rezerwa odporna na przestoj procesu (Ring 0 - kompozycja PID 0, Eksplorator, duze alokacje - nie jest
+ * wywlaszczany): Grajek prosi o gleboka kolejke (BWS_PCM_DEEP_FRAMES = 24576 ramek = 512 ms); starsze jadro daje
+ * 4096 ramek (85 ms).
  * Bez aktywnego czekania: proces spi w gui_czekaj_na_zdarzenie_z_timeoutem miedzy wywolaniami.
  *
  * Cykl zycia strumienia BWS 110 (jadro/bws/pcm_api.h):
@@ -13,7 +16,8 @@
  *   QUERY - zajetosc kolejki (pozycja odtwarzania = zaakceptowane - w kolejce),
  *   QUERY_STATS - licznik "starved" (prawdziwe niedobory), raportowany osobno od pauzy i ciszy,
  *   GAIN - glosnosc 0..100 i wyciszenie strumienia,
- *   FINISH - pauza i koniec utworu: kolejka gra do konca, mikser nie liczy dalszego braku danych jako niedoboru,
+ *   PAUSE/RESUME - pauza natychmiastowa bez porzucania kolejki (starsze jadro: PCM_INVALID -> FINISH jak dotad),
+ *   FINISH - koniec utworu (i pauza na starszym jadrze): kolejka gra do konca, brak danych nie jest niedoborem,
  *   CLOSE - stop, przewijanie, zmiana utworu: jadro porzuca kolejke, wiec stare probki nie trafia do nowego utworu.
  * Interfejs nie ma operacji "flush": zamkniecie i ponowne otwarcie jest jedynym poprawnym oproznieniem kolejki.
  *
@@ -33,13 +37,15 @@
  *    pauza/wznowienie i ponowne otwarcie strumienia go nie zeruja. Kazda granica zwieksza pokolenie_utworu(), po
  *    ktorym interfejs rozpoznaje, ze komunikat dotyczy poprzedniego utworu; niedobor_sesji - od uruchomienia,
  *  - przerwa producenta: najdluzszy odstep miedzy kolejnymi uzupelnieniami kolejki w stanie Odtwarzanie (zegar
- *    platformy). Odstep dluzszy niz pojemnosc kolejki (4096 ramek = 85,3 ms) musi skonczyc sie niedoborem.
+ *    platformy). Odstep dluzszy niz pojemnosc kolejki (PomiarySesji::pojemnosc_kolejki) musi skonczyc sie
+ *    niedoborem; "przerwy_ponad_kolejke" zachowuje dawny prog 85,3 ms, "przerwy_ponad_rezerwe" - faktyczna rezerwe.
  */
 #include "dekoder.h"
 #include "przetwarzanie.h"
 #include "korektor.h"
 #include "analiza.h"
 #include "pomiar.h"
+#include "histogram.h"
 #include "jadro/bws/pcm_api.h"
 
 namespace Grajek {
@@ -73,14 +79,36 @@ public:
     void ustaw_bws(FunkcjaBws f) { bws_ = f; }
     bool otwarty() const { return uchwyt_ != 0; }
     uint64_t uchwyt() const { return uchwyt_; }
-    // >0: uchwyt; <=0: kod BwsPcmError.
+    // >0: uchwyt; <=0: kod BwsPcmError. Prosi o gleboka kolejke jadra (BWS_PCM_DEEP_FRAMES = 512 ms); starsze jadro
+    // (albo atrapa testowa) odrzuca pole reserved jako PCM_INVALID - wtedy jedno ponowienie z pojemnoscia domyslna.
     int64_t otworz() {
         if (uchwyt_) return int64_t(uchwyt_);
-        BwsPcmFormat f{BWS_PCM_V1, sizeof(BwsPcmFormat), CZESTOTLIWOSC_WYJSCIA, 2, 1, 0};
-        const int64_t r = wywolaj(PCM_OPEN, reinterpret_cast<uint64_t>(&f), sizeof(f), BWS_PCM_V1);
-        if (r > 0) uchwyt_ = uint64_t(r);
+        BwsPcmFormat f{BWS_PCM_V1, sizeof(BwsPcmFormat), CZESTOTLIWOSC_WYJSCIA, 2, 1, gleboka_ ? BWS_PCM_DEEP_FRAMES : 0u};
+        int64_t r = wywolaj(PCM_OPEN, reinterpret_cast<uint64_t>(&f), sizeof(f), BWS_PCM_V1);
+        if (r == PCM_INVALID && f.reserved) {
+            gleboka_ = false;                 // jadro bez rozszerzenia: nie pytamy ponownie w tej sesji
+            f.reserved = 0;
+            r = wywolaj(PCM_OPEN, reinterpret_cast<uint64_t>(&f), sizeof(f), BWS_PCM_V1);
+        }
+        if (r > 0) { uchwyt_ = uint64_t(r); wstrzymany_ = false; }
         return r;
     }
+    // Pauza w jadrze (PCM_PAUSE): true = kolejka zachowana, false = jadro bez rozszerzenia (uzyj FINISH).
+    bool wstrzymaj() {
+        if (!uchwyt_ || !pauza_jadra_) return false;
+        const int64_t r = wywolaj(PCM_PAUSE, uchwyt_, 0, 0);
+        if (r == PCM_INVALID) { pauza_jadra_ = false; return false; }
+        wstrzymany_ = r == PCM_OK;
+        return wstrzymany_;
+    }
+    int64_t wznow() {
+        if (!uchwyt_ || !wstrzymany_) return PCM_OK;
+        const int64_t r = wywolaj(PCM_RESUME, uchwyt_, 0, 0);
+        if (r == PCM_OK) wstrzymany_ = false;
+        return r;
+    }
+    bool wstrzymany() const { return wstrzymany_; }
+    bool gleboka_dostepna() const { return gleboka_; }
     int64_t zapisz(const int16_t* pcm, uint32_t ramki) {
         return uchwyt_ ? wywolaj(PCM_WRITE, uchwyt_, reinterpret_cast<uint64_t>(pcm), ramki) : int64_t(PCM_HANDLE);
     }
@@ -101,6 +129,7 @@ public:
         int64_t r = PCM_BUSY;
         for (int i = 0; i < 8 && r == PCM_BUSY; ++i) r = wywolaj(PCM_CLOSE, uchwyt_, 0, 0);
         uchwyt_ = 0;
+        wstrzymany_ = false;
         return r;
     }
 
@@ -111,6 +140,7 @@ private:
     }
     FunkcjaBws bws_ = nullptr;
     uint64_t uchwyt_ = 0;
+    bool gleboka_ = true, pauza_jadra_ = true, wstrzymany_ = false;
 };
 
 struct StatystykiCiaglosci {
@@ -128,6 +158,25 @@ struct StatystykiCiaglosci {
     static uint64_t ms(uint64_t ramki) { return ramki * 1000ULL / CZESTOTLIWOSC_WYJSCIA; }
 };
 
+/*
+ * Pomiary sesji (od uruchomienia, NIE zerowane na granicy utworu) - przypisanie przerwy do etapu potoku:
+ *  - przerwa_producenta: odstep miedzy kolejnymi uzupelnieniami kolejki w stanie Odtwarzanie. Dluzszy niz
+ *    rezerwa kolejki jadra (pojemnosc) => niedobor Grajka; krotszy przy niezerowym niedoborze => jadro/sprzet,
+ *  - odczyt: pojedynczy odczyt pliku (BWS czytaj_fragment_pliku: PSF/BSP2 + VirtIO-BLK/AHCI), dekodowanie: jedno
+ *    wywolanie dekodera (z odczytami), zapis: jedno BWS 110 WRITE,
+ *  - przewijanie: wykonanie (decyzja + skok dekodera), wznowienie: od zatwierdzenia do chwili, gdy kolejka jadra
+ *    znow ma preroll (2048 ramek) - czas do slyszalnego dzwieku po przewinieciu (bez opoznienia DMA ~85 ms),
+ *  - zdarzenia celowe liczone osobno: pauzy, przewiniecia (w tym przyblizone), otwarcia strumienia (buforowanie
+ *    startowe) - zaden z nich nie jest niedoborem (jadro nie oczekuje danych zamknietego/wstrzymanego strumienia).
+ */
+struct PomiarySesji {
+    Histogram przerwa_producenta, odczyt, dekodowanie, zapis, przewijanie, wznowienie, indeks;
+    uint64_t pauzy = 0, przewiniecia = 0, przewiniecia_przyblizone = 0, otwarcia_strumienia = 0;
+    uint64_t bledy_dekodera = 0, bledy_odczytu = 0, przerwy_ponad_rezerwe = 0;
+    uint32_t pojemnosc_kolejki = 0;        // ramki (QUERY capacity); 4096 = jadro bez glebokiej kolejki
+    bool pauza_w_jadrze = false;           // PCM_PAUSE dostepne (inaczej FINISH + dogranie)
+};
+
 class Silnik {
 public:
     static constexpr uint32_t PORCJA = BWS_PCM_MAX_FRAMES;    // 512 ramek na zapis
@@ -142,7 +191,12 @@ public:
     Silnik(const Silnik&) = delete;
     Silnik& operator=(const Silnik&) = delete;
 
-    void konfiguruj(const DostepDoPlikow& dostep, FunkcjaBws bws) { dostep_ = dostep; pcm_.ustaw_bws(bws); }
+    // Dostep do plikow jest opakowany pomiarem czasu odczytu (zegar platformy); semantyka bez zmian.
+    void konfiguruj(const DostepDoPlikow& dostep, FunkcjaBws bws) {
+        zewn_ = dostep;
+        dostep_ = DostepDoPlikow{&Silnik::odczyt_mierzony, &Silnik::rozmiar_przekazany, this};
+        pcm_.ustaw_bws(bws);
+    }
     // Zegar monotoniczny (ns) do pomiaru przerw producenta; bez zegara pomiar przerw jest wylaczony.
     void ustaw_zegar(uint64_t (*zegar)()) { zegar_ = zegar; }
 
@@ -209,7 +263,16 @@ public:
         if (stan_ != Stan::Odtwarzanie) return false;
         // Kolejka (<= 85 ms) dogrywa sie; mikser przestaje oczekiwac danych - pauza nie jest niedoborem.
         // Statystyki sa odczytywane PRZED FINISH: niedobory sprzed pauzy naleza do odtwarzania.
-        if (pcm_.otwarty()) { sprawdz_niedobory(); PomiarSekcji p(Sekcja::Bws110); (void)pcm_.zakoncz(); }
+        // Jadro z PCM_PAUSE: kolejka (do 512 ms) zostaje w jadrze i nie jest odtwarzana - pauza natychmiastowa,
+        // wznowienie od tej samej ramki. Starsze jadro: FINISH (dogranie kolejki) jak dotad.
+        if (pcm_.otwarty()) {
+            sprawdz_niedobory();
+            PomiarSekcji p(Sekcja::Bws110);
+            if (!pcm_.wstrzymaj()) (void)pcm_.zakoncz();
+        }
+        if (pcm_.wstrzymany()) aktualizuj_kolejke();   // zajetosc w chwili pauzy: pozycja stoi dokladnie tu
+        pom_.pauza_w_jadrze = pcm_.wstrzymany();
+        ++pom_.pauzy;
         ostatnie_uzupelnienie_ns_ = 0;
         zmien_stan(Stan::Pauza);
         return true;
@@ -217,6 +280,7 @@ public:
     bool wznow() {
         if (stan_ != Stan::Pauza || !dek_) return false;
         ostatnie_uzupelnienie_ns_ = 0;
+        if (pcm_.wstrzymany()) { PomiarSekcji p(Sekcja::Bws110); (void)pcm_.wznow(); }   // BUSY: ponowienie w pompuj()
         zmien_stan(Stan::Odtwarzanie);
         return true;
     }
@@ -236,13 +300,23 @@ public:
         if (!dek_) return false;
         if (stan_ != Stan::Odtwarzanie && stan_ != Stan::Pauza && stan_ != Stan::Zatrzymany) return false;
         const Stan poprzedni = stan_;
+        const uint64_t t0 = zegar_ ? zegar_() : 0;
         zmien_stan(Stan::Przewijanie);
         const uint32_t sr = dek_->parametry().czestotliwosc;
+        if (ms > UINT64_MAX / (sr ? sr : 1)) ms = UINT64_MAX / (sr ? sr : 1);   // bez przepelnienia ms * sr
         uint64_t cel = ms * sr / 1000ULL;
         const uint64_t dl = dek_->parametry().ramki;
         if (dl && cel >= dl) cel = dl ? dl - 1 : 0;
         if (!przewin_wewn(cel)) return false;
         od_poczatku_ = false;
+        ++pom_.przewiniecia;
+        if (dek_->ostatnie_szukanie() == Dekoder::Szukanie::Przyblizone) ++pom_.przewiniecia_przyblizone;
+        if (zegar_) {
+            const uint64_t t1 = zegar_();
+            if (t1 >= t0) pom_.przewijanie.dodaj(t1 - t0);
+            // czas do wznowienia mierzony tylko przy odtwarzaniu (przewijanie w pauzie nie uruchamia dzwieku)
+            przewiniecie_od_ns_ = poprzedni == Stan::Odtwarzanie ? (t0 ? t0 : 1) : 0;
+        }
         zmien_stan(poprzedni);
         return true;
     }
@@ -280,6 +354,8 @@ public:
     // Niedobor strumienia Grajka od uruchomienia (ramki 48 kHz); szczegoly: ciaglosc().
     uint64_t niedobory_ramek() const { return ciag_.niedobor_sesji; }
     const StatystykiCiaglosci& ciaglosc() const { return ciag_; }
+    const PomiarySesji& pomiary() const { return pom_; }
+    const Dekoder* dekoder() const { return dek_; }
     // Numer granicy utworu (zwiekszany przy kazdym wczytaj()): rozpoznanie, do ktorego utworu odnosi sie komunikat.
     uint32_t pokolenie_utworu() const { return pokolenie_utworu_; }
     uint64_t zajete_odpowiedzi() const { return zajete_; }
@@ -302,6 +378,7 @@ public:
         }
         if (stan_ == Stan::Pauza) {
             aktualizuj_kolejke();
+            if (pcm_.wstrzymany()) { praca_w_tle(); return; }   // kolejka czeka w jadrze (PCM_PAUSE)
             // Po dograniu kolejki strumien jest zamykany: wznowienie otwiera nowy (z prerollem jadra), wiec pierwsze
             // porcje po pauzie nie sa liczone jako niedobor, a bezczynny proces nie trzyma strumienia ani DMA.
             // Niezapisane ramki bufora posredniego zostaja - nic nie ginie i nic nie jest powielane.
@@ -325,11 +402,29 @@ public:
             proby_otwarcia_ = 0;
             zapisane_ = 0; w_kolejce_ = 0; ostatnie_starved_ = 0;
             zastosuj_glosnosc_ = true;
+            ++pom_.otwarcia_strumienia;
+        }
+        if (pcm_.wstrzymany()) {
+            int64_t r;
+            { PomiarSekcji p(Sekcja::Bws110); r = pcm_.wznow(); }
+            if (r == PCM_BUSY) { ++zajete_; return; }
+            if (r != PCM_OK) { porazka("Strumień dźwięku przestał być dostępny."); return; }
         }
         if (zastosuj_glosnosc_) zastosuj_glosnosc();
         zmierz_przerwe_producenta();
         uzupelnij(PORCJA);
+        if (stan_ != Stan::Odtwarzanie) return;
         if (++licznik_statystyk_ >= 50) { licznik_statystyk_ = 0; sprawdz_niedobory(); }
+        // Praca w tle (indeks MP3) tylko przy zdrowej rezerwie: kolejka jadra co najmniej w polowie pelna.
+        if (pom_.pojemnosc_kolejki && w_kolejce_ >= pom_.pojemnosc_kolejki / 2) praca_w_tle();
+    }
+    // Indeks przewijania MP3: ograniczona porcja (BUDZET_INDEKSU ramek MPEG ~ 1,5 s audio, sam parsing naglowkow).
+    static constexpr uint32_t BUDZET_INDEKSU = 64;
+    void praca_w_tle() {
+        if (!dek_ || dek_->indeks_kompletny()) return;
+        const uint64_t t0 = zegar_ ? zegar_() : 0;
+        (void)dek_->praca_w_tle(BUDZET_INDEKSU);
+        if (zegar_) { const uint64_t t1 = zegar_(); if (t1 >= t0) pom_.indeks.dodaj(t1 - t0); }
     }
 
     // Dopelnienie kolejki z punktow kontrolnych interfejsu (tuz przed kosztownym rysowaniem i publikacja okna).
@@ -374,6 +469,10 @@ private:
             const uint64_t d = t - ostatnie_uzupelnienie_ns_;
             if (d > ciag_.maks_przerwa_producenta_ns) ciag_.maks_przerwa_producenta_ns = d;
             if (d > CZAS_KOLEJKI_NS) ++ciag_.przerwy_ponad_kolejke;
+            pom_.przerwa_producenta.dodaj(d);
+            const uint64_t rezerwa = pom_.pojemnosc_kolejki ? uint64_t(pom_.pojemnosc_kolejki) * 1000000000ULL / CZESTOTLIWOSC_WYJSCIA
+                                                          : CZAS_KOLEJKI_NS;
+            if (d > rezerwa) ++pom_.przerwy_ponad_rezerwe;
         }
         ostatnie_uzupelnienie_ns_ = t;
     }
@@ -433,10 +532,15 @@ private:
                 zr_poz_ = 0;
                 {
                     PomiarSekcji p(Sekcja::Dekodowanie);
+                    const uint64_t t0 = zegar_ ? zegar_() : 0;
                     zr_n_ = dek_->dekoduj(zrodlo_, RAMKI_ZRODLA);
+                    if (zegar_) { const uint64_t t1 = zegar_(); if (t1 >= t0) pom_.dekodowanie.dodaj(t1 - t0); }
                 }
                 if (zr_n_ == 0) {
-                    if (dek_->ma_blad()) { char b[MAKS_BLAD]; kopiuj_tekst(b, sizeof(b), dek_->blad()); porazka(b); return false; }
+                    if (dek_->ma_blad()) {
+                        ++pom_.bledy_dekodera;
+                        char b[MAKS_BLAD]; kopiuj_tekst(b, sizeof(b), dek_->blad()); porazka(b); return false;
+                    }
                     koniec_dekodera_ = true;
                     break;
                 }
@@ -466,6 +570,7 @@ private:
         if (rc != PCM_OK) { porazka("Strumień dźwięku przestał być dostępny."); return; }
         if (s.capacity == 0 || s.queued > s.capacity) { porazka("Niepoprawny stan strumienia dźwięku."); return; }
         w_kolejce_ = s.queued;
+        pom_.pojemnosc_kolejki = s.capacity;
         if (finish_wyslany_) {
             if (s.queued == 0) {
                 zamknij_strumien();
@@ -487,7 +592,12 @@ private:
             uint32_t n = wy_n_ - wy_poz_;
             if (n > wolne) n = wolne;
             int64_t acc;
-            { PomiarSekcji p(Sekcja::Bws110); acc = pcm_.zapisz(wyjscie_ + size_t(wy_poz_) * 2, n); }
+            {
+                PomiarSekcji p(Sekcja::Bws110);
+                const uint64_t t0 = zegar_ ? zegar_() : 0;
+                acc = pcm_.zapisz(wyjscie_ + size_t(wy_poz_) * 2, n);
+                if (zegar_) { const uint64_t t1 = zegar_(); if (t1 >= t0) pom_.zapis.dodaj(t1 - t0); }
+            }
             if (acc == PCM_BUSY) { ++zajete_; return; }
             if (acc == PCM_FULL) return;
             if (acc <= 0 || uint64_t(acc) > n) { porazka("Zapis do strumienia dźwięku nie powiódł się."); return; }
@@ -496,6 +606,11 @@ private:
             calkowicie_zapisane_ += uint64_t(acc);
             w_kolejce_ += uint32_t(acc);
             wolne -= uint32_t(acc);
+            if (przewiniecie_od_ns_ && w_kolejce_ >= PREROLL_WZNOWIENIA && zegar_) {
+                const uint64_t t = zegar_();
+                if (t >= przewiniecie_od_ns_) pom_.wznowienie.dodaj(t - przewiniecie_od_ns_);
+                przewiniecie_od_ns_ = 0;
+            }
             if (uint32_t(acc) < n) { ++czesciowe_; return; }   // czesciowy: reszta czeka, ponowne QUERY w nast. ticku
         }
         if (koniec_dekodera_ && wy_poz_ >= wy_n_ && !finish_wyslany_) {
@@ -506,7 +621,25 @@ private:
         }
     }
 
+    static constexpr uint32_t PREROLL_WZNOWIENIA = 2048;   // preroll jadra (2 okresy HDA): od tej chwili gra
+    static bool odczyt_mierzony(void* k, const char* sc, uint64_t off, void* buf, uint32_t n, uint32_t* got) {
+        auto* s = static_cast<Silnik*>(k);
+        if (!s->zewn_.odczyt) return false;
+        const uint64_t t0 = s->zegar_ ? s->zegar_() : 0;
+        const bool ok = s->zewn_.odczyt(s->zewn_.kontekst, sc, off, buf, n, got);
+        if (s->zegar_) { const uint64_t t1 = s->zegar_(); if (t1 >= t0) s->pom_.odczyt.dodaj(t1 - t0); }
+        if (!ok) ++s->pom_.bledy_odczytu;
+        return ok;
+    }
+    static bool rozmiar_przekazany(void* k, const char* sc, uint64_t* r) {
+        auto* s = static_cast<Silnik*>(k);
+        return s->zewn_.rozmiar && s->zewn_.rozmiar(s->zewn_.kontekst, sc, r);
+    }
+
+    DostepDoPlikow zewn_{};
     DostepDoPlikow dostep_{};
+    PomiarySesji pom_{};
+    uint64_t przewiniecie_od_ns_ = 0;
     StrumienPcm pcm_;
     Dekoder* dek_ = nullptr;
     Resampler rs_;

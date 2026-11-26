@@ -24,6 +24,8 @@ using Grajek::DostepDoPlikow;
 static std::map<std::string, Bajty> g_pliki;
 static std::map<std::string, bool> g_katalogi;
 static uint64_t g_odczyty = 0;
+static uint64_t g_bajty_odczytane = 0;           // suma bajtow zwroconych przez fs_odczyt (koszt I/O przewijania)
+static void (*g_hak_odczytu)(uint64_t off, uint32_t n) = nullptr;   // np. opoznienie odczytu (zegar testu)
 static std::set<std::string> g_bledy_odczytu;   // pliki, ktorych odczyt zwraca blad I/O (rozmiar dostepny)
 
 static bool fs_odczyt(void*, const char* s, uint64_t off, void* buf, uint32_t n, uint32_t* got) {
@@ -31,10 +33,12 @@ static bool fs_odczyt(void*, const char* s, uint64_t off, void* buf, uint32_t n,
     *got = 0;
     auto it = g_pliki.find(s);
     if (it == g_pliki.end() || n == 0 || n > 1024 * 1024 || g_bledy_odczytu.count(s)) return false;
+    if (g_hak_odczytu) g_hak_odczytu(off, n);
     if (off >= it->second.size()) return true;
     const size_t k = std::min<size_t>(n, it->second.size() - off);
     std::memcpy(buf, it->second.data() + off, k);
     *got = uint32_t(k);
+    g_bajty_odczytane += k;
     return true;
 }
 static bool fs_rozmiar(void*, const char* s, uint64_t* r) {
@@ -108,6 +112,10 @@ struct Jadro {
     uint64_t czekanie_cpu_ns = 0, uspienie_ns = 0;
     // BWS 111: 0 = brak wywolania (starsze jadro), 1 = trwaly dysk BSP2, 2 = RAM (Live)
     int magazyn = 0;
+    // Rozszerzenia BWS 110 obecnego jadra: gleboka kolejka (BwsPcmFormat.reserved) i PCM_PAUSE/RESUME.
+    // false (domyslnie) = zachowanie starszego jadra: reserved != 0 i PAUSE/RESUME -> PCM_INVALID.
+    bool rozszerzenia = false;
+    uint64_t pauzy = 0, wznowienia = 0;
     void reset() { *this = Jadro{}; }
 };
 static Jadro* g_j = nullptr;
@@ -135,9 +143,10 @@ static uint64_t fake_bws(uint64_t nr, uint64_t op, uint64_t a, uint64_t b, uint6
         if (b != sizeof(BwsPcmFormat) || c != BWS_PCM_V1) return uint64_t(int64_t(PCM_INVALID));
         if (!j.urzadzenie) return uint64_t(int64_t(PCM_DEVICE));
         BwsPcmFormat f; std::memcpy(&f, reinterpret_cast<void*>(a), sizeof(f));
-        if (f.version != BWS_PCM_V1 || f.size != sizeof(f) || f.reserved) return uint64_t(int64_t(PCM_INVALID));
+        if (f.version != BWS_PCM_V1 || f.size != sizeof(f)) return uint64_t(int64_t(PCM_INVALID));
+        if (j.rozszerzenia ? !bws_pcm_pojemnosc_poprawna(f.reserved) : f.reserved != 0) return uint64_t(int64_t(PCM_INVALID));
         uint64_t h = 0;
-        const auto rc = j.mikser->open(j.wlasciciel, {f.rate, f.channels, f.encoding}, &h, 2048);
+        const auto rc = j.mikser->open(j.wlasciciel, {f.rate, f.channels, f.encoding}, &h, 2048, f.reserved);
         if (rc != Pcm::OK) return uint64_t(r(rc));
         ++j.otwarcia;
         return h;
@@ -173,6 +182,8 @@ static uint64_t fake_bws(uint64_t nr, uint64_t op, uint64_t a, uint64_t b, uint6
     if (op == PCM_GAIN) { j.gain_ost_v = b; j.gain_ost_m = c; return uint64_t(r(j.mikser->gain(j.wlasciciel, a, uint32_t(b), uint32_t(c)))); }
     if (op == PCM_CLOSE) { const auto rc = j.mikser->close(j.wlasciciel, a); if (rc == Pcm::OK) ++j.zamkniecia; return uint64_t(r(rc)); }
     if (op == PCM_FINISH) { ++j.finish; return uint64_t(r(j.mikser->finish(j.wlasciciel, a))); }
+    if (op == PCM_PAUSE && j.rozszerzenia) { ++j.pauzy; return uint64_t(r(j.mikser->pause(j.wlasciciel, a))); }
+    if (op == PCM_RESUME && j.rozszerzenia) { ++j.wznowienia; return uint64_t(r(j.mikser->resume(j.wlasciciel, a))); }
     return uint64_t(int64_t(PCM_INVALID));
 }
 

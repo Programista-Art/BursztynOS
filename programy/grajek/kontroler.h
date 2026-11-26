@@ -85,6 +85,7 @@ public:
 
     // ------------------------------------------------------------ praca okresowa
     void tick() {
+        wykonaj_oczekujace_przewiniecie();
         if (silnik_.stan() == Stan::Ladowanie && okladka_do_wczytania_) {
             okladka_do_wczytania_ = false;
             const Utwor* u = utwor_biezacy();
@@ -159,13 +160,22 @@ public:
     // Pelna lista licznikow (karta "Diagnostyka"): nazwa i wartosc osobno, bez obcinania. Liczniki ciaglosci sa
     // zawsze dostepne; czasy sekcji - gdy pomiar (karta Ustawienia: "Pomiar czasu sekcji") jest wlaczony. Czasy sekcji to czas zegarowy
     // TSC z ostatniego okna ~1 s: obejmuja wywlaszczenie procesu i oczekiwanie w wywolaniach systemowych.
-    static constexpr size_t LICZBA_POMIAROW = 23;
+    static constexpr size_t LICZBA_POMIAROW = 35;
     void pomiar(size_t i, char* nazwa, size_t cap_n, char* wartosc, size_t cap_w) const {
         Tekst n(nazwa, cap_n), w(wartosc, cap_w);
         const StatystykiCiaglosci& c = silnik_.ciaglosc();
         const OknoPomiaru& o = g_profiler.ostatnie();
         const bool prof = g_profiler.wlaczony() && o.ns;
+        const PomiarySesji& ps = silnik_.pomiary();
         auto ms1 = [&w](uint64_t ns) { w.liczba(ns / 1000000ULL); w.dodaj(","); w.liczba((ns / 100000ULL) % 10); };
+        auto para = [&](const Histogram& h, uint32_t a, uint32_t b) {
+            if (!h.liczba()) { w.dodaj("—"); return; }
+            ms1(h.percentyl_ns(a)); w.dodaj(" / "); ms1(b >= 1000 ? h.maks_ns() : h.percentyl_ns(b)); w.dodaj(" ms");
+        };
+        auto trojka = [&](const Histogram& h) {
+            if (!h.liczba()) { w.dodaj("—"); return; }
+            ms1(h.percentyl_ns(500)); w.dodaj("/"); ms1(h.percentyl_ns(950)); w.dodaj("/"); ms1(h.maks_ns()); w.dodaj(" ms");
+        };
         auto sekcja = [&](const char* nz, Sekcja sk, bool maks) {
             n.dodaj(nz);
             if (!prof) { w.dodaj("—"); return; }
@@ -201,6 +211,31 @@ public:
             // planista jadra (sesja): gotowy, ale CPU zajete przez inny watek / najdluzsze dobrowolne uspienie
             case 21: n.dodaj("Maks. czekanie na CPU"); w.liczba(c.maks_czekanie_cpu_ns / 1000000ULL); w.dodaj(" ms"); break;
             case 22: n.dodaj("Maks. uśpienie procesu"); w.liczba(c.maks_uspienie_ns / 1000000ULL); w.dodaj(" ms"); break;
+            // --- przypisanie przerw do etapu potoku (PomiarySesji, od uruchomienia) ---
+            case 23: n.dodaj("Rezerwa kolejki jądra");
+                if (!ps.pojemnosc_kolejki) w.dodaj("—");
+                else { w.liczba(StatystykiCiaglosci::ms(ps.pojemnosc_kolejki)); w.dodaj(" ms"); }
+                break;
+            case 24: n.dodaj("Przerwy > rezerwa"); w.liczba(ps.przerwy_ponad_rezerwe); break;
+            case 25: n.dodaj("Przerwa prod. p50/p95"); para(ps.przerwa_producenta, 500, 950); break;
+            case 26: n.dodaj("Odczyt pliku p95/maks"); para(ps.odczyt, 950, 1000); break;
+            case 27: n.dodaj("Dekodowanie p95/maks"); para(ps.dekodowanie, 950, 1000); break;
+            case 28: n.dodaj("BWS 110 zapis p95/maks"); para(ps.zapis, 950, 1000); break;
+            case 29: n.dodaj("Przewinięcia (przybl.)");
+                w.liczba(ps.przewiniecia); w.dodaj(" ("); w.liczba(ps.przewiniecia_przyblizone); w.dodaj(")"); break;
+            case 30: n.dodaj("Przewijanie"); trojka(ps.przewijanie); break;
+            case 31: n.dodaj("Wznowienie po przew."); trojka(ps.wznowienie); break;
+            case 32: n.dodaj("Pauzy / otwarcia"); w.liczba(ps.pauzy); w.dodaj(" / "); w.liczba(ps.otwarcia_strumienia); break;
+            case 33: n.dodaj("Błędy dek. / odczytu"); w.liczba(ps.bledy_dekodera); w.dodaj(" / "); w.liczba(ps.bledy_odczytu); break;
+            case 34: {
+                n.dodaj("Indeks MP3");
+                const Dekoder* d = silnik_.dekoder();
+                if (!d || d->format() != FormatAudio::MP3) { w.dodaj("—"); break; }
+                if (d->indeks_kompletny()) { w.dodaj("pełny"); break; }
+                const uint64_t r = d->parametry().ramki;
+                w.liczba(r ? (d->zaindeksowane_ramki() >= r ? 99 : d->zaindeksowane_ramki() * 100 / r) : 0); w.dodaj(" %");
+                break;
+            }
             default: break;
         }
     }
@@ -210,6 +245,15 @@ public:
         diag_[0] = '\0';
         ++w_diag_;
         zmieniono();
+    }
+
+    void wykonaj_oczekujace_przewiniecie() {
+        if (!przew_oczekuje_) return;
+        przew_oczekuje_ = false;
+        if (p_.czas_ns) { const uint64_t t = p_.czas_ns(); if (t >= przew_od_ns_) przew_przygotowanie_.dodaj(t - przew_od_ns_); }
+        ++przew_wykonane_;
+        (void)silnik_.przewin(przew_cel_ms_);
+        ++w_utw_;
     }
 
     // ------------------------------------------------------------ rodzaj pamieci (BWS 111)
@@ -271,7 +315,7 @@ public:
     }
     bool pauza() { return silnik_.pauza(); }
     bool przelacz_pauze() { return silnik_.stan() == Stan::Odtwarzanie ? silnik_.pauza() : odtworz(); }
-    bool stop() { const bool r = silnik_.zatrzymaj(); ++w_utw_; return r; }
+    bool stop() { przew_oczekuje_ = false; const bool r = silnik_.zatrzymaj(); ++w_utw_; return r; }
     bool nastepny() {
         const int n = kol_.nastepna(false);
         if (n < 0) { ustaw_komunikat("To jest ostatni utwór na liście.", RodzajKomunikatu::Informacja); return false; }
@@ -285,7 +329,29 @@ public:
         kol_.przejdz(n); ++w_kol_;
         return graj_pozycje(n, false);
     }
-    bool przewin(uint64_t ms) { const bool r = silnik_.przewin(ms); ++w_utw_; return r; }
+    bool przewin(uint64_t ms) { przew_oczekuje_ = false; const bool r = silnik_.przewin(ms); ++w_utw_; return r; }
+
+    /*
+     * Przewijanie z interfejsu (suwak po puszczeniu, strzalki/PgUp/PgDn z autopowtorzeniem, rolka): zapamietywany
+     * jest WYLACZNIE najnowszy cel (generacja), wykonanie raz na tick petli - seria zdarzen klawiatury nie
+     * restartuje dekodera dla kazdego zdarzenia, a starszy cel nigdy nie zostanie wykonany po nowszym. Wykonanie
+     * zamyka strumien (CLOSE porzuca kolejke jadra) i czysci bufor posredni, wiec probki sprzed przewiniecia nie
+     * moga zabrzmiec po nim. Przygotowanie = czas od pierwszego niewykonanego zadania do wykonania.
+     */
+    void zadaj_przewiniecia(uint64_t ms) {
+        const uint64_t teraz = p_.czas_ns ? p_.czas_ns() : 0;
+        if (!przew_oczekuje_) przew_od_ns_ = teraz;
+        przew_oczekuje_ = true;
+        przew_cel_ms_ = ms;
+        ++przew_generacja_;
+        ++przew_zadania_;
+    }
+    bool przewiniecie_oczekuje() const { return przew_oczekuje_; }
+    uint64_t cel_przewiniecia_ms() const { return przew_cel_ms_; }
+    uint32_t generacja_przewiniecia() const { return przew_generacja_; }
+    uint64_t zadania_przewiniecia() const { return przew_zadania_; }
+    uint64_t wykonane_przewiniecia() const { return przew_wykonane_; }
+    const Histogram& przygotowanie_przewiniecia() const { return przew_przygotowanie_; }
 
     /*
      * Plik przekazany przez system (argument startowy przy uruchomieniu albo BWS_ZDARZENIE_OTWORZ_PLIK, gdy Grajek
@@ -458,7 +524,7 @@ public:
         if (do_zapisu_) zapisz_konfiguracje(p_.czas_ns ? p_.czas_ns() : 0);
         // Diagnostyka do odczytu po sesji (np. po tescie natywnym): ostatnie okno i liczniki ciaglosci.
         if (konf_.diagnostyka && p_.zapisz_ustawienie && diag_[0]) {
-            char t[1536];
+            char t[3072];
             Tekst x(t, sizeof(t));
             for (size_t i = 0; i < LICZBA_POMIAROW; ++i) {
                 char n[48], w[32]; pomiar(i, n, sizeof(n), w, sizeof(w));
@@ -505,6 +571,7 @@ private:
         const int idx = kol_.utwor(uint32_t(poz));
         const Utwor* u = idx >= 0 ? bib_.utwor(uint32_t(idx)) : nullptr;
         if (!u) return false;
+        przew_oczekuje_ = false;            // cel przewiniecia dotyczyl poprzedniego utworu
         biezacy_ = idx;
         automatyczne_ = automatycznie;
         okl_.wyczysc();
@@ -595,6 +662,10 @@ private:
     bool okladka_do_wczytania_ = false, automatyczne_ = false, zminimalizowane_ = false, do_zapisu_ = false;
     uint32_t proby_pod_rzad_ = 0;
     uint64_t ostatni_zapis_ = 0, ostatni_niedobor_ = 0;
+    bool przew_oczekuje_ = false;
+    uint64_t przew_cel_ms_ = 0, przew_od_ns_ = 0, przew_zadania_ = 0, przew_wykonane_ = 0;
+    uint32_t przew_generacja_ = 0;
+    Histogram przew_przygotowanie_{};
     bool niedobor_oczekuje_ = false, komunikat_niedoboru_aktywny_ = false;
     uint32_t pokolenie_komunikatu_ = 0;
     char (*stare_)[MAKS_SCIEZKA] = nullptr;

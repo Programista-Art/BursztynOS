@@ -61,6 +61,16 @@ public:
     // Ustawia pozycje na ramke PCM (w natywnej czestotliwosci). false = przewijanie niemozliwe.
     virtual bool szukaj(uint64_t ramka) { (void)ramka; return false; }
     virtual FormatAudio format() const { return FormatAudio::Nieznany; }
+    // Ograniczona praca w tle (silnik wola ja, gdy kolejka PCM jest pelna): MP3 - przyrostowy indeks ramek do
+    // szybkiego, dokladnego przewijania. `budzet` = maks. liczba ramek MPEG na wywolanie. true = zostala praca.
+    virtual bool praca_w_tle(uint32_t budzet) { (void)budzet; return false; }
+    enum class Szukanie : uint8_t { Brak, Dokladne, Przyblizone };
+    // Sposob ostatniego szukaj(): Dokladne = co do ramki PCM (WAV, MP3 z indeksem), Przyblizone = skok wg TOC Xing
+    // albo przeplywnosci CBR (blad pozycji ograniczony dokladnoscia naglowka, zwykle < 1% czasu utworu).
+    Szukanie ostatnie_szukanie() const { return szukanie_; }
+    // Postep indeksu (ramki PCM objete indeksem) - diagnostyka.
+    virtual uint64_t zaindeksowane_ramki() const { return 0; }
+    virtual bool indeks_kompletny() const { return true; }
 
     const ParametryStrumienia& parametry() const { return p_; }
     uint64_t pozycja() const { return pozycja_; }
@@ -72,6 +82,7 @@ protected:
     ParametryStrumienia p_{};
     uint64_t pozycja_ = 0;
     char blad_[MAKS_BLAD]{};
+    Szukanie szukanie_ = Szukanie::Brak;
 };
 
 class DekoderWav : public Dekoder {
@@ -115,6 +126,7 @@ public:
         if (ramka > info_.ramki) ramka = info_.ramki;
         if (!czytnik_.ustaw_pozycje(info_.dane_offset + ramka * info_.blok)) return false;
         pozycja_ = ramka;
+        szukanie_ = Szukanie::Dokladne;     // bezposrednie przesuniecie probki (O(1), jeden odczyt okna)
         return true;
     }
     FormatAudio format() const override { return FormatAudio::WAV; }

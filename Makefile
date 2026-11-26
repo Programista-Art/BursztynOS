@@ -2622,7 +2622,14 @@ grajek_zasoby_blob.o: $(GRAJEK_ZASOBY_DIR)/.gotowe ikonki/plyta_winylowa.jpg
 # Testy hosta Grajka (ASan/UBSan): logika (WAV, ID3, MP3 z syntetycznych ramek, konwersje, korektor, analiza, silnik na
 # mikserze jadra z symulacja BWS 110, biblioteka, kolejka/M3U8, konfiguracja, okladka) oraz okno BursztynUI.
 GRAJEK_TEST_ZRODLA := programy/grajek/dekoder_mp3.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp
-.PHONY: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-grajek
+.PHONY: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-grajek test-grajek-ciaglosc-host
+# Ciaglosc odtwarzania: gleboka kolejka jadra i PCM_PAUSE (prawdziwy mikser), przestoje producenta, pauza, przewijanie
+# bez starych probek, scalanie zadan przewijania, przewijanie MP3 (indeks przyrostowy, TOC Xing, uszkodzone pliki).
+test-grajek-ciaglosc-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_ciaglosc_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek-ciaglosc
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek-ciaglosc
+
 test-grajek-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
 	@mkdir -p .bsf-test
 	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek
@@ -2711,7 +2718,7 @@ test-punkt-audio-host:
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/punkt-audio-ahci
 	$(PYTHON) testy/test_punkt_kontrolny_audio.py
 
-test-grajek: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host test-zasoby-grajka test-magazyn-host test-punkt-audio-host
+test-grajek: test-grajek-host test-grajek-ciaglosc-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host test-zasoby-grajka test-magazyn-host test-punkt-audio-host
 
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).

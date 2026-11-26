@@ -259,6 +259,14 @@ int64_t finish(Pcm::Owner o, uint64_t h) {
     Blokada b; if (!b.ok()) return PCM_BUSY;
     return g_silnik.finish(o, h);
 }
+int64_t pause(Pcm::Owner o, uint64_t h) {
+    Blokada b; if (!b.ok()) return PCM_BUSY;
+    return g_silnik.pause(o, h);
+}
+int64_t resume(Pcm::Owner o, uint64_t h) {
+    Blokada b; if (!b.ok()) return PCM_BUSY;
+    return g_silnik.resume(o, h);
+}
 bool posprzataj(uint32_t pid, uint64_t gen) {
     Blokada b; if (!b.ok()) return false;
     g_silnik.posprzataj({pid, gen}, czas_monotoniczny_ns());

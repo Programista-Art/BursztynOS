@@ -28,6 +28,8 @@ int64_t statistics(Pcm::Owner, uint64_t, BwsPcmStats&) { std::abort(); }
 int64_t gain(Pcm::Owner, uint64_t, uint64_t, uint64_t) { std::abort(); }
 int64_t close(Pcm::Owner, uint64_t) { std::abort(); }
 int64_t finish(Pcm::Owner, uint64_t) { std::abort(); }
+int64_t pause(Pcm::Owner, uint64_t) { std::abort(); }
+int64_t resume(Pcm::Owner, uint64_t) { std::abort(); }
 bool posprzataj(uint32_t, uint64_t) { std::abort(); }
 bool diag_stream(uint32_t, uint64_t, BwsPcmStats&) { std::abort(); }
 bool diag_starvation(uint32_t, Pcm::Starvation&) { std::abort(); }

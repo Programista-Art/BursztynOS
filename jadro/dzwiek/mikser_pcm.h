@@ -15,6 +15,12 @@ constexpr uint32_t FORMAT_S16 = 1;
 constexpr uint32_t MAX_STREAMS = 8;
 constexpr uint32_t MAX_PER_PROCESS = 2;
 constexpr uint32_t CAPACITY_FRAMES = 4096;
+// Gleboka kolejka (BwsPcmFormat.reserved = zadana pojemnosc): rezerwa odtwarzacza na przestoje Ring 3 dluzsze niz
+// 85 ms (przeciaganie okna, Eksplorator, Przegladarka Obrazow). Statyczna pula, bez alokacji: MAX_DEEP_STREAMS
+// slotow na mikser. Brak wolnego slotu = zwykla pojemnosc (QUERY zwraca faktyczna capacity).
+constexpr uint32_t DEEP_CAPACITY_FRAMES = BWS_PCM_DEEP_FRAMES;   // 24576 = 512 ms
+constexpr uint32_t MAX_DEEP_STREAMS = 1;
+static_assert(DEEP_CAPACITY_FRAMES > CAPACITY_FRAMES && DEEP_CAPACITY_FRAMES % CAPACITY_FRAMES == 0);
 constexpr uint32_t MAX_MIX_FRAMES = 1024;
 constexpr uint32_t MAX_COPY_FRAMES = 256;
 
@@ -32,15 +38,20 @@ using CopyFromUser = bool (*)(void* dst, const void* src, size_t bytes);
 
 class Mixer {
     struct Stream {
-        Frame data[CAPACITY_FRAMES];
+        Frame small[CAPACITY_FRAMES];
+        uint32_t deep;             // 0 = zwykla kolejka (small), d+1 = slot d puli glebokiej tego miksera
+        // Stan wyzerowany jest poprawny (globalny mikser jadra nie wymaga konstruktora).
+        uint32_t capacity() const { return deep ? DEEP_CAPACITY_FRAMES : CAPACITY_FRAMES; }
         BwsPcmStats stats;
         Owner owner;
         uint64_t handle;
         uint64_t first_write_ns;
         uint32_t read, count, channels, volume, preroll;
-        bool mute, active, expecting, primed;
+        bool mute, active, expecting, primed, paused, finished;
     };
     Stream streams_[MAX_STREAMS]{};
+    Frame deep_[MAX_DEEP_STREAMS][DEEP_CAPACITY_FRAMES]{};
+    bool deep_used_[MAX_DEEP_STREAMS]{};
     uint64_t last_handle_ = 0;
     uint64_t underrun_frames_ = 0;
     Starvation starvation_[32]{};
@@ -60,16 +71,21 @@ class Mixer {
         if (value < -32768) return -32768;
         return static_cast<int16_t>(value);
     }
-    static void remove(Stream& s) {
+    Frame* frames_of(Stream& s) { return s.deep ? deep_[s.deep - 1] : s.small; }
+    const Frame* frames_of(const Stream& s) const { return s.deep ? deep_[s.deep - 1] : s.small; }
+    void remove(Stream& s) {
         // No pointers into a stream escape; stale samples are never addressed.
+        if (s.deep && s.deep <= MAX_DEEP_STREAMS) deep_used_[s.deep - 1] = false;
+        s.deep = 0;
         s.active = false; s.count = 0; s.read = 0; s.handle = 0; s.owner = {};
-        s.expecting = false; s.primed = false; s.preroll = 0; s.first_write_ns = 0;
+        s.expecting = false; s.primed = false; s.paused = false; s.finished = false; s.preroll = 0; s.first_write_ns = 0;
     }
 public:
     Mixer() = default;
     Mixer(const Mixer&) = delete;
     Mixer& operator=(const Mixer&) = delete;
-    Result open(Owner owner, Format fmt, uint64_t* out, uint32_t preroll_frames = 0) {
+    // requested_capacity: 0/<= CAPACITY_FRAMES = zwykla kolejka; wiecej = slot glebokiej puli, jesli wolny.
+    Result open(Owner owner, Format fmt, uint64_t* out, uint32_t preroll_frames = 0, uint32_t requested_capacity = 0) {
         if (!out || !valid_owner(owner)) return INVALID;
         *out = 0;
         if (fmt.rate != RATE || fmt.encoding != FORMAT_S16 || (fmt.channels != 1 && fmt.channels != 2)) return UNSUPPORTED;
@@ -82,13 +98,17 @@ public:
         if (owned >= MAX_PER_PROCESS || slot == MAX_STREAMS || last_handle_ == INT64_MAX) return LIMIT;
         Stream& s = streams_[slot];
         s.owner = owner; s.handle = ++last_handle_; s.read = 0; s.count = 0;
-        s.channels = fmt.channels; s.volume = 100; s.mute = false; s.active = true;
-        s.preroll = preroll_frames > CAPACITY_FRAMES ? CAPACITY_FRAMES : preroll_frames;
+        s.channels = fmt.channels; s.volume = 100; s.mute = false; s.active = true; s.paused = false; s.finished = false;
+        s.deep = 0;
+        if (requested_capacity > CAPACITY_FRAMES)
+            for (uint32_t d = 0; d < MAX_DEEP_STREAMS; ++d)
+                if (!deep_used_[d]) { deep_used_[d] = true; s.deep = d + 1; break; }
+        s.preroll = preroll_frames > s.capacity() ? s.capacity() : preroll_frames;
         s.primed = s.preroll == 0;
         s.first_write_ns = 0;
         s.expecting = false;
         s.stats = {};
-        s.stats.min_queued = CAPACITY_FRAMES;
+        s.stats.min_queued = s.capacity();
         *out = s.handle;
         return OK;
     }
@@ -110,7 +130,7 @@ public:
     Result status(Owner owner, uint64_t handle, Status* out) {
         if (!out) return INVALID;
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
-        *out = Status{s->count, CAPACITY_FRAMES, s->volume, s->mute ? 1U : 0U, s->channels};
+        *out = Status{s->count, s->capacity(), s->volume, s->mute ? 1U : 0U, s->channels};
         return OK;
     }
     Result statistics(Owner owner, uint64_t handle, BwsPcmStats& out) {
@@ -137,11 +157,27 @@ public:
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
         s->volume = volume; s->mute = mute != 0; return OK;
     }
+    // Pauza bez porzucania kolejki: strumien nie jest miksowany ani zuzywany i nie jest oczekiwany (brak niedoboru).
+    // Probki zostaja w kolejce; resume() wznawia od tej samej ramki. Zapis w pauzie jest dozwolony (dopelnienie).
+    Result pause(Owner owner, uint64_t handle) {
+        Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
+        s->paused = true; s->expecting = false;
+        return OK;
+    }
+    Result resume(Owner owner, uint64_t handle) {
+        Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
+        if (!s->paused) return OK;
+        s->paused = false;
+        // Strumien dogrywany po FINISH pozostaje nieoczekiwany (koncowka utworu nie jest niedoborem).
+        if (s->count > 0) { s->primed = true; s->expecting = !s->finished; }
+        return OK;
+    }
     // Drain a finite source normally. A subsequent accepted write resumes it.
     Result finish(Owner owner, uint64_t handle) {
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
         if (s->count > 0) s->primed = true;
         s->expecting = false;
+        s->finished = true;
         return OK;
     }
     // Samples are interleaved native little-endian S16; return accepted frames.
@@ -155,23 +191,28 @@ public:
             return INVALID;
         }
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
-        uint32_t n = CAPACITY_FRAMES - s->count;
+        uint32_t n = s->capacity() - s->count;
         if (!n) { ++s->stats.full; ++s->stats.rejected; return FULL; }
         ++s->stats.writes;
         s->stats.requested += frames;
         if (n > frames) n = frames;
-        uint32_t pos = (s->read + s->count) % CAPACITY_FRAMES;
+        const uint32_t cap = s->capacity();
+        Frame* data = frames_of(*s);
+        uint32_t pos = (s->read + s->count) % cap;
         for (uint32_t i = 0; i < n; ++i) {
             const int16_t l = samples[size_t(i) * s->channels];
             const int16_t r = s->channels == 2 ? samples[size_t(i) * 2 + 1] : l;
-            s->data[pos] = Frame{l, r};
-            pos = (pos + 1U) % CAPACITY_FRAMES;
+            data[pos] = Frame{l, r};
+            pos = (pos + 1U) % cap;
         }
         s->stats.accepted += n;
         if (n < frames) ++s->stats.partial;
         s->count += n;
         if (s->count > s->stats.max_queued) s->stats.max_queued = s->count;
-        if (!s->primed) {
+        s->finished = false;              // przyjety zapis wznawia strumien po FINISH
+        if (s->paused) {
+            // dopelnienie w pauzie: nic nie jest oczekiwane do resume()
+        } else if (!s->primed) {
             if (!s->first_write_ns && now) s->first_write_ns = now;
             if (s->count >= s->preroll) {
                 s->primed = true;
@@ -191,7 +232,7 @@ public:
         *accepted = 0;
         if (!user || !frames || !copy) return INVALID;
         Stream* s = find(owner, handle); if (!s) return BAD_HANDLE;
-        uint32_t n = CAPACITY_FRAMES - s->count;
+        uint32_t n = s->capacity() - s->count;
         if (!n) return FULL;
         if (n > frames) n = frames;
         if (n > MAX_COPY_FRAMES) n = MAX_COPY_FRAMES;
@@ -208,8 +249,8 @@ public:
         for (uint32_t f = 0; f < frames; ++f) {
             int64_t left = 0, right = 0;
             for (const auto& s : streams_) {
-                if (!s.active || !s.primed || s.mute || offset + f >= s.count) continue;
-                const Frame v = s.data[(s.read + offset + f) % CAPACITY_FRAMES];
+                if (!s.active || !s.primed || s.paused || s.mute || offset + f >= s.count) continue;
+                const Frame v = frames_of(s)[(s.read + offset + f) % s.capacity()];
                 left += int64_t(v.left) * s.volume / 100;
                 right += int64_t(v.right) * s.volume / 100;
             }
@@ -223,7 +264,7 @@ public:
     uint32_t consume(uint32_t frames, uint64_t now = 0) {
         uint32_t missing = 0;
         for (auto& s : streams_) {
-            if (!s.active || !s.primed) continue;
+            if (!s.active || !s.primed || s.paused) continue;
             const uint32_t taken = frames < s.count ? frames : s.count;
             if (s.expecting) {
                 if (s.mute || !s.volume) s.stats.muted_missing += frames - taken;
@@ -235,7 +276,7 @@ public:
                 if (frames - taken > missing) missing = frames - taken;
             }
             s.stats.consumed += taken;
-            s.read = (s.read + taken) % CAPACITY_FRAMES;
+            s.read = (s.read + taken) % s.capacity();
             s.count -= taken;
             if (s.expecting && s.count < s.stats.min_queued) s.stats.min_queued = s.count;
         }
@@ -251,7 +292,7 @@ public:
     uint32_t promote_timed_out(uint64_t now, uint64_t grace_ns) {
         uint32_t promoted = 0;
         for (auto& s : streams_) {
-            if (!s.active || s.primed || !s.count) continue;
+            if (!s.active || s.primed || s.paused || !s.count) continue;
             if (!s.first_write_ns) { s.first_write_ns = now; continue; }
             if (now >= s.first_write_ns && now - s.first_write_ns >= grace_ns) {
                 s.primed = true;
@@ -264,7 +305,7 @@ public:
     uint32_t promote_all_nonempty() {
         uint32_t promoted = 0;
         for (auto& s : streams_) {
-            if (!s.active || s.primed || !s.count) continue;
+            if (!s.active || s.primed || s.paused || !s.count) continue;
             s.primed = true;
             s.expecting = true;
             ++promoted;
@@ -272,9 +313,9 @@ public:
         return promoted;
     }
     QueueLevels queue_levels() const {
-        QueueLevels levels{CAPACITY_FRAMES, 0, 0};
+        QueueLevels levels{UINT32_MAX, 0, 0};
         for (const auto& s : streams_) {
-            if (!s.active || !s.primed || !s.expecting) continue;
+            if (!s.active || !s.primed || !s.expecting || s.paused) continue;
             if (s.count < levels.minimum) levels.minimum = s.count;
             if (s.count > levels.maximum) levels.maximum = s.count;
             ++levels.expecting;
@@ -284,12 +325,12 @@ public:
     }
     bool has_ready_pcm() const {
         for (const auto& s : streams_)
-            if (s.active && s.primed && s.count) return true;
+            if (s.active && s.primed && !s.paused && s.count) return true;
         return false;
     }
     bool has_pcm() const {
         for (const auto& s : streams_)
-            if (s.active && s.count) return true;
+            if (s.active && !s.paused && s.count) return true;
         return false;
     }
     bool starvation(uint32_t index, Starvation& out) const {

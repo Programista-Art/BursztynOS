@@ -44,6 +44,8 @@ int64_t statistics(Pcm::Owner owner, uint64_t handle, BwsPcmStats& out);
 int64_t gain(Pcm::Owner owner, uint64_t handle, uint64_t volume, uint64_t mute);
 int64_t close(Pcm::Owner owner, uint64_t handle);
 int64_t finish(Pcm::Owner owner, uint64_t handle);
+int64_t pause(Pcm::Owner owner, uint64_t handle);
+int64_t resume(Pcm::Owner owner, uint64_t handle);
 bool posprzataj(uint32_t pid, uint64_t generation);
 bool diag_stream(uint32_t pid, uint64_t generation, BwsPcmStats& out);
 bool diag_starvation(uint32_t index, Pcm::Starvation& out);

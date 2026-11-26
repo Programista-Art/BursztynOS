@@ -3336,14 +3336,14 @@ static int64_t result(Pcm::Result rc) {
     }
 }
 int64_t open(Pcm::Owner owner, const BwsPcmFormat& fmt) {
-    if (fmt.version != BWS_PCM_V1 || fmt.size != sizeof(fmt) || fmt.reserved)
+    if (fmt.version != BWS_PCM_V1 || fmt.size != sizeof(fmt) || !bws_pcm_pojemnosc_poprawna(fmt.reserved))
         return PCM_INVALID;
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return PCM_BUSY;
     if (!pcm_device_ready()) return PCM_DEVICE;
     uint64_t handle = 0;
     const auto rc = pcm_mixer.open(owner, {fmt.rate, fmt.channels, fmt.encoding},
-                                   &handle, 2 * HdaPcm::PERIOD_FRAMES);
+                                   &handle, 2 * HdaPcm::PERIOD_FRAMES, fmt.reserved);
     if (rc != Pcm::OK) return result(rc);
     ++pcm_clients;
     ++pcm_app_clients;
@@ -3415,6 +3415,18 @@ int64_t finish(Pcm::Owner owner, uint64_t handle) {
     GuardHDA guard(HDA_TIMEOUT_LOCK);
     if (!guard.aktywny()) return PCM_BUSY;
     const auto rc = pcm_mixer.finish(owner, handle);
+    if (rc == Pcm::OK) pcm_notify_ready(czas_monotoniczny_ns());
+    return result(rc);
+}
+int64_t pause(Pcm::Owner owner, uint64_t handle) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    return result(pcm_mixer.pause(owner, handle));
+}
+int64_t resume(Pcm::Owner owner, uint64_t handle) {
+    GuardHDA guard(HDA_TIMEOUT_LOCK);
+    if (!guard.aktywny()) return PCM_BUSY;
+    const auto rc = pcm_mixer.resume(owner, handle);
     if (rc == Pcm::OK) pcm_notify_ready(czas_monotoniczny_ns());
     return result(rc);
 }

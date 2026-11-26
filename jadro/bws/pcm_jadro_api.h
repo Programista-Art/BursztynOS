@@ -79,5 +79,7 @@ inline int64_t bws_pcm_obsluz(Pcm::Owner owner, uint64_t operation, uint64_t a,
     if (operation == PCM_GAIN) return gain(owner, a, b, c);
     if (operation == PCM_CLOSE && !b && !c) return close(owner, a);
     if (operation == PCM_FINISH && !b && !c) return finish(owner, a);
+    if (operation == PCM_PAUSE && !b && !c) return pause(owner, a);
+    if (operation == PCM_RESUME && !b && !c) return resume(owner, a);
     return PCM_INVALID;
 }

@@ -32,7 +32,8 @@ analizator (kopia do wizualizacji) → `PCM_WRITE` (BWS 110) → mikser jądra �
 Ring 3 nie ma wątków użytkownika, więc Grajek używa kooperacyjnego zadania okresowego `AplikacjaGUI` (1 tick ≈ 4 ms
 podczas odtwarzania i skanu, 25 ticków w bezczynności; bez aktywnego czekania – proces śpi w
 `gui_czekaj_na_zdarzenie_z_timeoutem`). Każdy tick: (1) okładka nowego utworu – dekodowana **przed** otwarciem
-strumienia, (2) produkcja PCM (uzupełnianie kolejki 4096 ramek = 85 ms, gdy wolne ≥ 512), (3) zdarzenia silnika,
+strumienia, (2) produkcja PCM (uzupełnianie kolejki jądra do pełna: 24576 ramek = 512 ms przy jądrze z głęboką
+kolejką, 4096 = 85 ms przy starszym jądrze; zob. „Ciągłość odtwarzania i przewijanie”), (3) zdarzenia silnika,
 (4) jeden krok skanu biblioteki, (5) odłożony zapis ustawień (≤ co 2 s). Interfejs odświeża postęp 1×/s, a
 wizualizację 4×/s i tylko zmienione pola.
 
@@ -144,8 +145,13 @@ ciągłość. Pomiar natywny WAV vs MP3 w tych samych warunkach nie został wyko
 * `PCM_QUERY` – zajętość; pozycja odtwarzania = zaakceptowane − w kolejce (dokładność do zawartości kolejki).
 * `PCM_QUERY_STATS` (co ~200 ms oraz przed każdym CLOSE/FINISH) – licznik `starved` raportowany jako **niedobór**
   (osobno od pauzy i ciszy; patrz „Liczniki ciągłości”).
-* `PCM_FINISH` – pauza (kolejka ≤ 85 ms dogrywa się, mikser nie liczy braku danych jako niedoboru; po dograniu
-  strumień jest zamykany) i koniec utworu.
+* `PCM_PAUSE` / `PCM_RESUME` (8/9, rozszerzenie addytywne) – pauza natychmiastowa: kolejka zostaje w jądrze i nie
+  jest miksowana ani „oczekiwana” (brak niedoboru); wznowienie od tej samej ramki. Starsze jądro zwraca
+  `PCM_INVALID` – wtedy pauza jak dotąd przez `PCM_FINISH`.
+* `PCM_FINISH` – koniec utworu (kolejka dogrywa się, mikser nie liczy braku danych jako niedoboru) oraz pauza na
+  starszym jądrze (po dograniu strumień jest zamykany).
+* `BwsPcmFormat.reserved` przy `PCM_OPEN` = żądana pojemność kolejki: 0 albo [4096, 24576] ramek; Grajek prosi o
+  `BWS_PCM_DEEP_FRAMES`, przy `PCM_INVALID` (starsze jądro) ponawia z 0. Faktyczną pojemność zwraca `PCM_QUERY`.
 * `PCM_CLOSE` – stop, przewijanie, zmiana utworu, zamknięcie. API nie ma operacji „flush”: zamknięcie i ponowne
   otwarcie jest jedynym sposobem porzucenia kolejki, więc stare próbki nigdy nie trafiają do nowego utworu.
 
@@ -169,8 +175,9 @@ odtwarzania, wznowienie podczas odtwarzania, przewijanie bez utworu) są odrzuca
 Public Domain (Unlicense) albo MIT No Attribution; bazuje na minimp3 (CC0). Tekst licencji:
 `programy/grajek/zewnetrzne/LICENSE`, trafia też do `licenses/dr_mp3.txt` w ISO (`package_release_notices.py`).
 Brak kodu GPL. Konfiguracja Ring 3 (bez stdio/libc, własny alokator, bez asercji) jest w `dekoder_mp3.cpp`.
-Znany błąd dr_mp3 0.7.4 (punkt szukania w oknie 3 początkowych ramek przy gęstej tablicy) jest omijany przez odstęp
-punktów ≥ 8 ramek; krótkie pliki są przewijane dokładnie „od początku”.
+Grajek nie używa `drmp3_calculate_seek_points` (pełny skan pliku – zob. „Przewijanie MP3”); własny indeks punktów
+`drmp3_seek_point` ma odstęp ≥ 8 ramek (omija znany błąd dr_mp3 0.7.4 przy gęstej tablicy) i jawny punkt początku
+strumienia.
 
 ## Metadane i okładki
 ID3v2.2/2.3/2.4 (UTF‑8, UTF‑16 z BOM, UTF‑16BE, Latin‑1; unsynchronisation; rozmiary nie‑syncsafe iTunes),
@@ -329,6 +336,72 @@ sterty i harmonogramu, produkcyjna pętla AHCI z emulacją rejestrów W1C, kontr
 opublikowaną pracę audio). **Natywnie niezmierzone** – czas pętli w QEMU (TCG) jest modelem; weryfikacja: liczniki
 `bezpieczna_cisza`/`utracone_okresy` i `CHECKPOINTS` przy przeglądaniu zdjęć.
 
+## Ciągłość odtwarzania i przewijanie (audyt wydajności 2026-11-26)
+
+**Przyczyny potwierdzone w kodzie i w testach hosta** (pomiary natywne wymagają QEMU – zob. niżej):
+* *Rezerwa 85 ms.* Jedyną rezerwą odporną na przestój procesu Grajka jest kolejka strumienia w jądrze (mikser
+  pobiera z niej okresy niezależnie od Ring 3). Ring 3 jest wywłaszczany co tik (~4 ms), ale Ring 0 nie: kompozycja
+  w PID 0 przy przeciąganiu okna, operacje katalogowe Eksploratora (PSF + odczyty dysku), duże alokacje i odczyty
+  plików Przeglądarki Obrazów zabierają CPU Grajkowi na czas całego wywołania. Mikser jądra jest wtedy karmiony
+  przez punkty kontrolne, ale Grajek nie może dopisać danych – po 85 ms jest niedobór. Zrzut ekranu z sesji
+  natywnej: przerwa producenta 342 ms > 85 ms. Test hosta odtwarza to: przestój 342 ms = 12 512 ramek niedoboru
+  przy starej kolejce, 0 przy głębokiej.
+* *Przewijanie MP3.* Pierwsze przewinięcie wywoływało `drmp3_calculate_seek_points`, które synchronicznie: liczyło
+  ramki całego pliku, wracało do bieżącej pozycji dekodując od początku (brute force), budowało tablicę drugim
+  pełnym przebiegiem i znów dekodowało od początku do bieżącej pozycji. Pomiar hosta (plik 6,1 MB, 6 min, pozycja
+  3 min): 416 ms i 18,4 MB odczytu; nowy kod: 1,7 ms i 0,79 MB. Natywnie (TCG, prawdziwa muzyka, odczyt z dysku)
+  ten sam algorytm trwa wielokrotnie dłużej – to „kilkusekundowe zacinanie”.
+* *Brak scalania.* Strzałki/PgUp/PgDn (autopowtórzenie) i rolka na suwaku zatwierdzały przewinięcie przy KAŻDYM
+  zdarzeniu (synchronicznie). Suwak myszą zatwierdza dopiero po puszczeniu (bez zmian).
+* *Przeciąganie okna Grajka* nie wysyła do aplikacji żadnego zdarzenia – kompozytor składa zbuforowaną powierzchnię;
+  koszt to wyłącznie czas PID 0 (Ring 0) na składanie i prezentację, widoczny w Grajku jako przerwa producenta i
+  „Maks. czekanie na CPU”.
+
+**Architektura po zmianach**
+
+`dekoder (okno 64 KiB pliku) → resampler → korektor → analizator → bufor pośredni 512 ramek → BWS 110 WRITE →
+kolejka strumienia w jądrze (24576 ramek = 512 ms, statyczny slot miksera) → mikser → okresy DMA HDA (1024 ramki)
+/ AC97`.
+* Rozmiary: głęboka kolejka 24576 ramek (96 KiB) – pokrywa zmierzoną przerwę 342 ms z zapasem ~170 ms; 1 slot na
+  mikser (HDA i AC97 mają osobne miksery: +192 KiB BSS, `__kernel_end` 0xD3F000 → 0xD6F000). Bufor pośredni i
+  okno czytnika bez zmian (bez kopii poza istniejącymi: dekoder → resampler → zapis BWS 110 → kopia do jądra).
+* Znaki wodne: wysoki = pełna kolejka (silnik dopełnia do pełna, ≤ 16 zapisów po 512 ramek na tick); niski =
+  `PROG_DOPELNIENIA` / 512 wolnych ramek (jak dotąd). Start bez opóźnienia: jądro zaczyna grać po prerollu
+  2048 ramek (43 ms), reszta kolejki dopełnia się w kolejnych tickach.
+* Opóźnienie sterowania: głośność/wyciszenie działa przy miksowaniu (natychmiast w jądrze, + bufor DMA); pauza –
+  `PCM_PAUSE` (natychmiast, kolejka zostaje); przewinięcie – `PCM_CLOSE` porzuca kolejkę (bez starych próbek).
+* Rozmiar kolejki NIE ukrywa problemu: przestój > 512 ms jest liczony (test: 700 ms → 9216 ramek niedoboru).
+
+**Przewijanie MP3** (`dekoder_mp3.cpp`):
+* indeks punktów `drmp3_seek_point` co `krok` ramek MPEG (początkowo 8), budowany przyrostowo drugim egzemplarzem
+  dr_mp3 tylko z nagłówków ramek (bez syntezy): 64 ramki na tick, wyłącznie gdy kolejka jądra jest co najmniej w
+  połowie pełna; maks. 2048 punktów (48 KiB), po zapełnieniu decymacja ×2 – ograniczona pamięć dla każdej długości,
+* `szukaj(cel)`: dociągnięcie indeksu o ≤ 1536 nagłówków; cel w zasięgu indeksu (albo ≤ 128 ramek za ostatnim
+  punktem) → **dokładnie** (próbki identyczne jak przy dekodowaniu od początku; dekodowanie ≤ `krok` + 2 ramek),
+  inaczej **przybliżenie**: bajt z TOC Xing (tylko niemalejąca tablica; długość strumienia z nagłówka tylko gdy
+  ≤ plik) albo liniowo (CBR), synchronizacja na najbliższej ramce, 1 ramka odrzucana dla stanu syntezy,
+* złożoność: O(krok) dekodowanych ramek + O(1536) nagłówków na przewinięcie; nigdy pełny skan ani dekodowanie od
+  początku pliku; plik nie jest wczytywany w całości,
+* WAV: bezpośrednie przesunięcie `dane_offset + ramka × block_align` (dokładne, O(1)).
+* Żądania z interfejsu (`Odtwarzacz::zadaj_przewiniecia`): najnowszy cel, jedno wykonanie na tick; zmiana utworu i
+  stop anulują oczekujące żądanie; pauza zostaje pauzą; wykonanie zamyka strumień, więc stare próbki nie zabrzmią.
+
+**Diagnostyka – co oznaczają wartości ze zrzutu** (`kontroler.h`, `silnik.h`):
+* „682 ms w tym utworze” i „Niedobór 661 ms” to TEN SAM licznik (`niedobor_utworu`, ramki `starved` jądra)
+  odczytany w dwóch chwilach – nie sumują się; „10389 ms od uruchomienia” = suma po utworach (`niedobor_sesji`),
+* „przerwa 342 ms” = MAKSIMUM odstępu między uzupełnieniami kolejki w utworze (nie suma),
+* „GUI 76 ms/s” = czas rysowania + publikacji (BWS 57) Grajka w ostatnim oknie 1 s (wymaga pomiaru sekcji).
+* Nowe wiersze karty „Diagnostyka” (od uruchomienia, histogramy log2 – percentyl = górna granica kubełka):
+  rezerwa kolejki jądra, przerwy > rezerwa, przerwa producenta p50/p95, odczyt pliku p95/maks, dekodowanie
+  p95/maks, zapis BWS 110 p95/maks, przewinięcia (w tym przybliżone), „Przewijanie” i „Wznowienie po przew.”
+  (wartości p50/p95/maks), pauzy i otwarcia strumienia (buforowanie startowe), błędy dekodera/odczytu, postęp
+  indeksu MP3. Nazwy są krótkie, bo kolumna nazw wyznacza minimalną szerokość karty „Diagnostyka”.
+  Przypisanie: niedobór przy przerwie producenta > rezerwy → Grajek nie dostał CPU albo czekał w wywołaniu
+  (porównaj „Maks. czekanie na CPU” – inny proces/PID 0 – i „Odczyt pliku” – system plików/dysk); niedobór bez
+  takiej przerwy → jądro/sprzęt (`missed_periods`, `safety_silent_periods`, `[HDA-PCM] CHECKPOINTS`).
+* Zapis po sesji: przy włączonej diagnostyce wszystkie wiersze trafiają przy zamknięciu do ustawień aplikacji
+  (klucz `diagnostyka`, katalog ustawień Grajka) – bez zapisu do plików muzyki ani dokumentów.
+
 ## Bezpieczeństwo i limity
 * Prawa: `okna`, `pliki_czytaj`, `ustawienia_aplikacji` (bez `pliki_zapisz` – muzyka jest tylko czytana).
 * Wszystkie wejścia (WAV, MP3, ID3, RIFF, obrazy, M3U8, ustawienia) traktowane jako niezaufane: arytmetyka
@@ -400,17 +473,16 @@ moduł, 256 plików. Prywatne nagrania w `dane/muzyka/` są ignorowane przez git
 * `make -j1 test-grajek` – wszystkie powyższe (zależą od `grajek_zasoby/`, tworzonego automatycznie).
 
 ## Znane ograniczenia
-* Brak wątków Ring 3: produkcja PCM współdzieli pętlę z GUI. Długie operacje (pierwsze przewinięcie MP3 buduje
-  tablicę punktów – pełny skan nagłówków pliku; dekodowanie dużej okładki) wykonują się synchronicznie – przy
-  przewijaniu i ładowaniu strumień jest zamknięty, więc nie powodują niedoboru, ale chwilowo wstrzymują interfejs.
-* Kolejka BWS 110 to tylko 85 ms, a Ring 3 nie ma wątków: każdy przestój procesu Grajka dłuższy niż kolejka (pełne
-  odrysowanie okna pod emulacją, długa kompozycja/prezentacja w PID 0, opóźnienie planisty) kończy się niedoborem –
-  jest raportowany, nie maskowany. Grajek może jedynie skracać i dzielić własną pracę (punkty kontrolne). Najmniejsza
-  bezpieczna poprawa po stronie systemu: większa pojemność kolejki strumienia (`Pcm::CAPACITY_FRAMES`, np. 8192 =
-  171 ms, +16 KiB BSS na strumień) – zmienia opóźnienie pauzy/FINISH i wymaga osobnej weryfikacji natywnej; nie
-  została wprowadzona.
+* Brak wątków Ring 3: produkcja PCM nadal współdzieli pętlę z GUI. Ochroną przed przestojami jest rezerwa 512 ms w
+  jądrze (głęboka kolejka); przestój procesu Grajka dłuższy niż rezerwa nadal kończy się niedoborem – jest
+  raportowany (niedobór, „Przerwy > rezerwa”), nie maskowany. Dekodowanie dużej okładki pozostaje synchroniczne
+  (przed otwarciem strumienia, więc nie powoduje niedoboru).
+* Jeden głęboki slot na mikser: drugi strumień proszący o głęboką kolejkę (inna aplikacja) dostaje 85 ms.
 * Zmniejszanie częstotliwości (> 48 kHz) bez filtru antyaliasingowego.
-* Pozycja odtwarzania jest dokładna do zawartości kolejki jądra; wizualizacja wyprzedza dźwięk o ≤ 85 ms.
+* Pozycja odtwarzania jest dokładna do zawartości kolejki jądra; wizualizacja wyprzedza dźwięk o ≤ 512 ms (analizator
+  widzi próbki w chwili produkcji).
+* Przewinięcie MP3 poza zasięg jeszcze niezbudowanego indeksu jest przybliżone (TOC Xing / przepływność); pozycja
+  wyświetlana = cel, faktyczny dźwięk może się różnić o dokładność nagłówka.
 * Brak FLAC/OGG (interfejs `Dekoder` przygotowany), brak gapless.
 
 ## Wyniki natywne (QEMU TCG, 2026-11-21, ISO produkcyjne, 2 przebiegi)

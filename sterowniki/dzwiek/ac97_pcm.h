@@ -52,10 +52,11 @@ public:
     }
 
     int64_t open(Pcm::Owner owner, const BwsPcmFormat& fmt) {
-        if (fmt.version != BWS_PCM_V1 || fmt.size != sizeof(fmt) || fmt.reserved) return PCM_INVALID;
+        if (fmt.version != BWS_PCM_V1 || fmt.size != sizeof(fmt) || !bws_pcm_pojemnosc_poprawna(fmt.reserved))
+            return PCM_INVALID;
         if (!k_.gotowy()) return PCM_DEVICE;
         uint64_t h = 0;
-        const auto rc = mikser_.open(owner, {fmt.rate, fmt.channels, fmt.encoding}, &h, PREROLL_RAMEK);
+        const auto rc = mikser_.open(owner, {fmt.rate, fmt.channels, fmt.encoding}, &h, PREROLL_RAMEK, fmt.reserved);
         if (rc != Pcm::OK) return wynik(rc);
         ++klienci_; ++s_.otwarcia; bezczynny_od_ = 0;
         if (otwarcie_) otwarcie_(owner.pid);
@@ -94,6 +95,8 @@ public:
         return wynik(rc);
     }
     int64_t finish(Pcm::Owner owner, uint64_t h) { return wynik(mikser_.finish(owner, h)); }
+    int64_t pause(Pcm::Owner owner, uint64_t h) { return wynik(mikser_.pause(owner, h)); }
+    int64_t resume(Pcm::Owner owner, uint64_t h) { return wynik(mikser_.resume(owner, h)); }
     void posprzataj(Pcm::Owner owner, uint64_t teraz) {
         biezacy_ = this;
         mikser_.archive_owner(owner, [](Pcm::Owner o, uint64_t h) { biezacy_->archiwizuj(o, h); });

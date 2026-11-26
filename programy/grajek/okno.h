@@ -506,7 +506,7 @@ private:
     void przewin_do(int promile) {
         const uint64_t c = o_.silnik().czas_ms();
         if (!c) return;
-        o_.przewin(c * uint64_t(promile < 0 ? 0 : promile) / 1000ULL);
+        o_.zadaj_przewiniecia(c * uint64_t(promile < 0 ? 0 : promile) / 1000ULL);   // scalane, wykonanie w tick()
         ostatni_postep_ = 0;
     }
 
@@ -609,10 +609,10 @@ private:
         if (!wymus && ms - ostatnia_diag_ < 1000 && ostatnia_diag_) return;
         ostatnia_diag_ = ms ? ms : 1;
         if (!karty_ || karty_->aktywna_karta() != KARTA_DIAGNOSTYKI || czy_zminimalizowane()) return;
-        const uint32_t zm = dane_diag_.odswiez();
+        const uint64_t zm = dane_diag_.odswiez();
         // nazwy sa stale (wypelnione przy budowie), wiec tylko kolumna wartosci zmienionych wierszy
         for (size_t i = 0; i < DaneDiagnostyki::N; ++i)
-            if (zm & (1u << i)) { diag_tab_->uniewaznij_wiersz(i, 1); ++wiersze_diag_; }   // bez __builtin_popcount (Ring 3: brak libgcc)
+            if (zm & (uint64_t(1) << i)) { diag_tab_->uniewaznij_wiersz(i, 1); ++wiersze_diag_; }   // bez __builtin_popcount (Ring 3: brak libgcc)
     }
 
     void aktualizuj_utwor() {
