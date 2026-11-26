@@ -49,7 +49,7 @@ struct InstalatorOdpowiedz {
     uint32_t procent,postep_etap,wykonane,razem;
     uint32_t pliki_wykonane,pliki_razem,tapety_wykonane,tapety_razem;
     uint64_t sektory,esp_mib,bsp_mib,nieprzydzielone_mib,token,zapisy;
-    char model[41],serial[21],blad[160];
+    char model[41],serial[21],blad[256];   // blad: do 3 wierszy (\n), zob. InstalacjaPlikow::opisz
 };
 static_assert(sizeof(InstalatorOdpowiedz)<=512,"IPC response limit");
 

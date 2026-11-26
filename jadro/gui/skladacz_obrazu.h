@@ -405,6 +405,10 @@ bool skladacz_obrazu_publikuj_klatke(int pid);
  * (BWS 19, gui_odswiez_pulpit) NIE moze zerowac powierzchni: przez czas rysowania (setki ms w TCG)
  * kompozytor pokazywalby przezroczysty, czesciowo namalowany bufor. */
 bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int pid);
+/* Epoka tresci warstw: rosnie przy KAZDEJ zmianie pikseli warstwy poza transakcja rysowania wlasciciela
+ * (utworzenie/ponowne uzycie/zmiana rozmiaru, czyszczenie, usuniecie, zmiana trybu ekranu). grafika.cpp utrzymuje
+ * cien warstwy przyrostowo (kopiuje tylko opublikowane prostokaty) i robi pelna kopie, gdy epoka sie zmienila. */
+uint64_t skladacz_obrazu_epoka_tresci();
 bool skladacz_obrazu_czy_widoczna(int pid);
 bool skladacz_obrazu_ksztalt_w_punkcie(int pid,int x,int y);
 uint64_t skladacz_obrazu_id_okna(int pid);

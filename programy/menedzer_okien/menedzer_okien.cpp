@@ -3109,6 +3109,9 @@ void obsluz_element_menu(int item_index) {
         case 23:
             uruchom_lub_aktywuj(AppIdentity::Calendar, "Kalendarz");
             break;
+        case 24:
+            uruchom_lub_aktywuj(AppIdentity::MusicPlayer, "Grajek");
+            break;
         case 18:
             wykonaj_restart();
             break;

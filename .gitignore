@@ -81,7 +81,7 @@ narzedzia/run_probe_td.sh
 # --- Artefakty sesji QEMU / logi prob (2026-11) ---
 .bsf-test/var-wyd-diag
 docs/bursztynowy-zasobnik-2026-11-20/
-
+dane/muzyka/
 .qemu-*.err
 .qemu-*.out
 qemu_*.log
@@ -112,6 +112,7 @@ jadro/gui/kursor_rozciagania.generated.h
 jadro/siec/tls_test_ca.generated.h
 
 .galeria.stamp
+.muzyka.stamp
 
 # --- Wyjscie harnessow testowych (odtwarzane przy kazdym przebiegu; 2026-11-16) ---
 # Harness BWS 97 (testy/test_zakonczenie_qemu.py): bloby, kernel.elf, staging ISO, kopia jadro/fs, logi przebiegow.
@@ -123,3 +124,7 @@ jadro/siec/tls_test_ca.generated.h
 /.graphics-perf/
 # Dowody w docs/ sa wersjonowane mimo globalnych regul *.log
 !/docs/zakonczenie-procesow-2026-11-16/**
+
+# --- Grajek: ikony przeskalowane przy budowaniu (narzedzia/przygotuj_zasoby_grajka.py) ---
+/grajek_zasoby/
+/.importer-test/

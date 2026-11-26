@@ -26,6 +26,11 @@ static GuiDirtyRect recorded_first{};
 static bool use_clock=false;
 static uint64_t mock_now=1000000000;
 int aktualny_pid=0;
+// Punkty kontrolne HDA w petli kompozytora (skladacz_obrazu.cpp): test nie ma sterownika dzwieku.
+bool hda_pcm_praca_oczekuje(){return false;}
+void hda_obsluz_okresowo(){}
+bool ac97_praca_oczekuje(){return false;}
+void ac97_obsluz_okresowo(){}
 int grafika_pobierz_szerokosc(){return sw;}
 int grafika_pobierz_wysokosc(){return sh;}
 uint32_t* grafika_pobierz_wiersz_backbuffer(int y){return scene.data()+y*sw;}

@@ -183,8 +183,13 @@ class Wizard : public Panel {
             line(5,"Rozruch: UEFI / EFI/BOOT/BOOTX64.EFI (bez zmiany NVRAM).");
             line(8,"Testy QEMU nie stanowią ręcznej weryfikacji na fizycznym komputerze.");next->ustaw_tekst("Zamknij");
         }else{line(0,"Instalacja nie powiodła się.");progressbar->ustaw_wartosc(state.procent);progressbar->pokaz();
-            line(3,progress_text());line(4,state.blad[0]?state.blad:"Walidacja dysku, uprawnień lub plików instalacyjnych nie powiodła się.");
-            number(text,sizeof(text),"Kod błędu: ",state.status);line(5,text);line(6,"Dalsze zapisy zostały zatrzymane.");next->ustaw_tekst("Zamknij");}
+            line(3,progress_text());
+            // Diagnoza bywa dluzsza niz szerokosc okna (etap, sciezka, przyczyna w osobnych wierszach '\n'):
+            // zawijany obszar na wiersze 4-6; pelny rekord (CRC, LBA, czasy) jest w logu szeregowym.
+            lines[4]->ustaw_zawijanie(true);lines[4]->ustaw_preferowany_rozmiar(Rozmiar(780,92));
+            line(4,state.blad[0]?state.blad:"Walidacja dysku, uprawnień lub plików instalacyjnych nie powiodła się.");
+            number(text,sizeof(text),"Kod błędu: ",state.status);line(7,text);
+            line(8,"Dalsze zapisy zostały zatrzymane. Szczegóły: log szeregowy [INSTALL DIAG].");next->ustaw_tekst("Zamknij");}
         window->przelicz_uklad();uniewaznij();
     }
     void advance(){

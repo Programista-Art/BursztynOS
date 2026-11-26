@@ -2,6 +2,7 @@ extern "C" unsigned char _binary_pcm440_bin_bz_start[], _binary_pcm440_bin_bz_en
 #include "powiadomienia_jadra.h"
 #include "galeria_pak.h"
 #include "galeria_kopiowanie.h"
+#include "jadro/gui/instalacja_plikow.h"
 extern "C" bool podpis_sha256(const uint8_t* dane, uint64_t rozmiar, uint8_t wynik[32]);
 #include "jadro/gui/display_mode_policy.h"
 #include "jadro/mm/zarezerwowane_va.h"
@@ -59,6 +60,8 @@ extern "C" void odblokuj_ekran();
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "sterowniki/dzwiek/ac97.h"
+#include "jadro/dzwiek/wyjscie_audio.h"
 #include "sterowniki/dzwiek/hda_qemu_regression.h"
 #include "sterowniki/dzwiek/hda_pcm_regression.h"
 #include "sterowniki/dzwiek/hda_ring3_regression.h"
@@ -191,6 +194,30 @@ extern "C" uint8_t _binary_ikonki_app_test_dzwieku_png_start[], _binary_ikonki_a
 extern "C" uint8_t _binary_ikonki_app_diagnostyka_png_start[], _binary_ikonki_app_diagnostyka_png_end[];
 extern "C" uint8_t _binary_ikonki_app_menedzer_zadan_png_start[], _binary_ikonki_app_menedzer_zadan_png_end[];
 extern "C" uint8_t _binary_ikonki_app_kalendarz_png_start[], _binary_ikonki_app_kalendarz_png_end[];
+extern "C" uint8_t _binary_ikonki_app_grajek_png_start[], _binary_ikonki_app_grajek_png_end[];
+// Grajek: ikony przyciskow (grafiki uzytkownika, 128x128 przy budowaniu) i plyta winylowa (oryginalny JPEG)
+#define GRAJEK_ZASOB(a) extern "C" uint8_t _binary_grajek_zasoby_grajek_##a##_png_start[], _binary_grajek_zasoby_grajek_##a##_png_end[];
+GRAJEK_ZASOB(poprzedni)
+GRAJEK_ZASOB(odtworz)
+GRAJEK_ZASOB(pauza)
+GRAJEK_ZASOB(stop)
+GRAJEK_ZASOB(nastepny)
+GRAJEK_ZASOB(wycisz)
+GRAJEK_ZASOB(odswiez)
+GRAJEK_ZASOB(dodaj)
+GRAJEK_ZASOB(w_gore)
+GRAJEK_ZASOB(w_dol)
+GRAJEK_ZASOB(usun)
+GRAJEK_ZASOB(wyczysc)
+GRAJEK_ZASOB(zapisz)
+GRAJEK_ZASOB(wczytaj)
+GRAJEK_ZASOB(losowo)
+GRAJEK_ZASOB(powtarzanie)
+GRAJEK_ZASOB(powtarzanie_jeden)
+GRAJEK_ZASOB(w_tle)
+GRAJEK_ZASOB(wizualizacja)
+#undef GRAJEK_ZASOB
+extern "C" uint8_t _binary_ikonki_plyta_winylowa_jpg_start[], _binary_ikonki_plyta_winylowa_jpg_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
 extern "C" uint8_t _binary_ikonki_app_tapety_png_start[], _binary_ikonki_app_tapety_png_end[];
 extern "C" uint8_t _binary_ikonki_app_ustawienia_ekranu_png_start[], _binary_ikonki_app_ustawienia_ekranu_png_end[];
@@ -250,6 +277,7 @@ extern "C" uint8_t _binary_aktualizacje_bin_bz_end[];
 extern "C" uint8_t _binary_diagnostyka_bin_bz_start[],_binary_diagnostyka_bin_bz_end[];
 extern "C" uint8_t _binary_menedzer_zadan_bin_bz_start[],_binary_menedzer_zadan_bin_bz_end[];
 extern "C" uint8_t _binary_kalendarz_bin_bz_start[],_binary_kalendarz_bin_bz_end[];
+extern "C" uint8_t _binary_grajek_bin_bz_start[],_binary_grajek_bin_bz_end[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_start[];
 extern "C" uint8_t _binary_test_dzwieku_bin_bz_end[];
 
@@ -618,20 +646,30 @@ bool pobierz_rozmiar_bloba(
 bool scisla_instalacja=false,pliki_instalacja_ok=true;
 bool ekran_aplikacja_instalacja_ok=false;
 bool tapety_aplikacja_instalacja_ok=false;
-struct PlikKontrolny{char path[128];uint32_t size,crc;};
+// Kontrola plikow systemowych i diagnostyka bledow instalacji: wspolny modul jadra i testu hosta.
+using PlikKontrolny = InstalacjaPlikow::Kontrolny;
+uint32_t segmenty_kontrolne[InstalacjaPlikow::MAKS_SEGMENTOW]{};   // CRC-32 segmentow 64 KiB
+uint32_t liczba_segmentow_kontrolnych=0;
+InstalacjaPlikow::Diagnoza diagnoza_instalacji{};
+InstalacjaPlikow::Rejestr rejestr_pliku_instalacji{};
 constexpr unsigned MAKS_PLIKOW_KONTROLNYCH = 128;   // = MAKS_PLANOWANYCH_PLIKOW (96 -> 112 -> 128: Menedzer zadan)
 PlikKontrolny pliki_kontrolne[MAKS_PLIKOW_KONTROLNYCH]{};
 unsigned liczba_plikow_kontrolnych=0;
 // Kompresja blobow (2.2): data/koniec wskazuja skompresowany blob, a size
 // to rozmiar surowy; dane sa rozpakowywane dopiero przy zapisie pliku.
-struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;};
+struct PlanowanyPlik{char path[128];const char*data;uint32_t size;const uint8_t*koniec;bool skompresowany;
+                     InstalacjaPlikow::Zrodlo zrodlo;};   // zrodlo: CRC bajtow w chwili planowania (male pliki surowe)
 constexpr unsigned MAKS_PLANOWANYCH_PLIKOW = 128;   // plik .bur + manifest na aplikacje, ikony, dane; bylo 96, potem 112
 PlanowanyPlik planowane_pliki[MAKS_PLANOWANYCH_PLIKOW]{};
 unsigned planowane_liczba=0,planowane_indeks=0;
 size_t planowane_katalog_indeks=0;
-uint32_t planowane_offset=0,planowane_crc=~0U;
+uint32_t planowane_offset=0;
 uint64_t planowane_bajty=0,planowane_bajty_razem=0;
 bool planowanie_instalacji=false,instalacja_krokowa=false;
+// Gorna granica ramek planowania (ramka kernel_instaluj_system_start): kazdy adres stosu ponizej niej, a powyzej
+// biezacego RSP, nalezy do ramki, ktora nie przetrwa do krokow zapisu. 0 = poza planowaniem.
+uintptr_t plan_granica_stosu=0;
+__attribute__((noinline)) uintptr_t biezacy_rsp(){uintptr_t sp;asm volatile("mov %%rsp,%0":"=r"(sp));return sp;}
 
 bool sciezka_ma_poczatek(const char* sciezka,const char* poczatek){
     if(!sciezka||!poczatek)return false;
@@ -663,6 +701,19 @@ void log_blad_pliku_instalacji(const char* sciezka,const char* operacja,
            !dolacz_tekst(komunikat,sizeof(komunikat),liczba))return;
     }
     wypisz_log(komunikat);
+}
+// Kazdy blad zapisu/weryfikacji plikow systemowych: Diagnoza dla GUI + jedna ograniczona linia logu
+// szeregowego (dla KAZDEGO pliku, nie tylko Ekranu/Tapet).
+void zglos_blad_instalacji(InstalacjaPlikow::Etap etap,InstalacjaPlikow::Przyczyna przyczyna,const char* sciezka,
+                           uint64_t offset=0,uint64_t dlugosc=0,uint64_t oczekiwano=0,uint64_t odczytano=0){
+    InstalacjaPlikow::ustaw(&diagnoza_instalacji,etap,przyczyna,sciezka,oczekiwano,odczytano,offset,dlugosc);
+    diagnoza_instalacji.zapis_trwaly=psf_zapis_trwaly_aktywny();
+    diagnoza_instalacji.flush_ok=psf_ostatni_flush_ok();diagnoza_instalacji.flush_znany=true;
+    if(etap!=InstalacjaPlikow::Etap::Plan){   // w trakcie planowania numer pliku nie jest jeszcze ustalony
+        diagnoza_instalacji.indeks_pliku=planowane_indeks;diagnoza_instalacji.liczba_plikow=planowane_liczba;}
+    char linia[384];
+    InstalacjaPlikow::linia_logu(diagnoza_instalacji,linia,sizeof(linia));
+    wypisz_log(linia);
 }
 bool zapisz_plik_od_nowa_impl(const char* sciezka,
                          const char* dane,
@@ -703,29 +754,39 @@ bool zapisz_plik_od_nowa_impl(const char* sciezka,
     return true;
 }
 
-bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
-    if(planowanie_instalacji){
-        if(!path||(size&&!data)||planowane_liczba>=MAKS_PLANOWANYCH_PLIKOW||planowane_bajty_razem>UINT64_MAX-size){
-            pliki_instalacja_ok=false;return false;
-        }
-        auto&e=planowane_pliki[planowane_liczba++];unsigned i=0;
-        for(;i+1<sizeof(e.path)&&path[i];++i){e.path[i]=path[i];}
-        e.path[i]=0;
-        if(path[i]){pliki_instalacja_ok=false;return false;}
-        e.data=data;e.size=size;e.koniec=nullptr;e.skompresowany=false;planowane_bajty_razem+=size;
-        return true;
+// Wpis planu krokowego: zapamietywany jest tylko wskaznik `data`, wiec zrodlo musi zyc do konca SYSTEMFILES.
+// koniec != nullptr: skompresowany blob [data, koniec) z obrazu jadra, `size` = rozmiar po rozpakowaniu.
+bool planuj_plik(const char*path,const char*data,uint32_t size,const uint8_t*koniec){
+    if(!path||(size&&!data)||planowane_liczba>=MAKS_PLANOWANYCH_PLIKOW||planowane_bajty_razem>UINT64_MAX-size){
+        pliki_instalacja_ok=false;return false;
     }
+    const uint64_t bajty_zrodla=koniec?uint64_t(reinterpret_cast<uintptr_t>(koniec)-reinterpret_cast<uintptr_t>(data)):size;
+    if(plan_granica_stosu&&InstalacjaPlikow::zakres_nachodzi(data,bajty_zrodla,biezacy_rsp(),plan_granica_stosu)){
+        zglos_blad_instalacji(InstalacjaPlikow::Etap::Plan,InstalacjaPlikow::Przyczyna::ZrodloNietrwale,path,0,size);
+        pliki_instalacja_ok=false;return false;
+    }
+    auto&e=planowane_pliki[planowane_liczba];unsigned i=0;
+    for(;i+1<sizeof(e.path)&&path[i];++i){e.path[i]=path[i];}
+    e.path[i]=0;
+    if(path[i]){pliki_instalacja_ok=false;return false;}
+    ++planowane_liczba;
+    e.data=data;e.size=size;e.koniec=koniec;e.skompresowany=koniec!=nullptr;planowane_bajty_razem+=size;
+    e.zrodlo=koniec?InstalacjaPlikow::Zrodlo{0,false}:InstalacjaPlikow::migawka_zrodla(data,size);
+    return true;
+}
+bool zapisz_plik_od_nowa(const char*path,const char*data,uint32_t size){
+    if(planowanie_instalacji)return planuj_plik(path,data,size,nullptr);
     if(scisla_instalacja&&!pliki_instalacja_ok)return false;
     bool ok=zapisz_plik_od_nowa_impl(path,data,size);
     if(scisla_instalacja){
         if(!ok||liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
-        auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];unsigned i=0;
-        for(;i+1<sizeof(e.path)&&path[i];++i){
-            e.path[i]=path[i];
+        auto&e=pliki_kontrolne[liczba_plikow_kontrolnych++];e={};unsigned i=0;
+        for(;i+1<sizeof(e.sciezka)&&path[i];++i){
+            e.sciezka[i]=path[i];
         }
-        e.path[i]=0;
+        e.sciezka[i]=0;
         if(path[i]){pliki_instalacja_ok=false;return false;}
-        e.size=size;e.crc=Storage::crc32(data,size);
+        e.rozmiar=size;e.crc=Storage::crc32(data,size);
     }
     return ok;
 }
@@ -759,10 +820,7 @@ bool zapisz_blob_bur(
         if(!BlobZ::rozmiar_surowy(poczatek,koniec,&n)||n<sizeof(NaglowekBur))return false;
         if(planowanie_instalacji){
             // Plan zapamietuje tylko zrodlo; rozpakowanie nastapi przy zapisie.
-            if(!zapisz_plik_od_nowa(sciezka,reinterpret_cast<const char*>(poczatek),n))return false;
-            auto&e=planowane_pliki[planowane_liczba-1];
-            e.koniec=koniec;e.skompresowany=true;
-            return true;
+            return planuj_plik(sciezka,reinterpret_cast<const char*>(poczatek),n,koniec);
         }
         uint8_t* surowe=rozpakuj_blob(poczatek,koniec,&n);
         if(!surowe)return false;
@@ -1275,6 +1333,87 @@ void importuj_galerie_z_modulu(uint64_t mbi) {
     OdblokujZakres(g->start, g->rozmiar);
 }
 
+/* =========================================================================
+ * MUZYKA (modul Multiboot2 "muzyka.pak", ten sam kontener BZP3 co galeria) - dla Grajka.
+ *
+ * ISO niesie pliki z dane/muzyka/ (WAV, MP3) jako modul; przy rozruchu ZYWEGO systemu trafiaja do /dane/muzyka/.
+ * Zasady jak w galerii: istniejace pliki nie sa nadpisywane, nazwa bez '/', '\\' i "..", CRC-32 przed zapisem,
+ * niepelny plik usuwany, jadro nie dekoduje dzwieku. Dodatkowo: RAM-dysk 128 MiB jest wspoldzielony z systemem,
+ * wiec wpis, po ktorym zostaloby mniej niz REZERWA_RAM_DYSKU_MUZYKA wolnego miejsca (psf_wolne_bajty), jest
+ * pomijany w calosci (log); import od najmniejszych plikow. Instalator NIE kopiuje muzyki na dysk.
+ * ========================================================================= */
+constexpr uint64_t REZERWA_RAM_DYSKU_MUZYKA = 24ULL * 1024ULL * 1024ULL;
+GaleriaModul g_muzyka_modul;
+
+bool muzyka_otworz_modul(uint64_t mbi, GaleriaModul* g) {
+    ModulMB2 mod{};
+    if (!znajdz_modul_mb2(mbi, "muzyka.pak", &mod) || !mod.poprawny || !tekst_rowny(mod.cmdline, "muzyka.pak")) return false;
+    g->start = mod.start; g->rozmiar = mod.rozmiar; g->dane = nullptr; g->liczba = 0;
+    if (mod.start == 0 || mod.start >= 0x100000000ULL || mod.koniec > 0x100000000ULL) {
+        wypisz_log("[MUZYKA] Nieprawidlowy modul muzyka.pak.");
+        return false;
+    }
+    const uint8_t* d = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(mod.start));
+    const GaleriaPak::Blad b = GaleriaPak::parsuj(d, mod.rozmiar, g->wpisy, &g->liczba, &podpis_sha256, GaleriaPak::rozszerzenie_audio);
+    if (b != GaleriaPak::Blad::OK) {
+        wypisz_log("[MUZYKA] muzyka.pak odrzucony:");
+        wypisz_log(GaleriaPak::opis(b));
+        return false;
+    }
+    g->dane = d;
+    return true;
+}
+
+void importuj_muzyke_z_modulu(uint64_t mbi) {
+    if (mbi == 0 || instalator_tryb()) return;
+    GaleriaModul* g = &g_muzyka_modul;
+    if (!muzyka_otworz_modul(mbi, g)) {
+        if (g->start) OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    PsfStanStartu stan{};
+    (void)zapewnij_katalog_startowy("/dane", &stan);
+    if (!zapewnij_katalog_startowy("/dane/muzyka", &stan)) {
+        wypisz_log("[MUZYKA] Brak katalogu /dane/muzyka.");
+        OdblokujZakres(g->start, g->rozmiar);
+        return;
+    }
+    uint32_t kolejnosc[GaleriaPak::MAKS_WPISOW];
+    for (uint32_t i = 0; i < g->liczba; ++i) kolejnosc[i] = i;
+    for (uint32_t i = 1; i < g->liczba; ++i) {
+        const uint32_t v = kolejnosc[i];
+        uint32_t j = i;
+        while (j > 0 && g->wpisy[kolejnosc[j - 1]].rozmiar > g->wpisy[v].rozmiar) { kolejnosc[j] = kolejnosc[j - 1]; --j; }
+        kolejnosc[j] = v;
+    }
+    GaleriaPak::Io io = galeria_io();
+    io.wolne = []() -> uint64_t { return psf_wolne_bajty(); };
+    io.rezerwa = REZERWA_RAM_DYSKU_MUZYKA;
+    // Pominiecie nie jest ciche: nazwa, rozmiar i wolne miejsce w logu (np. 49 MB WAV na 128 MiB RAM-dysku).
+    io.pominieto_bez_miejsca = [](const char* nazwa, uint32_t dl, uint32_t rozmiar, uint64_t wolne) {
+        char b[160] = {};
+        size_t p = 0;
+        auto dodaj = [&](const char* t) { while (*t && p + 1 < sizeof(b)) b[p++] = *t++; };
+        auto liczba = [&](uint64_t v) { char t[21]; int n = 0; do { t[n++] = char('0' + v % 10U); v /= 10U; } while (v && n < 20); while (n && p + 1 < sizeof(b)) b[p++] = t[--n]; };
+        dodaj("[MUZYKA] pominieto (brak miejsca na RAM-dysku): ");
+        for (uint32_t i = 0; i < dl && p + 1 < sizeof(b) - 48; ++i) b[p++] = nazwa[i];
+        dodaj(" ("); liczba(rozmiar / (1024U * 1024U)); dodaj(" MiB, wolne "); liczba(wolne / (1024ULL * 1024ULL));
+        dodaj(" MiB, rezerwa 24 MiB)");
+        b[p] = '\0';
+        wypisz_log(b);
+    };
+    GaleriaPak::Kopiarka kop;
+    kop.start(g->dane, g->wpisy, g->liczba, io, kolejnosc, GaleriaPak::KATALOG_MUZYKI, GaleriaPak::NAZWA_TMP_MUZYKI);
+    constexpr uint32_t PORCJA = 192U * 1024U;
+    while (kop.krok(PORCJA) == GaleriaPak::Krok::Dalej) {}
+    (void)psf_flush_cache();
+    galeria_log_liczba("[MUZYKA] utwory zaimportowane: ", kop.zainstalowane);
+    galeria_log_liczba("[MUZYKA] utwory pominiete (istnieja): ", kop.pominiete);
+    if (kop.bez_miejsca) galeria_log_liczba("[MUZYKA] pominiete (brak miejsca, rezerwa 24 MiB): ", kop.bez_miejsca);
+    if (kop.bledne) galeria_log_liczba("[MUZYKA] BLEDNE wpisy (CRC/nazwa>55B/zapis): ", kop.bledne);
+    OdblokujZakres(g->start, g->rozmiar);
+}
+
 /*
  * Instalator: opcjonalna kopia przykladowych zdjec na dysk docelowy (best effort). Wywolywana krokami z
  * maszyny stanow instalatora (po tapetach). Nie nadpisuje istniejacych plikow, usuwa niepelny plik przy bledzie,
@@ -1362,6 +1501,9 @@ void instaluj_wbudowane_programy() {
         "    \"okno_podrzedne\"\n"
         "]\n";
 
+    // ustawienia_aplikacji: prawa dziecka (BWS 10) = prawa rodzica & manifest dziecka - bez tego Grajek otwarty
+    // dwuklikiem MP3/WAV nie moglby zapisac WLASNYCH ustawien i kolejki (prawo ogranicza zapis do katalogu
+    // ustawien danej aplikacji; Eksplorator i tak ma pliki_zapisz).
     static const char MANIFEST_EKSPLORATORA[] =
         "nazwa = \"Eksplorator Plików\"\n"
         "autor = \"Programista Art\"\n"
@@ -1372,7 +1514,8 @@ void instaluj_wbudowane_programy() {
         "    \"okna\",\n"
         "    \"pliki_czytaj\",\n"
         "    \"pliki_zapisz\",\n"
-        "    \"uruchom_program\"\n"
+        "    \"uruchom_program\",\n"
+        "    \"ustawienia_aplikacji\"\n"
         "]\n";
 
     static const char MANIFEST_KALKULATORA[] =
@@ -1532,6 +1675,17 @@ void instaluj_wbudowane_programy() {
         "plik_startowy = \"kalendarz.bur\"\n"
         "uprawnienia = [\"okna\"]\n";
 
+    /* Grajek: zwykla aplikacja uzytkownika (PZB 4). Czyta muzyke z /dane/muzyka (pliki_czytaj, bez zapisu plikow
+     * uzytkownika), konfiguracje i liste M3U8 trzyma we wlasnym katalogu ustawien (ustawienia_aplikacji).
+     * Strumien PCM BWS 110 nie wymaga dodatkowego prawa. */
+    static const char MANIFEST_GRAJEK[] =
+        "nazwa = \"Grajek\"\n"
+        "autor = \"Bursztyn OS\"\n"
+        "wersja = \"1.0\"\n"
+        "poziom_zaufania = 4\n"
+        "plik_startowy = \"grajek.bur\"\n"
+        "uprawnienia = [\"okna\", \"pliki_czytaj\", \"ustawienia_aplikacji\"]\n";
+
     static const char MANIFEST_TEST_DZWIEKU[] =
         "nazwa = \"Test dźwięku\"\n"
         "autor = \"Programista Art\"\n"
@@ -1617,6 +1771,27 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/app_ustawienia_ekranu.png",_binary_ikonki_app_ustawienia_ekranu_png_start,_binary_ikonki_app_ustawienia_ekranu_png_end},
         {"/ikonki/app_menedzer_zadan.png",_binary_ikonki_app_menedzer_zadan_png_start,_binary_ikonki_app_menedzer_zadan_png_end},
         {"/ikonki/app_kalendarz.png",_binary_ikonki_app_kalendarz_png_start,_binary_ikonki_app_kalendarz_png_end},
+        {"/ikonki/app_grajek.png",_binary_ikonki_app_grajek_png_start,_binary_ikonki_app_grajek_png_end},
+        {"/ikonki/grajek_poprzedni.png",_binary_grajek_zasoby_grajek_poprzedni_png_start,_binary_grajek_zasoby_grajek_poprzedni_png_end},
+        {"/ikonki/grajek_odtworz.png",_binary_grajek_zasoby_grajek_odtworz_png_start,_binary_grajek_zasoby_grajek_odtworz_png_end},
+        {"/ikonki/grajek_pauza.png",_binary_grajek_zasoby_grajek_pauza_png_start,_binary_grajek_zasoby_grajek_pauza_png_end},
+        {"/ikonki/grajek_stop.png",_binary_grajek_zasoby_grajek_stop_png_start,_binary_grajek_zasoby_grajek_stop_png_end},
+        {"/ikonki/grajek_nastepny.png",_binary_grajek_zasoby_grajek_nastepny_png_start,_binary_grajek_zasoby_grajek_nastepny_png_end},
+        {"/ikonki/grajek_wycisz.png",_binary_grajek_zasoby_grajek_wycisz_png_start,_binary_grajek_zasoby_grajek_wycisz_png_end},
+        {"/ikonki/grajek_odswiez.png",_binary_grajek_zasoby_grajek_odswiez_png_start,_binary_grajek_zasoby_grajek_odswiez_png_end},
+        {"/ikonki/grajek_dodaj.png",_binary_grajek_zasoby_grajek_dodaj_png_start,_binary_grajek_zasoby_grajek_dodaj_png_end},
+        {"/ikonki/grajek_w_gore.png",_binary_grajek_zasoby_grajek_w_gore_png_start,_binary_grajek_zasoby_grajek_w_gore_png_end},
+        {"/ikonki/grajek_w_dol.png",_binary_grajek_zasoby_grajek_w_dol_png_start,_binary_grajek_zasoby_grajek_w_dol_png_end},
+        {"/ikonki/grajek_usun.png",_binary_grajek_zasoby_grajek_usun_png_start,_binary_grajek_zasoby_grajek_usun_png_end},
+        {"/ikonki/grajek_wyczysc.png",_binary_grajek_zasoby_grajek_wyczysc_png_start,_binary_grajek_zasoby_grajek_wyczysc_png_end},
+        {"/ikonki/grajek_zapisz.png",_binary_grajek_zasoby_grajek_zapisz_png_start,_binary_grajek_zasoby_grajek_zapisz_png_end},
+        {"/ikonki/grajek_wczytaj.png",_binary_grajek_zasoby_grajek_wczytaj_png_start,_binary_grajek_zasoby_grajek_wczytaj_png_end},
+        {"/ikonki/grajek_losowo.png",_binary_grajek_zasoby_grajek_losowo_png_start,_binary_grajek_zasoby_grajek_losowo_png_end},
+        {"/ikonki/grajek_powtarzanie.png",_binary_grajek_zasoby_grajek_powtarzanie_png_start,_binary_grajek_zasoby_grajek_powtarzanie_png_end},
+        {"/ikonki/grajek_powtarzanie_jeden.png",_binary_grajek_zasoby_grajek_powtarzanie_jeden_png_start,_binary_grajek_zasoby_grajek_powtarzanie_jeden_png_end},
+        {"/ikonki/grajek_w_tle.png",_binary_grajek_zasoby_grajek_w_tle_png_start,_binary_grajek_zasoby_grajek_w_tle_png_end},
+        {"/ikonki/grajek_wizualizacja.png",_binary_grajek_zasoby_grajek_wizualizacja_png_start,_binary_grajek_zasoby_grajek_wizualizacja_png_end},
+        {"/ikonki/grajek_plyta_winylowa.jpg",_binary_ikonki_plyta_winylowa_jpg_start,_binary_ikonki_plyta_winylowa_jpg_end},
     };
     for(const auto& asset:power_assets){
         uint32_t bytes=0;
@@ -2140,8 +2315,10 @@ void instaluj_wbudowane_programy() {
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
-    const char manifest440[] = "nazwa = \"PCM 440 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm440.bur\"\nuprawnienia = [\"okna\"]\n";
-    const char manifest660[] = "nazwa = \"PCM 660 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm660.bur\"\nuprawnienia = [\"okna\"]\n";
+    // static: plan krokowy instalatora przechowuje tylko wskaznik (zob. planuj_plik) - lokalna tablica na
+    // stosie byla po powrocie nadpisywana, a na dysk trafialy przypadkowe bajty (natywny blad 7, plik 108/120).
+    static const char manifest440[] = "nazwa = \"PCM 440 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm440.bur\"\nuprawnienia = [\"okna\"]\n";
+    static const char manifest660[] = "nazwa = \"PCM 660 Hz\"\nautor = \"Bursztyn OS\"\nwersja = \"1.0\"\npoziom_zaufania = 4\nplik_startowy = \"pcm660.bur\"\nuprawnienia = [\"okna\"]\n";
     if (!instaluj_paczke("/programy/pcm440.cebula/opis.aplikacji", manifest440,
         "/programy/pcm440.cebula/pcm440.bur", _binary_pcm440_bin_bz_start, _binary_pcm440_bin_bz_end)) pliki_instalacja_ok = false;
     if (!instaluj_paczke("/programy/pcm660.cebula/opis.aplikacji", manifest660,
@@ -2149,6 +2326,12 @@ void instaluj_wbudowane_programy() {
     if (!instaluj_paczke("/programy/kalendarz.cebula/opis.aplikacji",MANIFEST_KALENDARZ,
             AppIdentity::Calendar,_binary_kalendarz_bin_bz_start,_binary_kalendarz_bin_bz_end)) {
         wypisz_log("[KALENDARZ] Nie udalo sie zainstalowac Kalendarza.");
+        if (scisla_instalacja) pliki_instalacja_ok = false;
+    }
+
+    if (!instaluj_paczke("/programy/grajek.cebula/opis.aplikacji",MANIFEST_GRAJEK,
+            AppIdentity::MusicPlayer,_binary_grajek_bin_bz_start,_binary_grajek_bin_bz_end)) {
+        wypisz_log("[GRAJEK] Nie udalo sie zainstalowac Grajka.");
         if (scisla_instalacja) pliki_instalacja_ok = false;
     }
 
@@ -2323,6 +2506,7 @@ void instaluj_wbudowane_programy() {
 
     importuj_modul_test8k(g_multiboot_info_ptr);
     importuj_galerie_z_modulu(g_multiboot_info_ptr);
+    importuj_muzyke_z_modulu(g_multiboot_info_ptr);
 }
 
 /* =========================================================================
@@ -2392,6 +2576,10 @@ void powitanie_punkt_startu() {
 extern "C" bool galeria_instaluj_start(uint64_t mbi, uint64_t* razem) { return galeria_inst_start(mbi, razem); }
 extern "C" void galeria_instaluj_step(uint64_t* wykonane, bool* gotowe) { galeria_inst_step(wykonane, gotowe); }
 extern "C" void galeria_instaluj_zakoncz() { galeria_inst_zakoncz(); }
+// Diagnostyka ostatniego bledu zapisu/weryfikacji plikow systemowych (nullptr = brak bledu).
+const InstalacjaPlikow::Diagnoza* kernel_diagnoza_instalacji(){
+    return diagnoza_instalacji.etap==InstalacjaPlikow::Etap::Brak?nullptr:&diagnoza_instalacji;
+}
 
 
     bool kernel_instaluj_system(){
@@ -2407,13 +2595,19 @@ extern "C" void galeria_instaluj_zakoncz() { galeria_inst_zakoncz(); }
 bool kernel_instaluj_system_start(uint64_t* razem){
     scisla_instalacja=true;pliki_instalacja_ok=true;liczba_plikow_kontrolnych=0;
     ekran_aplikacja_instalacja_ok=tapety_aplikacja_instalacja_ok=false;
-    planowane_liczba=planowane_indeks=0;planowane_katalog_indeks=0;planowane_offset=0;planowane_crc=~0U;
+    planowane_liczba=planowane_indeks=0;planowane_katalog_indeks=0;planowane_offset=0;
     planowane_bajty=planowane_bajty_razem=0;instalacja_krokowa=false;
+    liczba_segmentow_kontrolnych=0;diagnoza_instalacji={};
     planowanie_instalacji=true;
+    plan_granica_stosu=reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
     if(pliki_instalacja_ok)instaluj_wbudowane_programy();
+    plan_granica_stosu=0;
     planowanie_instalacji=false;
     instalacja_krokowa=pliki_instalacja_ok&&ekran_aplikacja_instalacja_ok&&
         tapety_aplikacja_instalacja_ok&&planowane_liczba!=0;
+    if(!instalacja_krokowa&&diagnoza_instalacji.etap==InstalacjaPlikow::Etap::Brak)   // nie nadpisuj konkretnej diagnozy
+        zglos_blad_instalacji(InstalacjaPlikow::Etap::Plan,InstalacjaPlikow::Przyczyna::Limit,
+                              planowane_liczba?planowane_pliki[planowane_liczba-1].path:"(plan)");
     if(razem)*razem=planowane_bajty_razem;
     return instalacja_krokowa;
 }
@@ -2427,10 +2621,12 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         const char* katalog=KATALOGI_SYSTEMOWE[planowane_katalog_indeks];
         if(!zapewnij_katalog_startowy(katalog)){
             log_blad_pliku_instalacji(katalog,"mkdir error=psf-create-or-verify");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Katalogi,InstalacjaPlikow::Przyczyna::Katalog,katalog);
             planowane_katalog_indeks=0;pliki_instalacja_ok=false;return false;
         }
         if(!psf_flush_cache()){
             log_blad_pliku_instalacji(katalog,"mkdir-flush error=psf-flush");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Katalogi,InstalacjaPlikow::Przyczyna::Flush,katalog);
             planowane_katalog_indeks=0;pliki_instalacja_ok=false;return false;
         }
         ++planowane_katalog_indeks;
@@ -2455,10 +2651,14 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
     if(e.skompresowany&&!planowane_surowe){
         uint32_t n=0;
         const auto* zrodlo=reinterpret_cast<const uint8_t*>(e.data);
-        if(!BlobZ::rozmiar_surowy(zrodlo,e.koniec,&n)||n!=e.size||planowane_offset!=0){log_blad_pliku_instalacji(e.path,"unpack");pliki_instalacja_ok=false;return false;}
+        if(!BlobZ::rozmiar_surowy(zrodlo,e.koniec,&n)||n!=e.size||planowane_offset!=0){log_blad_pliku_instalacji(e.path,"unpack");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Rozpakowanie,e.path,planowane_offset);
+            pliki_instalacja_ok=false;return false;}
         planowane_surowe=static_cast<uint8_t*>(kmalloc(n));
         if(!planowane_surowe||!BlobZ::otworz(planowany_strumien,zrodlo,e.koniec,planowane_surowe,n)){
-            zwolnij_surowe();log_blad_pliku_instalacji(e.path,"unpack");pliki_instalacja_ok=false;return false;
+            zwolnij_surowe();log_blad_pliku_instalacji(e.path,"unpack");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Rozpakowanie,e.path);
+            pliki_instalacja_ok=false;return false;
         }
         planowane_surowe_indeks=planowane_indeks;
     }
@@ -2467,6 +2667,7 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         (void)usun_twor(e.path);
         if(!utworz_plik(e.path)){
             log_blad_pliku_instalacji(e.path,"create");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Utworzenie,e.path);
             zwolnij_surowe();pliki_instalacja_ok=false;return false;
         }
     }
@@ -2481,29 +2682,42 @@ bool kernel_instaluj_system_step(uint64_t* wykonane,uint32_t* pliki,uint32_t* ws
         if(!ok||planowany_strumien.s.dl<planowane_offset+n){
             wypisz_log("[BSP-BLAD] Uszkodzony skompresowany blob aplikacji (CRC/Adler/rozmiar).");
             log_blad_pliku_instalacji(e.path,"unpack",planowane_offset,n);
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Rozpakowanie,e.path,planowane_offset,n);
             zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
         }
     }
     if(n&&!zapisz_fragment_pliku(e.path,planowane_offset,dane+planowane_offset,n)){
         log_blad_pliku_instalacji(e.path,"write",planowane_offset,n);
+        zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Zapis,e.path,planowane_offset,n);
         zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
     if(!psf_flush_cache()){
         log_blad_pliku_instalacji(e.path,"flush",planowane_offset,n);
+        zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Flush,e.path,planowane_offset,n);
         zwolnij_surowe();(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
     }
-    for(uint32_t i=0;i<n;++i){
-        planowane_crc^=uint8_t(dane[planowane_offset+i]);
-        for(unsigned bit=0;bit<8;++bit)planowane_crc=(planowane_crc>>1)^(0xEDB88320U&(0U-(planowane_crc&1)));
-    }
+    // CRC calego pliku i segmentow 64 KiB z dokladnie tych bajtow, ktore zostaly zapisane.
+    if(planowane_offset==0)InstalacjaPlikow::rejestr_start(rejestr_pliku_instalacji,liczba_segmentow_kontrolnych);
+    InstalacjaPlikow::rejestr_dodaj(rejestr_pliku_instalacji,reinterpret_cast<const uint8_t*>(dane+planowane_offset),n,
+                                    segmenty_kontrolne,&liczba_segmentow_kontrolnych);
     planowane_offset+=n;planowane_bajty+=n;
     if(planowane_offset==e.size){
-        if(liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){pliki_instalacja_ok=false;return false;}
+        if(liczba_plikow_kontrolnych>=MAKS_PLIKOW_KONTROLNYCH){
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::Limit,e.path);
+            pliki_instalacja_ok=false;return false;}
         auto&k=pliki_kontrolne[liczba_plikow_kontrolnych++];
-        unsigned i=0;for(;i+1<sizeof(k.path)&&e.path[i];++i){k.path[i]=e.path[i];}k.path[i]=0;
-        k.size=e.size;k.crc=~planowane_crc;
+        InstalacjaPlikow::rejestr_zakoncz(rejestr_pliku_instalacji,k,e.path,e.size,
+                                          segmenty_kontrolne,&liczba_segmentow_kontrolnych);
         zwolnij_surowe();
-        ++planowane_indeks;planowane_offset=0;planowane_crc=~0U;
+        // Zapisane bajty musza byc bajtami zrodla z chwili planowania; inaczej oczekiwane CRC weryfikacji
+        // pochodziloby z pamieci zmienionej w trakcie zapisu (zrodlo != dysk != CRC).
+        if(!InstalacjaPlikow::zrodlo_zgodne(e.zrodlo,k)){
+            log_blad_pliku_instalacji(e.path,"source-changed");
+            zglos_blad_instalacji(InstalacjaPlikow::Etap::Zapis,InstalacjaPlikow::Przyczyna::ZrodloZmienione,e.path,
+                                  0,e.size,e.zrodlo.crc,k.crc);
+            --liczba_plikow_kontrolnych;(void)usun_twor(e.path);pliki_instalacja_ok=false;return false;
+        }
+        ++planowane_indeks;planowane_offset=0;
     }
     if(wykonane)*wykonane=planowane_bajty;
     if(pliki)*pliki=planowane_indeks;
@@ -2515,55 +2729,62 @@ bool kernel_weryfikuj_system(){
     if(!pliki_instalacja_ok||!ekran_aplikacja_instalacja_ok||
        !tapety_aplikacja_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
     for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){const auto&e=pliki_kontrolne[i];
-        if(rozmiar_pliku(e.path)!=e.size)return false;
+        if(rozmiar_pliku(e.sciezka)!=e.rozmiar)return false;
         uint32_t c=~0U;
-        for(uint32_t off=0;off<e.size;){uint32_t n=e.size-off>sizeof(buf)?sizeof(buf):e.size-off,got=0;
-            if(!czytaj_fragment_pliku(e.path,off,buf,n,&got)||got!=n)return false;
+        for(uint32_t off=0;off<e.rozmiar;){uint32_t n=e.rozmiar-off>sizeof(buf)?sizeof(buf):e.rozmiar-off,got=0;
+            if(!czytaj_fragment_pliku(e.sciezka,off,buf,n,&got)||got!=n)return false;
             for(uint32_t j=0;j<n;++j){c^=uint8_t(buf[j]);for(unsigned k=0;k<8;++k)c=(c>>1)^(0xEDB88320U&(0U-(c&1)));}off+=n;}
         if(~c!=e.crc)return false;
     }
     return true;
 }
-unsigned weryfikacja_indeks=0;
-uint32_t weryfikacja_offset=0,weryfikacja_crc=~0U;
-char weryfikacja_buf[4*1024];
+InstalacjaPlikow::Weryfikacja weryfikacja_stan{};
+uint8_t weryfikacja_buf[InstalacjaPlikow::PORCJA];
+const InstalacjaPlikow::Odczyt odczyt_weryfikacji{
+    [](const char* p,uint64_t* r){psf_metadane m{};if(!pobierz_metadane_tworu(p,&m)||m.typ!=TYP_PLIK)return false;*r=m.rozmiar;return true;},
+    [](const char* p,uint64_t off,void* b,uint32_t n,uint32_t* got){return czytaj_fragment_pliku(p,off,static_cast<char*>(b),n,got);},
+    [](const char* p,uint64_t blok,uint64_t* lba){return psf_lba_bloku_pliku(p,blok,lba);},
+    [](){return psf_zapis_trwaly_aktywny();},
+    [](){return psf_porzuc_czyste_bloki_cache();},
+    []()->uint64_t{return hpet_dostepny()?czas_monotoniczny_us():0;},
+    [](){return psf_ostatni_flush_ok();},
+};
 bool kernel_weryfikuj_system_start(uint64_t* razem){
     if(!pliki_instalacja_ok||!ekran_aplikacja_instalacja_ok||
        !tapety_aplikacja_instalacja_ok||liczba_plikow_kontrolnych==0)return false;
     uint64_t total=0;for(unsigned i=0;i<liczba_plikow_kontrolnych;++i){
-        if(total>UINT64_MAX-pliki_kontrolne[i].size)return false;
-        total+=pliki_kontrolne[i].size;
+        if(total>UINT64_MAX-pliki_kontrolne[i].rozmiar)return false;
+        total+=pliki_kontrolne[i].rozmiar;
     }
-    weryfikacja_indeks=0;weryfikacja_offset=0;weryfikacja_crc=~0U;if(razem)*razem=total;return true;
+    // Odczyt z NOSNIKA: faza metadanych (psf_weryfikuj_dysk_step, wykonywana przed ta faza) porownuje wszystkie
+    // bloki metadanych z dyskiem i konczy sie wyczysc_cache_blokow(), wiec pliki systemowe sa czytane z dysku.
+    weryfikacja_stan={};if(razem)*razem=total;return true;
 }
+// Jedna porcja 4 KiB: rozmiar, odczyt i CRC-32 (segmentu 64 KiB i calego pliku) wzgledem zapisanych bajtow.
+// Pierwsza niezgodnosc -> diagnoza_instalacji (plik, oczekiwano/odczytano, blok, LBA) + linia [INSTALL DIAG].
 bool kernel_weryfikuj_system_step(uint64_t* wykonane,bool* gotowe){
-    static uint64_t verified=0;
-    if(weryfikacja_indeks==0&&weryfikacja_offset==0)verified=0;
-    if(wykonane)*wykonane=verified;
-    if(gotowe)*gotowe=false;
-    if(weryfikacja_indeks>=liczba_plikow_kontrolnych){if(gotowe)*gotowe=true;return true;}
-    const auto&e=pliki_kontrolne[weryfikacja_indeks];
-    if(weryfikacja_offset==0&&rozmiar_pliku(e.path)!=e.size){
-        log_blad_pliku_instalacji(e.path,"verify-size error=mismatch");
-        return false;
+    const bool ok=InstalacjaPlikow::weryfikuj_krok(weryfikacja_stan,pliki_kontrolne,liczba_plikow_kontrolnych,
+        segmenty_kontrolne,odczyt_weryfikacji,weryfikacja_buf,gotowe,&diagnoza_instalacji);
+    if(wykonane)*wykonane=weryfikacja_stan.bajty;
+    if(ok&&gotowe&&*gotowe){
+        char linia[160]="[INSTALL] VERIFY files OK: files=";size_t p=sizeof("[INSTALL] VERIFY files OK: files=")-1;
+        auto u=[&](uint64_t v){char d[21];int n=0;do{d[n++]=char('0'+v%10);v/=10;}while(v&&n<20);while(n&&p+1<sizeof(linia))linia[p++]=d[--n];};
+        auto t=[&](const char*x){while(*x&&p+1<sizeof(linia))linia[p++]=*x++;};
+        u(liczba_plikow_kontrolnych);t(" bytes=");u(weryfikacja_stan.bajty);t(" segments=");u(liczba_segmentow_kontrolnych);
+        t(" max_read_us=");u(weryfikacja_stan.maks_czas_us);linia[p]=0;
+        wypisz_log(linia);
     }
-    uint32_t n=e.size-weryfikacja_offset;if(n>sizeof(weryfikacja_buf))n=sizeof(weryfikacja_buf);uint32_t got=0;
-    if(n&&(!czytaj_fragment_pliku(e.path,weryfikacja_offset,weryfikacja_buf,n,&got)||got!=n)){
-        log_blad_pliku_instalacji(e.path,"verify-read",weryfikacja_offset,n);
-        return false;
+    if(!ok){
+        using P=InstalacjaPlikow::Przyczyna;
+        const P p=diagnoza_instalacji.przyczyna;
+        log_blad_pliku_instalacji(diagnoza_instalacji.sciezka,                 // znaczniki [EKRAN]/[TAPETA] jak dotad
+            p==P::Crc?"verify-crc error=mismatch":p==P::Odczyt?"verify-read":"verify-size error=mismatch",
+            uint32_t(diagnoza_instalacji.offset),uint32_t(diagnoza_instalacji.dlugosc));
+        char linia[384];
+        InstalacjaPlikow::linia_logu(diagnoza_instalacji,linia,sizeof(linia));
+        wypisz_log(linia);
     }
-    for(uint32_t i=0;i<n;++i){weryfikacja_crc^=uint8_t(weryfikacja_buf[i]);for(unsigned bit=0;bit<8;++bit)weryfikacja_crc=(weryfikacja_crc>>1)^(0xEDB88320U&(0U-(weryfikacja_crc&1)));}
-    weryfikacja_offset+=n;verified+=n;
-    if(weryfikacja_offset==e.size){
-        if(~weryfikacja_crc!=e.crc){
-            log_blad_pliku_instalacji(e.path,"verify-crc error=mismatch");
-            return false;
-        }
-        ++weryfikacja_indeks;weryfikacja_offset=0;weryfikacja_crc=~0U;
-    }
-    if(wykonane)*wykonane=verified;
-    if(weryfikacja_indeks==liczba_plikow_kontrolnych&&gotowe)*gotowe=true;
-    return true;
+    return ok;
 }
 
 static uint64_t t_kernel_ready_us = 0;
@@ -3043,6 +3264,29 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     } else {
         wypisz_log(
             "[HDA] Brak dostepnego urzadzenia HDA.");
+    }
+    {
+        // Jedno wyjscie audio dla BWS 110 (jadro/dzwiek/wyjscie_audio_polityka.h): HDA ma pierwszenstwo;
+        // AC97 jest inicjalizowane tylko, gdy HDA nie dziala. Wybor jest staly do restartu systemu.
+        WyjscieAudio::Dostepnosc dostepnosc{};
+        dostepnosc.hda_wykryte = hda_transport_liczba() != 0;
+        dostepnosc.hda_gotowe = diag_hda_ready;
+        dostepnosc.ac97_wykryte = ac97_wykryj();
+        if (WyjscieAudio::inicjalizowac_ac97(diag_hda_ready, dostepnosc.ac97_wykryte))
+            dostepnosc.ac97_gotowe = inicjalizuj_ac97();
+        (void)wyjscie_audio_ustal(dostepnosc);
+        const WyjscieAudio::Urzadzenie wyjscie = wyjscie_audio_aktywne();
+        if (wyjscie == WyjscieAudio::Urzadzenie::Ac97) {
+            wypisz_log("[AUDIO] Wyjscie PCM: Intel ICH AC97.");
+            powiadomienie_systemowe(BWS_POW_INFO, "Wykryto urządzenie dźwiękowe",
+                                    "Kontroler Intel ICH AC97 i wyjście audio są gotowe.");
+        } else if (wyjscie == WyjscieAudio::Urzadzenie::Hda) {
+            wypisz_log(dostepnosc.ac97_wykryte ? "[AUDIO] Wyjscie PCM: Intel HDA (AC97 wykryte, nieuzywane)."
+                                               : "[AUDIO] Wyjscie PCM: Intel HDA.");
+        } else {
+            wypisz_log("[AUDIO] Brak wyjscia PCM:");
+            wypisz_log(WyjscieAudio::opis_braku(dostepnosc));
+        }
     }
     powitanie_punkt_startu();
 

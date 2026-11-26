@@ -25,7 +25,7 @@ else:
         "-m", "2G",
         "-serial", "stdio",
         "-display", "gtk",
-        "-audiodev", "none,id=snd",
+        "-audiodev", "dsound,id=snd",
         "-device", "intel-hda",
         "-device", "hda-output,audiodev=snd",
         "-drive", "id=disk,file=.\\wirtualny_dysk.img,format=raw,if=none",
@@ -61,7 +61,8 @@ def canonical(argv):
   option,value=a[i:i+2]
   if option in ('-display','-audiodev','-serial','-name'):
    host[option]=value
-   if option=='-audiodev':assert value in ('alsa,id=snd','none,id=snd')
+   # Linux: alsa (domyslnie, jak Makefile); Windows: dsound (domyslnie od 2026-11-23); wylaczony: none.
+   if option=='-audiodev':assert value in ('alsa,id=snd','none,id=snd','dsound,id=snd')
    continue
   result += [option,value]
  return result,host

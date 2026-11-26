@@ -12,6 +12,7 @@
 #include "virtio_blk.h"
 #include "idt.h"
 #include "apic.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"   // host: wersje bez efektu (BURSZTYN_VIRTIO_HOST_TEST)
 
 #ifdef BURSZTYN_VIRTIO_HOST_TEST
 #include <cstdio>
@@ -74,6 +75,16 @@ static inline uint64_t blk_monotonic_ns(void) {
     return 0;
 }
 #endif
+
+// Punkt kontrolny audio w petli oczekiwania na urzadzenie (jadro/dzwiek/punkt_kontrolny_audio.h). Czas pracy
+// audio nie jest czasem odpytywania urzadzenia: termin przesuwa sie o niego (lacznie najwyzej o `limit_ns`), wiec
+// urzadzenie zachowuje pelny limit, a wynik zadania (ukonczenie / blad / timeout) nie zalezy od pracy miksera.
+static void blk_punkt_audio(uint64_t teraz_ns, uint64_t* termin_ns, uint64_t* przedluzono, uint64_t limit_ns) {
+    if (PunktKontrolnyAudio::punkt() != PunktKontrolnyAudio::Wynik::Wykonano || !termin_ns || !przedluzono) return;
+    const uint64_t przed = *przedluzono;
+    *termin_ns = PunktKontrolnyAudio::przedluz_termin(*termin_ns, teraz_ns, blk_monotonic_ns(), *przedluzono, limit_ns);
+    PunktKontrolnyAudio::zapisz_przedluzenie(*przedluzono - przed);
+}
 
 /*
  * Prawdziwe, nieoptymalizowalne przez kompilator zerowanie pamieci z danymi wrazliwymi.
@@ -192,10 +203,11 @@ static bool virtio_blk_reset_locked(VirtioBlkDriver* drv) {
         virtio_pci_set_status(drv->dev, VIRTIO_STATUS_RESET);
 
         const uint64_t start_ns = blk_monotonic_ns();
-        const uint64_t deadline_ns = (start_ns > UINT64_MAX - 100000000ULL)
+        uint64_t deadline_ns = (start_ns > UINT64_MAX - 100000000ULL)
                                          ? UINT64_MAX
                                          : (start_ns + 100000000ULL);
         uint32_t spin_guard = 1000000U;
+        uint64_t przedluzono_ns = 0;   // reset trwa do 100 ms: mikser audio nie czeka (punkt w kazdej iteracji)
 
         while (spin_guard > 0) {
             spin_guard--;
@@ -207,6 +219,7 @@ static bool virtio_blk_reset_locked(VirtioBlkDriver* drv) {
             if (now_ns != 0 && now_ns >= deadline_ns) {
                 break;
             }
+            blk_punkt_audio(now_ns, &deadline_ns, &przedluzono_ns, 100000000ULL);
             asm volatile("pause" ::: "memory");
         }
 
@@ -273,6 +286,25 @@ static bool virtio_blk_reset_locked(VirtioBlkDriver* drv) {
  * i weryfikuje zakonczenie (id deskryptora, used.len, status).
  * Funkcja wywolywana w sekcji krytycznej (pod lockiem sterownika).
  */
+// Diagnostyka zadania (ograniczona linia, bez danych): operacja, LBA, sektory i wartosc dodatkowa.
+static void blk_log_zadania(const char* prefiks, BlkReqOp op, uint64_t lba, uint32_t count,
+                            const char* nazwa1, uint64_t w1, const char* nazwa2 = nullptr, uint64_t w2 = 0,
+                            const char* przyczyna = nullptr) {
+    char b[192];
+    size_t p = 0;
+    auto t = [&](const char* s) { while (s && *s && p + 1 < sizeof(b)) b[p++] = *s++; };
+    auto u = [&](uint64_t v) { char d[21]; int n = 0; do { d[n++] = char('0' + v % 10); v /= 10; } while (v && n < 20); while (n && p + 1 < sizeof(b)) b[p++] = d[--n]; };
+    t(prefiks);
+    t(" op="); t(op == BlkReqOp::Read ? "read" : op == BlkReqOp::Write ? "write" : "flush");
+    t(" lba="); u(lba); t(" sectors="); u(count);
+    if (nazwa1) { t(" "); t(nazwa1); t("="); u(w1); }
+    if (nazwa2) { t(" "); t(nazwa2); t("="); u(w2); }
+    if (przyczyna) { t(" reason="); t(przyczyna); }
+    b[p] = 0;
+    blk_klog(b);
+}
+static uint32_t blk_krotkie_odczyty = 0;   // licznik krotkich odczytow (used.len < dane + status)
+
 static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
                                                    BlkReqOp op,
                                                    uint64_t lba,
@@ -367,13 +399,17 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
     // Oczekiwanie na zakonczenie z ograniczeniem czasu monotonicznego i wtornym spin guardem
     const uint64_t start_ns = blk_monotonic_ns();
     const uint64_t timeout_ns = VIRTIO_BLK_DEFAULT_TIMEOUT_MS * 1000000ULL;
-    const uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
+    uint64_t deadline_ns = (start_ns > UINT64_MAX - timeout_ns) ? UINT64_MAX : (start_ns + timeout_ns);
     uint32_t spin_guard = VIRTIO_BLK_MAX_SPINS_GUARD;
 
     bool completed = false;
     void* cookie = nullptr;
     uint32_t completed_len = 0;
     int popped_id = -1;
+    // Odpytywanie bez wywlaszczenia: w kazdej iteracji punkt kontrolny audio (inaczej odczyt pliku z dysku
+    // wstrzymuje mikser HDA/AC97 - przerwy w muzyce przy przegladaniu plikow i zdjec). Praca tylko, gdy zegar ja
+    // opublikowal; jej czas nie skraca limitu urzadzenia (blk_punkt_audio).
+    uint64_t przedluzono_ns = 0;
 
     if (drv->use_msix) {
         while (spin_guard > 0) {
@@ -395,6 +431,7 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
             if (now_ns != 0 && now_ns >= deadline_ns) {
                 break;
             }
+            blk_punkt_audio(now_ns, &deadline_ns, &przedluzono_ns, timeout_ns);
             asm volatile("pause" ::: "memory");
         }
         if (!completed) {
@@ -408,6 +445,7 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
                         break;
                     }
                 }
+                (void)PunktKontrolnyAudio::punkt();   // petla ograniczona licznikiem, bez terminu czasowego
                 asm volatile("pause" ::: "memory");
             }
         }
@@ -431,6 +469,7 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
             if (now_ns != 0 && now_ns >= deadline_ns) {
                 break;
             }
+            blk_punkt_audio(now_ns, &deadline_ns, &przedluzono_ns, timeout_ns);
             asm volatile("pause" ::: "memory");
         }
     }
@@ -444,6 +483,11 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
 
     if (!completed) {
         blk_klog("[VIRTIO-BLK] ERROR: request timed out");
+        const uint64_t teraz_ns = blk_monotonic_ns();
+        blk_log_zadania("[VIRTIO-BLK] TIMEOUT", op, lba, count,
+                        "elapsed_ms", (teraz_ns > start_ns ? teraz_ns - start_ns : 0) / 1000000ULL,
+                        "limit_ms", VIRTIO_BLK_DEFAULT_TIMEOUT_MS,
+                        spin_guard == 0 ? "spin-guard" : (teraz_ns == 0 ? "no-clock" : "deadline"));
         drv->has_error = true;
         virtio_blk_reset_locked(drv);
         if (op == BlkReqOp::Read && buf) blk_secure_zero(buf, data_bytes);
@@ -496,12 +540,20 @@ static BlockError virtio_blk_submit_request_locked(VirtioBlkDriver* drv,
             uint32_t data_written = completed_len - 1U;
             if (data_written > data_bytes) data_written = data_bytes;
 
-            blk_memcpy(buf, drv->data_vaddr, data_written);
-
-            // Jesli urzadzenie zwrocilo mniej niz zadano: zerujemy niezapelniona czesc bufora wyjsciowego
+            // Krotki odczyt (used.len < dane + status) przy statusie OK: VIRTIO 1.x (negocjujemy wylacznie
+            // VIRTIO_F_VERSION_1) - sterownik nie moze zakladac niczego o danych poza pierwszymi `len` bajtami
+            // bufora zapisywalnego przez urzadzenie. Dawniej brakujaca czesc byla zerowana i zwracano Ok, czyli
+            // niepelne dane wygladaly jak poprawny odczyt. Teraz: caly bufor wyzerowany i blad I/O (bez resetu -
+            // urzadzenie zakonczylo zadanie i zglosilo status, kolejka pozostaje spojna).
             if (data_written < data_bytes) {
-                blk_secure_zero(static_cast<uint8_t*>(buf) + data_written, data_bytes - data_written);
+                if (blk_krotkie_odczyty < UINT32_MAX) ++blk_krotkie_odczyty;
+                if (blk_krotkie_odczyty <= 16)
+                    blk_log_zadania("[VIRTIO-BLK] ERROR short read", op, lba, count, "bytes", data_written, "expected", data_bytes);
+                blk_secure_zero(buf, data_bytes);
+                return BlockError::IOError;
             }
+
+            blk_memcpy(buf, drv->data_vaddr, data_bytes);
 
             if (drv->total_reads < UINT64_MAX) drv->total_reads++;
             if (drv->total_sectors_read <= UINT64_MAX - count) drv->total_sectors_read += count;

@@ -1,6 +1,7 @@
 /* Bursztyn OS - Eksplorator Plikow. Ring 3 korzysta tylko z GUI/BWS. */
 #include "katalogi_uzytkownika.h"
 #include "bursztyn_gui.h"
+#include "skojarzenia_plikow.h"
 #include "plik_popup_ui.h"
 #include "desktop_entries.h"
 #include "okno_geometria.h"
@@ -9,6 +10,8 @@
 #include "../../bursztyn_ui/tabela_wirtualna.h"
 #include "../../bursztyn_ui/przycisk_obrazkowy.h"
 #include "../../bursztyn_ui/ikony_eksplorator_dane.h"
+#include "jadro/bws/bws_magazyn_tekst.h"
+#include "jadro/bws/bws_api.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -44,7 +47,7 @@ constexpr uint32_t LIST_CAP = 64U * 1024U;
 constexpr uint32_t MANIFEST_MAX = 16U * 1024U;
 constexpr int MAX_ENTRIES = 8192;
 constexpr int HISTORY_MAX = 32;
-constexpr int QUICK_MAX = 10;
+constexpr int QUICK_MAX = 12;   // 11 wpisow standardowych (z Obrazami i Muzyka) + zapas
 
 /*
  * Jeden cel zawiera pelna, 512-bajtowa sciezke. Cala tablica celow nie moze
@@ -395,7 +398,7 @@ uint64_t list_hash(const char* data, size_t length) {
     return hash ^ static_cast<uint64_t>(length);
 }
 
-enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE, LAUNCHER };
+enum class EntryType : uint8_t { PARENT, FOLDER, BUR, CEBULA, TXT, BMP, FILE, LAUNCHER, IMAGE };
 enum class SortMode : uint8_t { AZ, ZA, TYPE, DATE };
 enum class Change : uint8_t { ERROR, UNCHANGED, DETAILS, CHANGED };
 enum class Activation : uint8_t { STATUS, NAVIGATION };
@@ -470,6 +473,7 @@ const char* entry_type_name(EntryType type) {
         case EntryType::CEBULA: return "Paczka Cebula";
         case EntryType::TXT: return "Dokument tekstowy";
         case EntryType::BMP: return "Obraz BMP";
+        case EntryType::IMAGE: return "Obraz";
         default: return "Plik";
     }
 }
@@ -966,6 +970,10 @@ private:
         add_quick("Gry", "/gry", false, true);
         // Ten sam katalog Dokumentow co w dialogach plikow (jadro zapewnia go przy starcie).
         add_quick("Dokumenty", KatalogiUzytkownika::Dokumenty, false, true);
+        // Trwale katalogi danych (KATALOGI_SYSTEMOWE: tworzy je jadro, Bursztynowy Importer Plikow tam zapisuje).
+        // Skrot nie tworzy katalogu - pokazywany tylko, gdy katalog istnieje (jak pozostale wpisy).
+        add_quick("Obrazy", "/dane/zdjecia", false, true);
+        add_quick("Muzyka", "/dane/muzyka", false, true);
         if (directory_exists("/kosz"))
             add_quick("Kosz", "/kosz", false, false);
         else
@@ -1037,6 +1045,8 @@ private:
             else if (ends_with(item.name, ".bur")) item.type = EntryType::BUR;
             else if (ends_with(item.name, ".txt")) item.type = EntryType::TXT;
             else if (ends_with_ci(item.name, ".bmp")) item.type = EntryType::BMP;
+            // PNG, JPEG, BTP: obraz (tylko opis i kolor) - lista nigdy nie filtruje plikow po rozszerzeniu
+            else if (SkojarzeniaPlikow::obraz(item.name)) item.type = EntryType::IMAGE;
             else item.type = EntryType::FILE;
             char full[PATH_CAP] = {};
             BwsMetadanePliku meta{};
@@ -1070,6 +1080,7 @@ private:
             case EntryType::BUR: return 2;
             case EntryType::TXT: return 3;
             case EntryType::BMP: return 3;
+            case EntryType::IMAGE: return 3;
             default: return 4;
         }
     }
@@ -1154,7 +1165,15 @@ private:
         int rzeczywiste = visible_count_;
         if (!equal_text(path_, "/") && rzeczywiste > 0) --rzeczywiste;
         (void)append_unsigned(message, sizeof(message), static_cast<uint64_t>(rzeczywiste));
-        (void)append_text(message, sizeof(message), ".");
+        (void)append_text(message, sizeof(message), ". ");
+        // BWS 111: wolne miejsce i rodzaj pamieci (dysk trwaly albo RAM sesji Live).
+        BwsMagazynV1 magazyn{};
+        if (bws_wywolaj(BWS_INFORMACJA_MAGAZYNU, reinterpret_cast<uint64_t>(&magazyn), sizeof(magazyn),
+                        BWS_MAGAZYN_V1, 0) == BWS_MAG_OK) {
+            char wolne[96] = {};
+            MagazynTekst::opis_wolnego(wolne, sizeof(wolne), magazyn);
+            (void)append_text(message, sizeof(message), wolne);
+        }
         set_status(message);
     }
 
@@ -1919,7 +1938,7 @@ public:
     ContextAction pending_action() { return menu_.pobierz_akcje(); }
     void theme_refresh() {
         BursztynUI::Motyw::pobierz_domyslny().zaktualizuj_z_systemu();
-        table_.zaktualizuj_motyw(); scrollbar_.zaktualizuj_motyw();
+        table_.zaktualizuj_motyw(); scrollbar_.zaktualizuj_motyw(); quick_bar_.zaktualizuj_motyw();
         path_field_.zaktualizuj_motyw(); search_field_.zaktualizuj_motyw();
         for(auto& b:buttons_) b.zaktualizuj_motyw();
         draw_workspace();
@@ -2098,23 +2117,155 @@ public:
         return rows > 0 ? rows : 1;
     }
 
-    int quick_at(int mx, int my) const {
-        const AktowkaLayout value = layout();
-        int y = value.left.y + PANEL_TITLE_H + 4;
-        bool pinned_header = false;
-        for (int i = 0; i < model_.quick_count(); ++i) {
-            const QuickItem* item = model_.quick(i);
-            if (!item) continue;
-            if (item->pinned && !pinned_header) {
-                y += 23;
-                pinned_header = true;
+    // ---------------------------------------------------------------- szybki dostep (przewijany)
+    // Przewijanie w CALYCH pozycjach (jak lista plikow: model_.scroll): pierwsza widoczna pozycja quick_first_,
+    // rysowane sa tylko pozycje mieszczace sie w calosci - nic nie wychodzi poza panel, trafienia = rysowanie.
+    // Naglowek "Przypiete foldery" nalezy do pierwszej przypietej pozycji (przewija sie razem z nia).
+    static constexpr int PINNED_HEADER_H = 23;
+    Rect quick_view() const {
+        const AktowkaLayout l = layout();
+        const int top = l.left.y + PANEL_TITLE_H + 4, h = l.left.y + l.left.h - top;
+        return {l.left.x, top, l.left.w > 0 ? l.left.w : 0, h > 0 ? h : 0};
+    }
+    int quick_first_pinned() const {
+        for (int i = 0; i < model_.quick_count(); ++i) if (model_.quick(i) && model_.quick(i)->pinned) return i;
+        return -1;
+    }
+    int quick_item_h(int i) const { return ROW_H + (i == quick_first_pinned() ? PINNED_HEADER_H : 0); }
+    // Najwieksza pierwsza pozycja: od niej wszystkie dalsze mieszcza sie w widoku (0 = wszystko widac).
+    int quick_max_first() const {
+        const int n = model_.quick_count(), h = quick_view().h;
+        int used = 0, first = n;
+        while (first > 0 && used + quick_item_h(first - 1) <= h) { used += quick_item_h(first - 1); --first; }
+        if (first >= n) first = n > 0 ? n - 1 : 0;           // nawet ostatnia pozycja sie nie miesci
+        return first;
+    }
+    bool quick_scrollbar_visible() const {
+        const Rect v = quick_view();
+        return quick_max_first() > 0 && v.w > SCROLL_W + 40 && v.h >= 2 * SCROLL_W;
+    }
+    Rect quick_bar_rect() const {
+        const Rect v = quick_view();
+        return quick_scrollbar_visible() ? Rect{v.x + v.w - SCROLL_W, v.y, SCROLL_W, v.h} : Rect{v.x + v.w, v.y, 0, 0};
+    }
+    int quick_row_w() const {
+        const int w = quick_view().w - 4 - (quick_scrollbar_visible() ? SCROLL_W : 0);
+        return w > 0 ? w : 0;
+    }
+    int quick_first() const { return quick_first_; }
+    int quick_focus() const { return quick_focus_; }
+    bool clamp_quick() {
+        const int old = quick_first_, m = quick_max_first();
+        quick_first_ = quick_first_ < 0 ? 0 : quick_first_ > m ? m : quick_first_;
+        if (quick_focus_ >= model_.quick_count()) quick_focus_ = model_.quick_count() - 1;
+        return old != quick_first_;
+    }
+    // Prostokat wiersza i (bez naglowka) i y naglowka (-1 = brak) - tylko dla pozycji widocznej w calosci.
+    bool quick_row_rect(int index, Rect* row, int* header_y = nullptr) const {
+        const Rect v = quick_view();
+        int y = v.y;
+        for (int i = quick_first_; i >= 0 && i < model_.quick_count(); ++i) {
+            const int h = quick_item_h(i);
+            if (h > v.h || y > v.y + v.h - h) return false;   // dalsze pozycje juz sie nie mieszcza
+            if (i == index) {
+                if (row) *row = {v.x + 2, y + h - ROW_H, quick_row_w(), ROW_H};
+                if (header_y) *header_y = h > ROW_H ? y : -1;
+                return true;
             }
-            const Rect row{value.left.x + 2, y, value.left.w > 4 ? value.left.w - 4 : 0, ROW_H};
+            y += h;
+        }
+        return false;
+    }
+    int quick_visible_count() const {
+        int n = 0;
+        for (int i = quick_first_; i < model_.quick_count(); ++i) { if (!quick_row_rect(i, nullptr)) break; ++n; }
+        return n;
+    }
+    // Przewija tak, by pozycja byla widoczna w calosci; true = zmiana przewiniecia.
+    bool ensure_quick_visible(int index) {
+        if (index < 0 || index >= model_.quick_count()) return false;
+        const int old = quick_first_;
+        if (index < quick_first_) quick_first_ = index;
+        while (quick_first_ < index && !quick_row_rect(index, nullptr)) ++quick_first_;
+        clamp_quick();
+        return old != quick_first_;
+    }
+    bool scroll_quick_by(int delta) {
+        const int old = quick_first_;
+        const int64_t t = int64_t(quick_first_) + delta;
+        quick_first_ = t < 0 ? 0 : t > INT32_MAX ? INT32_MAX : int(t);
+        clamp_quick();
+        return old != quick_first_;
+    }
+    // Pozycja pod kursorem: tylko widoczne w calosci wiersze panelu, nigdy pasek przewijania ani obszar poza panelem.
+    int quick_at(int mx, int my) const {
+        const Rect v = quick_view(), bar = quick_bar_rect();
+        if (!hit(mx, my, v) || (bar.w > 0 && hit(mx, my, bar))) return -1;
+        for (int i = quick_first_; i < model_.quick_count(); ++i) {
+            Rect row{};
+            if (!quick_row_rect(i, &row)) break;
             if (hit(mx, my, row)) return i;
-            y += ROW_H;
         }
         return -1;
     }
+    /*
+     * Wejscie panelu (przed lista plikow): kolko nad panelem, pasek przewijania (klik toru, przeciaganie suwaka z
+     * przechwyceniem myszy), klawiatura - Tab przelacza fokus lista <-> panel; w panelu Gora/Dol/Home/End, Enter
+     * (*aktywuj = pozycja do otwarcia), Esc/Tab wraca do listy. NONE = zdarzenie nie dotyczy panelu.
+     */
+    enum class QuickInput : uint8_t { NONE, HANDLED, ACTIVATE };
+    QuickInput quick_event(const bws_zdarzenie& e, int* aktywuj) {
+        if (aktywuj) *aktywuj = -1;
+        if (e.typ == BWS_ZDARZENIE_KLAWISZ_FIZYCZNY && e.x && edit_mode_ == EditMode::NONE && !modal_open() && !context_open()) {
+            const uint32_t key = BursztynUI::klawisz_polecenia(e);
+            if (key == 9) { set_quick_focus(quick_focus_ >= 0 ? -1 : quick_entry_for_path()); return QuickInput::HANDLED; }
+            if (quick_focus_ < 0) return QuickInput::NONE;
+            const int n = model_.quick_count();
+            int f = quick_focus_;
+            if (key == 0x48) f = f > 0 ? f - 1 : 0;
+            else if (key == 0x50) f = f + 1 < n ? f + 1 : n - 1;
+            else if (key == 0x47) f = 0;
+            else if (key == 0x4F) f = n - 1;
+            else if (key == 13) { if (aktywuj) *aktywuj = quick_focus_; return QuickInput::ACTIVATE; }
+            else if (key == 27) { set_quick_focus(-1); return QuickInput::HANDLED; }
+            else return QuickInput::NONE;
+            set_quick_focus(f);
+            return QuickInput::HANDLED;
+        }
+        if (e.typ == BWS_ZDARZENIE_MYSZ_KOLO && hit(e.x, e.y, layout().left)) {
+            if (scroll_quick_by(-clamp_int(e.dy, -64, 64))) { draw_left_panel(); gui_odswiez(); }
+            return QuickInput::HANDLED;                      // kolko nad panelem nigdy nie przewija listy plikow
+        }
+        if (!quick_scrollbar_visible() && !quick_bar_.czy_przeciagany()) return QuickInput::NONE;
+        const Rect bar = quick_bar_rect();
+        const bool w_pasku = bar.w > 0 && hit(e.x, e.y, bar);
+        if (!w_pasku && !quick_bar_.czy_przeciagany()) return QuickInput::NONE;
+        BursztynUI::ZdarzenieMyszki m{}; m.x = e.x; m.y = e.y; m.przycisk = 1;
+        if (e.typ == BWS_ZDARZENIE_MYSZ_DOWN) { quick_bar_.obsluz_wcisniecie_myszy(m); if (m.obsluzone) gui_ustaw_capture_myszy(true); }
+        else if (e.typ == BWS_ZDARZENIE_MYSZ_UP) { quick_bar_.obsluz_zwolnienie_myszy(m); gui_ustaw_capture_myszy(false); }
+        else if (e.typ == BWS_ZDARZENIE_MYSZ_RUCH) quick_bar_.obsluz_ruch_myszy(m);
+        else return w_pasku ? QuickInput::HANDLED : QuickInput::NONE;
+        if (scroll_quick_by(int(quick_bar_.wartosc()) - quick_first_)) draw_left_panel();
+        else if (quick_bar_.czy_brudna()) paint(quick_bar_);
+        gui_odswiez();
+        return QuickInput::HANDLED;                          // klik na pasku nigdy nie aktywuje skrotu
+    }
+    // Fokus klawiatury panelu (-1 = lista plikow); pozycja przewijana do widoku, odrysowanie tylko panelu.
+    void set_quick_focus(int index) {
+        if (index >= model_.quick_count()) index = model_.quick_count() - 1;
+        if (index == quick_focus_) return;
+        quick_focus_ = index;
+        const bool przewinieto = ensure_quick_visible(index);
+        draw_left_panel(!przewinieto);
+        gui_odswiez();
+    }
+    int quick_entry_for_path() const {
+        for (int i = 0; i < model_.quick_count(); ++i) if (model_.quick(i) && equal_text(model_.quick(i)->path, model_.path())) return i;
+        return model_.quick_count() > 0 ? 0 : -1;
+    }
+    void quick_clicked(int index) { if (quick_focus_ >= 0) quick_focus_ = index; (void)ensure_quick_visible(index); }
+    void clear_quick_focus() { if (quick_focus_ >= 0) { quick_focus_ = -1; draw_left_panel(true); } }
+    BursztynUI::PasekPrzewijania& test_quick_scrollbar() { return quick_bar_; }
 
     int row_at(int mx, int my) const {
         const AktowkaLayout value = layout();
@@ -2256,28 +2407,24 @@ public:
     void draw_search_field() { draw_text_field(search_field_,layout().search,edit_mode_==EditMode::SEARCH,model_.filter(),"Szukaj"); }
     void draw_left_panel(bool changed_only=false) {
         const AktowkaLayout value = layout();
+        if (clamp_quick()) changed_only = false;              // np. po zmianie rozmiaru okna
         if(!changed_only) {
             gui_rysuj_prostokat(value.left.x, value.left.y, value.left.w, value.left.h, COLOR_PANEL);
             draw_panel_title(value.left, "Szybki dostęp");
         }
-        int y = value.left.y + PANEL_TITLE_H + 4;
-        bool pinned_header = false;
-        for (int i = 0; i < model_.quick_count(); ++i) {
+        const int row_w = quick_row_w();
+        for (int i = quick_first_; i < model_.quick_count(); ++i) {
             const QuickItem* item = model_.quick(i);
-            if (!item) continue;
-            if (item->pinned && !pinned_header) {
-                if(!changed_only)draw_clipped(value.left.x + 7, y + 4, value.left.w - 14,
-                             "Przypięte foldery", COLOR_MUTED, false);
-                y += 23;
-                pinned_header = true;
-            }
-            if (y + ROW_H > value.left.y + value.left.h) break;
+            Rect row{}; int header_y = -1;
+            if (!item || !quick_row_rect(i, &row, &header_y)) break;
+            if (header_y >= 0 && !changed_only)
+                draw_clipped(value.left.x + 7, header_y + 4, row_w - 10, "Przypięte foldery", COLOR_MUTED, false);
+            const int y = row.y;
             const bool current = equal_text(item->path, model_.path());
-            if(changed_only && quick_active_[i]==current) {y+=ROW_H;continue;}
-            quick_active_[i]=current;
-            gui_rysuj_prostokat(value.left.x + 2, y,
-                                value.left.w > 4 ? value.left.w - 4 : 0,
-                                ROW_H, current ? COLOR_SELECT : COLOR_PANEL);
+            const bool focused = quick_focus_ == i;
+            if(changed_only && quick_active_[i]==current && quick_focused_[i]==focused) continue;
+            quick_active_[i]=current; quick_focused_[i]=focused;
+            gui_rysuj_prostokat(row.x, y, row_w, ROW_H, current ? COLOR_SELECT : COLOR_PANEL);
             {
                 const int isz = ICON > 16 ? 16 : ICON;
                 if (isz < 10) {
@@ -2290,9 +2437,27 @@ public:
                     drawing_.zdejmij_przyciecie();
                 }
             }
-            draw_clipped(value.left.x + 23, y + 5, value.left.w - 29,
+            draw_clipped(value.left.x + 23, y + 5, row_w - 25,
                          item->label, current ? COLOR_TEXT : COLOR_TEXT2, false);
-            y += ROW_H;
+            if (focused && row_w > 2) {                        // fokus klawiatury: cienka (1 px) ramka akcentu
+                const uint32_t a = COLOR_CEBULA;
+                gui_rysuj_prostokat(row.x, y, row_w, 1, a); gui_rysuj_prostokat(row.x, y + ROW_H - 1, row_w, 1, a);
+                gui_rysuj_prostokat(row.x, y, 1, ROW_H, a); gui_rysuj_prostokat(row.x + row_w - 1, y, 1, ROW_H, a);
+            }
+        }
+        // pasek przewijania panelu (ten sam komponent i wyglad co lista plikow); niewidoczny, gdy wszystko sie miesci
+        const Rect bar = quick_bar_rect();
+        quick_bar_.ustaw_skale_dpi(ui_skala());
+        quick_bar_.ustaw_orientacje(BursztynUI::Orientacja::Pionowa);
+        quick_bar_.ustaw_widoczna(bar.w > 0);
+        if (bar.w > 0) {
+            quick_bar_.rozmiesc(BursztynUI::Prostokat(bar.x, bar.y, bar.w, bar.h));
+            quick_bar_.ustaw_zakres(0, quick_max_first());
+            const int page = quick_visible_count();
+            quick_bar_.ustaw_rozmiar_strony(page > 0 ? page : 1);
+            quick_bar_.ustaw_wartosc(quick_first_);
+            quick_bar_.ustaw_maly_krok(1); quick_bar_.ustaw_duzy_krok(page > 0 ? page : 1);
+            paint(quick_bar_);
         }
     }
 
@@ -2439,6 +2604,10 @@ private:
     bool path_submit_pending_{false};
     bool popup_needs_refresh_{false};
     bool quick_active_[QUICK_MAX]{};
+    bool quick_focused_[QUICK_MAX]{};
+    int quick_first_ = 0;           // pierwsza widoczna pozycja szybkiego dostepu
+    int quick_focus_ = -1;          // fokus klawiatury w panelu (-1 = lista plikow)
+    BursztynUI::PasekPrzewijania quick_bar_;
     char field_skip_[5]{};unsigned field_skip_count_{0},field_skip_pos_{0};
     BursztynUI::PoleTekstowe path_field_, search_field_;
     BursztynUI::MenuTekstowe text_menu_;
@@ -2541,7 +2710,7 @@ private:
         if (item.type == EntryType::BUR || item.type==EntryType::LAUNCHER) return COLOR_BUR;
         if (item.type == EntryType::CEBULA) return COLOR_CEBULA;
         if (item.type == EntryType::TXT) return COLOR_TXT;
-        if (item.type == EntryType::BMP) return COLOR_BMP;
+        if (item.type == EntryType::BMP || item.type == EntryType::IMAGE) return COLOR_BMP;
         return COLOR_FILE_COLOR;
     }
 
@@ -2858,6 +3027,20 @@ extern "C" __attribute__((noreturn)) void _start() {
             if(refresh_pending && !view.modal_open() && !view.context_open()) {refresh_pending=false;present_workspace_change(view,model.refresh());}
             view.register_drop_targets();if(view.popup_needs_refresh())gui_odswiez();continue;
         }
+        {   // panel szybkiego dostepu: klawiatura (fokus panelu), kolko i pasek przewijania - przed lista plikow
+            const bool mysz = event.typ == BWS_ZDARZENIE_MYSZ_DOWN || event.typ == BWS_ZDARZENIE_MYSZ_UP ||
+                              event.typ == BWS_ZDARZENIE_MYSZ_RUCH || event.typ == BWS_ZDARZENIE_MYSZ_KOLO;
+            if (!mysz || (!window.minimized && !dragging && !resizing && !item_drag_candidate)) {
+                int aktywuj = -1;
+                const auto wynik = view.quick_event(event, &aktywuj);
+                if (wynik == AktowkaView::QuickInput::ACTIVATE) {
+                    const QuickItem* quick = model.quick(aktywuj);
+                    if (quick) { view.end_edit(); present_workspace_change(view, model.navigate(quick->path)); }
+                    continue;
+                }
+                if (wynik == AktowkaView::QuickInput::HANDLED) continue;
+            }
+        }
         if(obsluz_nawigacje_fizyczna(view,model,event))continue;
         if (event.typ == BWS_ZDARZENIE_TIMER) {
             if (view.edit_mode() != EditMode::NONE && ansi == AnsiState::ESC) {
@@ -3119,10 +3302,12 @@ extern "C" __attribute__((noreturn)) void _start() {
                 const QuickItem* quick = model.quick(quick_index);
                 if (quick) {
                     view.end_edit();
+                    view.quick_clicked(quick_index);
                     present_workspace_change(view, model.navigate(quick->path));
                 }
                 continue;
             }
+            if (hit(mx, my, layout.center)) view.clear_quick_focus();
             if (view.edit_mode() != EditMode::NONE) {
                 const EditMode old_mode = view.edit_mode();
                 view.end_edit();

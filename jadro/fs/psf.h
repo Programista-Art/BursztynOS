@@ -538,6 +538,21 @@ bool usun_twor(
  * 0 oznacza zarowno pusty plik, jak i blad/brak pliku - takie zachowanie
  * jest zachowane dla kompatybilnosci z istniejacym API.
  */
+/* Wolne miejsce na dane PSF w bajtach (tylko odczyt bitmapy); 0 = PSF niegotowy. */
+uint64_t psf_wolne_bajty();
+struct PsfStatystyki {
+    uint64_t bloki_danych, wolne_bajty, wezly, wolne_wezly;
+    bool gotowy, trwaly;   // trwaly = zamontowany z partycji dysku i zapisy sa dozwolone
+};
+/* Pojemnosc, wolne miejsce i wolne wezly (BWS 111, Eksplorator, importer). */
+bool psf_statystyki(struct PsfStatystyki* out);
+/* Diagnostyka instalatora (tylko odczyt): bezwzgledny LBA dysku bloku pliku; stan zapisu trwalego. */
+bool psf_lba_bloku_pliku(const char* sciezka, uint64_t indeks_bloku, uint64_t* lba_dysku);
+bool psf_zapis_trwaly_aktywny();
+/* Weryfikacja instalatora: porzuca tylko CZYSTE bloki danych z pamieci podrecznej (false = sa brudne,
+ * nic nie zmieniono); kolejne odczyty ida z nosnika. */
+bool psf_porzuc_czyste_bloki_cache();
+bool psf_ostatni_flush_ok();
 uint32_t rozmiar_pliku(
     const char* sciezka
 );

@@ -27,15 +27,28 @@ extern "C" int& vmm_okno_uzytkownika_glebokosc() {static int glebokosc=0;return 
 warstwa_obrazu* pobierz_warstwe(int pid) {return layer.aktywna&&layer.pid==pid?&layer:nullptr;}
 bool skladacz_obrazu_czy_widoczna(int pid) {return presentable&&pobierz_warstwe(pid);}
 bool skladacz_obrazu_publikuj_klatke(int pid) {assert(pobierz_warstwe(pid));if(presentable)return false;++commits;presentable=true;return true;}
-void skladacz_obrazu_oznacz_dirty_rect(int,int,int,int) {++invalidations;}
+struct TestDirty {int x,y,w,h;};
+static TestDirty test_dirty[64];static unsigned test_dirty_n=0;
+void skladacz_obrazu_oznacz_dirty_rect(int x,int y,int w,int h) {++invalidations;if(test_dirty_n<64)test_dirty[test_dirty_n++]={x,y,w,h};}
+// Epoka tresci warstw (skladacz_obrazu.cpp): test zwieksza ja przy kazdym zapisie do warstwy poza transakcja
+// rysowania (jak tworzenie/czyszczenie/zmiana rozmiaru w kompozytorze).
+// Punkty kontrolne HDA w kopii cienia (grafika.cpp): licznik wywolan zamiast sterownika dzwieku.
+static unsigned test_hda_punkty=0;
+bool hda_pcm_praca_oczekuje() {++test_hda_punkty;return false;}
+void hda_obsluz_okresowo() {}
+bool ac97_praca_oczekuje() {return false;}
+void ac97_obsluz_okresowo() {}
+static uint64_t test_epoka=1;
+uint64_t skladacz_obrazu_epoka_tresci() {return test_epoka;}
 void skladacz_obrazu_oznacz_dirty_rect_dokladny(int,int,int,int) {++invalidations;}
 void skladacz_obrazu_oznacz_dirty() {++invalidations;}
 static bool test_zachowana_po_resize=false;
 bool skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(int) {return test_zachowana_po_resize;}
-void wyczysc_warstwe(int pid) {auto* w=pobierz_warstwe(pid);if(w)memset(w->bufor_pikseli,0,size_t(w->szerokosc)*w->wysokosc*4);++invalidations;}
+void wyczysc_warstwe(int pid) {auto* w=pobierz_warstwe(pid);if(w)memset(w->bufor_pikseli,0,size_t(w->szerokosc)*w->wysokosc*4);++test_epoka;++invalidations;}
 void skladacz_obrazu_wznow() {}
 void skladacz_obrazu_podnies_warstwe(int) {}
 bool skladacz_obrazu_ustaw_popup_aplikacji(int,bool,int,int,int,int) {return true;}
+bool skladacz_obrazu_ustaw_popup_aplikacji(int,bool,int,int,int,int,bool) {return true;}   // bws_gui_aktywuj_warstwe -> ustaw_focus_gui
 const BursztynMotyw* motyw_pobierz_aktywny() {return &test_theme;}
 uint32_t ekran_skala() {return 100;}
 static bool test_clock=false;
@@ -104,7 +117,7 @@ int main() {
     // nawet gdy bufor zywy zostal wyzerowany; po gui_odswiez kompozytor znow czyta bufor na zywo.
     {
         const size_t px=size_t(layer.szerokosc)*layer.wysokosc;
-        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00ABCDEF;
+        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00ABCDEF;++test_epoka;
         assert(!bws_gui_warstwa_w_trakcie_rysowania(2));
         bws_gui_odswiez_pulpit();
         assert(layer.bufor_pikseli[5]==0);                                  // bufor zywy wyzerowany ...
@@ -115,7 +128,7 @@ int main() {
         bws_gui_odswiez();
         assert(!bws_gui_warstwa_w_trakcie_rysowania(2)&&!bws_gui_cien_warstwy(2,px*4));
         // Po zmianie rozmiaru (stara tresc + kryjace rozszerzenie) bufor NIE jest zerowany
-        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00FEDCBA;
+        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00FEDCBA;++test_epoka;
         test_zachowana_po_resize=true;
         bws_gui_odswiez_pulpit();
         assert(layer.bufor_pikseli[7]==0x00FEDCBA&&bws_gui_warstwa_w_trakcie_rysowania(2));
@@ -131,21 +144,21 @@ int main() {
         // (a) brak pamieci na cien: odrysowanie dziala, brak cienia (kompozytor czyta bufor zywy), bez awarii
         bws_gui_usun_stan_procesu(2);
         test_alokacja_nie_dziala=true;
-        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00111111;
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00111111;++test_epoka;
         bws_gui_odswiez_pulpit();
         assert(!bws_gui_cien_warstwy(2,bytes_of())&&bws_gui_warstwa_w_trakcie_rysowania(2)&&layer.bufor_pikseli[3]==0);
         test_alokacja_nie_dziala=false;
         bws_gui_odswiez();
         // (b) timeout: cien starszy niz 1 s jest ignorowany (aplikacja, ktora nie wola gui_odswiez, nie zamraza okna)
         test_clock=true;test_ns=5000;
-        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00222222;
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00222222;++test_epoka;
         bws_gui_odswiez_pulpit();
         assert(bws_gui_cien_warstwy(2,bytes_of())&&bws_gui_cien_warstwy(2,bytes_of())[1]==0x00222222);
         test_ns=5000+999999999ULL;assert(bws_gui_cien_warstwy(2,bytes_of()));            // tuz przed limitem: jeszcze cien
         test_ns=5000+1000000001ULL;assert(!bws_gui_cien_warstwy(2,bytes_of()));          // po limicie: bufor zywy
         bws_gui_odswiez();test_clock=false;test_ns=0;
         // (c) zakonczenie procesu w trakcie transakcji: cien zwolniony i nieaktywny, ponowne uzycie PID startuje czysto
-        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00333333;
+        for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00333333;++test_epoka;
         bws_gui_odswiez_pulpit();assert(bws_gui_cien_warstwy(2,bytes_of()));
         bws_gui_usun_stan_procesu(2);
         assert(!bws_gui_cien_warstwy(2,bytes_of()));
@@ -157,7 +170,7 @@ int main() {
             uint32_t* stary=layer.bufor_pikseli;
             layer.bufor_pikseli=static_cast<uint32_t*>(calloc(size_t(r[0])*r[1],4));assert(layer.bufor_pikseli);
             layer.szerokosc=r[0];layer.wysokosc=r[1];
-            for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00444444+uint32_t(r[0]);
+            for(size_t i=0;i<bytes_of()/4;++i)layer.bufor_pikseli[i]=0x00444444+uint32_t(r[0]);++test_epoka;
             bws_gui_odswiez_pulpit();
             const uint32_t* c=bws_gui_cien_warstwy(2,bytes_of());
             assert(c&&c!=layer.bufor_pikseli&&c[0]==0x00444444+uint32_t(r[0]));          // cien = ostatnia klatka w NOWYM rozmiarze
@@ -168,6 +181,94 @@ int main() {
         free(layer.bufor_pikseli);layer.bufor_pikseli=oryginal;layer.szerokosc=ow;layer.wysokosc=oh;
         bws_gui_usun_stan_procesu(2);
         assert(!bws_gui_cien_warstwy(2,bytes_of()));
+    }
+    // Cien przyrostowy (2026-11-23): po publikacji cien przejmuje tylko opublikowane prostokaty; pelna kopia warstwy
+    // wylacznie po zmianie epoki tresci / bufora / porzuceniu oczekujacych obszarow. Zapisy "poza sledzeniem" (bez
+    // zmiany epoki) sluza tu jako sonda: trafiaja do cienia tylko przy pelnej kopii.
+    {
+        const size_t px=size_t(layer.szerokosc)*layer.wysokosc;
+        auto at=[&](int lx,int ly){return size_t(ly)*layer.szerokosc+lx;};
+        const uint32_t piks[4]={0x00A1A1A1,0x00A1A1A1,0x00A1A1A1,0x00A1A1A1};
+        for(size_t i=0;i<px;++i)layer.bufor_pikseli[i]=0x00101010;++test_epoka;
+        // 1. pierwsza transakcja po zmianie epoki: pelna kopia; publikacja synchronizuje
+        assert(bws_gui_blit(100,100,2,2,piks));
+        const uint32_t* c=bws_gui_cien_warstwy(2,px*4);
+        assert(c&&c[at(0,0)]==0x00101010&&c[at(50,50)]==0x00101010);       // kompozytor widzi ostatnia klatke (bez rozdarcia)
+        assert(layer.bufor_pikseli[at(0,0)]==0x00A1A1A1);
+        test_dirty_n=0;bws_gui_odswiez();
+        assert(!bws_gui_cien_warstwy(2,px*4)&&test_dirty_n==1&&test_dirty[0].x==100&&test_dirty[0].w==2);
+        // 2. sonda: zapis bez sledzenia i bez zmiany epoki; nowa transakcja NIE kopiuje calej warstwy
+        layer.bufor_pikseli[at(70,70)]=0x00BADBAD;
+        const uint32_t gora[2]={0x00C0C0C0,0x00C0C0C0};
+        assert(bws_gui_blit(110,100,2,1,gora));
+        c=bws_gui_cien_warstwy(2,px*4);
+        assert(c&&c[at(0,0)]==0x00A1A1A1);                                // poprzednia publikacja jest w cieniu
+        assert(c[at(70,70)]==0x00101010);                                 // brak pelnej kopii (sonda nie trafila do cienia)
+        assert(c[at(10,0)]==0x00101010&&layer.bufor_pikseli[at(10,0)]==0x00C0C0C0);   // rysowany obszar: stara klatka w cieniu
+        // 3. dwa odlegle prostokaty (gora i dol okna): dwa obszary dla kompozytora zamiast prostokata obejmujacego
+        const uint32_t dol[2]={0x00D0D0D0,0x00D0D0D0};
+        assert(bws_gui_blit(110,198,2,1,dol));
+        test_dirty_n=0;bws_gui_odswiez();
+        assert(test_dirty_n==2);
+        for(unsigned i=0;i<test_dirty_n;++i)assert(test_dirty[i].w==2&&test_dirty[i].h==1);
+        // po publikacji oba prostokaty sa w cieniu (nastepna transakcja pokazuje je bez rozdarcia)
+        assert(bws_gui_blit(100,150,1,1,piks));
+        c=bws_gui_cien_warstwy(2,px*4);
+        assert(c&&c[at(10,0)]==0x00C0C0C0&&c[at(10,98)]==0x00D0D0D0&&c[at(70,70)]==0x00101010);
+        bws_gui_odswiez();
+        // 4. sasiednie paski laczone (bez marnowania > 1/8 powierzchni); przepelnienie = jeden prostokat obejmujacy
+        for(int k=0;k<4;++k)assert(bws_gui_blit(100,120+k,2,1,gora));
+        test_dirty_n=0;bws_gui_odswiez();
+        assert(test_dirty_n==1&&test_dirty[0].h==4);
+        for(int k=0;k<12;++k)assert(bws_gui_blit(100+8*k,100+8*k,1,1,piks));
+        test_dirty_n=0;bws_gui_odswiez();
+        assert(test_dirty_n<=8);
+        // 5. okno przesuniete miedzy rysowaniem a publikacja: obszar w biezacej pozycji warstwy, cien zgodny lokalnie
+        assert(bws_gui_blit(120,120,2,2,piks));
+        layer.x=300;layer.y=200;
+        test_dirty_n=0;bws_gui_odswiez();
+        assert(test_dirty_n==1&&test_dirty[0].x==320&&test_dirty[0].y==220);
+        assert(bws_gui_blit(300,200,1,1,gora));
+        c=bws_gui_cien_warstwy(2,px*4);assert(c&&c[at(20,20)]==0x00A1A1A1);
+        bws_gui_odswiez();
+        layer.x=100;layer.y=100;
+        // 6. zmiana epoki (np. czyszczenie/zmiana rozmiaru w kompozytorze): pelna kopia przy nastepnej transakcji
+        layer.bufor_pikseli[at(71,71)]=0x00E0E0E0;++test_epoka;
+        assert(bws_gui_blit(100,100,1,1,piks));
+        c=bws_gui_cien_warstwy(2,px*4);assert(c&&c[at(71,71)]==0x00E0E0E0);
+        bws_gui_odswiez();
+        // 7. aktywacja warstwy porzuca oczekujace obszary -> pelna kopia przy nastepnej transakcji
+        assert(bws_gui_blit(100,100,1,1,piks));
+        layer.bufor_pikseli[at(72,72)]=0x00F0F0F0;
+        bws_gui_aktywuj_warstwe(2);
+        bws_gui_odswiez();
+        assert(bws_gui_blit(100,100,1,1,piks));
+        c=bws_gui_cien_warstwy(2,px*4);assert(c&&c[at(72,72)]==0x00F0F0F0);
+        bws_gui_odswiez();
+        // 8. pelna klatka (BWS 19) synchronizuje cien niezaleznie od epoki
+        bws_gui_odswiez_pulpit();bws_gui_rysuj_prostokat(100,100,100,100,0x00121212);bws_gui_odswiez();
+        layer.bufor_pikseli[at(73,73)]=0x00BEEF00;                          // sonda
+        assert(bws_gui_blit(100,100,1,1,piks));
+        c=bws_gui_cien_warstwy(2,px*4);assert(c&&c[at(50,50)]==0x00121212&&c[at(73,73)]==0x00121212);
+        bws_gui_odswiez();
+        // 9. pelna kopia duzej warstwy (400x300 = 120 tys. px) ma punkty kontrolne HDA (co ~64 tys. px), mala - nie
+        {
+            uint32_t* oryg=layer.bufor_pikseli;const int ow=layer.szerokosc,oh=layer.wysokosc;
+            layer.szerokosc=400;layer.wysokosc=300;
+            layer.bufor_pikseli=static_cast<uint32_t*>(calloc(400*300,4));assert(layer.bufor_pikseli);++test_epoka;
+            const unsigned przed=test_hda_punkty;
+            assert(bws_gui_blit(100,100,1,1,piks));
+            assert(test_hda_punkty>=przed+1);
+            assert(bws_gui_cien_warstwy(2,400*300*4));
+            bws_gui_odswiez();
+            const unsigned po=test_hda_punkty;
+            assert(bws_gui_blit(101,100,1,1,piks));bws_gui_odswiez();        // przyrostowo: bez pelnej kopii
+            assert(test_hda_punkty==po);
+            bws_gui_usun_stan_procesu(2);
+            free(layer.bufor_pikseli);layer.bufor_pikseli=oryg;layer.szerokosc=ow;layer.wysokosc=oh;++test_epoka;
+        }
+        bws_gui_usun_stan_procesu(2);
+        assert(!bws_gui_cien_warstwy(2,px*4));
     }
     // The real dirty-region replacement copies transparency without clearing
     // or publishing the layer between preparation and the one BWS17 commit.

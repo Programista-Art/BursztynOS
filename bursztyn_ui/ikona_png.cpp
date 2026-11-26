@@ -34,8 +34,9 @@ void IkonaPNG::przygotuj(const char* path,int side){
   if(!original_.piksele||side==side_||side<1||side>128)return;
   delete[] scaled_;scaled_=nullptr;side_=0;
   auto* p=new uint32_t[size_t(side)*size_t(side)];if(!p)return;
-  if(!skaluj_obraz_bilinear(reinterpret_cast<const uint32_t*>(original_.piksele),original_.szerokosc,original_.wysokosc,original_.bajty,
-   p,side,side,side,size_t(side)*side*4,TrybSkalowaniaObrazu::Dopasuj,0)){delete[] p;return;}
+  // Alfa premnozona przy skalowaniu: kolor przezroczystych pikseli zrodla nie przecieka na krawedzie.
+  if(!skaluj_ikone_alfa(reinterpret_cast<const uint32_t*>(original_.piksele),original_.szerokosc,original_.wysokosc,original_.bajty,
+   p,side,side,side,size_t(side)*side*4)){delete[] p;return;}
   scaled_=p;side_=side;
  }
 }

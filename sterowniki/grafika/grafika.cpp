@@ -35,6 +35,7 @@
 #include "heap.h"
 #include "scheduler.h"
 #include "motyw.h"
+#include "sterowniki/dzwiek/hda_praca_odroczona.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -725,16 +726,64 @@ static void grafika_zakoncz_batch_gpu() {
 static int pid_przejmujacy_mysz = -1;
 static int aktywny_pid_gui = -1;
 static int capture_pid_gui = -1;
-static GuiDirtyRect oczekujacy_dirty[SKLADACZ_MAKS_WARSTW] = {};
+/*
+ * Oczekujace (narysowane, jeszcze nieopublikowane) obszary warstwy procesu, we wspolrzednych LOKALNYCH warstwy.
+ * Wczesniej byl to jeden prostokat obejmujacy: etykieta czasu u gory i pasek stanu u dolu okna dawaly prostokat na
+ * prawie cale okno, ktory kompozytor skladal i prezentowal w calosci (koszt rosl z rozmiarem okna, nie ze zmiana).
+ * Teraz do MAKS_OCZEKUJACYCH prostokatow; laczone sa tylko prostokaty, ktorych suma marnuje <= 1/8 powierzchni,
+ * a po przepelnieniu - jak dotad - jeden prostokat obejmujacy. Lokalne wspolrzedne sa poprawne takze, gdy okno
+ * przesunieto miedzy rysowaniem a publikacja (piksele leza w buforze warstwy, nie na ekranie).
+ */
+struct OczekujaceDirty {
+    static constexpr uint32_t MAKS_OCZEKUJACYCH = 8;
+    GuiDirtyRect r[MAKS_OCZEKUJACYCH];
+    uint32_t n;
+};
+static OczekujaceDirty oczekujace_dirty[SKLADACZ_MAKS_WARSTW] = {};
 static bool ma_oczekujacy_dirty[SKLADACZ_MAKS_WARSTW] = {};
+
+static uint64_t pole_dirty(const GuiDirtyRect& r) { return uint64_t(r.width) * uint64_t(r.height); }
+static GuiDirtyRect suma_dirty(const GuiDirtyRect& a, const GuiDirtyRect& b) {
+    const int x0 = a.x < b.x ? a.x : b.x, y0 = a.y < b.y ? a.y : b.y;
+    const int x1 = a.x + a.width > b.x + b.width ? a.x + a.width : b.x + b.width;
+    const int y1 = a.y + a.height > b.y + b.height ? a.y + a.height : b.y + b.height;
+    return {x0, y0, x1 - x0, y1 - y0};
+}
+static uint64_t czesc_wspolna_dirty(const GuiDirtyRect& a, const GuiDirtyRect& b) {
+    const int x0 = a.x > b.x ? a.x : b.x, y0 = a.y > b.y ? a.y : b.y;
+    const int x1 = a.x + a.width < b.x + b.width ? a.x + a.width : b.x + b.width;
+    const int y1 = a.y + a.height < b.y + b.height ? a.y + a.height : b.y + b.height;
+    return x1 > x0 && y1 > y0 ? uint64_t(x1 - x0) * uint64_t(y1 - y0) : 0;
+}
+static void zapamietaj_dirty_lokalny(int pid, GuiDirtyRect r) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW || r.width <= 0 || r.height <= 0) return;
+    OczekujaceDirty& d = oczekujace_dirty[pid];
+    if (!ma_oczekujacy_dirty[pid]) d.n = 0;
+    ma_oczekujacy_dirty[pid] = true;
+    for (uint32_t i = 0; i < d.n;) {
+        const GuiDirtyRect u = suma_dirty(d.r[i], r);
+        const uint64_t uzyte = pole_dirty(d.r[i]) + pole_dirty(r) - czesc_wspolna_dirty(d.r[i], r);
+        if (pole_dirty(u) * 8 <= uzyte * 9) { r = u; d.r[i] = d.r[--d.n]; i = 0; }
+        else ++i;
+    }
+    if (d.n < OczekujaceDirty::MAKS_OCZEKUJACYCH) { d.r[d.n++] = r; return; }
+    for (uint32_t i = 0; i < d.n; ++i) r = suma_dirty(r, d.r[i]);
+    d.r[0] = r; d.n = 1;
+}
 
 static void zapamietaj_dirty_rysowania(int x,int y,int w,int h) {
     if(aktualny_pid<=0||aktualny_pid>=SKLADACZ_MAKS_WARSTW||w<=0||h<=0)return;
-    GuiDirtyRect r{x,y,w,h};
-    if(!ma_oczekujacy_dirty[aktualny_pid]){oczekujacy_dirty[aktualny_pid]=r;ma_oczekujacy_dirty[aktualny_pid]=true;return;}
-    GuiDirtyRect&a=oczekujacy_dirty[aktualny_pid];int x0=a.x<r.x?a.x:r.x,y0=a.y<r.y?a.y:r.y;
-    int x1=a.x+a.width>r.x+r.width?a.x+a.width:r.x+r.width;
-    int y1=a.y+a.height>r.y+r.height?a.y+a.height:r.y+r.height;a={x0,y0,x1-x0,y1-y0};
+    const warstwa_obrazu* warstwa = pobierz_warstwe(aktualny_pid);
+    if (!warstwa || warstwa->szerokosc <= 0 || warstwa->wysokosc <= 0) return;
+    // Przyciecie do warstwy (piksele poza nia nie zostaly zapisane).
+    int64_t x0 = int64_t(x) - warstwa->x, y0 = int64_t(y) - warstwa->y;
+    int64_t x1 = x0 + w, y1 = y0 + h;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > warstwa->szerokosc) x1 = warstwa->szerokosc;
+    if (y1 > warstwa->wysokosc) y1 = warstwa->wysokosc;
+    if (x0 >= x1 || y0 >= y1) return;
+    zapamietaj_dirty_lokalny(aktualny_pid, {int(x0), int(y0), int(x1 - x0), int(y1 - y0)});
 }
 
 /*
@@ -744,19 +793,33 @@ static void zapamietaj_dirty_rysowania(int x,int y,int w,int h) {
  * moze zlozyc te warstwe w kazdej chwili (ruch kursora, inne okno, zegar).
  * Bez ochrony uzytkownik widzi polowicznie narysowana klatke: tlo wiersza
  * wyczyszczone, tekst jeszcze nienarysowany (migotanie Eksploratora przy
- * przewijaniu i wpisywaniu). Przy pierwszym rysowaniu po publikacji kopiujemy
- * opublikowana tresc do cienia; skladacz czyta cien az do bws_gui_odswiez()
- * wlasciciela, ktory konczy transakcje. Kopiowanie jest raz na klatke
- * (pamiec grafiki ma wlasne sloty, patrz bufory_grafiki.h). Warstwa pulpitu
- * (z_order 0) jest pomijana. Zawor bezpieczenstwa: cien starszy niz
- * CIEN_MAKS_WIEK_NS (1 s) jest ignorowany, wiec aplikacja, ktora zapomni o
- * odswiezeniu, nigdy nie zostanie zamrozona.
+ * przewijaniu i wpisywaniu). Od pierwszego rysowania po publikacji skladacz
+ * czyta cien (ostatnia opublikowana klatke) az do bws_gui_odswiez()
+ * wlasciciela, ktory konczy transakcje. Warstwa pulpitu (z_order 0) jest
+ * pomijana. Zawor bezpieczenstwa: cien starszy niz CIEN_MAKS_WIEK_NS (1 s) jest
+ * ignorowany, wiec aplikacja, ktora zapomni o odswiezeniu, nigdy nie zostanie
+ * zamrozona.
+ *
+ * Utrzymanie przyrostowe (2026-11-23): wczesniej na poczatku KAZDEJ transakcji
+ * kopiowano cala warstwe (szer x wys pikseli, np. 8 MiB dla okna 1920x1040) w
+ * nieprzerywalnym BWS 57 pod blokada ekranu - takze gdy aplikacja zmieniala
+ * tylko etykiete 40x20 (Grajek: kilka klatek na sekunde, koszt rosnacy z
+ * rozmiarem okna). Teraz cien jest "zgodny": po publikacji kopiujemy do niego
+ * tylko opublikowane prostokaty (oczekujace_dirty), wiec na poczatku kolejnej
+ * transakcji juz zawiera ostatnia klatke. Pelna kopia (jak dotad) jest
+ * wykonywana, gdy zgodnosc nie jest pewna: nowy bufor cienia, inny bufor lub
+ * rozmiar warstwy, zmiana epoki tresci (skladacz_obrazu_epoka_tresci(): zmiany
+ * pikseli poza transakcja - tworzenie, zmiana rozmiaru, czyszczenie, tryb
+ * ekranu), porzucone oczekujace obszary, zbiorcza wymiana regionow (BWS 57/4).
  */
 struct CienWarstwy {
     uint32_t* bufor;
     size_t bajty;
     uint64_t od_ns;
     bool aktywny;
+    bool zgodny;                 // bufor == ostatnia opublikowana klatka warstwy (poza oczekujacymi obszarami)
+    uint64_t epoka;              // epoka tresci warstw z chwili ostatniej pelnej synchronizacji
+    const uint32_t* zrodlo;      // bufor warstwy, z ktorym cien jest zgodny
 };
 static CienWarstwy cien_warstwy[SKLADACZ_MAKS_WARSTW] = {};
 static constexpr uint64_t CIEN_MAKS_WIEK_NS = 1000ULL * 1000ULL * 1000ULL;
@@ -766,8 +829,29 @@ static void cien_warstwy_zwolnij(int pid) {
     CienWarstwy& c = cien_warstwy[pid];
     __atomic_store_n(&c.aktywny, false, __ATOMIC_RELEASE);
     uint32_t* stary = c.bufor;
-    c.bufor = nullptr; c.bajty = 0;
+    c.bufor = nullptr; c.bajty = 0; c.zgodny = false; c.zrodlo = nullptr;
     if (stary) bufor_grafiki_zwolnij(stary);
+}
+
+// Zgodnosc cienia nie jest juz pewna (oczekujace obszary porzucone, zapis poza sledzeniem).
+static void cien_warstwy_niezgodny(int pid) {
+    if (pid > 0 && pid < SKLADACZ_MAKS_WARSTW) cien_warstwy[pid].zgodny = false;
+}
+
+// Duze kopie (pelna warstwa: 2 mln pikseli przy 1920x1040) sa dzielone punktami kontrolnymi HDA co ~64 tys.
+// pikseli - jak skladanie warstw w kompozytorze. Praca odroczona HDA nie bierze zamkow ekranu/kompozytora/GPU,
+// wiec jest bezpieczna pod BlokadaEkranu; bez tego jedna kopia byla nieprzerwanym blokiem w BWS 57.
+static constexpr size_t CIEN_PIKSELE_MIEDZY_HDA = 64U * 1024U;
+static void cien_kopiuj_prostokat(CienWarstwy& c, const warstwa_obrazu* w, const GuiDirtyRect& r) {
+    const size_t szer = static_cast<size_t>(w->szerokosc);
+    size_t od_hda = 0;
+    for (int y = r.y; y < r.y + r.height; ++y) {
+        const size_t p = static_cast<size_t>(y) * szer + static_cast<size_t>(r.x);
+        for (int x = 0; x < r.width; ++x) c.bufor[p + size_t(x)] = w->bufor_pikseli[p + size_t(x)];
+        od_hda += static_cast<size_t>(r.width);
+        if (od_hda >= CIEN_PIKSELE_MIEDZY_HDA) { od_hda = 0; hda_wykonaj_zaplanowana_prace_odroczona(); }
+    }
+    gui_perf_add(aktualny_pid, GP_SHADOW_COPY_PX, pole_dirty(r));
 }
 
 // Wolane przed pierwszym zapisem do warstwy aktualnego procesu w danej klatce.
@@ -788,12 +872,36 @@ static void cien_warstwy_przed_rysowaniem() {
     if (!c.bufor) {
         c.bufor = static_cast<uint32_t*>(bufor_grafiki_alokuj(bajty));
         c.bajty = c.bufor ? bajty : 0;
+        c.zgodny = false;
     }
     if (!c.bufor) return;   // brak pamieci: zachowanie sprzed poprawki
-    const uint32_t* zrodlo = w->bufor_pikseli;
-    for (size_t i = 0; i < bajty / sizeof(uint32_t); ++i) c.bufor[i] = zrodlo[i];
+    const uint64_t epoka = skladacz_obrazu_epoka_tresci();
+    if (!c.zgodny || c.epoka != epoka || c.zrodlo != w->bufor_pikseli) {
+        cien_kopiuj_prostokat(c, w, {0, 0, w->szerokosc, w->wysokosc});
+        c.zgodny = true; c.epoka = epoka; c.zrodlo = w->bufor_pikseli;
+        gui_perf_add(pid, GP_SHADOW_FULL_COPY);
+    }
     c.od_ns = hpet_dostepny() ? czas_monotoniczny_ns() : 0;
     __atomic_store_n(&c.aktywny, true, __ATOMIC_RELEASE);
+}
+
+// Publikacja (bws_gui_odswiez): cien przejmuje opublikowane prostokaty, wiec pozostaje rowny ostatniej klatce.
+static void cien_warstwy_po_publikacji(int pid, const warstwa_obrazu* w, const OczekujaceDirty& d) {
+    if (pid <= 0 || pid >= SKLADACZ_MAKS_WARSTW) return;
+    CienWarstwy& c = cien_warstwy[pid];
+    if (!c.bufor) return;
+    if (!w || !w->bufor_pikseli || w->szerokosc <= 0 || w->wysokosc <= 0 ||
+        c.bajty != static_cast<size_t>(w->szerokosc) * static_cast<size_t>(w->wysokosc) * sizeof(uint32_t) ||
+        c.zrodlo != w->bufor_pikseli) { c.zgodny = false; return; }
+    const uint64_t epoka = skladacz_obrazu_epoka_tresci();
+    for (uint32_t i = 0; i < d.n; ++i)
+        if (d.r[i].x == 0 && d.r[i].y == 0 && d.r[i].width == w->szerokosc && d.r[i].height == w->wysokosc) {
+            cien_kopiuj_prostokat(c, w, d.r[i]);   // pelna klatka (np. BWS 19): zgodnosc niezalezna od epoki
+            c.zgodny = true; c.epoka = epoka;
+            return;
+        }
+    if (!c.zgodny || c.epoka != epoka) { c.zgodny = false; return; }
+    for (uint32_t i = 0; i < d.n; ++i) cien_kopiuj_prostokat(c, w, d.r[i]);
 }
 
 // Kompozytor: cien opublikowanej klatki, jesli wlasciciel jest w trakcie rysowania.
@@ -3893,14 +4001,20 @@ extern "C" void bws_gui_odswiez() {
         return;
 
     // Koniec transakcji rysowania: od teraz skladacz czyta bufor na zywo.
-    if (aktualny_pid > 0 && aktualny_pid < SKLADACZ_MAKS_WARSTW)
-        __atomic_store_n(&cien_warstwy[aktualny_pid].aktywny, false, __ATOMIC_RELEASE);
+    if (aktualny_pid <= 0 || aktualny_pid >= SKLADACZ_MAKS_WARSTW) return;
+    __atomic_store_n(&cien_warstwy[aktualny_pid].aktywny, false, __ATOMIC_RELEASE);
     if(ma_oczekujacy_dirty[aktualny_pid]){
-        const GuiDirtyRect r=oczekujacy_dirty[aktualny_pid];ma_oczekujacy_dirty[aktualny_pid]=false;
+        const OczekujaceDirty d=oczekujace_dirty[aktualny_pid];
+        ma_oczekujacy_dirty[aktualny_pid]=false;oczekujace_dirty[aktualny_pid].n=0;
+        const warstwa_obrazu* w=pobierz_warstwe(aktualny_pid);
+        cien_warstwy_po_publikacji(aktualny_pid,w,d);
         if (skladacz_obrazu_publikuj_klatke(aktualny_pid) &&
             skladacz_obrazu_czy_widoczna(aktualny_pid))
             bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_POKAZANE, aktualny_pid);
-        skladacz_obrazu_oznacz_dirty_rect(r.x,r.y,r.width,r.height);
+        // Kazdy opublikowany prostokat osobno (biezaca pozycja warstwy): kompozytor sklada i prezentuje tylko
+        // zmienione obszary, nie prostokat obejmujacy np. etykiete u gory i pasek stanu u dolu okna.
+        if (w) for (uint32_t i = 0; i < d.n; ++i)
+            skladacz_obrazu_oznacz_dirty_rect(w->x + d.r[i].x, w->y + d.r[i].y, d.r[i].width, d.r[i].height);
     }
 }
 
@@ -3970,12 +4084,13 @@ extern "C" void bws_gui_odswiez_pulpit() {
      */
     if(warstwa->z_order!=0){
         cien_warstwy_przed_rysowaniem();
-        zapamietaj_dirty_rysowania(0,0,warstwa->szerokosc,warstwa->wysokosc);
+        // Cala warstwa (wspolrzedne lokalne; wczesniej (0,0,szer,wys) ekranu - zly prostokat dla okna poza 0,0).
+        zapamietaj_dirty_lokalny(aktualny_pid,{0,0,warstwa->szerokosc,warstwa->wysokosc});
     }
     // Zaraz po zmianie rozmiaru bufor niesie stara tresc i kryjace rozszerzenie (skladacz_obrazu.h): nie zerujemy go.
     if(!skladacz_obrazu_tresc_zachowana_po_zmianie_rozmiaru(aktualny_pid))
         wyczysc_warstwe(aktualny_pid);
-    if(warstwa->z_order==0)ma_oczekujacy_dirty[aktualny_pid]=false;
+    if(warstwa->z_order==0){ma_oczekujacy_dirty[aktualny_pid]=false;oczekujace_dirty[aktualny_pid].n=0;}
 }
 
 extern "C" void bws_gui_wypisz_tekst_kolor(
@@ -4140,6 +4255,8 @@ extern "C" bool bws_gui_zastap_regiony(const BwsGuiRegion* regions,uint32_t coun
         const auto& r=regions[i];
         gui_blit_region(r.x,r.y,r.width,r.height,reinterpret_cast<const uint32_t*>(r.pixels),true,false,true);
     }
+    // Regiony zbiorcze nie trafiaja do oczekujace_dirty: nastepna transakcja synchronizuje cien w calosci (jak dotad).
+    cien_warstwy_niezgodny(aktualny_pid);
     if(skladacz_obrazu_publikuj_klatke(aktualny_pid) && skladacz_obrazu_czy_widoczna(aktualny_pid))
         bws_gui_powiadom_lifecycle(BWS_ZDARZENIE_OKNO_POKAZANE,aktualny_pid);
     for(uint32_t i=0;i<count;++i) {
@@ -4210,7 +4327,7 @@ extern "C" void bws_gui_ustaw_capture(bool stan) {
 extern "C" void bws_gui_usun_stan_procesu(int pid) {
     cien_warstwy_zwolnij(pid);
     if(pid>0&&pid<SKLADACZ_MAKS_WARSTW){
-        ma_oczekujacy_dirty[pid]=false;
+        ma_oczekujacy_dirty[pid]=false;oczekujace_dirty[pid].n=0;
         uint32_t* stare = kursory_procesow[pid].piksele;
         kursory_procesow[pid]={};
         if (stare) kfree(stare);
@@ -4286,7 +4403,8 @@ extern "C" int bws_gui_aktywny_pid() { return aktywny_pid_gui; }
 
 extern "C" void bws_gui_aktywuj_warstwe(int pid) {
     if(pid<=0||!pobierz_warstwe(pid))return;
-    ma_oczekujacy_dirty[pid] = false;
+    // Porzucone oczekujace obszary: zapisy bez sledzenia, wiec cien musi zostac zsynchronizowany w calosci.
+    ma_oczekujacy_dirty[pid] = false;oczekujace_dirty[pid].n=0;cien_warstwy_niezgodny(pid);
     ustaw_focus_gui(pid);
     skladacz_obrazu_podnies_warstwe(pid);
 }
@@ -4672,7 +4790,7 @@ void grafika_wymien_stan(const StanBuforowEkranu&s){
     kursor_plane_ksztalt_brudny=true;
     kursor_plane_aktywny=false;
     kursor_plane_zablokowany=false;
-    for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i)ma_oczekujacy_dirty[i]=false;
+    for(unsigned i=0;i<SKLADACZ_MAKS_WARSTW;++i){ma_oczekujacy_dirty[i]=false;oczekujace_dirty[i].n=0;cien_warstwy_niezgodny(int(i));}
     log_granice_kursora("cursor", s.tryb.szerokosc, s.tryb.wysokosc, aktywny_stan.generacja);
 }
 void grafika_pobierz_granice_kursora(int* max_x,int* max_y){

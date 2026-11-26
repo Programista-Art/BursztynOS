@@ -159,7 +159,10 @@ enum BwsNumer : uint64_t {
     BWS_ZASOBNIK_STAN = 107,
     BWS_ZASOBNIK_POLECENIE = 108,
     BWS_POWIADOMIENIA = 109,
-    BWS_PIERWSZY_WOLNY = 111
+    /* 110 = BWS_PCM (jadro/bws/pcm_api.h). 111: (bufor*, rozmiar, wersja) informacja o systemie plikow:
+     * trwaly dysk czy RAM, pojemnosc, wolne miejsce, wolne wezly, limity (jadro/bws/bws_magazyn.h). */
+    BWS_INFORMACJA_MAGAZYNU = 111,
+    BWS_PIERWSZY_WOLNY = 112
 };
 
 /* Additive ABI for buffers above 4 GiB. Arguments 1..3 retain BWS29/30

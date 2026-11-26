@@ -11,6 +11,8 @@
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda_transport.h"
 #include "sterowniki/dzwiek/hda_wewnetrzny.h"
+#include "sterowniki/dzwiek/ac97.h"
+#include "jadro/dzwiek/wyjscie_audio.h"
 namespace {
 bool services_ready{},desktop{},launched{},hda_boot_finished{};uint32_t hda_boot_active=UINT32_MAX;
 uint64_t desktop_time{},last_refresh{},last_save{};
@@ -37,6 +39,25 @@ void refresh(){
   diag_publish(i,d);
  }
  if(!hda_transport_liczba())diag_simple(DIAG_HDA,"Dźwięk HDA","hda",DIAG_NOT_FOUND,false,"Nie wykryto kontrolera HDA");
+ // AC97: tylko gdy wykryty. Wyjscie PCM jest jedno (wyjscie_audio_polityka.h) - opis mowi, ktore urzadzenie gra.
+ Ac97Migawka a{};
+ if(ac97_migawka(&a)&&a.wykryty){
+  const auto wyjscie=wyjscie_audio_aktywne();
+  const bool gra=wyjscie==WyjscieAudio::Urzadzenie::Ac97&&a.aktywny&&
+   (a.kontroler.stan==Ac97::Stan::Gotowy||a.kontroler.stan==Ac97::Stan::Odtwarza);
+  const uint32_t state=gra?DIAG_OK:a.kontroler.stan==Ac97::Stan::Awaria?DIAG_INIT_FAILED:DIAG_INACTIVE;
+  auto d=diag_device(DIAG_HDA,"Kontroler AC97","ac97",state,true,
+   gra?"Wyjście PCM BWS 110: Intel ICH AC97 (48000 Hz, stereo PCM16)":
+   state==DIAG_INIT_FAILED?Ac97::nazwa_bledu(a.kontroler.blad):
+   wyjscie==WyjscieAudio::Urzadzenie::Hda?"Wykryty, nieużywany: wyjściem PCM jest Intel HDA":
+   "Wykryty, niezainicjalizowany");
+  d.parent=diag_pci_parent(a.bus,a.slot,a.func);
+  d.transport=DIAG_TRANSPORT_PCI;d.bus=a.bus;d.pci_device=a.slot;d.function=a.func;d.pci_valid=1;
+  d.vendor=a.kontroler.vendor;d.device=a.kontroler.device;d.bar=a.kontroler.nam;
+  d.hardware_status=static_cast<uint32_t>(a.kontroler.blad);d.value=a.kontroler.niedobory;
+  if(state==DIAG_INIT_FAILED)d.code=DIAG_CODE_HDA_INIT;
+  diag_publish(0xAC97,d);
+ }
 }
 void save_boot(){
  DiagSummary summary{};diag_get_summary(&summary);

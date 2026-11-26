@@ -165,6 +165,112 @@ static constexpr uint64_t rights = PRAWO_GUI | PRAWO_PLIKI_CZYTAJ | PRAWO_PLIKI_
 static std::vector<uint8_t> executable;
 static NaglowekBur header;
 
+// --- Package install / repair isolation (production instaluj_paczke, zapisz_plik_od_nowa, planuj_plik) ---
+// Unrelated files the audio-test package must never touch: system configuration, both A/B slots, another
+// application's resources and user media (music, photos). Contents include NUL bytes and are not text.
+struct Sentinel { const char* path; std::vector<uint8_t> bytes; };
+static std::vector<Sentinel> sentinels;
+static std::vector<uint8_t> read_whole(const char* p) {
+    const uint32_t n = rozmiar_pliku(p);
+    std::vector<uint8_t> out(n); uint32_t got = 0;
+    if (n) CHECK(czytaj_fragment_pliku(p, 0, reinterpret_cast<char*>(out.data()), n, &got) && got == n);
+    return out;
+}
+static void plant_sentinels() {
+    const char* paths[] = {"/system/konfig/motyw.cfg", "/sloty/a/system/konfig/slot.cfg",
+                           "/sloty/b/system/konfig/slot.cfg", "/programy/notatnik.cebula/opis.aplikacji",
+                           "/dane/muzyka/utwor.mp3", "/dane/zdjecia/zdjecie.png"};
+    uint32_t seed = 0x13579bdfu;
+    for (const char* p : paths) {
+        Sentinel s{p, {}}; s.bytes.resize(4096 + 977 * (sentinels.size() + 1));
+        for (auto& b : s.bytes) { seed = seed * 1664525u + 1013904223u; b = uint8_t(seed >> 24); }
+        CHECK(zapisz_plik_od_nowa_impl(p, reinterpret_cast<const char*>(s.bytes.data()), s.bytes.size()));
+        sentinels.push_back(std::move(s));
+    }
+}
+static void check_sentinels() {
+    for (const auto& s : sentinels) CHECK(read_whole(s.path) == s.bytes);
+}
+// Not ASan-instrumented: the local buffer must live on the real stack (ASan may move locals to a heap "fake
+// stack"), exactly like a stack-local manifest in the kernel planning frame (installer error 7).
+__attribute__((noinline, no_sanitize_address)) static bool plan_from_stack_frame() {
+    volatile char local[64];
+    for (auto& c : local) c = 'x';
+    planowanie_instalacji = true; plan_granica_stosu = biezacy_rsp() + 4096;
+    const bool ok = zapisz_plik_od_nowa("/programy/test_dzwieku.cebula/z_stosu",
+                                        const_cast<const char*>(local), sizeof(local));
+    plan_granica_stosu = 0; planowanie_instalacji = false;
+    return ok;
+}
+static const char* const manifest_path = "/programy/test_dzwieku.cebula/opis.aplikacji";
+static void install_repair_isolation() {
+    const auto manifest_installed = read_whole(manifest_path);
+    CHECK(manifest_installed.size() == sizeof(MANIFEST_TEST_DZWIEKU) - 1);
+    CHECK(!std::memcmp(manifest_installed.data(), MANIFEST_TEST_DZWIEKU, manifest_installed.size()));
+    check_sentinels();
+
+    // Repair: damaged executable and truncated manifest are rewritten byte-exact; nothing else changes.
+    ++scenarios;
+    std::vector<uint8_t> damaged(executable.begin(), executable.begin() + executable.size() / 3);
+    for (size_t i = 0; i < damaged.size(); i += 97) damaged[i] ^= 0x5a;
+    CHECK(zapisz_plik_od_nowa_impl(path, reinterpret_cast<const char*>(damaged.data()), damaged.size()));
+    CHECK(zapisz_plik_od_nowa_impl(manifest_path, "nazwa", 5));
+    CHECK(boot_install(executable.data(), executable.data() + executable.size()));
+    CHECK(read_whole(path) == executable); CHECK(read_whole(manifest_path) == manifest_installed);
+    check_sentinels();
+
+    // Strict installer mode (SYSTEMFILES): every written file gets a control record (path, size, CRC-32 of the
+    // bytes written) from the shared InstalacjaPlikow module; exactly the two package files are recorded.
+    ++scenarios;
+    scisla_instalacja = true; pliki_instalacja_ok = true; liczba_plikow_kontrolnych = 0;
+    CHECK(boot_install(executable.data(), executable.data() + executable.size()));
+    CHECK(liczba_plikow_kontrolnych == 2);
+    CHECK(!std::strcmp(pliki_kontrolne[0].sciezka, manifest_path));
+    CHECK(pliki_kontrolne[0].rozmiar == manifest_installed.size());
+    CHECK(pliki_kontrolne[0].crc == Storage::crc32(manifest_installed.data(), manifest_installed.size()));
+    CHECK(!std::strcmp(pliki_kontrolne[1].sciezka, path));
+    CHECK(pliki_kontrolne[1].rozmiar == executable.size());
+    CHECK(pliki_kontrolne[1].crc == Storage::crc32(executable.data(), executable.size()));
+    // A failed earlier file poisons strict mode: the package is NOT written over a good installation.
+    CHECK(zapisz_plik_od_nowa_impl(path, reinterpret_cast<const char*>(damaged.data()), damaged.size()));
+    pliki_instalacja_ok = false; liczba_plikow_kontrolnych = 0;
+    CHECK(!boot_install(executable.data(), executable.data() + executable.size()));
+    CHECK(liczba_plikow_kontrolnych == 0); CHECK(read_whole(path) == damaged);
+    scisla_instalacja = false; pliki_instalacja_ok = true;
+    check_sentinels();
+
+    // Stepwise plan (installer planning phase): files are only planned, no PSF write happens; the plan points at
+    // the caller's bytes and snapshots the CRC of small raw sources (manifest), not of the 64 KiB+ executable.
+    ++scenarios;
+    planowanie_instalacji = true; planowane_liczba = 0; planowane_bajty_razem = 0;
+    CHECK(boot_install(executable.data(), executable.data() + executable.size()));
+    planowanie_instalacji = false;
+    CHECK(planowane_liczba == 2); CHECK(read_whole(path) == damaged);
+    CHECK(!std::strcmp(planowane_pliki[0].path, manifest_path) && planowane_pliki[0].data == MANIFEST_TEST_DZWIEKU);
+    CHECK(planowane_pliki[0].zrodlo.znane &&
+          planowane_pliki[0].zrodlo.crc == Storage::crc32(MANIFEST_TEST_DZWIEKU, sizeof(MANIFEST_TEST_DZWIEKU) - 1));
+    CHECK(!std::strcmp(planowane_pliki[1].path, path) && !planowane_pliki[1].skompresowany);
+    CHECK(planowane_pliki[1].data == reinterpret_cast<const char*>(executable.data()));
+    CHECK(planowane_pliki[1].size == executable.size() && !planowane_pliki[1].zrodlo.znane);
+    CHECK(planowane_bajty_razem == manifest_installed.size() + executable.size());
+    // Plan source on a dying stack frame is rejected with a diagnosis instead of being written later.
+    {
+        logs.clear();
+        CHECK(!plan_from_stack_frame());
+        CHECK(planowane_liczba == 2 && !pliki_instalacja_ok);
+        CHECK(diagnoza_instalacji.przyczyna == InstalacjaPlikow::Przyczyna::ZrodloNietrwale);
+        CHECK(logs.size() == 1); CHECK(rozmiar_pliku("/programy/test_dzwieku.cebula/z_stosu") == 0);
+        pliki_instalacja_ok = true;
+    }
+    planowane_liczba = 0; planowane_bajty_razem = 0;
+
+    // Restore the good installation for the loader scenarios below.
+    CHECK(boot_install(executable.data(), executable.data() + executable.size()));
+    CHECK(read_whole(path) == executable);
+    check_sentinels();
+    std::printf("install/repair isolation PASS (repair, strict CRC records, plan-only, stack source rejected)\n");
+}
+
 static void release_process(int pid) {
     auto& p = tablica_procesow[pid];
     ZniszczPrzestrzenAdresowaProcesu(reinterpret_cast<void*>(p.cr3));
@@ -271,6 +377,7 @@ int main(int argc, char** argv) {
     CHECK(executable.size() < 512 * 1024); CHECK(!bur_blad_naglowka(header, executable.size()));
     std::vector<uint8_t> ram(16 * 1024 * 1024); inicjalizuj_psf(ram.data(), ram.size());
     CHECK(psf_czy_gotowy()); for (const char* dir : KATALOGI_SYSTEMOWE) CHECK(zapewnij_katalog_startowy(dir));
+    plant_sentinels();
     psf_allocations = allocations; // persistent production PSF cache
     // Same final bytes and verbatim boot installation call; .cebula is a PSF
     // directory, not an archive with a second executable hidden in it.
@@ -282,6 +389,7 @@ int main(int argc, char** argv) {
     PakietManifest manifest{}; CHECK(pakiet_wczytaj_manifest(path, &manifest));
     CHECK(manifest.poziom_zaufania == 3); CHECK(manifest.uprawnienia == rights);
     CHECK(!std::strcmp(manifest.plik_startowy, "test_dzwieku.bur"));
+    install_repair_isolation();
     ++scenarios;
     BurObrazPliku a{}, b{};
     CHECK(bsp_wczytaj_obraz_bur(path, &a, BUR_MAKS_ROZMIAR_PLIKU, bur_blad_naglowka));
@@ -422,5 +530,6 @@ int main(int argc, char** argv) {
         }
         std::printf("BUR v2 production loader rollback: %u frame and mapping failure stages PASS; NX/entropy denial PASS\n",count);
     }
+    check_sentinels();   // loader scenarios (bad_path rewrites, mutations) never touched unrelated files
     std::printf("Test dzwieku loader/package: %u scenarios, %u checks PASS; ASan+UBSan\n", scenarios, checks);
 }

@@ -43,6 +43,8 @@
     "virtio-keyboard-pci",
     "-device",
     "virtio-mouse-pci",
+    "-device",
+    "virtio-tablet-pci",
     "-boot",
     "order=d,menu=on",
     "-cdrom",
@@ -92,6 +94,12 @@
       "device": "virtio-mouse-pci",
       "expected_class": "relative mouse",
       "expected_bdf": "00:08.0"
+    },
+    {
+      "order": 7,
+      "device": "virtio-tablet-pci",
+      "expected_class": "absolute tablet",
+      "expected_bdf": "00:09.0"
     }
   ],
   "bdf_assumption": "pc/i440fx default host bridge/PIIX at 00:00.0/00:01.*, -vga none, no extra PCI devices"

@@ -21,6 +21,7 @@ inline constexpr App apps[]={
  {"Diagnostyka systemu","",16,"/ikonki/app_diagnostyka.png"},
  {"Menedżer zadań","procesy pamięć procesor zakończ",22,"/ikonki/app_menedzer_zadan.png"},
  {"Kalendarz","data dzień miesiąc rok",23,"/ikonki/app_kalendarz.png"},
+ {"Grajek","muzyka odtwarzacz mp3 wav audio piosenki",24,"/ikonki/app_grajek.png"},
  {"Snake","gry",21,"/ikonki/app_snake.png"},
  {"Ustawienia","czcionki font",20,"/ikonki/app_ustawienia.png"}};
 constexpr int Count=sizeof(apps)/sizeof(apps[0]), QueryMax=64;
