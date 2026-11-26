@@ -40,6 +40,12 @@ MAPA_IKON = {
     "clear.png": "wyczysc",
     "save list.png": "zapisz",
     "load list.png": "wczytaj",
+    # przelaczniki: ikony rysowane w stylu grafik uzytkownika (narzedzia/generuj_ikony_grajka.py)
+    "shuffle.png": "losowo",
+    "repeat.png": "powtarzanie",
+    "repeat one.png": "powtarzanie_jeden",
+    "background.png": "w_tle",
+    "visualization.png": "wizualizacja",
 }
 
 

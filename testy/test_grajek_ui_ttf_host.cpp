@@ -81,13 +81,13 @@ int main() {
     CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie);
 
     // uklad przy wszystkich rozmiarach (z diagnostyka wylaczona i wlaczona - podsumowanie w pasku)
-    struct R { int w, h, skala; } rozmiary[] = {{980, 580, 100}, {1080, 640, 100}, {1280, 680, 100}, {1280, 720, 100}, {1920, 1040, 100}, {1920, 1080, 100}, {1470, 870, 150}};
+    struct R { int w, h, skala; } rozmiary[] = {{OknoGrajka::MIN_SZEROKOSC, OknoGrajka::MIN_WYSOKOSC, 100}, {1080, 640, 100}, {1280, 680, 100}, {1280, 720, 100}, {1920, 1040, 100}, {1920, 1080, 100}, {OknoGrajka::MIN_SZEROKOSC * 3 / 2, 870, 150}};
     for (int d = 0; d < 2; ++d) {
         o->o_.ustaw_diagnostyke(d == 1);
         petla(*o, 300);
         for (const R& r : rozmiary) GrajekUklad::sprawdz_uklad(o, r.w, r.h, r.skala);
     }
-    std::printf("uklad TTF (7 rozmiarow x 2 stany diagnostyki, 3 karty) OK\n");
+    std::printf("uklad TTF (7 rozmiarow x 2 stany diagnostyki, 4 karty) OK\n");
 
     // domyslny rozmiar: odtwarzanie z wizualizacja - bez pelnych odrysowan i przeliczania ukladu
     o->ustaw_skale_dpi(SkalaUI(1)); o->ustaw_geometrie(0, 0, 1080, 640); o->przelicz_uklad();
@@ -111,7 +111,7 @@ int main() {
     // podpowiedzi Grajka miesza sie w buforze Kontrolki (63 B) bez obcinania
     Kontrolka* z_podpowiedzia[] = {o->odswiez_, o->dodaj_kol_, o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_,
                                    o->glosnosc_, o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_,
-                                   o->zakoncz_, o->korektor_, o->preset_, o->podkatalogi_};
+                                   o->korektor_, o->preset_, o->podkatalogi_};
     for (Kontrolka* k : z_podpowiedzia) CHECK(k->podpowiedz()[0] && std::strlen(k->podpowiedz()) < 63);
 
     o->o_.zakoncz();

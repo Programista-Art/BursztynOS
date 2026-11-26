@@ -26,15 +26,19 @@ using namespace BursztynUI;
 constexpr size_t MAKS_DLUGOSC_TEKSTU_GRAJKA = Kontrolka::MAKS_DLUGOSC_TEKSTU;
 
 // Ikony przyciskow: grafiki uzytkownika (ikonki/grajek/), przy budowaniu 128x128 -> /ikonki/grajek_<akcja>.png
-// (narzedzia/przygotuj_zasoby_grajka.py). Akcje bez pasujacej grafiki (Zakoncz, Powtarzanie, przelaczniki) maja tekst.
+// (narzedzia/przygotuj_zasoby_grajka.py). Przelaczniki (losowo, powtarzanie, w tle, wizualizacja) maja ikony w tym
+// samym stylu (narzedzia/generuj_ikony_grajka.py). Brak pliku = przycisk tekstowy z ta sama nazwa akcji.
 enum IkonaGrajka : int { IK_POPRZEDNI, IK_ODTWORZ, IK_PAUZA, IK_STOP, IK_NASTEPNY, IK_WYCISZ, IK_ODSWIEZ, IK_DODAJ,
-                         IK_W_GORE, IK_W_DOL, IK_USUN, IK_WYCZYSC, IK_ZAPISZ, IK_WCZYTAJ, LICZBA_IKON };
+                         IK_W_GORE, IK_W_DOL, IK_USUN, IK_WYCZYSC, IK_ZAPISZ, IK_WCZYTAJ, IK_LOSOWO, IK_POWTARZANIE,
+                         IK_POWTARZANIE_JEDEN, IK_W_TLE, IK_WIZUALIZACJA, LICZBA_IKON };
 inline const char* sciezka_ikony(int i) {
     static const char* const S[LICZBA_IKON] = {
         "/ikonki/grajek_poprzedni.png", "/ikonki/grajek_odtworz.png", "/ikonki/grajek_pauza.png", "/ikonki/grajek_stop.png",
         "/ikonki/grajek_nastepny.png", "/ikonki/grajek_wycisz.png", "/ikonki/grajek_odswiez.png", "/ikonki/grajek_dodaj.png",
         "/ikonki/grajek_w_gore.png", "/ikonki/grajek_w_dol.png", "/ikonki/grajek_usun.png", "/ikonki/grajek_wyczysc.png",
-        "/ikonki/grajek_zapisz.png", "/ikonki/grajek_wczytaj.png"};
+        "/ikonki/grajek_zapisz.png", "/ikonki/grajek_wczytaj.png", "/ikonki/grajek_losowo.png",
+        "/ikonki/grajek_powtarzanie.png", "/ikonki/grajek_powtarzanie_jeden.png", "/ikonki/grajek_w_tle.png",
+        "/ikonki/grajek_wizualizacja.png"};
     return i >= 0 && i < LICZBA_IKON ? S[i] : "";
 }
 // Odczyt (<= 256 KiB) przez dostep do plikow Grajka i dekodowanie RAZ; brak/uszkodzenie = przycisk tekstowy.
@@ -200,9 +204,10 @@ private:
 };
 
 // Etykiety 10 pasm korektora (Hz albo dB) wyrownane do srodkow kolumn siatki suwakow (te same wypelnienie i
-// odstep). Gdy najszerszy tekst nie miesci sie w kolumnie (np. "125" w TTF przy oknie 1080 px), etykiety ukladaja
-// sie naprzemiennie w dwoch rzedach - kazda ma wtedy szerokosc dwoch kolumn. Bez stykania sie i bez obcinania,
-// a panel nie musi byc szerszy niz 10 suwakow.
+// odstep). Zawsze JEDEN rzad: wszystkie teksty na wspolnej linii bazowej (ta sama wspolrzedna y), srodki w rownych
+// odstepach (srodek kolumny suwaka). Dawny uklad naprzemienny w dwoch rzedach (gdy "+12" / "125" nie miescily sie
+// w kolumnie) wygladal krzywo; minimum panelu (OknoGrajka::minimum_korektora) gwarantuje teraz, ze najszerszy
+// mozliwy tekst miesci sie w jednej kolumnie z odstepem.
 class EtykietyPasm : public Kontrolka {
 public:
     static constexpr int N = Tabele::LICZBA_PASM;
@@ -213,7 +218,6 @@ public:
         uniewaznij();
     }
     const char* tekst_pasma(int i) const { return i >= 0 && i < N ? t_[i] : ""; }
-    // Najszerszy tekst w pikselach (bez wielokrotnego pomiaru przy kazdym rysowaniu - teksty sa krotkie).
     int najszerszy() const {
         int w = 0;
         for (int i = 0; i < N; ++i) { const int x = CzcionkaUI::zmierz_tekst(t_[i], skala_dpi_); if (x > w) w = x; }
@@ -224,23 +228,22 @@ public:
         const int k = (szerokosc - 2 * pad_ * s - (N - 1) * gap_ * s) / N;
         return k > 0 ? k : 1;
     }
-    bool dwa_rzedy(int szerokosc) const { return najszerszy() + 4 * skala_dpi_ > kolumna(szerokosc) + gap_ * skala_dpi_; }
-    bool dwa_rzedy() const { return dwa_rzedy(obszar_.szerokosc); }
-    // Prostokat etykiety i (wspolrzedne kontrolki) - dla rysowania i testow.
+    // Srodek kolumny pasma i (wspolrzedne kontrolki) - ten sam wzor co rozmieszczenie suwakow w siatce.
+    int srodek(int i) const {
+        const SkalaUI s = skala_dpi_;
+        const int k = kolumna(obszar_.szerokosc);
+        return pad_ * s + i * (k + gap_ * s) + k / 2;
+    }
+    // Prostokat etykiety i (wspolrzedne kontrolki) - dla rysowania i testow. Jedna linia bazowa dla wszystkich.
     Prostokat obszar_etykiety(int i) const {
         const SkalaUI s = skala_dpi_;
-        const int k = kolumna(obszar_.szerokosc), h = CzcionkaUI::pobierz_wysokosc(s);
-        const int srodek = pad_ * s + i * (k + gap_ * s) + k / 2;
-        const int w = CzcionkaUI::zmierz_tekst(t_[i], s);
-        const bool dwa = dwa_rzedy();
-        const int y = dwa && (i % 2) ? h + 2 * s : 0;
-        return Prostokat(srodek - w / 2, y + (dwa ? 0 : (obszar_.wysokosc - h) / 2), w, h);
-    }
-    Rozmiar zmierz(Rozmiar dostepny) override {
-        const SkalaUI s = skala_dpi_;
         const int h = CzcionkaUI::pobierz_wysokosc(s);
-        const bool dwa = dostepny.szerokosc > 0 && dwa_rzedy(dostepny.szerokosc);
-        return Rozmiar(-1, dwa ? 2 * h + 2 * s : h + 2 * s);
+        const int w = CzcionkaUI::zmierz_tekst(t_[i], s);
+        return Prostokat(srodek(i) - w / 2, (obszar_.wysokosc - h) / 2, w, h);
+    }
+    Rozmiar zmierz(Rozmiar) override {
+        const SkalaUI s = skala_dpi_;
+        return Rozmiar(-1, CzcionkaUI::pobierz_wysokosc(s) + 2 * s);
     }
     void rysuj_siebie(KontekstRysowania& ctx) override {
         for (int i = 0; i < N; ++i) {
@@ -395,9 +398,9 @@ private:
     uint32_t skalowania_ = 0;
 };
 
-// Pasek komunikatow: zawsze JEDEN wiersz o stalej wysokosci (wysokosc czcionki): ikona rodzaju + komunikat z
-// wielokropkiem po lewej, a przy wlaczonej diagnostyce krotkie podsumowanie po prawej (szczegoly: karta
-// "Diagnostyka"). Wlaczenie diagnostyki nie zmienia wysokosci, wiec sterowanie nad paskiem nie "skacze" i nie ma
+// Pasek stanu: zawsze JEDEN wiersz o stalej wysokosci (wysokosc czcionki): pozycja utworu ("1/7") po lewej, za nia
+// - tylko gdy jest - komunikat (ikona rodzaju + tekst z wielokropkiem), a przy wlaczonej diagnostyce krotkie
+// podsumowanie po prawej (szczegoly: karta "Diagnostyka"). Wlaczenie diagnostyki nie zmienia wysokosci, wiec sterowanie nad paskiem nie "skacze" i nie ma
 // przeliczenia ukladu; zmiana tekstu uniewaznia tylko pasek.
 class PasekStanuGrajka : public Kontrolka {
 public:
@@ -416,6 +419,16 @@ public:
         uniewaznij();
     }
     const char* skrot() const { return skrot_; }
+    // Pozycja utworu ("1/7", "0/0"): zmiana uniewaznia tylko pasek.
+    void ustaw_pozycje(const char* t) {
+        if (rowne(pozycja_, t ? t : "")) return;
+        kopiuj_tekst(pozycja_, sizeof(pozycja_), t ? t : "");
+        szer_cache_ = -1;
+        uniewaznij();
+    }
+    const char* pozycja() const { return pozycja_; }
+    // Lewa krawedz komunikatu (ikona rodzaju) - za pozycja.
+    int x_komunikatu() const { return x_kom_; }
     const char* skrot_widoczny() const { return skrot_widoczny_; }
     void przy_kliknieciu_skrotu(FunkcjaKlikniecia f, void* d) { klik_ = f; klik_dane_ = d; }
     const char* tekst_widoczny() const { return widoczny_; }
@@ -434,8 +447,10 @@ public:
         const Prostokat b(0, 0, obszar_.szerokosc, obszar_.wysokosc);
         ctx.rysuj_zaokraglony_prostokat(b, motyw_kolor(MOTYW_KOLOR_PANEL), 4 * s);
         const int fh = CzcionkaUI::pobierz_wysokosc(s);
-        const int ik = 8 * s, x0 = 8 * s, y = (obszar_.wysokosc - fh) / 2;
+        const int ik = 8 * s, y = (obszar_.wysokosc - fh) / 2;
         if (obszar_.szerokosc != szer_cache_ || s.procent() != dpi_cache_) przelicz(s);
+        if (pozycja_[0]) ctx.rysuj_tekst(Punkt(8 * s, y), pozycja_, motyw_kolor(MOTYW_KOLOR_TEKST), s);
+        const int x0 = x_kom_;
         if (tekst()[0]) {
             ctx.rysuj_zaokraglony_prostokat(Prostokat(x0, (obszar_.wysokosc - ik) / 2, ik, ik), motyw_kolor(kolor_rodzaju()), ik / 2);
             ctx.rysuj_tekst(Punkt(x0 + ik + 8 * s, y), widoczny_,
@@ -444,10 +459,12 @@ public:
         if (skrot_widoczny_[0])
             ctx.rysuj_tekst(Punkt(obszar_skrotu_.x, y), skrot_widoczny_, motyw_kolor(MOTYW_KOLOR_TEKST_DRUGI), s);
     }
-    // Podzial szerokosci: podsumowanie najwyzej 45 % paska (wielokropek), komunikat - reszta.
+    // Podzial szerokosci: pozycja (w calosci), podsumowanie najwyzej 45 % paska (wielokropek), komunikat - reszta.
     void przelicz(SkalaUI s) {
         szer_cache_ = obszar_.szerokosc; dpi_cache_ = s.procent();
-        const int x0 = 8 * s, ik = 8 * s, odstep = 16 * s;
+        const int ik = 8 * s, odstep = 16 * s;
+        x_kom_ = 8 * s + (pozycja_[0] ? CzcionkaUI::zmierz_tekst(pozycja_, s) + odstep : 0);
+        const int x0 = x_kom_;
         int w_skr = 0;
         skrot_widoczny_[0] = '\0';
         if (skrot_[0]) w_skr = dopasuj_tekst(skrot_, obszar_.szerokosc * 45 / 100, s, skrot_widoczny_, sizeof(skrot_widoczny_));
@@ -468,6 +485,8 @@ private:
     }
     Rodzaj rodzaj_ = Rodzaj::Informacja;
     char skrot_[128]{};
+    char pozycja_[24]{};
+    int x_kom_ = 0;
     char widoczny_[MAKS_DLUGOSC_TEKSTU_GRAJKA + 4]{};
     char skrot_widoczny_[136]{};
     Prostokat obszar_skrotu_{};

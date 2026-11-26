@@ -221,8 +221,18 @@ public:
         }
     }
 
+    // Czy w zarzadcy jest otwarta INNA powierzchnia (lista rozwijana, menu, dialog). ZarzadcaPopupow::otworz zamyka
+    // wszystkie otwarte powierzchnie, wiec podpowiedz pokazana w tym czasie zamknelaby np. rozwinieta liste zaraz po
+    // otwarciu (Grajek: lista presetow korektora). Podpowiedz czeka wtedy, az popup sie zamknie.
+    bool inny_popup_otwarty(const ZarzadcaPopupow& popupy) const {
+        for (int i = 0; i < popupy.liczba_powierzchni(); ++i)
+            if (popupy.powierzchnia(i) && popupy.powierzchnia(i) != &podpowiedz_) return true;
+        return false;
+    }
+
     void pokaz(ZarzadcaPopupow& popupy, const char* tekst, int kursor_ekran_x, int kursor_ekran_y, const char* tytul = nullptr) {
         if (!tekst || tekst[0] == '\0') return;
+        if (inny_popup_otwarty(popupy)) return;
         ukryj(&popupy);
         podpowiedz_.ustaw_tytul(tytul);
         podpowiedz_.ustaw_tekst(tekst);
@@ -232,13 +242,13 @@ public:
         popupy.otworz(podpowiedz_, rect);
     }
 
+    // Zamyka TYLKO powierzchnie podpowiedzi (nie wszystkie popupy zarzadcy - inaczej ukrycie podpowiedzi przy
+    // kliknieciu zamykaloby takze liste rozwijana otwarta nad nia).
     void ukryj(ZarzadcaPopupow* popupy = nullptr) {
         if (podpowiedz_.czy_otwarta()) {
-            if (podpowiedz_.zarzadca()) {
-                podpowiedz_.zarzadca()->zamknij(PowodZamknieciaPopup::Anulowanie);
-            } else if (popupy) {
-                popupy->zamknij(PowodZamknieciaPopup::Anulowanie);
-            }
+            ZarzadcaPopupow* z = podpowiedz_.zarzadca() ? podpowiedz_.zarzadca() : popupy;
+            if (z && !z->zamknij_powierzchnie(&podpowiedz_, PowodZamknieciaPopup::Anulowanie))
+                z->zamknij(PowodZamknieciaPopup::Anulowanie);
         }
     }
 

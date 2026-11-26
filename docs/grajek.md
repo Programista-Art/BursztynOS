@@ -74,7 +74,7 @@ Każdy przestój producenta dłuższy niż zawartość kolejki kończy się nied
   jeszcze WAV z fazy C (przerwy 85 + 106 ms przy 299,7 s nagrania). Komunikat nie był odświeżany po zmianie utworu,
   więc przy MP3 wyglądał na wartość MP3, a kolejny (21 ms, już dla MP3) – na spadek licznika. Sam licznik nie malał.
 
-### Diagnostyka (opcja „Diagnostyka”, klucz `diagnostyka=1`, karta „Diagnostyka”)
+### Diagnostyka (karta „Ustawienia” → „Pomiar czasu sekcji”, klucz `diagnostyka=1`, karta „Diagnostyka”)
 Pomiar czasu sekcji licznikiem TSC (bez wywołań systemowych w gorącej ścieżce i bez logów na port szeregowy):
 dekodowanie, konwersja, korektor, analiza, BWS 110, widmo, rysowanie drzewa BursztynUI, publikacja (BWS 57),
 tabele, wizualizacja, okładka.
@@ -207,10 +207,15 @@ rysowaniu. Wygenerowana grafika płyty (`grafika_domyslna`) została usunięta.
 | `delete.png` | usuń z kolejki | kolejka |
 | `clear.png` | wyczyść kolejkę | kolejka |
 | `save list.png` / `load list.png` | zapisz / wczytaj listę M3U8 | kolejka |
+| `shuffle.png` | losowa kolejność | przełącznik w wierszu sterowania |
+| `repeat.png` / `repeat one.png` | powtarzanie: wszystkie (i wył.) / utwór | przełącznik (ikona wg stanu) |
+| `background.png` | odtwarzanie w tle (po minimalizacji) | przełącznik |
+| `visualization.png` | wizualizacja | przełącznik |
 
-Bez pasującej grafiki (zostają tekstowe): **Zakończ** (brak ikony zamknięcia), Powtarzanie, Losowo, W tle,
-Wizualizacja, Diagnostyka, karty i nagłówki. Brak pliku lub plik uszkodzony/zbyt duży → przycisk tekstowy z tą samą
-akcją i podpowiedzią (nic nie jest zastępowane inną grafiką ani emoji).
+Ikony przełączników nie pochodziły z zestawu użytkownika – rysuje je `narzedzia/generuj_ikony_grajka.py` w tym
+samym stylu (bursztynowa linia ~10 px na kanwie 128×128, przezroczyste tło, zmniejszanie na premnożonej alfie,
+piksele A=0 mają RGB=0); pliki są w repozytorium, skrypt nie jest częścią budowania. Karty i nagłówki pozostają
+tekstowe. Brak pliku lub plik uszkodzony/zbyt duży → przycisk tekstowy z tą samą akcją i podpowiedzią.
 
 Komponent **`BursztynUI::PrzyciskIkony`** (`bursztyn_ui/przycisk_ikony.h`, wielokrotnego użytku): `ObrazIkony`
 dekoduje PNG raz (także porażka jest zapamiętana) i skaluje raz na bok (średnia obszarowa, premnożona alfa) w
@@ -251,26 +256,78 @@ czcionka bitmapowa hosta, na której wcześniej sprawdzano układ):
   biblioteki („Format”) mieszczą się bez przewijania,
 * kolejka: jeden wiersz 6 ikon (w górę, w dół, usuń, wyczyść, zapisz, wczytaj) w równych odstępach; biblioteka:
   ikony „Odśwież” i „Dodaj do kolejki” wyrównane do lewej (pełne opisy w podpowiedziach),
-* korektor: wiersz [Włączony][preset], etykiety dB i Hz w kontrolce `EtykietyPasm` wyśrodkowane nad/pod
-  suwakami, a gdy kolumna jest węższa niż tekst – naprzemiennie w dwóch rzędach (wcześniej „125”, „250”, „500”
-  stykały się). `SkalaUI` nie schodzi poniżej 100 %, więc zmniejszanie czcionki nie jest możliwe. Opis korektora ma
-  wysokość z zawijania tekstu (wcześniej stałe 52 px ucinały trzeci wiersz w TTF),
-* sterowanie: wiersz transportu [stop][poprzedni][**Odtwórz/Pauza**][następny] – grupa symetryczna, przycisk
-  główny dokładnie na środku okna, większy i okrągły; po prawej wyciszenie tuż przy suwaku głośności i wartość %.
-  Drugi wiersz (Losowo, Powtarzanie, W tle, Wizualizacja, Diagnostyka, Zakończ) w kolumnach Auto – bez nachodzenia
-  przy minimalnym oknie; teksty zmienne („Powtarzanie: wszystkie”, „wycisz.”) mają minimum najszerszego wariantu.
-  Cel kliknięcia ikony ≥ 34 DIP,
+* korektor: wiersz [Włączony][preset], etykiety dB i Hz w kontrolce `EtykietyPasm` – zawsze **jeden rząd**:
+  wspólna linia bazowa, środki w równych odstępach dokładnie nad/pod suwakami (dawny układ naprzemienny w dwóch
+  rzędach wyglądał krzywo). Minimum panelu (`minimum_korektora`) gwarantuje, że najszerszy możliwy tekst („+12”,
+  „-12”, „125”, „16k”) mieści się w kolumnie z odstępem; z TTF wymaga to minimalnej szerokości okna 1020 px
+  (wcześniej 980). `SkalaUI` nie schodzi poniżej 100 %. Opis korektora ma wysokość z zawijania tekstu,
+* lista presetów (`ListaRozwijana`): podpowiedź nie otwiera się, gdy w oknie jest otwarty inny popup (dawniej
+  podpowiedź – samej listy albo suwaka pod rozwiniętą listą – otwierana po 500 ms przez `ZarzadcaPopupow::otworz`
+  zamykała listę, zanim dało się wybrać element); kursor nad popupem nie „najeżdża” kontrolek pod nim. Strzałki w
+  otwartej liście stosują podgląd presetu na bieżąco, a anulowanie (Esc, klik obok) przywraca i zgłasza poprzedni,
+* sterowanie: **jeden wiersz** – po lewej małe przełączniki z ikonami PNG (losowo, powtarzanie, w tle,
+  wizualizacja; stan = zaznaczenie kafla, opis stanu w polskiej podpowiedzi, Spacja/Enter z klawiatury), na środku
+  transport [stop][poprzedni][**Odtwórz/Pauza**][następny] – grupa symetryczna, przycisk główny dokładnie na środku
+  okna; po prawej wyciszenie tuż przy suwaku głośności i wartość %. Bez przycisku „Zakończ” (Grajka zamyka X na
+  pasku tytułu) i bez pola „Diagnostyka” (karta **Ustawienia**). Cel kliknięcia ikony ≥ 34 DIP,
+* pasek stanu: pozycja „bieżący/wszystkie” w widoku biblioteki (gra lub pauza: grający utwór; inaczej zaznaczony
+  wiersz; brak utworów: „0/0”), za nią tylko komunikaty wymagające uwagi (błędy, ostrzeżenia, wynik akcji) – udany
+  skan nie zostawia komunikatu („Biblioteka: N utworów…” zastąpiła pozycja), po prawej skrót diagnostyki,
+* nagłówek: tylko „Grajek” (bez podtytułu), lewy panel bez napisu „Biblioteka muzyki · /dane/muzyka”,
 * nagłówki kart z wysokością z czcionki (`Karty::ustaw_zawijanie_naglowkow`) – przy 150 % nie są przycięte,
 * podpowiedzi BursztynUI (`podpowiedz.h`) zawijane i mierzone rzeczywistą czcionką (wcześniej stałe 8 px na bajt i
   16 px na wiersz – ramka węższa i niższa niż tekst TTF z polskimi znakami). Bufor podpowiedzi kontrolki: 63 B.
-Sprawdzane testami hosta z czcionką bitmapową i z TTF przy 980×580, 1080×640, 1280×680, 1280×720, 1920×1040,
-1920×1080 i 1470×870 (150 %).
+Sprawdzane testami hosta z czcionką bitmapową i z TTF przy 1020×580 (minimum), 1080×640, 1280×680, 1280×720,
+1920×1040, 1920×1080 i 1530×870 (150 %).
 
 ## Odtwarzanie w tle
-Opcja „Odtwarzanie w tle”: zamknięcie okna (X lub zdarzenie zamknięcia) minimalizuje je, a muzyka gra dalej;
-okno przywraca się z paska zadań albo z menu Start (pojedyncza instancja – aktywacja istniejącego okna). Przycisk
-„Zakończ” zawsze zatrzymuje muzykę i kończy proces (także Menedżer zadań). Bez tej opcji minimalizacja wstrzymuje
-odtwarzanie, a zamknięcie zamyka strumień PCM i kończy proces. Żadnej usługi systemowej ani podwyższonych praw.
+Przełącznik „Odtwarzanie w tle”: minimalizacja okna nie przerywa muzyki (okno wraca z paska zadań albo z menu
+Start – pojedyncza instancja). Bez tej opcji minimalizacja wstrzymuje odtwarzanie. **X na pasku tytułu zawsze
+zamyka Grajka** (zapis ustawień, zamknięcie strumienia PCM, koniec procesu) – także przy włączonym odtwarzaniu w
+tle; osobny przycisk „Zakończ” został usunięty (dawniej X przy tej opcji tylko chował okno). Żadnej usługi
+systemowej ani podwyższonych praw.
+
+## Przerwy w dźwięku przy korzystaniu z innych aplikacji
+Mikser BWS 110 (HDA/AC97) nie ma własnego wątku: okresy DMA są przygotowywane w punktach kontrolnych jądra
+(wejście/wyjście syscallu, pętla PID 0, pasma BWS 57, kompozytor, oczekiwanie VirtIO-GPU). Ring 0 nie jest
+wywłaszczany, więc pojedynczy długi syscall innej aplikacji wstrzymuje mikser – transport HDA pomija okres (cisza
+21,3 ms), nawet gdy kolejka Grajka jest pełna. Grajek (Ring 3) jest wywłaszczany co tick, więc praca innych
+aplikacji w Ring 3 (dekodowanie zdjęć, rysowanie) nie powoduje sama niedoboru 85 ms kolejki.
+Potwierdzone w kodzie długie pętle **bez** punktu kontrolnego (teraz z punktem w każdej iteracji,
+`jadro/dzwiek/punkt_kontrolny_audio.h`):
+* `bws_alokuj_sterte` – mapowanie i zerowanie stron pojedynczo; Przeglądarka Obrazów alokuje powierzchnię zdjęcia
+  do 72 MiB (18 432 strony) jednym wywołaniem,
+* oczekiwanie na zakończenie żądania VirtIO-BLK (także reset) i AHCI – każdy odczyt z dysku: katalogi, metadane i
+  miniatury Eksploratora, porcje 512 KiB Przeglądarki, strumień MP3 Grajka.
+
+### Kontrakt bezpieczeństwa punktu kontrolnego (audyt 2026-11-26)
+* **Co wykonuje punkt:** `hda_wykonaj_zaplanowana_prace_odroczona()` → `hda_obsluz_okresowo()` /
+  `ac97_obsluz_okresowo()`. Workery działają wyłącznie na pamięci jądra (dane PCM są kopiowane z Ring 3 w BWS 110
+  przed blokadą miksera), MMIO własnego kontrolera i logu szeregowym; nie alokują (DMA przydziela tylko
+  inicjalizacja), nie wołają sterty procesu, PMM, VFS/PSF, VirtIO-BLK, AHCI ani przełączenia kontekstu. Nie ma więc
+  ścieżki z pracy audio z powrotem do pętli z punktem (brak rekursji i cyklu blokad).
+* **Blokady audio są nieblokujące** (try-lock HDA i AC97): zajęta blokada nie czeka, praca zostaje opublikowana.
+* **Walidacja kontekstu** (`PunktKontrolnyAudio::obsluz`), w kolejności: praca opublikowana → IF=1 → brak
+  zagnieżdżenia (flaga `w_toku`) → wolna blokada miksera HDA. Każde odrzucenie to **odroczenie**: znacznik
+  oczekiwania zostaje, wykona go następny punkt (kolejna iteracja, wyjście z syscallu, PID 0).
+* **Miejsce w pętli:** sterta – przed `ZaalokujRamke` (PMM odblokowany, strony [0,i) w pełni zmapowane, granica
+  sterty przesuwana dopiero po pętli); dysk – między odczytami rejestrów/pierścienia (żądanie złożone, urządzenie
+  pracuje samo).
+* **Harmonogram:** sprawdzenie w każdej iteracji (bez pracy: dwa odczyty atomowe), wykonanie tylko po publikacji
+  przez przerwanie zegara (raz na tik, gdy mikser jest używany). Opóźnienie ≤ czas jednej iteracji. Poprzedni
+  licznik „co 16” był lokalny dla każdego żądania dysku i zerował się – seria krótkich żądań w jednym syscallu nie
+  wykonywała pracy wcale (model: 0 wykonań, przerwa 154 ms).
+* **Semantyka urządzeń bez zmian:** VirtIO-BLK przesuwa termin o czas pracy audio (łącznie najwyżej o limit
+  żądania, więc całkowite oczekiwanie ≤ 2× limit); AHCI liczy limit w iteracjach, praca audio nie zużywa prób.
+* **Liczniki:** linia `[HDA-PCM] CHECKPOINTS` w raporcie testów automatycznych (requested, executed, deferred_if0,
+  nested_rejected, deferred_lock, device_deadline_ext_ns); prawdziwe niedobory to `missed_periods` i
+  `safety_silent_periods`.
+
+Bufor BWS 110, scheduler i sterowniki HDA/AC97 bez zmian. Testy: `make -j1 test-punkt-audio-host` (logika, model
+sterty i harmonogramu, produkcyjna pętla AHCI z emulacją rejestrów W1C, kontrola źródeł), `make -j1 test-virtio-pci`
+(VirtIO-BLK: ukończenie i termin z pracą audio), `make -j1 test-splash-production-path` (kompozytor obsługuje
+opublikowaną pracę audio). **Natywnie niezmierzone** – czas pętli w QEMU (TCG) jest modelem; weryfikacja: liczniki
+`bezpieczna_cisza`/`utracone_okresy` i `CHECKPOINTS` przy przeglądaniu zdjęć.
 
 ## Bezpieczeństwo i limity
 * Prawa: `okna`, `pliki_czytaj`, `ustawienia_aplikacji` (bez `pliki_zapisz` – muzyka jest tylko czytana).

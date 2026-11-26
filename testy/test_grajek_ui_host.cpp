@@ -5,6 +5,8 @@
 #include "bursztyn_ui_host_fixture.h"
 #include "grajek_srodowisko_testowe.h"
 #include <cstdio>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <string>
 
 #define private public
@@ -77,7 +79,7 @@ static void test_kontroler() {
     CHECK(o.biblioteka().skanuje());
     kroki_k(o, 20);
     CHECK(!o.biblioteka().skanuje() && o.biblioteka().liczba() == 3);
-    CHECK(o.rodzaj_komunikatu() == RodzajKomunikatu::Sukces && std::strstr(o.komunikat(), "3 utwor"));
+    CHECK(!o.komunikat()[0]);                     // udany skan: bez komunikatu (liczba w etykiecie, pozycja w pasku)
     // kolejnosc widoku: "Bursztynowy test", "Piosenka2 mono", "Żółta łódź"
     CHECK(std::strcmp(o.biblioteka().utwor(uint32_t(o.biblioteka().widoczny(0)))->tytul(), "Bursztynowy test") == 0);
     o.silnik().ustaw_glosnosc(100, false);
@@ -135,7 +137,7 @@ static void test_kontroler() {
     CHECK(o.odtworz_z_kolejki(0)); kroki_k(o, 3);
     o.okno_zminimalizowane(true);
     CHECK(o.silnik().stan() == Stan::Odtwarzanie && !o.silnik().analizator().wlaczony());
-    CHECK(o.przy_zamknieciu() && o.silnik().strumien_otwarty());              // proces zostaje, dzwiek gra
+    CHECK(o.silnik().strumien_otwarty());                                     // w tle: minimalizacja nie przerywa
     o.okno_zminimalizowane(false);
     o.ustaw_w_tle(false);
     o.okno_zminimalizowane(true);
@@ -172,8 +174,7 @@ static void test_magazyn() {
     j.magazyn = 1;
     o.start(); kroki_k(o, 20);
     CHECK(o.biblioteka().liczba() == 3 && o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Trwaly);
-    CHECK(std::strstr(o.komunikat(), "dysku trwałym") && !std::strstr(o.komunikat(), "RAM"));
-    CHECK(o.rodzaj_komunikatu() == RodzajKomunikatu::Sukces);
+    CHECK(!o.komunikat()[0]);                     // trwaly dysk i brak problemow: nic do zgloszenia
     j.magazyn = 2;
     o.odswiez_biblioteke(); kroki_k(o, 20);
     CHECK(o.rodzaj_magazynu() == Odtwarzacz::RodzajMagazynu::Ram);
@@ -202,12 +203,19 @@ static void test_okno() {
     CHECK(o->pasma_[0]->wartosc() == 6 && std::strcmp(o->db_pasm_->tekst_pasma(0), "+6") == 0);
     kroki(*o, 25);
     CHECK(o->bib_->liczba_wierszy() == 3 && std::strstr(o->stan_bib_->tekst(), "3 z 3"));
-    CHECK(o->komunikat_->czy_widoczna() && o->komunikat_->tekst()[0] && std::strstr(o->komunikat_->tekst(), "3 utwor"));
+    // pasek stanu: zamiast podsumowania biblioteki pozycja "zaznaczony/wszystkie" (nic nie gra: zaznaczony wiersz 0)
+    CHECK(o->komunikat_->czy_widoczna() && !o->komunikat_->tekst()[0] && std::strcmp(o->komunikat_->pozycja(), "1/3") == 0);
+    CHECK(!std::strstr(o->komunikat_->tekst(), "Biblioteka") && !std::strstr(o->komunikat_->tekst(), "dysku"));
+    o->bib_->ustaw_wybrany_wiersz(2); kroki(*o, 1);
+    CHECK(std::strcmp(o->komunikat_->pozycja(), "3/3") == 0);
     { KontekstRysowania c; o->rysuj(c, false); }
     // dwuklik na "Piosenka2 mono" (wiersz 1) -> laduje i gra
     dwuklik(*o->bib_, 1);
     kroki(*o, 3);
     CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie && std::strcmp(o->tytul_->tekst(), "Piosenka2 mono") == 0);
+    CHECK(std::strcmp(o->komunikat_->pozycja(), "2/3") == 0);                // gra: numer grajacego utworu
+    o->bib_->ustaw_wybrany_wiersz(0); kroki(*o, 1);
+    CHECK(std::strcmp(o->komunikat_->pozycja(), "2/3") == 0);                // zaznaczenie nie zmienia pozycji grajacego
     CHECK(std::strstr(o->format_->tekst(), "WAV · 16 bit") && std::strstr(o->format_->tekst(), "mono"));
     CHECK(j.gain_ost_v == 55);
     // jeden przycisk Odtworz/Pauza: podczas odtwarzania ikona pauzy (grafika uzytkownika), wlaczony
@@ -252,14 +260,27 @@ static void test_okno() {
     CHECK(o->o_.silnik().korektor().wzmocnienie(5) == 9 && o->preset_->wybrany_indeks() == int(PresetKorektora::Wlasny));
     klik(*o->korektor_); kroki(*o, 1);
     CHECK(!o->o_.silnik().korektor().wlaczony() && !o->pasma_[0]->czy_wlaczona());
-    // losowo i powtarzanie
-    klik(*o->losowo_); CHECK(o->o_.konfiguracja().losowo && o->o_.kolejka().losowo());
-    klik(*o->powtarzanie_); kroki(*o, 1); CHECK(std::strcmp(o->powtarzanie_->tekst(), "Powtarzanie: utwór") == 0);
+    // losowo i powtarzanie: przelaczniki z ikonami (stan = zaznaczenie kafla, opis w podpowiedzi)
+    CHECK(!o->losowo_->czy_zaznaczony() && std::strstr(o->losowo_->podpowiedz(), "wyłączona"));
+    klik(*o->losowo_); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().losowo && o->o_.kolejka().losowo() && o->losowo_->czy_zaznaczony());
+    CHECK(std::strstr(o->losowo_->podpowiedz(), "włączona"));
+    CHECK(o->powtarzanie_->obraz_ikony() == &o->ikony_[IK_POWTARZANIE] && !o->powtarzanie_->czy_zaznaczony());
+    klik(*o->powtarzanie_); kroki(*o, 1);
+    CHECK(std::strcmp(o->powtarzanie_->tekst(), "Powtarzanie: utwór") == 0 && o->powtarzanie_->czy_zaznaczony());
+    CHECK(o->powtarzanie_->obraz_ikony() == &o->ikony_[IK_POWTARZANIE_JEDEN] && std::strstr(o->powtarzanie_->podpowiedz(), "utwór"));
+    klik(*o->powtarzanie_); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().powtarzanie == Powtarzanie::Wszystkie && o->powtarzanie_->obraz_ikony() == &o->ikony_[IK_POWTARZANIE]);
+    klik(*o->powtarzanie_); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().powtarzanie == Powtarzanie::Brak && !o->powtarzanie_->czy_zaznaczony());
+    klik(*o->powtarzanie_); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().powtarzanie == Powtarzanie::Jeden);
     // wizualizacja: z rzeczywistych probek, wylaczana
     kroki(*o, 40);
     { KontekstRysowania c; o->rysuj(c, false); }
+    CHECK(o->wizualizacja_->czy_zaznaczony());
     klik(*o->wizualizacja_); kroki(*o, 1);
-    CHECK(!o->o_.silnik().analizator().wlaczony() && !o->wiz_->aktywna_);
+    CHECK(!o->o_.silnik().analizator().wlaczony() && !o->wiz_->aktywna_ && !o->wizualizacja_->czy_zaznaczony());
     // wyszukiwanie
     o->o_.filtruj("żółta"); kroki(*o, 1);
     CHECK(o->bib_->liczba_wierszy() == 1);
@@ -271,13 +292,12 @@ static void test_okno() {
     o->kol_->ustaw_wybrany_wiersz(przed); o->przesun_zaznaczony(-1);
     CHECK(o->kol_->wybrany_wiersz() == przed - 1);
     CHECK(o->o_.usun_z_kolejki(przed - 1) && o->o_.kolejka().liczba() == przed);
-    // odtwarzanie w tle: zamkniecie okna minimalizuje, muzyka gra dalej
+    // odtwarzanie w tle (przelacznik z ikona): minimalizacja nie przerywa muzyki
     klik(*o->w_tle_); kroki(*o, 1);
-    CHECK(o->o_.konfiguracja().w_tle);
+    CHECK(o->o_.konfiguracja().w_tle && o->w_tle_->czy_zaznaczony() && std::strstr(o->w_tle_->podpowiedz(), "gra po"));
     if (o->o_.silnik().stan() != Stan::Odtwarzanie) { o->o_.odtworz(); kroki(*o, 2); }
-    o->zamknij();
+    o->minimalizuj(); kroki(*o, 10);
     CHECK(o->czy_zminimalizowane() && o->o_.silnik().strumien_otwarty());
-    kroki(*o, 10);
     CHECK(o->o_.silnik().stan() == Stan::Odtwarzanie || o->o_.silnik().stan() == Stan::Ladowanie || o->o_.silnik().stan() == Stan::Zatrzymany);
     { bws_zdarzenie ev{}; ev.typ = BWS_ZDARZENIE_FOCUS; o->obsluz_zdarzenie(ev); }
     CHECK(!o->czy_zminimalizowane());
@@ -489,7 +509,7 @@ static void test_odrysowania_i_uklad() {
 
     // (G) uklad: rozmiary (minimalny, domyslny, zmaksymalizowany, duzy) i skala 150 %, wszystkie karty
     int szer_bib_poprz = 0;
-    struct R { int w, h, skala; } rozmiary[] = {{980, 580, 100}, {1080, 640, 100}, {1280, 680, 100}, {1920, 1040, 100}, {1470, 870, 150}};
+    struct R { int w, h, skala; } rozmiary[] = {{OknoGrajka::MIN_SZEROKOSC, OknoGrajka::MIN_WYSOKOSC, 100}, {1080, 640, 100}, {1280, 680, 100}, {1920, 1040, 100}, {OknoGrajka::MIN_SZEROKOSC * 3 / 2, 870, 150}};
     for (const R& r : rozmiary) {
         GrajekUklad::sprawdz_uklad(o, r.w, r.h, r.skala);
         if (r.skala == 100) { CHECK(o->bib_->obszar().szerokosc >= szer_bib_poprz); szer_bib_poprz = o->bib_->obszar().szerokosc; }
@@ -574,8 +594,10 @@ static void test_ikony_i_grafiki() {
         {o->przyciski_kolejki_[1], IK_W_DOL}, {o->przyciski_kolejki_[2], IK_USUN}, {o->przyciski_kolejki_[3], IK_WYCZYSC},
         {o->przyciski_kolejki_[4], IK_ZAPISZ}, {o->przyciski_kolejki_[5], IK_WCZYTAJ}};
     for (auto& m : mapa) CHECK(m.b->obraz_ikony() == &o->ikony_[m.ik] && m.b->uzywa_ikony() && m.b->podpowiedz()[0] && std::strlen(m.b->podpowiedz()) < 63);
-    // akcje bez grafiki uzytkownika pozostaja tekstowe
-    CHECK(std::strcmp(o->zakoncz_->tekst(), "Zakończ") == 0 && std::strstr(o->powtarzanie_->tekst(), "Powtarzanie"));
+    // przelaczniki: ikony PNG (styl grafik uzytkownika), nazwa akcji zostaje tekstem (dostepnosc, brak pliku)
+    struct { PrzyciskIkony* b; int ik; } przel[] = {{o->losowo_, IK_LOSOWO}, {o->powtarzanie_, IK_POWTARZANIE}, {o->w_tle_, IK_W_TLE}, {o->wizualizacja_, IK_WIZUALIZACJA}};
+    for (auto& m : przel) CHECK(m.b->obraz_ikony() == &o->ikony_[m.ik] && m.b->uzywa_ikony() && m.b->podpowiedz()[0] && std::strlen(m.b->podpowiedz()) < 63);
+    CHECK(std::strstr(o->powtarzanie_->tekst(), "Powtarzanie") && std::strcmp(o->losowo_->tekst(), "Losowo") == 0);
     // (2) plyta: zdekodowana raz (przy starcie), okladka skalowana raz na rozmiar kontrolki - nie w kazdej klatce
     CHECK(o->plyta_.jest() && o->plyta_.dekodowania() == 1 && o->plyta_.szerokosc() == GrafikaPlyty::BOK_POSREDNI);
     CHECK(o->okladka_->czy_ma_obraz() && o->okladka_->piksele_wyswietlane());
@@ -900,6 +922,184 @@ static void test_otwieranie_pliku() {
     std::printf("otwieranie pliku z systemu OK\n");
 }
 
+// Lista presetow korektora: dawniej otwierala sie i od razu zamykala - podpowiedz (kontrolki pod lista albo samej
+// listy) po 500 ms otwierala sie przez ZarzadcaPopupow::otworz, ktory zamyka WSZYSTKIE popupy. Teraz lista zostaje
+// otwarta przy ruchu i postoju kursora (takze dluzej niz opoznienie podpowiedzi), wybor mysza i klawiatura dziala.
+static void zdarzenie_myszy(OknoGrajka& o, uint32_t typ, int x, int y) {
+    bws_zdarzenie e{}; e.typ = typ; e.x = x; e.y = y; e.przyciski = (typ == BWS_ZDARZENIE_MYSZ_DOWN) ? 1 : 0;
+    e.timestamp = test_monotonic_ns / 1000000ULL;
+    o.obsluz_zdarzenie(e);
+}
+static void klawisz(Kontrolka& k, uint32_t kod) {
+    ZdarzenieKlawiatury e{}; e.kod_klawisza = kod; e.kod_skanu = KLAWISZ_FIZYCZNY_GUI;
+    k.obsluz_wcisniecie_klawisza(e);
+}
+static void test_lista_presetow() {
+    Jadro j; g_j = &j;
+    przygotuj_muzyke();
+    g_ustawienia.clear();
+    g_ustawienia[KLUCZ_KONFIGURACJI] = "korektor=1\n";
+    auto* o = new OknoGrajka;
+    o->init(platforma());
+    o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    o->karty_->ustaw_aktywna_karte(1); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    kroki(*o, 25);
+    ListaRozwijana* l = o->preset_;
+    CHECK(l->czy_wlaczona() && l->wybrany_indeks() == int(PresetKorektora::Plaski) && !l->czy_rozwinieta());
+    const Prostokat r = l->obszar_ekranu();
+    const int px = r.x + r.szerokosc - 10, py = r.y + r.wysokosc / 2;   // przycisk strzalki
+    // (1) mysz: klik otwiera; kursor stoi nad lista 3 s i jezdzi po niej - lista zostaje otwarta
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_RUCH, px, py); kroki(*o, 1);
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_DOWN, px, py);
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_UP, px, py);
+    CHECK(l->czy_rozwinieta());
+    for (int i = 0; i < 750; ++i) {                                  // 3 s ticków po 4 ms, kursor nad strzalka
+        kroki(*o, 1);
+        if (i % 50 == 0) { KontekstRysowania c; o->rysuj(c); }
+    }
+    CHECK(l->czy_rozwinieta() && !o->podpowiedzi_.czy_widoczna());
+    const Prostokat pl = l->prostokat_popupu();
+    CHECK(pl.szerokosc > 0 && pl.wysokosc > 0);
+    for (int i = 0; i < 40; ++i) {                                   // ruch po elementach listy (pod nia sa suwaki z podpowiedziami)
+        zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_RUCH, pl.x + pl.szerokosc / 2, pl.y + 4 + (i * pl.wysokosc) / 48);
+        kroki(*o, 30);
+        CHECK(l->czy_rozwinieta());
+    }
+    CHECK(!o->podpowiedzi_.czy_widoczna());
+    // klik w element: wybor zastosowany w korektorze, lista zamknieta, bez zmiany innych ustawien
+    const int wiersz = int(PresetKorektora::Rock);
+    const ListaWyboru& lw = l->lista_popupu();
+    CHECK(int(PresetKorektora::Liczba) <= l->maks_widocznych_elementow());   // bez przewijania listy
+    const int hw = lw.wysokosc_wiersza_piksele();
+    const int iy = lw.obszar_ekranu().y + (lw.wysokosc_dla_wierszy(1) - hw) / 2 + wiersz * hw + hw / 2;
+    CHECK(iy >= pl.y && iy < pl.dolny());
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_RUCH, pl.x + pl.szerokosc / 2, iy);
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_DOWN, pl.x + pl.szerokosc / 2, iy);
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_UP, pl.x + pl.szerokosc / 2, iy);
+    kroki(*o, 2);
+    CHECK(!l->czy_rozwinieta() && l->wybrany_indeks() == wiersz);
+    CHECK(o->o_.silnik().korektor().rozpoznaj_preset() == PresetKorektora::Rock && o->pasma_[9]->wartosc() == 4);
+    // (2) klik poza lista zamyka ja bez zmiany wyboru
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_DOWN, px, py); zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_UP, px, py);
+    CHECK(l->czy_rozwinieta());
+    const Prostokat t = o->tytul_->obszar_ekranu();
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_DOWN, t.x + 4, t.y + 4); zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_UP, t.x + 4, t.y + 4);
+    CHECK(!l->czy_rozwinieta() && l->wybrany_indeks() == wiersz);
+    // (3) klawiatura: Enter otwiera, strzalki wybieraja, Enter zatwierdza; Esc nie zmienia
+    klawisz(*l, 13); CHECK(l->czy_rozwinieta());
+    kroki(*o, 300); CHECK(l->czy_rozwinieta());
+    klawisz(*l, 0x50); klawisz(*l, 0x50);                           // dwa w dol (podglad stosowany na biezaco)
+    CHECK(l->czy_rozwinieta() && o->o_.silnik().korektor().rozpoznaj_preset() == PresetKorektora(wiersz + 2));
+    klawisz(*l, 13); kroki(*o, 1);
+    CHECK(!l->czy_rozwinieta() && l->wybrany_indeks() == wiersz + 2);
+    CHECK(o->o_.silnik().korektor().rozpoznaj_preset() == PresetKorektora(wiersz + 2));
+    klawisz(*l, 13); CHECK(l->czy_rozwinieta());
+    klawisz(*l, 0x48); kroki(*o, 50);                                // podglad poprzedniego presetu, lista nadal otwarta
+    CHECK(l->czy_rozwinieta() && o->o_.silnik().korektor().rozpoznaj_preset() == PresetKorektora(wiersz + 1));
+    l->zwin(); kroki(*o, 1);                                         // anulowanie (Esc / klik poza): wybor i korektor przywrocone
+    CHECK(!l->czy_rozwinieta() && l->wybrany_indeks() == wiersz + 2);
+    CHECK(o->o_.silnik().korektor().rozpoznaj_preset() == PresetKorektora(wiersz + 2));
+    // (4) podpowiedz po zamknieciu listy nadal dziala (nie zostala zablokowana)
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_RUCH, px - 30, py);
+    for (int i = 0; i < 200; ++i) kroki(*o, 1);
+    CHECK(o->podpowiedzi_.czy_widoczna());
+    // (5) otwarta podpowiedz nie przeszkadza: klik otwiera liste, podpowiedz znika, lista zostaje
+    zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_DOWN, px, py); zdarzenie_myszy(*o, BWS_ZDARZENIE_MYSZ_UP, px, py);
+    CHECK(l->czy_rozwinieta() && !o->podpowiedzi_.czy_widoczna());
+    for (int i = 0; i < 300; ++i) kroki(*o, 1);
+    CHECK(l->czy_rozwinieta());
+    l->zwin();
+    o->o_.zakoncz(); delete o;
+}
+
+// Dolny pasek: bez "Zakończ" (zamyka tylko X) i bez pola "Diagnostyka" (karta Ustawienia); przelaczniki z ikonami
+// dzialaja mysza i klawiatura (Spacja / Enter), X zamyka Grajka takze przy wlaczonym odtwarzaniu w tle.
+static OknoGrajka* g_okno_x = nullptr;
+static Jadro* g_jadro_x = nullptr;
+static void szukaj_tekstu(Kontrolka* k, const char* t, int* n) {
+    if (!k) return;
+    if (k->tekst() && std::strcmp(k->tekst(), t) == 0) ++*n;
+    for (size_t i = 0; i < k->liczba_dzieci(); ++i) szukaj_tekstu(k->dziecko(i), t, n);
+}
+static void test_pasek_i_ustawienia() {
+    Jadro j; g_j = &j;
+    przygotuj_muzyke();
+    g_ustawienia.clear();
+    auto* o = new OknoGrajka;
+    o->init(platforma());
+    o->ustaw_geometrie(0, 0, 1180, 660); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    kroki(*o, 25);
+    // usuniete teksty i kontrolki
+    const char* usuniete[] = {"Zakończ", "Odtwarzacz muzyki Bursztyn OS", "Biblioteka muzyki · /dane/muzyka", "Diagnostyka"};
+    for (const char* t : usuniete) {
+        int n = 0;
+        szukaj_tekstu(o->kontrolka_glowna(), t, &n);
+        CHECK(n == (std::strcmp(t, "Diagnostyka") == 0 ? 1 : 0));    // "Diagnostyka" zostaje tylko jako naglowek w Ustawieniach
+    }
+    // karta Ustawienia z polem pomiaru (to samo zachowanie co dawne pole w pasku)
+    CHECK(o->karty_->liczba_kart() == 4 && OknoGrajka::KARTA_USTAWIEN == 3);
+    { int n = 0; szukaj_tekstu(o->kontrolka_glowna(), "Ustawienia", &n); CHECK(n == 0); }   // tytul karty jest w Karty, nie w kontrolce
+    o->karty_->ustaw_aktywna_karte(OknoGrajka::KARTA_USTAWIEN); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    CHECK(!o->o_.konfiguracja().diagnostyka && !o->diagnostyka_->czy_zaznaczone());
+    klik(*o->diagnostyka_); kroki(*o, 300);
+    CHECK(o->o_.konfiguracja().diagnostyka && g_profiler.wlaczony() && std::strstr(o->komunikat_->skrot(), "Niedobór"));
+    klik(*o->diagnostyka_); kroki(*o, 2);
+    CHECK(!o->o_.konfiguracja().diagnostyka && !o->komunikat_->skrot()[0]);
+    o->o_.ustaw_diagnostyke(true); kroki(*o, 1);                     // zmiana z innego zrodla: pole zsynchronizowane
+    CHECK(o->diagnostyka_->czy_zaznaczone());
+    o->o_.ustaw_diagnostyke(false); kroki(*o, 1);
+    o->karty_->ustaw_aktywna_karte(0); o->przelicz_uklad();
+    // przelaczniki klawiatura: Spacja i Enter (fokus na przycisku)
+    PrzyciskIkony* przel[] = {o->losowo_, o->w_tle_, o->wizualizacja_};
+    for (PrzyciskIkony* b : przel) CHECK(b->czy_moze_miec_fokus());
+    const bool w0 = o->o_.konfiguracja().wizualizacja;
+    klawisz(*o->losowo_, 32); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().losowo && o->losowo_->czy_zaznaczony());
+    klawisz(*o->losowo_, 13); kroki(*o, 1);
+    CHECK(!o->o_.konfiguracja().losowo && !o->losowo_->czy_zaznaczony());
+    klawisz(*o->wizualizacja_, 32); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().wizualizacja == !w0 && o->wizualizacja_->czy_zaznaczony() == !w0);
+    klawisz(*o->powtarzanie_, 32); kroki(*o, 1);
+    CHECK(o->o_.konfiguracja().powtarzanie == Powtarzanie::Jeden);
+    // stany wizualne przelacznika: zaznaczony = powierzchnia + stonowana ramka; wylaczony = bez tla (przygaszona ikona)
+    {
+        auto st = o->losowo_->styl_stanu();
+        CHECK(!st.tlo && !st.ramka);
+        o->losowo_->ustaw_zaznaczony(true); st = o->losowo_->styl_stanu();
+        CHECK(st.tlo && st.ramka && st.grubosc == 1);
+        o->losowo_->ustaw_wlaczona(false); st = o->losowo_->styl_stanu();
+        CHECK(!st.tlo && !st.ramka);
+        o->losowo_->ustaw_wlaczona(true);
+        o->o_.ustaw_losowo(false); kroki(*o, 1);
+        CHECK(!o->losowo_->czy_zaznaczony());
+    }
+    // X przy wlaczonym odtwarzaniu w tle: Grajek konczy sie (strumien zamkniety), nie chowa sie do paska.
+    // Okno::zamknij konczy aplikacje (host: exit(0)), wiec sprawdzenie w procesie potomnym, w haku atexit.
+    o->o_.ustaw_w_tle(true); kroki(*o, 1);
+    CHECK(o->o_.odtworz_z_widoku(0)); kroki(*o, 5);
+    CHECK(o->o_.silnik().strumien_otwarty());
+    std::fflush(nullptr);
+    const pid_t pid = fork();
+    CHECK(pid >= 0);
+    if (pid == 0) {
+        g_okno_x = o; g_jadro_x = &j;
+        std::atexit([] {
+            const bool ok = !g_okno_x->o_.silnik().strumien_otwarty() && !g_jadro_x->mikser->has_pcm() && !g_okno_x->czy_zminimalizowane() &&
+                            g_ustawienia[KLUCZ_KONFIGURACJI].find("w_tle=1") != std::string::npos;   // ustawienia zapisane przy X
+            _exit(ok ? 42 : 43);
+        });
+        o->zamknij();
+        _exit(44);                                                      // zamknij() nie zakonczyl aplikacji
+    }
+    int status = 0;
+    CHECK(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 42);
+    o->o_.zakoncz();
+    delete o;
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_kontroler(); std::printf("kontroler OK\n");
@@ -909,6 +1109,8 @@ int main() {
     test_odrysowania_i_uklad(); std::printf("odrysowania i uklad OK\n");
     test_ikony_i_grafiki(); std::printf("ikony i grafiki uzytkownika OK\n");
     test_otwieranie_pliku();
+    test_lista_presetow(); std::printf("lista presetow korektora OK\n");
+    test_pasek_i_ustawienia(); std::printf("pasek sterowania i karta Ustawienia OK\n");
     std::printf("Grajek UI: %u sprawdzen OK\n", g_checks);
     return 0;
 }

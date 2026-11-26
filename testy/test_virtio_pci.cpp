@@ -39,6 +39,7 @@
 #include "virtqueue.h"
 #include "virtio_rng.h"
 #include "virtio_blk.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"   // host: model punktu przez g_host_punkt
 #include "virtio_net.h"
 #include "virtio_gpu.h"
 #include "prezentacja_startu.h"
@@ -3312,6 +3313,104 @@ void test_virtio_blk_timeout_and_reset() {
     TEST_ASSERT(!drv->initialized, "Sterownik oznaczony jako nieaktywny po timeout");
 
     virtio_blk_reset_all();
+}
+
+// ----------------------------------------------------------------------------
+// 61a. VirtIO-BLK + punkt kontrolny audio (jadro/dzwiek/punkt_kontrolny_audio.h): punkt w kazdej iteracji
+//      oczekiwania, urzadzenie konczy zadanie w trakcie odpytywania; dane, liczniki i wynik bez zmian. Czas
+//      pracy audio nie skraca limitu urzadzenia (termin przesuwany, lacznie najwyzej o limit), a czas, ktory
+//      NIE jest praca audio, nadal sie liczy - prawdziwy brak odpowiedzi konczy sie Timeout.
+// ----------------------------------------------------------------------------
+namespace punkt_audio_blk {
+uint64_t wywolania = 0, ukoncz_przy = 0, koszt_ns = 0;
+bool jako_praca = true;
+struct Srodowisko {
+    bool praca_oczekuje() const { return true; }
+    bool przerwania_wlaczone() const { return true; }
+    bool blokada_audio_zajeta() const { return false; }
+    void wykonaj() const { g_host_mock_time_ns += koszt_ns; }   // "mikser" zajmuje procesor przez koszt_ns
+};
+PunktKontrolnyAudio::Wynik punkt() {
+    ++wywolania;
+    if (ukoncz_przy && wywolania == ukoncz_przy) {
+        VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+        g_mock.blk_skip_reply = false;   // urzadzenie konczy zadanie miedzy iteracjami petli
+        host_mmio_write16(virtio_pci_notify_address(drv->dev, drv->vq->queue_notify_off), 0);
+    }
+    if (!jako_praca) { g_host_mock_time_ns += koszt_ns; return PunktKontrolnyAudio::Wynik::BrakPracy; }
+    Srodowisko s;
+    return PunktKontrolnyAudio::obsluz(s, PunktKontrolnyAudio::g_statystyki, PunktKontrolnyAudio::g_w_toku);
+}
+void ustaw(uint64_t ukoncz, uint64_t koszt, bool praca) {
+    wywolania = 0; ukoncz_przy = ukoncz; koszt_ns = koszt; jako_praca = praca;
+    PunktKontrolnyAudio::g_host_punkt = punkt;
+}
+} // namespace punkt_audio_blk
+
+void test_virtio_blk_punkt_audio_ukonczenie() {
+    for (bool msix : {false, true}) {
+        virtio_blk_reset_all();
+        VirtioPciDevice dev{};
+        TEST_ASSERT(msix ? setup_mock_blk_device_msix(&dev) : setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+        TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+        VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+        TEST_ASSERT(drv && drv->use_msix == msix, "Tryb powiadomien zgodny z konfiguracja");
+        if (msix) {   // urzadzenie MSI-X w tym mocku nie ma danych dysku - wystarczy semantyka ukonczenia
+            g_mock.blk_disk_data.assign(2048 * 512, 0);
+            g_mock.blk_auto_process = true;
+        }
+        uint8_t wbuf[1024];
+        for (size_t i = 0; i < sizeof(wbuf); ++i) wbuf[i] = static_cast<uint8_t>(i * 7 + 3);
+        g_mock.blk_skip_reply = true;
+        punkt_audio_blk::ustaw(25, 0, true);
+        TEST_ASSERT(drv->bdev.write(20, 2, wbuf) == BlockError::Ok, "Zapis konczy sie po pracy audio w petli");
+        TEST_ASSERT(punkt_audio_blk::wywolania == 25, "Punkt audio w kazdej iteracji oczekiwania na zapis");
+        g_mock.blk_skip_reply = true;
+        punkt_audio_blk::ustaw(3, 0, true);
+        uint8_t rbuf[1024]{};
+        TEST_ASSERT(drv->bdev.read(20, 2, rbuf) == BlockError::Ok, "Odczyt konczy sie po pracy audio w petli");
+        TEST_ASSERT(std::memcmp(wbuf, rbuf, sizeof(wbuf)) == 0, "Dane po readbacku identyczne");
+        TEST_ASSERT(drv->total_writes == 1 && drv->total_reads == 1 && drv->initialized && !drv->has_error,
+                    "Liczniki i stan sterownika jak bez audio");
+        PunktKontrolnyAudio::g_host_punkt = nullptr;
+        virtio_blk_reset_all();
+    }
+    TEST_ASSERT(!PunktKontrolnyAudio::g_w_toku, "Flaga punktu zwolniona");
+}
+
+void test_virtio_blk_punkt_audio_termin() {
+    struct Przypadek { uint64_t ukoncz; bool praca; BlockError wynik; const char* opis; };
+    // Kazde wywolanie punktu zajmuje 2 s; limit zadania 5 s. 3 x 2 s = 6 s przed ukonczeniem przy 4. punkcie.
+    const Przypadek przypadki[] = {
+        {4, true, BlockError::Ok, "2 s pracy audio na punkt: urzadzenie zachowuje pelny limit (Ok)"},
+        {4, false, BlockError::Timeout, "ten sam czas, ale nie praca audio: limit sie liczy (Timeout)"},
+        {6, true, BlockError::Timeout, "przedluzenie lacznie najwyzej o limit: 10 s pracy -> Timeout"},
+    };
+    for (const auto& p : przypadki) {
+        virtio_blk_reset_all();
+        VirtioPciDevice dev{};
+        TEST_ASSERT(setup_mock_blk_device(&dev, 2048, 512), "Probe dysku");
+        TEST_ASSERT(virtio_blk_init(&dev), "Inicjalizacja dysku");
+        VirtioBlkDriver* drv = virtio_blk_get_driver(0);
+        g_host_use_mock_time = true;
+        g_host_mock_time_ns = 1000000000ULL;
+        g_host_mock_step_ns = 1000;
+        const auto przed = PunktKontrolnyAudio::statystyki().przedluzenia_terminu_ns;
+        g_mock.blk_skip_reply = true;
+        punkt_audio_blk::ustaw(p.ukoncz, 2000000000ULL, p.praca);
+        uint8_t buf[512]{};
+        const BlockError e = drv->bdev.read(0, 1, buf);
+        PunktKontrolnyAudio::g_host_punkt = nullptr;
+        const auto dodane = PunktKontrolnyAudio::statystyki().przedluzenia_terminu_ns - przed;
+        TEST_ASSERT(e == p.wynik, p.opis);
+        TEST_ASSERT(p.praca ? dodane == VIRTIO_BLK_DEFAULT_TIMEOUT_MS * 1000000ULL : dodane == 0,
+                    "Przedluzenie terminu zapisane w statystykach i ograniczone limitem");
+        TEST_ASSERT(p.wynik == BlockError::Ok ? drv->initialized : !drv->initialized,
+                    "Stan sterownika po zadaniu zgodny z wynikiem");
+        g_host_use_mock_time = false;
+        g_host_mock_step_ns = 0;
+        virtio_blk_reset_all();
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -7445,6 +7544,8 @@ int main() {
     RUN_TEST(test_virtio_blk_unsupported_status);
     RUN_TEST(test_virtio_blk_bounds_and_overflow);
     RUN_TEST(test_virtio_blk_timeout_and_reset);
+    RUN_TEST(test_virtio_blk_punkt_audio_ukonczenie);
+    RUN_TEST(test_virtio_blk_punkt_audio_termin);
     RUN_TEST(test_virtio_blk_invalid_used_len_rejected);
     RUN_TEST(test_virtio_blk_short_read_logged);
     RUN_TEST(test_virtio_blk_invalid_desc_id_rejected);

@@ -28,13 +28,20 @@ def extract_boot_install():
     kernel = (ROOT / "jadro/rdzen/kernel.cpp").read_text()
     globals_ = kernel[kernel.index("bool scisla_instalacja="):
                       kernel.index("bool sciezka_ma_poczatek(")]
-    names = ["dlugosc_tekstu_u32", "pobierz_rozmiar_bloba", "zapisz_plik_od_nowa_impl",
-             "zapisz_plik_od_nowa", "rozpakuj_blob", "zapisz_blob_bur", "zapisz_manifest", "instaluj_paczke"]
+    # Since 08c03ba the installer globals use the shared file-control module (jadro/gui/instalacja_plikow.h),
+    # and zapisz_plik_od_nowa/zapisz_blob_bur delegate to planuj_plik (stepwise SYSTEMFILES plan), which reports
+    # through zglos_blad_instalacji. All of them are extracted verbatim, in kernel.cpp order.
+    names = ["dlugosc_tekstu_u32", "pobierz_rozmiar_bloba", "zglos_blad_instalacji", "zapisz_plik_od_nowa_impl",
+             "planuj_plik", "zapisz_plik_od_nowa", "rozpakuj_blob", "zapisz_blob_bur", "zapisz_manifest",
+             "instaluj_paczke"]
+    include = re.search(r'^#include "jadro/gui/instalacja_plikow\.h"$', kernel, re.M)
+    if not include:
+        raise RuntimeError("kernel.cpp no longer includes jadro/gui/instalacja_plikow.h")
     manifest = re.search(r"static const char MANIFEST_TEST_DZWIEKU\[\] =.*?;", kernel, re.S)[0]
     call = re.search(r'instaluj_paczke\(\s*"/programy/test_dzwieku\.cebula/opis\.aplikacji".*?\)',
                      kernel, re.S)[0]
     call = re.sub(r"_binary_test_dzwieku_bin(?:_bz)?_(start|end)", r"\1", call)
-    (OUT / "package_actual.inc").write_text(globals_ + "\n" + "\n".join(
+    (OUT / "package_actual.inc").write_text(include[0] + "\n" + globals_ + "\n" + "\n".join(
         function(kernel, name) for name in names) + "\n" + manifest +
         "\nstatic bool boot_install(const uint8_t* start, const uint8_t* end) { return " + call + "; }\n")
 

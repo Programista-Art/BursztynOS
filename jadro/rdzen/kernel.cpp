@@ -211,6 +211,11 @@ GRAJEK_ZASOB(usun)
 GRAJEK_ZASOB(wyczysc)
 GRAJEK_ZASOB(zapisz)
 GRAJEK_ZASOB(wczytaj)
+GRAJEK_ZASOB(losowo)
+GRAJEK_ZASOB(powtarzanie)
+GRAJEK_ZASOB(powtarzanie_jeden)
+GRAJEK_ZASOB(w_tle)
+GRAJEK_ZASOB(wizualizacja)
 #undef GRAJEK_ZASOB
 extern "C" uint8_t _binary_ikonki_plyta_winylowa_jpg_start[], _binary_ikonki_plyta_winylowa_jpg_end[];
 extern "C" uint8_t _binary_ikonki_app_shell_png_start[], _binary_ikonki_app_shell_png_end[];
@@ -1781,6 +1786,11 @@ void instaluj_wbudowane_programy() {
         {"/ikonki/grajek_wyczysc.png",_binary_grajek_zasoby_grajek_wyczysc_png_start,_binary_grajek_zasoby_grajek_wyczysc_png_end},
         {"/ikonki/grajek_zapisz.png",_binary_grajek_zasoby_grajek_zapisz_png_start,_binary_grajek_zasoby_grajek_zapisz_png_end},
         {"/ikonki/grajek_wczytaj.png",_binary_grajek_zasoby_grajek_wczytaj_png_start,_binary_grajek_zasoby_grajek_wczytaj_png_end},
+        {"/ikonki/grajek_losowo.png",_binary_grajek_zasoby_grajek_losowo_png_start,_binary_grajek_zasoby_grajek_losowo_png_end},
+        {"/ikonki/grajek_powtarzanie.png",_binary_grajek_zasoby_grajek_powtarzanie_png_start,_binary_grajek_zasoby_grajek_powtarzanie_png_end},
+        {"/ikonki/grajek_powtarzanie_jeden.png",_binary_grajek_zasoby_grajek_powtarzanie_jeden_png_start,_binary_grajek_zasoby_grajek_powtarzanie_jeden_png_end},
+        {"/ikonki/grajek_w_tle.png",_binary_grajek_zasoby_grajek_w_tle_png_start,_binary_grajek_zasoby_grajek_w_tle_png_end},
+        {"/ikonki/grajek_wizualizacja.png",_binary_grajek_zasoby_grajek_wizualizacja_png_start,_binary_grajek_zasoby_grajek_wizualizacja_png_end},
         {"/ikonki/grajek_plyta_winylowa.jpg",_binary_ikonki_plyta_winylowa_jpg_start,_binary_ikonki_plyta_winylowa_jpg_end},
     };
     for(const auto& asset:power_assets){

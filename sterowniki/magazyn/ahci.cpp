@@ -1,4 +1,5 @@
 #include "diagnostyka_systemu.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"
 /*
  * Bursztyn OS - sterownik AHCI 1.x (SATA)
  *
@@ -249,13 +250,20 @@ constexpr uint32_t TIMEOUT_DEVICE_DETECT =
  * 3. REJESTRY MMIO AHCI
  * ========================================================================= */
 
+#ifdef BURSZTYN_AHCI_HOST_TEST
+#include "testy/ahci_rejestr_w1c_host.h"
+using RejestrW1C = AhciRejestrW1CHost;   // test hosta: emulacja "zapis jedynki kasuje bit" (PxIS, PxSERR)
+#else
+using RejestrW1C = uint32_t;             // sprzet: zwykly rejestr MMIO (kod maszynowy bez zmian)
+#endif
+
 struct PortAHCI {
     uint32_t clb;       /* 0x00 Command List Base Address */
     uint32_t clbu;      /* 0x04 */
     uint32_t fb;        /* 0x08 FIS Base Address */
     uint32_t fbu;       /* 0x0C */
 
-    uint32_t is;        /* 0x10 Interrupt Status */
+    RejestrW1C is;      /* 0x10 Interrupt Status (W1C) */
     uint32_t ie;        /* 0x14 Interrupt Enable */
     uint32_t cmd;       /* 0x18 Command and Status */
     uint32_t reserved0; /* 0x1C */
@@ -265,7 +273,7 @@ struct PortAHCI {
     uint32_t ssts;      /* 0x28 SATA Status */
     uint32_t sctl;      /* 0x2C SATA Control */
 
-    uint32_t serr;      /* 0x30 SATA Error */
+    RejestrW1C serr;    /* 0x30 SATA Error (W1C) */
     uint32_t sact;      /* 0x34 SATA Active */
     uint32_t ci;        /* 0x38 Command Issue */
     uint32_t sntf;      /* 0x3C SATA Notification */
@@ -1882,6 +1890,8 @@ BlockError uruchom_i_czekaj_na_komende(
     port->ci =
         AHCI_SLOT_BIT;
 
+    // Odpytywanie bez wywlaszczenia: w kazdej iteracji punkt kontrolny audio (praca tylko, gdy zegar ja opublikowal).
+    // Limit jest liczony w iteracjach, nie w czasie - praca audio nie zuzywa prob urzadzenia.
     for (uint32_t proba = 0;
          proba <
             TIMEOUT_COMMAND;
@@ -1940,6 +1950,7 @@ BlockError uruchom_i_czekaj_na_komende(
             return BlockError::Ok;
         }
 
+        (void)PunktKontrolnyAudio::punkt();
         pause_cpu();
     }
 

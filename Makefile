@@ -2611,7 +2611,7 @@ ikona_app_grajek_blob.o: ikonki/app_grajek.png
 # (narzedzia/przygotuj_zasoby_grajka.py, oryginaly tylko czytane) oraz plyta winylowa ikonki/plyta_winylowa.jpg
 # osadzona BEZ zmian. Pliki trafiaja do /ikonki/grajek_*.png i /ikonki/grajek_plyta_winylowa.jpg (live i instalacja).
 GRAJEK_ZASOBY_DIR := grajek_zasoby
-GRAJEK_IKONY := poprzedni odtworz pauza stop nastepny wycisz odswiez dodaj w_gore w_dol usun wyczysc zapisz wczytaj
+GRAJEK_IKONY := poprzedni odtworz pauza stop nastepny wycisz odswiez dodaj w_gore w_dol usun wyczysc zapisz wczytaj losowo powtarzanie powtarzanie_jeden w_tle wizualizacja
 GRAJEK_IKONY_PNG := $(foreach a,$(GRAJEK_IKONY),$(GRAJEK_ZASOBY_DIR)/grajek_$(a).png)
 $(GRAJEK_ZASOBY_DIR)/.gotowe: narzedzia/przygotuj_zasoby_grajka.py ikonki/grajek ikonki/plyta_winylowa.jpg
 	$(PYTHON) narzedzia/przygotuj_zasoby_grajka.py $(GRAJEK_ZASOBY_DIR)
@@ -2700,7 +2700,18 @@ test-grajek-ui-ttf-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
 test-zasoby-grajka:
 	$(PYTHON) testy/test_zasoby_grajka.py
 
-test-grajek: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host test-zasoby-grajka test-magazyn-host
+# Punkty kontrolne pracy audio w dlugich petlach jadra (sterta, VirtIO-BLK, AHCI): przerwy w muzyce przy innych
+# aplikacjach (jadro/dzwiek/punkt_kontrolny_audio.h).
+.PHONY: test-punkt-audio-host
+test-punkt-audio-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_punkt_kontrolny_audio_host.cpp -o .bsf-test/punkt-audio
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/punkt-audio
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_punkt_audio_ahci_host.cpp -o .bsf-test/punkt-audio-ahci
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/punkt-audio-ahci
+	$(PYTHON) testy/test_punkt_kontrolny_audio.py
+
+test-grajek: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host test-zasoby-grajka test-magazyn-host test-punkt-audio-host
 
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).

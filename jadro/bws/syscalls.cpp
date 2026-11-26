@@ -89,6 +89,7 @@
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"
 #include "stos_jadra.h"
 #include "virtio_gpu.h"
 
@@ -2839,9 +2840,14 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
     uint64_t poprawnie_zmapowane =
         0;
 
+    // Duza alokacja (np. powierzchnia obrazu do 72 MiB = 18 432 stron) to jeden niewywlaszczalny syscall: przed kazda
+    // strona punkt kontrolny audio (wykonuje prace tylko, gdy zegar ja opublikowal), zeby mikser HDA/AC97 nie pomijal
+    // okresow. Stan w punkcie jest spojny: strony [0,i) w pelni zmapowane, PMM odblokowany, granica_sterty
+    // przesuwana dopiero po petli; worker audio nie dotyka sterty, PMM ani tablic stron procesu.
     for (uint64_t i = 0;
          i < liczba_stron;
          ++i) {
+        (void)PunktKontrolnyAudio::punkt();
 
         uint64_t adres = 0;
 

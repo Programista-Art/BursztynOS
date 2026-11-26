@@ -61,19 +61,33 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
     sprawdz_tabele(o->bib_, &o->dane_bib_);
     CHECK(ikona_miesci(o->odswiez_) && ikona_miesci(o->dodaj_kol_) && rozlaczne(o->odswiez_->obszar_ekranu(), o->dodaj_kol_->obszar_ekranu()));
     // sterowanie: rozlaczne, w oknie, teksty w calosci (takze najszersze warianty zmiennych tekstow)
+    // jeden wiersz sterowania: przelaczniki z ikonami po lewej, transport na srodku, glosnosc po prawej
     Kontrolka* ster[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->glosnosc_proc_,
-                         o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_, o->zakoncz_};
+                         o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_};
     for (size_t i = 0; i < sizeof(ster) / sizeof(ster[0]); ++i) {
         CHECK(wewnatrz(ster[i]->obszar_ekranu(), W, H));
+        CHECK(zawiera(o->wiersz_ster_->obszar_ekranu(), ster[i]->obszar_ekranu()));
         for (size_t k = 0; k < i; ++k) CHECK(rozlaczne(ster[i]->obszar_ekranu(), ster[k]->obszar_ekranu()));
     }
-    Przycisk* przyciski[] = {o->powtarzanie_, o->zakoncz_};
-    for (Przycisk* b : przyciski) CHECK(tekst_miesci(b));
-    PrzyciskIkony* ikony[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_};
-    for (PrzyciskIkony* b : ikony) CHECK(ikona_miesci(b));
+    PrzyciskIkony* ikony[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_, o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_};
+    for (PrzyciskIkony* b : ikony) CHECK(b->uzywa_ikony() && ikona_miesci(b));
+    {   // przelaczniki: w kolejnosci przy lewej krawedzi, przed transportem, w tej samej linii co Odtworz/Pauza
+        PrzyciskIkony* pr[] = {o->losowo_, o->powtarzanie_, o->w_tle_, o->wizualizacja_};
+        const Prostokat g = o->graj_->obszar_ekranu();
+        CHECK(pr[0]->obszar_ekranu().x - o->wiersz_ster_->obszar_ekranu().x <= 2 * s);
+        for (int i = 0; i < 4; ++i) {
+            if (i) CHECK(pr[i - 1]->obszar_ekranu().prawy() <= pr[i]->obszar_ekranu().x);
+            const int dy = (pr[i]->obszar_ekranu().y + pr[i]->obszar_ekranu().wysokosc / 2) - (g.y + g.wysokosc / 2);
+            CHECK(dy <= 1 * s && dy >= -1 * s);
+            CHECK(pr[i]->bok_kafla_px() < o->stop_->bok_kafla_px());                 // male kafle
+        }
+        CHECK(pr[3]->obszar_ekranu().prawy() < o->stop_->obszar_ekranu().x);
+    }
+    // brak przycisku "Zakończ" i pola "Diagnostyka" w wierszu sterowania (zamykanie tylko X; diagnostyka w Ustawieniach)
+    CHECK(o->diagnostyka_->obszar_ekranu().dolny() <= o->wiersz_ster_->obszar_ekranu().y);
     // transport wysrodkowany w wierszu (dwie rowne kolumny gwiazdkowe), Odtworz/Pauza wiekszy niz pozostale
     {
-        const Prostokat w = o->wiersz_ster_[0]->obszar_ekranu();
+        const Prostokat w = o->wiersz_ster_->obszar_ekranu();
         const Prostokat g = o->graj_->obszar_ekranu();
         const int srodek = g.x + g.szerokosc / 2 - (w.x + w.szerokosc / 2);
         CHECK(srodek <= 2 * s && srodek >= -2 * s);                                          // Odtworz/Pauza na srodku
@@ -90,24 +104,21 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
               o->glosnosc_->obszar_ekranu().x - o->wycisz_->obszar_ekranu().prawy() <= 12 * s);
         CHECK(o->wycisz_->obszar_ekranu().x > o->nast_->obszar_ekranu().prawy());
     }
-    PoleWyboru* pola[] = {o->losowo_, o->w_tle_, o->wizualizacja_, o->diagnostyka_};
-    for (PoleWyboru* p : pola) CHECK(CzcionkaUI::zmierz_tekst(p->tekst(), s) + 16 * s <= p->obszar().szerokosc);   // pole + tekst
     {   // warianty zmiennych tekstow mieszcza sie w kolumnach Auto
-        char b[64]; kopiuj_tekst(b, sizeof(b), o->powtarzanie_->tekst());
-        static const char* const W3[] = {"Powtarzanie: wył.", "Powtarzanie: utwór", "Powtarzanie: wszystkie"};
-        for (const char* t : W3) { o->powtarzanie_->ustaw_tekst(t); CHECK(tekst_miesci(o->powtarzanie_)); }
-        o->powtarzanie_->ustaw_tekst(b);
+        char b[64];
         if (!o->wycisz_->uzywa_ikony()) {
             kopiuj_tekst(b, sizeof(b), o->wycisz_->tekst());
             o->wycisz_->ustaw_tekst("Przywróć dźwięk"); CHECK(tekst_miesci(o->wycisz_)); o->wycisz_->ustaw_tekst(b);
         }
         CHECK(CzcionkaUI::zmierz_tekst("wycisz.", s) <= o->glosnosc_proc_->obszar().szerokosc);
     }
-    // pasek stanu: jeden wiersz o wysokosci czcionki; komunikat i podsumowanie rozlaczne
+    // pasek stanu: jeden wiersz o wysokosci czcionki; pozycja, komunikat i podsumowanie rozlaczne
     CHECK(o->komunikat_->obszar().wysokosc == CzcionkaUI::pobierz_wysokosc(s) + 8 * s);
     o->komunikat_->przelicz(s);
+    CHECK(o->komunikat_->pozycja()[0] && std::strchr(o->komunikat_->pozycja(), '/'));
+    CHECK(8 * s + CzcionkaUI::zmierz_tekst(o->komunikat_->pozycja(), s) < o->komunikat_->x_komunikatu());
     if (o->komunikat_->skrot()[0])
-        CHECK(8 * s + 8 * s + 8 * s + CzcionkaUI::zmierz_tekst(o->komunikat_->tekst_widoczny(), s) <= o->komunikat_->obszar_skrotu().x);
+        CHECK(o->komunikat_->x_komunikatu() + 8 * s + 8 * s + CzcionkaUI::zmierz_tekst(o->komunikat_->tekst_widoczny(), s) <= o->komunikat_->obszar_skrotu().x);
 
     // karta Kolejka: wiersz 6 ikon (rozlaczne, w panelu, rowne odstepy), tabela bez przewijania poziomego
     o->karty_->ustaw_aktywna_karte(0); o->przelicz_uklad();
@@ -126,12 +137,22 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
     }
     sprawdz_tabele(o->kol_, &o->dane_kol_);
 
-    // karta Korektor: etykiety Hz i dB rozlaczne (w razie potrzeby w dwoch rzedach), opis w calosci pod nimi
+    // karta Korektor: etykiety Hz i dB w jednym rzedzie (wspolna linia bazowa), rozlaczne, wysrodkowane nad/pod
+    // suwakami w rownych odstepach; opis w calosci pod nimi
     o->karty_->ustaw_aktywna_karte(1); o->przelicz_uklad();
     { KontekstRysowania c; o->rysuj(c, true); }
+    // najszersze mozliwe wartosci dB ("+12"/"-12" naprzemiennie) tez musza sie miescic w jednym rzedzie
+    char db_przed[EtykietyPasm::N][8];
+    for (int b = 0; b < EtykietyPasm::N; ++b) { kopiuj_tekst(db_przed[b], sizeof(db_przed[b]), o->db_pasm_->tekst_pasma(b)); o->db_pasm_->ustaw(b, b % 2 ? "-12" : "+12"); }
     EtykietyPasm* rzedy[] = {o->db_pasm_, o->hz_pasm_};
     for (EtykietyPasm* e : rzedy) {
         CHECK(wewnatrz(e->obszar_ekranu(), W, H));
+        CHECK(e->obszar().wysokosc == CzcionkaUI::pobierz_wysokosc(s) + 2 * s);          // jeden rzad
+        for (int b = 1; b < EtykietyPasm::N; ++b) {
+            CHECK(e->obszar_etykiety(b).y == e->obszar_etykiety(0).y);                     // wspolna linia bazowa
+            const int d = e->srodek(b) - e->srodek(b - 1), d0 = e->srodek(1) - e->srodek(0);
+            CHECK(d == d0);                                                                // rowne odstepy srodkow
+        }
         for (int b = 0; b < EtykietyPasm::N; ++b) {
             const Prostokat r = e->obszar_etykiety(b);
             CHECK(zawiera(Prostokat(0, 0, e->obszar().szerokosc, e->obszar().wysokosc), r));
@@ -150,7 +171,10 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
         const Prostokat h = o->hz_pasm_->obszar_etykiety(b);
         const int srodek_h = o->hz_pasm_->obszar_ekranu().x + h.x + h.szerokosc / 2, srodek_p = p.x + p.szerokosc / 2;
         CHECK(srodek_h - srodek_p <= 2 * s + 1 && srodek_p - srodek_h <= 2 * s + 1);
+        const int srodek_d = o->db_pasm_->obszar_ekranu().x + o->db_pasm_->srodek(b);
+        CHECK(srodek_d - srodek_p <= 2 * s + 1 && srodek_p - srodek_d <= 2 * s + 1);
     }
+    for (int b = 0; b < EtykietyPasm::N; ++b) o->db_pasm_->ustaw(b, db_przed[b]);
     CHECK(o->opis_korektora_->obszar_ekranu().y >= o->hz_pasm_->obszar_ekranu().dolny());
     CHECK(wewnatrz(o->opis_korektora_->obszar_ekranu(), W, H));
     CHECK(o->opis_korektora_->zmierz(Rozmiar(o->opis_korektora_->obszar().szerokosc, -1)).wysokosc <= o->opis_korektora_->obszar().wysokosc);
@@ -169,6 +193,13 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
     }
     CHECK(CzcionkaUI::zmierz_tekst("999,9 ms/s", s) + 12 * s <= o->diag_tab_->szerokosc_kolumny_px(1));
     CHECK(o->opis_diagnostyki_->zmierz(Rozmiar(o->opis_diagnostyki_->obszar().szerokosc, -1)).wysokosc <= o->opis_diagnostyki_->obszar().wysokosc);
+    // karta Ustawienia: pole pomiaru diagnostycznego i opis w calosci w karcie
+    o->karty_->ustaw_aktywna_karte(OknoGrajka::KARTA_USTAWIEN); o->przelicz_uklad();
+    { KontekstRysowania c; o->rysuj(c, true); }
+    CHECK(o->diagnostyka_->czy_widoczna() && zawiera(o->karty_->obszar_ekranu(), o->diagnostyka_->obszar_ekranu()));
+    CHECK(CzcionkaUI::zmierz_tekst(o->diagnostyka_->tekst(), s) + 16 * s <= o->diagnostyka_->obszar().szerokosc);
+    CHECK(zawiera(o->karty_->obszar_ekranu(), o->opis_ustawien_->obszar_ekranu()));
+    CHECK(o->opis_ustawien_->zmierz(Rozmiar(o->opis_ustawien_->obszar().szerokosc, -1)).wysokosc <= o->opis_ustawien_->obszar().wysokosc);
     o->karty_->ustaw_aktywna_karte(0); o->przelicz_uklad();
 }
 
@@ -178,7 +209,7 @@ inline void sprawdz_uklad(OknoGrajka* o, int W, int H, int skala) {
 template <class Petla>
 inline void sprawdz_stabilnosc_diagnostyki(OknoGrajka* o, Petla petla) {
     Kontrolka* ster[] = {o->poprz_, o->graj_, o->stop_, o->nast_, o->wycisz_, o->glosnosc_, o->losowo_,
-                         o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->diagnostyka_, o->zakoncz_, o->komunikat_, o->karty_};
+                         o->powtarzanie_, o->w_tle_, o->wizualizacja_, o->komunikat_, o->karty_};
     petla(10);                                         // zalegle odrysowania wczesniejszych krokow
     Prostokat przed[sizeof(ster) / sizeof(ster[0])];
     for (size_t i = 0; i < sizeof(ster) / sizeof(ster[0]); ++i) przed[i] = ster[i]->obszar_ekranu();

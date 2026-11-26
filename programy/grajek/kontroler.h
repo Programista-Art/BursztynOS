@@ -157,7 +157,7 @@ public:
     }
 
     // Pelna lista licznikow (karta "Diagnostyka"): nazwa i wartosc osobno, bez obcinania. Liczniki ciaglosci sa
-    // zawsze dostepne; czasy sekcji - gdy pomiar (opcja Diagnostyka) jest wlaczony. Czasy sekcji to czas zegarowy
+    // zawsze dostepne; czasy sekcji - gdy pomiar (karta Ustawienia: "Pomiar czasu sekcji") jest wlaczony. Czasy sekcji to czas zegarowy
     // TSC z ostatniego okna ~1 s: obejmuja wywlaszczenie procesu i oczekiwanie w wywolaniach systemowych.
     static constexpr size_t LICZBA_POMIAROW = 23;
     void pomiar(size_t i, char* nazwa, size_t cap_n, char* wartosc, size_t cap_w) const {
@@ -233,7 +233,7 @@ public:
         // zapamietaj sciezki kolejki i biezacego utworu (indeksy zmienia publikacja nowej listy)
         zapamietaj_sciezki();
         if (!bib_.rozpocznij()) { ustaw_komunikat("Brak pamięci do skanowania biblioteki.", RodzajKomunikatu::Blad); return; }
-        ustaw_komunikat("Wyszukiwanie muzyki w /dane/muzyka…", RodzajKomunikatu::Informacja);
+        ustaw_komunikat("", RodzajKomunikatu::Informacja);   // postep skanu: etykieta pod biblioteka (bez komunikatu)
         ++w_bib_;
     }
     void filtruj(const char* wzorzec) { bib_.filtruj(wzorzec); ++w_bib_; }
@@ -446,13 +446,10 @@ public:
             ustaw_komunikat("Wstrzymano: okno zminimalizowane, a odtwarzanie w tle jest wyłączone.", RodzajKomunikatu::Informacja);
         }
     }
-    // Zamkniecie okna: true = proces ma zostac (odtwarzanie w tle), false = zakonczyc (strumien zamkniety).
+    // Zamkniecie okna (X na pasku tytulu - jedyny sposob zamkniecia Grajka): zawsze konczy odtwarzanie i zwraca
+    // false (proces ma sie zakonczyc, strumien zamkniety). "Odtwarzanie w tle" dotyczy tylko minimalizacji: dawniej X
+    // przy wlaczonej opcji tylko chowal okno, a do wyjscia sluzyl osobny przycisk "Zakończ" (usuniety).
     bool przy_zamknieciu() {
-        const Stan s = silnik_.stan();
-        if (konf_.w_tle && (s == Stan::Odtwarzanie || s == Stan::Pauza || s == Stan::Ladowanie)) {
-            ustaw_komunikat("Grajek gra w tle. Przywróć okno z paska zadań; przycisk „Zakończ” zamyka odtwarzacz.", RodzajKomunikatu::Informacja);
-            return true;
-        }
         zakoncz();
         return false;
     }
@@ -576,13 +573,16 @@ private:
             ustaw_komunikat(bufor_kom_, RodzajKomunikatu::Informacja);
             return;
         }
-        t.dodaj("Biblioteka: "); t.liczba(bib_.liczba_skanu()); t.dodaj(bib_.liczba_skanu() == 1 ? " utwór" : " utworów");
-        if (w.odrzucone) { t.dodaj(", pominięte (nieprawidłowe): "); t.liczba(w.odrzucone); }
-        if (w.pominiete_limit) { t.dodaj(", poza limitem: "); t.liczba(w.pominiete_limit); }
-        t.dodaj(".");
+        // Udany skan nie zostawia komunikatu: liczba utworow jest w etykiecie biblioteki, a pasek stanu pokazuje pozycje
+        // ("1/7"). Komunikat zostaje tylko, gdy jest o czym ostrzec (pominiete pliki, limit, sesja Live w RAM).
+        if (!w.odrzucone && !w.pominiete_limit && rodzaj_magazynu_ != RodzajMagazynu::Ram) {
+            ustaw_komunikat("", RodzajKomunikatu::Informacja);
+            return;
+        }
+        if (w.odrzucone) { t.dodaj("Pominięte (nieprawidłowe) pliki: "); t.liczba(w.odrzucone); t.dodaj("."); }
+        if (w.pominiete_limit) { if (w.odrzucone) t.dodaj(" "); t.dodaj("Poza limitem biblioteki: "); t.liczba(w.pominiete_limit); t.dodaj("."); }
         dopisz_magazyn(t);
-        ustaw_komunikat(bufor_kom_, w.odrzucone || w.pominiete_limit || rodzaj_magazynu_ == RodzajMagazynu::Ram
-                                        ? RodzajKomunikatu::Ostrzezenie : RodzajKomunikatu::Sukces);
+        ustaw_komunikat(bufor_kom_[0] == ' ' ? bufor_kom_ + 1 : bufor_kom_, RodzajKomunikatu::Ostrzezenie);
     }
 
     Platforma p_{};

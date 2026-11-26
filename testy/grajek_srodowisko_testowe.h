@@ -71,7 +71,8 @@ static void dodaj_plik(const std::string& s, Bajty b) {
 // ze test wylaczy je (g_zasoby_grajka = false), np. aby sprawdzic brak lub uszkodzenie grafiki.
 static bool g_zasoby_grajka = true;
 static const char* const AKCJE_IKON_GRAJKA[] = {"poprzedni", "odtworz", "pauza", "stop", "nastepny", "wycisz", "odswiez",
-                                               "dodaj", "w_gore", "w_dol", "usun", "wyczysc", "zapisz", "wczytaj"};
+                                               "dodaj", "w_gore", "w_dol", "usun", "wyczysc", "zapisz", "wczytaj", "losowo",
+                                               "powtarzanie", "powtarzanie_jeden", "w_tle", "wizualizacja"};
 static Bajty plik_repozytorium(const std::string& sciezka) {
     Bajty b;
     if (FILE* f = std::fopen(sciezka.c_str(), "rb")) {

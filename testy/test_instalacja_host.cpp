@@ -368,7 +368,8 @@ static unsigned sprawdz_manifest(const std::vector<Wpis>& m) {
     CHECK(grajek && grajek_manifest && winyl && emoji && ekran && tapety);
     unsigned ikony_grajka = 0;
     for (const auto& e : m) ikony_grajka += e.sciezka.rfind("/ikonki/grajek_", 0) == 0;
-    CHECK(ikony_grajka == 15);
+    // 19 ikon przyciskow (14 grafik uzytkownika + 5 przelacznikow) + plyta winylowa
+    CHECK(ikony_grajka == 20);
     CHECK(systemowe > 100 && systemowe <= 128);                      // MAKS_PLANOWANYCH_PLIKOW / MAKS_PLIKOW_KONTROLNYCH
     std::printf("manifest: %u plikow systemowych (%llu B), %zu wpisow lacznie, zapas planu %u\n",
                 systemowe, (unsigned long long)bajty, m.size(), 128 - systemowe);
