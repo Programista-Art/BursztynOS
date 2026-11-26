@@ -148,6 +148,7 @@ public:
         Prostokat gdzie = z->umiesc_pod_kotwica_ekranu(kotwica, Rozmiar(w, h), true);
         wybor_przed_otwarciem_ = wybrany_indeks();
         anulowanie_ = false;
+        podglad_zgloszony_ = false;
         if (!z->otworz(popup_, gdzie, edytowalna_ ? static_cast<Kontrolka*>(edycja_)
                                                    : static_cast<Kontrolka*>(this),
                        &popup_)) return false;
@@ -260,7 +261,7 @@ private:
     }
     void wybrano_z_popupu(int indeks) {
         synchronizuj_tekst();
-        if (!anulowanie_ && cb_zmiana_) cb_zmiana_(this, indeks, dane_zmiany_);
+        if (!anulowanie_ && cb_zmiana_) { cb_zmiana_(this, indeks, dane_zmiany_); podglad_zgloszony_ = czy_rozwinieta(); }
         if (czy_rozwinieta() && !nawigacja_popupu_ && !otwieranie_) zatwierdz_popup();
         uniewaznij();
     }
@@ -269,13 +270,18 @@ private:
         if (popup_.zarzadca()) popup_.zarzadca()->zamknij(PowodZamknieciaPopup::Zatwierdzenie);
         if (cb_zatwierdzenie_) cb_zatwierdzenie_(this, indeks, wybrany_tekst(), dane_zatwierdzenia_);
     }
+    // Anulowanie (Esc, klik poza lista, zamkniecie wlasciciela) przywraca wybor sprzed otwarcia. Nawigacja strzalkami
+    // w otwartej liscie zglasza zmiane na biezaco (podglad, np. preset korektora slychac od razu), wiec przywrocenie
+    // tez musi byc zgloszone - inaczej aplikacja zostawala przy podgladanym elemencie, a lista pokazywala poprzedni.
     void popup_zamkniety(PowodZamknieciaPopup powod) {
         if (powod != PowodZamknieciaPopup::Zatwierdzenie && wybor_przed_otwarciem_ != wybrany_indeks()) {
             anulowanie_ = true;
             popup_.lista().ustaw_wybrany_indeks(wybor_przed_otwarciem_);
             anulowanie_ = false;
             synchronizuj_tekst();
+            if (podglad_zgloszony_ && cb_zmiana_) cb_zmiana_(this, wybor_przed_otwarciem_, dane_zmiany_);
         }
+        podglad_zgloszony_ = false;
         uniewaznij();
     }
     void synchronizuj_tekst() {
@@ -286,7 +292,7 @@ private:
 
     PoleEdycji* edycja_{nullptr};
     PopupListy popup_;
-    bool edytowalna_{false}, nawigacja_popupu_{false}, otwieranie_{false}, anulowanie_{false};
+    bool edytowalna_{false}, nawigacja_popupu_{false}, otwieranie_{false}, anulowanie_{false}, podglad_zgloszony_{false};
     int maks_widocznych_{8}, wybor_przed_otwarciem_{-1};
     FunkcjaWyboru cb_zmiana_{nullptr}; void* dane_zmiany_{nullptr};
     FunkcjaZatwierdzenia cb_zatwierdzenie_{nullptr}; void* dane_zatwierdzenia_{nullptr};

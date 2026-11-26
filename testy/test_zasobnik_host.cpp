@@ -353,7 +353,7 @@ static void jadro() {
     CHECK(ZasobnikJadro::wynik_glosnosci(HDA_GLOSNOSC_OK) == BWS_ZAS_OK && ZasobnikJadro::wynik_glosnosci(HDA_GLOSNOSC_ZAJETE) == BWS_ZAS_ZAJETE &&
           ZasobnikJadro::wynik_glosnosci(HDA_GLOSNOSC_NIEOBSLUGIWANE) == BWS_ZAS_NIEOBSLUGIWANE);
     // ABI
-    CHECK(BWS_ZASOBNIK_STAN == 107 && BWS_ZASOBNIK_POLECENIE == 108 && BWS_POWIADOMIENIA == 109 && BWS_PIERWSZY_WOLNY == 111);
+    CHECK(BWS_ZASOBNIK_STAN == 107 && BWS_ZASOBNIK_POLECENIE == 108 && BWS_POWIADOMIENIA == 109 && BWS_PIERWSZY_WOLNY == 112 && BWS_INFORMACJA_MAGAZYNU == 111);
     CHECK(sizeof(BwsZasobnikStanV1) % 8 == 0 && sizeof(BwsPowiadomieniaListaV1) == 24 + BWS_POW_MAKS * sizeof(BwsPowiadomienieV1));
 }
 

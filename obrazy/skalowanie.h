@@ -70,8 +70,9 @@ inline bool skaluj_obraz(const uint32_t* src, uint32_t sw, uint32_t sh, size_t s
     return true;
 }
 
-// Bilinear (fixed-point 16.16), bez FPU. Tylko dla malych ikon UI (IkonaPNG).
-// Probuje kanaly RGBA niezaleznie; tlo wypelniane przed zapisem jak w skaluj_obraz.
+// Bilinear (fixed-point 16.16), bez FPU. Kanaly RGBA interpolowane NIEZALEZNIE (bez premnozenia alfy), wiec
+// wolno go uzywac tylko dla obrazow nieprzezroczystych (np. okladka w Grajku). Ikony z alfa: skaluj_ikone_alfa.
+// Tlo wypelniane przed zapisem jak w skaluj_obraz.
 inline bool skaluj_obraz_bilinear(const uint32_t* src, uint32_t sw, uint32_t sh, size_t src_bytes,
                                   uint32_t* dst, uint32_t dw, uint32_t dh, uint32_t stride,
                                   size_t dst_bytes, TrybSkalowaniaObrazu tryb, uint32_t tlo) {
@@ -114,6 +115,65 @@ inline bool skaluj_obraz_bilinear(const uint32_t* src, uint32_t sw, uint32_t sh,
                 out_c |= (mix & 0xffU) << shift;
             }
             if (out_c != 0) out[x] = out_c;
+        }
+    }
+    return true;
+}
+
+// --- Ikony z kanalem alfa -----------------------------------------------------------------------------------
+// Wejscie i wyjscie: proste (nieprzemnozone) ARGB; obliczenia na alfie premnozonej, wiec kolor pikseli w pelni
+// przezroczystych (np. bialy RGB pod A=0 z edytora grafiki) NIE wplywa na wynik - bez bialych/ciemnych obwodek.
+// Pomniejszanie: srednia obszarowa z dokladnym (ulamkowym) pokryciem pikseli zrodla - bez aliasingu 128 -> 16 px.
+// Powiekszanie: interpolacja liniowa (namiot). Ten sam rozmiar: kopia 1:1 (piksel A=0 zapisywany jako 0).
+// Geometria Dopasuj: proporcje zachowane, przezroczyste marginesy (0). Bez alokacji i bez float.
+namespace skalowanie_alfa {
+// Wagi jednej osi dla piksela celu d: f(indeks_zrodla, waga); zwraca sume wag (mianownik).
+template <class F> inline uint64_t wagi_osi(uint32_t d, uint32_t zrodlo, uint32_t cel, F f) {
+    if (zrodlo >= cel) {
+        // piksel celu d pokrywa [d*zrodlo, (d+1)*zrodlo), piksel zrodla i: [i*cel, (i+1)*cel) (jednostki 1/cel)
+        const uint64_t a = uint64_t(d) * zrodlo, b = a + zrodlo;
+        for (uint64_t i = a / cel; i < zrodlo && i * cel < b; ++i) {
+            const uint64_t lo = i * cel > a ? i * cel : a, hi = (i + 1) * cel < b ? (i + 1) * cel : b;
+            if (hi > lo) f(static_cast<uint32_t>(i), hi - lo);
+        }
+        return zrodlo;
+    }
+    // srodek piksela celu w ukladzie zrodla: (d + 0.5) * zrodlo / cel - 0.5, w 1/65536 piksela
+    int64_t c = static_cast<int64_t>((uint64_t(2 * d + 1) * zrodlo * 65536U) / (2U * uint64_t(cel))) - 32768;
+    if (c < 0) c = 0;
+    const uint32_t i0 = static_cast<uint32_t>(c >> 16), w1 = static_cast<uint32_t>(c & 0xFFFF);
+    const uint32_t i1 = i0 + 1 < zrodlo ? i0 + 1 : i0;
+    f(i0, 65536U - w1);
+    if (w1) f(i1, w1);
+    return 65536U;
+}
+}  // namespace skalowanie_alfa
+
+inline bool skaluj_ikone_alfa(const uint32_t* src, uint32_t sw, uint32_t sh, size_t src_bytes,
+                              uint32_t* dst, uint32_t dw, uint32_t dh, uint32_t stride, size_t dst_bytes) {
+    GeometriaObrazu g{};
+    if (!src || !dst || !geometria_obrazu(sw, sh, dw, dh, TrybSkalowaniaObrazu::Dopasuj, &g) || stride < dw ||
+        static_cast<uint64_t>(sw) * sh * 4 > src_bytes ||
+        static_cast<uint64_t>(stride) * dh * 4 > dst_bytes) return false;
+    for (uint32_t y = 0; y < dh; ++y)
+        for (uint32_t x = 0; x < dw; ++x) dst[static_cast<size_t>(y) * stride + x] = 0;
+    const uint64_t mian = (sw >= g.dst_w ? uint64_t(sw) : 65536U) * (sh >= g.dst_h ? uint64_t(sh) : 65536U);
+    for (uint32_t y = 0; y < g.dst_h; ++y) {
+        uint32_t* out = dst + static_cast<size_t>(y + g.dst_y) * stride + g.dst_x;
+        for (uint32_t x = 0; x < g.dst_w; ++x) {
+            uint64_t A = 0, R = 0, G = 0, B = 0;     // <= 2^32 (wagi) * 255 * 255 < 2^48: miesci sie w uint64
+            skalowanie_alfa::wagi_osi(y, sh, g.dst_h, [&](uint32_t sy, uint64_t wy) {
+                const uint32_t* wiersz = src + static_cast<size_t>(sy) * sw;
+                skalowanie_alfa::wagi_osi(x, sw, g.dst_w, [&](uint32_t sx, uint64_t wx) {
+                    const uint32_t c = wiersz[sx];
+                    const uint64_t wa = wx * wy * (c >> 24);
+                    if (!wa) return;
+                    A += wa; R += wa * ((c >> 16) & 0xFFU); G += wa * ((c >> 8) & 0xFFU); B += wa * (c & 0xFFU);
+                });
+            });
+            uint64_t a = (A + mian / 2) / mian;
+            if (a > 255) a = 255;
+            out[x] = a ? static_cast<uint32_t>((a << 24) | (((R + A / 2) / A) << 16) | (((G + A / 2) / A) << 8) | ((B + A / 2) / A)) : 0U;
         }
     }
     return true;

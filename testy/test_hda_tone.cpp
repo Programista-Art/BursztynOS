@@ -9,6 +9,29 @@
 #include "../sterowniki/dzwiek/hda.cpp"
 #include "../sterowniki/dzwiek/hda_praca_odroczona.h"
 #include "../jadro/bws/pcm_jadro_api.h"
+// BWS 110 przechodzi przez produkcyjna warstwe wyjscia audio; w tym tescie AC97 jest nieobecne,
+// wiec polityka wybiera HDA (jadro/dzwiek/wyjscie_audio_polityka.h).
+#include "../jadro/dzwiek/wyjscie_audio.cpp"
+bool ac97_wykryj() { return false; }
+bool inicjalizuj_ac97() { return false; }
+void ac97_zaplanuj_prace() {}
+bool ac97_praca_oczekuje() { return false; }
+void ac97_obsluz_okresowo() {}
+void ac97_glosnosc_info(HdaGlosnoscInfo* o) { if (o) *o = {}; }
+uint32_t ac97_glosnosc_ustaw(uint32_t) { return HDA_GLOSNOSC_NIEOBSLUGIWANE; }
+uint32_t ac97_wyciszenie_ustaw(bool) { return HDA_GLOSNOSC_NIEOBSLUGIWANE; }
+namespace Ac97Pcm {
+int64_t open(Pcm::Owner, const BwsPcmFormat&) { std::abort(); }
+int64_t write(Pcm::Owner, uint64_t, const int16_t*, uint32_t) { std::abort(); }
+int64_t query(Pcm::Owner, uint64_t, BwsPcmState&) { std::abort(); }
+int64_t statistics(Pcm::Owner, uint64_t, BwsPcmStats&) { std::abort(); }
+int64_t gain(Pcm::Owner, uint64_t, uint64_t, uint64_t) { std::abort(); }
+int64_t close(Pcm::Owner, uint64_t) { std::abort(); }
+int64_t finish(Pcm::Owner, uint64_t) { std::abort(); }
+bool posprzataj(uint32_t, uint64_t) { std::abort(); }
+bool diag_stream(uint32_t, uint64_t, BwsPcmStats&) { std::abort(); }
+bool diag_starvation(uint32_t, Pcm::Starvation&) { std::abort(); }
+}
 #include "../programy/pcm_demo/refill_policy.h"
 
 namespace {
@@ -473,6 +496,8 @@ static void test_pcm_large_write() {
     CHECK(PcmAplikacji::close(proc_b, hb) == PCM_OK);
 }
 int main() {
+    CHECK(PcmAplikacji::open({1, 1}, {BWS_PCM_V1, sizeof(BwsPcmFormat), 48000, 2, 1, 0}) == PCM_DEVICE);  // przed wyborem
+    CHECK(wyjscie_audio_ustal({true, true, false, false}) && wyjscie_audio_aktywne() == WyjscieAudio::Urzadzenie::Hda);
     test_pcm_large_write();
     test_pcm_api();
     using namespace PcmJadro;

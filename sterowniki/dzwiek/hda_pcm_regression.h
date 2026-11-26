@@ -4,6 +4,7 @@
 #include "sterowniki/czas/hpet.h"
 #include "hda.h"
 #include "jadro/arch/diag_opoznienia_irq.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"
 
 extern "C" uint32_t timer_scheduler_hz();
 
@@ -186,6 +187,20 @@ inline void hda_pcm_regression_krok(bool requested) {
             field(fields[i], s.przyczyny[i]);
         message[size] = 0;
         wypisz_log(message);
+        {   // Punkty kontrolne audio w dlugich petlach jadra (sterta, VirtIO-BLK, AHCI): ile razy zastaly prace,
+            // ile wykonaly, ile odroczyly i dlaczego; prawdziwe niedobory to missed_periods / safe_silence powyzej.
+            const auto pk = PunktKontrolnyAudio::statystyki();
+            size = 0;
+            str("[HDA-PCM] CHECKPOINTS");
+            field(" requested=", pk.zgloszenia);
+            field(" executed=", pk.wykonane);
+            field(" deferred_if0=", pk.odroczone_przerwania);
+            field(" nested_rejected=", pk.odrzucone_zagniezdzone);
+            field(" deferred_lock=", pk.odroczone_blokada);
+            field(" device_deadline_ext_ns=", pk.przedluzenia_terminu_ns);
+            message[size] = 0;
+            wypisz_log(message);
+        }
         for (uint32_t i = 0; i < s.zapisane_zdarzenia; ++i) {
             Zdarzenie e{};
             if (!zdarzenie(i, e)) break;

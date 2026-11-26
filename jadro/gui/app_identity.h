@@ -11,6 +11,7 @@ inline constexpr char Settings[]="/programy/ustawienia.cebula/ustawienia.bur";
 inline constexpr char DisplaySettings[]="/programy/ekran.cebula/ekran.bur";
 inline constexpr char TaskManager[]="/programy/menedzer_zadan.cebula/menedzer_zadan.bur";
 inline constexpr char Calendar[]="/programy/kalendarz.cebula/kalendarz.bur";
+inline constexpr char MusicPlayer[]="/programy/grajek.cebula/grajek.bur";
 template<size_t N> inline bool equal(const char (&stored)[N],const char* expected) {
     if(!expected)return false;
     for(size_t i=0;i<N;++i){if(stored[i]!=expected[i])return false;if(!stored[i])return true;}

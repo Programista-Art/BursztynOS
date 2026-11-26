@@ -43,6 +43,9 @@
 #include "../sterowniki/grafika/uefi_gop.h"
 #include "../sterowniki/grafika/bochs_vbe.h"
 #include "motyw.h"
+// Kompozytor wola hak pracy odroczonej audio (hda_praca_odroczona.h -> hda.cpp / ac97.cpp). Sterownikow dzwieku
+// nie linkujemy: wierny model kontraktu (publikacja, try-lock, zdjecie publikacji) - tylko w buildzie hosta.
+#include "praca_audio_odroczona_host.h"
 static unsigned checks=0;
 #undef assert
 #define assert(c) do {++checks;if(!(c)){fprintf(stderr,"FAIL %d: %s\n",__LINE__,#c);abort();}}while(0)
@@ -173,7 +176,12 @@ int main(){
         grafika_zwolnij_stan(&old);
         // One production compositor transaction produces one logical full commit.
         const auto flushes=gpu->flush_count;test_now=delay+4400000;
+        // Grajek gra podczas skladania: zegar opublikowal prace HDA i AC97 - transakcja kompozytora ja obsluguje.
+        g_praca_audio_host.reset();
+        g_praca_audio_host.hda.opublikuj(test_now*1000);g_praca_audio_host.ac97.opublikuj(test_now*1000);
         skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+        assert(g_praca_audio_host.hda.obsluzone==1&&g_praca_audio_host.hda.oczekuje_ns==0);
+        assert(g_praca_audio_host.ac97.obsluzone==1&&g_praca_audio_host.ac97.oczekuje_ns==0);
         assert(gpu->flush_count==flushes+1);check_image(gpu_scanout_model.visible.back().pixels,1024,768,4400000);
         assert(!gpu_scanout_model.invalid);
         auto logs=KlatkiStartuDiag::liczniki().visible;
@@ -198,6 +206,22 @@ int main(){
         assert(gpu_scanout_model.visible.size()==dirty_copy_visible_before+1);
         assert(gpu_scanout_model.visible.back().pixels[30U*1024U+20U]==0x00123456U);
         PrezentacjaStartu::zakoncz_inicjalizacje();
+        {
+            // Punkt kontrolny audio w kompozytorze pulpitu: bez publikacji tylko tani odczyt (brak pracy),
+            // przy zajetej blokadzie miksera praca zostaje opublikowana (odroczona, nie utracona) i wykonuje ja
+            // nastepna transakcja; kazda publikacja jest obsluzona dokladnie raz. Zegar +50 ms: poza limitem tempa klatek.
+            auto& a=g_praca_audio_host;a.reset();
+            test_now+=50000;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+            assert(a.hda.sprawdzenia>=1&&a.hda.obsluzone==0&&a.ac97.obsluzone==0);
+            a.hda.opublikuj(77);a.hda.blokada=true;
+            test_now+=50000;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+            assert(a.hda.obsluzone==0&&a.hda.blokady_pracy>=1&&a.hda.oczekuje_ns==77);
+            a.hda.blokada=false;
+            test_now+=50000;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+            assert(a.hda.obsluzone==1&&a.hda.oczekuje_ns==0);
+            test_now+=50000;skladacz_obrazu_oznacz_dirty();skladacz_obrazu_obsluz_dirty();
+            assert(a.hda.obsluzone==1);
+        }
         assert(virtio_gpu_reset(gpu));virtio_gpu_reset_all();gpu_scanout_model.reset(false);
         StanBuforowEkranu final{};grafika_pobierz_stan(&final);
         grafika_wymien_stan({});grafika_zwolnij_stan(&final);

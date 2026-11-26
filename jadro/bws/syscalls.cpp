@@ -85,9 +85,11 @@
 #include "heap.h"
 #include "psf.h"
 #include "instalator.h"
+#include "jadro/fs/magazyn_info.h"
 #include "acpi.h"
 #include "sterowniki/czas/hpet.h"
 #include "sterowniki/dzwiek/hda_praca_odroczona.h"
+#include "jadro/dzwiek/punkt_kontrolny_audio.h"
 #include "stos_jadra.h"
 #include "virtio_gpu.h"
 
@@ -2838,9 +2840,14 @@ __attribute__((noinline)) uint64_t bws_alokuj_sterte(
     uint64_t poprawnie_zmapowane =
         0;
 
+    // Duza alokacja (np. powierzchnia obrazu do 72 MiB = 18 432 stron) to jeden niewywlaszczalny syscall: przed kazda
+    // strona punkt kontrolny audio (wykonuje prace tylko, gdy zegar ja opublikowal), zeby mikser HDA/AC97 nie pomijal
+    // okresow. Stan w punkcie jest spojny: strony [0,i) w pelni zmapowane, PMM odblokowany, granica_sterty
+    // przesuwana dopiero po petli; worker audio nie dotyka sterty, PMM ani tablic stron procesu.
     for (uint64_t i = 0;
          i < liczba_stron;
          ++i) {
+        (void)PunktKontrolnyAudio::punkt();
 
         uint64_t adres = 0;
 
@@ -3360,6 +3367,17 @@ static uint64_t obsluga_wywolan_systemowych_impl(
             scheduler_generacja_procesu(aktualny_pid)};
         return static_cast<uint64_t>(bws_pcm_obsluz(owner, arg1, arg2, arg3, arg4,
             skopiuj_z_przestrzeni_uzytkownika, skopiuj_do_przestrzeni_uzytkownika));
+    }
+    if (nr_funkcji == BWS_INFORMACJA_MAGAZYNU) {
+        // Tylko odczyt statystyk PSF; bez sciezek i bez danych innych procesow.
+        if (arg3 != BWS_MAGAZYN_V1) return BWS_MAG_ZLA_WERSJA;
+        if (arg2 < sizeof(BwsMagazynV1) || !arg1) return BWS_MAG_ZLY_BUFOR;
+        PsfStatystyki statystyki{};
+        if (!psf_statystyki(&statystyki)) return BWS_MAG_NIEGOTOWY;
+        BwsMagazynV1 odp{};
+        wypelnij_informacje_magazynu(odp, statystyki, instalator_system_zainstalowany());
+        return skopiuj_do_przestrzeni_uzytkownika(reinterpret_cast<void*>(arg1), &odp, sizeof(odp))
+                   ? BWS_MAG_OK : BWS_MAG_ZLY_BUFOR;
     }
     if (nr_funkcji >= BWS_GUI_GEOMETRIA &&
         nr_funkcji <= BWS_POWIADOMIENIA) {

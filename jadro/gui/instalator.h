@@ -14,3 +14,6 @@ bool kernel_weryfikuj_system();
 bool kernel_weryfikuj_system_start(uint64_t* razem);
 bool kernel_weryfikuj_system_step(uint64_t* wykonane,bool* gotowe);
 uint32_t kernel_liczba_plikow_instalacji();
+namespace InstalacjaPlikow { struct Diagnoza; }
+// Ostatni blad zapisu/weryfikacji plikow systemowych (jadro/gui/instalacja_plikow.h); nullptr = brak.
+const InstalacjaPlikow::Diagnoza* kernel_diagnoza_instalacji();

@@ -30,6 +30,15 @@
 #   ./rununix_virtio_latest.sh --dry-run --mode 2
 #                                              tylko wypisuje polecenie QEMU (nie tworzy dysku, nie uruchamia)
 #   ./rununix_virtio_latest.sh --help
+#   ./rununix_virtio_latest.sh --mode 2 --audio pipewire      wyjscie dzwieku PipeWire
+#   ./rununix_virtio_latest.sh --mode 2 --audio auto          wybor automatyczny (PipeWire > PulseAudio > ALSA)
+#   ./rununix_virtio_latest.sh --mode 2 --audio wav --audio-wav "nagrania/próba 1.wav"
+#   ./rununix_virtio_latest.sh --audio-diag                  diagnostyka dzwieku hosta (tylko odczyt)
+#
+# Dzwiek: gosc zawsze ma Intel HDA (-device intel-hda -device hda-output,audiodev=snd, PCI 00:02.0).
+# Zmienia sie tylko backend hosta (-audiodev ...,id=snd). Domyslnie ALSA (jak Makefile / make runuefi),
+# chyba ze podano --audio albo AUDIO_BACKEND. Launcher nie instaluje, nie restartuje i nie konfiguruje
+# uslug dzwieku hosta. Opis: docs/qemu-dzwiek-launchery.md.
 #
 # Klawiatura (AltGr / polskie znaki): przy -display sdl SDL2 oddaje klawisze tekstowe IBus; dla
 # AltGr+litera IBus zatwierdza gotowy znak i SDL nie wysyla klawisza litery, wiec QEMU dostaje sam
@@ -43,6 +52,8 @@ set -u
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Wzgledna sciezka --audio-wav odnosi sie do katalogu, z ktorego uruchomiono skrypt.
+INVOCATION_DIR="$PWD"
 cd "$SCRIPT_DIR"
 
 OS_NAME="$(uname -s)"
@@ -77,7 +88,8 @@ OVMF_VARS_RUNTIME="$SCRIPT_DIR/.bursztyn_ovmf_vars_unix.fd"
 
 # Ustawienia opcjonalne:
 #
-#   AUDIO_BACKEND=alsa|pipewire|pa|sdl|coreaudio|off
+#   AUDIO_BACKEND=auto|alsa|pipewire|pa|sdl|wav|none|off|coreaudio   (--audio ma pierwszenstwo)
+#   AUDIO_WAV_PATH=plik.wav                                       (dla trybu wav; --audio-wav ma pierwszenstwo)
 #   QEMU_DISPLAY_ARGS="-display gtk,zoom-to-fit=off"
 #   QEMU_EXTRA_ARGS="-d guest_errors"
 #
@@ -122,6 +134,13 @@ IBUS_ADDRESS_BEZ_IME="unix:path=/nonexistent/bursztyn-qemu-bez-ibus"
 
 DRY_RUN=false
 MODE=""
+AUDIO_CLI=""
+AUDIO_WAV_CLI=""
+AUDIO_OVERWRITE=false
+AUDIO_DIAG=false
+AUDIO_WAV_PATH="${AUDIO_WAV_PATH:-}"
+# Kod wyjscia dla bledow konfiguracji dzwieku (backend nieobslugiwany/niedostepny, zly plik WAV).
+AUDIO_EXIT_CODE=3
 
 usage() {
     cat <<'EOF'
@@ -130,9 +149,26 @@ Bursztyn OS - launcher QEMU (Linux/macOS)
   --mode N, -m N      uruchom tryb N z menu (0-18) bez menu interaktywnego
   --dry-run, -n       wypisz polecenie QEMU bez uruchamiania (bez tworzenia dysku i NVRAM)
   --print-argv        to samo co --dry-run
+  --audio TRYB        wyjscie dzwieku hosta (gosc zawsze ma Intel HDA):
+                        auto      - automatycznie: PipeWire > PulseAudio > ALSA (dzialajacy serwer)
+                        pipewire  - PipeWire (slyszalne)
+                        pa        - PulseAudio, takze pipewire-pulse (slyszalne)
+                        alsa      - ALSA (slyszalne; domyslnie, jak Makefile)
+                        sdl       - SDL (slyszalne; SDL sam wybiera sterownik)
+                        wav       - nagrywanie dzwieku goscia do pliku WAV (bez odtwarzania)
+                        none      - brak dzwieku (HDA zostaje, nic nie trafia do hosta)
+  --audio-wav PLIK    plik nagrania dla --audio wav (domyslnie logi_qemu/nagrania_audio/...)
+  --audio-overwrite   pozwol nadpisac istniejacy plik nagrania
+  --audio-diag        diagnostyka dzwieku hosta (tylko odczyt: QEMU, PipeWire/PulseAudio, ALSA, VM)
+  --guest-audio KONTROLER
+                      kontroler dzwieku GOSCIA (nie mylic z --audio, ktore wybiera wyjscie hosta):
+                        hda   - Intel HDA (domyslnie, wszystkie profile produkcyjne)
+                        ac97  - Intel ICH AC97 (TYLKO do rozwoju/testow sterownika AC97; zamiast HDA)
   --help, -h          ta pomoc
 
-Zmienne: QEMU, QEMU_IMG, QEMU_DISPLAY_ARGS, QEMU_EXTRA_ARGS, AUDIO_BACKEND, GUEST_WIDTH,
+Kody wyjscia: kod QEMU; 2 = zla opcja; 3 = blad konfiguracji dzwieku (QEMU nie uruchomiono).
+
+Zmienne: QEMU, QEMU_IMG, QEMU_DISPLAY_ARGS, QEMU_EXTRA_ARGS, AUDIO_BACKEND, AUDIO_WAV_PATH, GUEST_AUDIO, GUEST_WIDTH,
 GUEST_HEIGHT, DISK_SIZE, OVMF_MONO, OVMF_CODE, OVMF_VARS, QEMU_SDL_BEZ_IME (1/0).
 EOF
 }
@@ -149,6 +185,35 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --mode=*) MODE="${1#--mode=}" ;;
+        --audio)
+            if [[ $# -lt 2 ]]; then
+                echo "BLAD: --audio wymaga nazwy trybu (auto, pipewire, pa, alsa, sdl, wav, none)." >&2
+                exit 2
+            fi
+            AUDIO_CLI="$2"
+            shift
+            ;;
+        --audio=*) AUDIO_CLI="${1#--audio=}" ;;
+        --audio-wav)
+            if [[ $# -lt 2 ]]; then
+                echo "BLAD: --audio-wav wymaga sciezki pliku." >&2
+                exit 2
+            fi
+            AUDIO_WAV_CLI="$2"
+            shift
+            ;;
+        --audio-wav=*) AUDIO_WAV_CLI="${1#--audio-wav=}" ;;
+        --audio-overwrite) AUDIO_OVERWRITE=true ;;
+        --audio-diag) AUDIO_DIAG=true ;;
+        --guest-audio)
+            if [[ $# -lt 2 ]]; then
+                echo "BLAD: --guest-audio wymaga nazwy kontrolera (hda, ac97)." >&2
+                exit 2
+            fi
+            GUEST_AUDIO_CLI="$2"
+            shift
+            ;;
+        --guest-audio=*) GUEST_AUDIO_CLI="${1#--guest-audio=}" ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "BLAD: nieznana opcja: $1" >&2
@@ -165,6 +230,46 @@ if [[ -n "$MODE" && ! "$MODE" =~ ^([0-9]|1[0-8])$ ]]; then
 fi
 if [[ "$DRY_RUN" == "true" && -z "$MODE" ]]; then
     MODE="2"
+fi
+
+# Zadany tryb dzwieku: --audio > AUDIO_BACKEND > domyslny hosta. Nazwy zastepcze: off -> none,
+# pulseaudio -> pa. Sciezka WAV: --audio-wav > AUDIO_WAV_PATH; podanie --audio-wav bez --audio = wav.
+normalize_audio_mode() {
+    case "$1" in
+        off|none|brak) printf 'none' ;;
+        pulseaudio|pulse|pa) printf 'pa' ;;
+        pipewire|pw) printf 'pipewire' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+if [[ -n "$AUDIO_WAV_CLI" ]]; then
+    AUDIO_WAV_PATH="$AUDIO_WAV_CLI"
+    [[ -z "$AUDIO_CLI" ]] && AUDIO_CLI="wav"
+fi
+AUDIO_REQUEST="$(normalize_audio_mode "${AUDIO_CLI:-$AUDIO_BACKEND}")"
+case "$HOST_NAME:$AUDIO_REQUEST" in
+    *:auto|*:pipewire|*:pa|*:alsa|*:sdl|*:wav|*:none|macOS:coreaudio) ;;
+    *:dsound|*:directsound)
+        echo "BLAD: DirectSound jest dostepny tylko w launcherze Windows (runwindows.ps1)." >&2
+        exit 2
+        ;;
+    *)
+        echo "BLAD: nieznany tryb dzwieku: $AUDIO_REQUEST (auto, pipewire, pa, alsa, sdl, wav, none)." >&2
+        exit 2
+        ;;
+esac
+# Kontroler dzwieku goscia: --guest-audio > GUEST_AUDIO > hda. AC97 jest wylacznie jawnym wyborem deweloperskim.
+GUEST_AUDIO="${GUEST_AUDIO_CLI:-${GUEST_AUDIO:-hda}}"
+case "$GUEST_AUDIO" in
+    hda|ac97) ;;
+    *)
+        echo "BLAD: nieznany kontroler dzwieku goscia: $GUEST_AUDIO (hda, ac97)." >&2
+        exit 2
+        ;;
+esac
+if [[ -n "$AUDIO_CLI" && "$AUDIO_REQUEST" != "wav" && -n "$AUDIO_WAV_CLI" ]]; then
+    echo "BLAD: --audio-wav dziala tylko z --audio wav." >&2
+    exit 2
 fi
 
 show_error() {
@@ -211,18 +316,21 @@ brew_prefix_qemu() {
     fi
 }
 
+# Wyjscie QEMU jest najpierw zapisywane w zmiennej: przy `set -o pipefail` potok "qemu | grep -q" bywal falszywie
+# nieudany (grep -q konczy po pierwszym trafieniu, piszacy QEMU dostaje SIGPIPE -> "BRAK QEMU device").
 qemu_has_device() {
-    local device_name="$1"
-    "$QEMU" -device help 2>/dev/null | grep -Eq \
-        "(^|[[:space:]\"'])${device_name}([[:space:]\"',]|$)"
+    local device_name="$1" lista
+    lista="$("$QEMU" -device help 2>/dev/null)" || return 1
+    grep -Eq "(^|[[:space:]\"'])${device_name}([[:space:]\"',]|$)" <<< "$lista"
 }
 
 qemu_device_supports_property() {
     local device_name="$1"
     local property_name="$2"
 
-    "$QEMU" -device "${device_name},help" 2>&1 | \
-        grep -Eq "(^|[[:space:]])${property_name}([=<[:space:]]|$)"
+    local wlasciwosci
+    wlasciwosci="$("$QEMU" -device "${device_name},help" 2>&1)" || true
+    grep -Eq "(^|[[:space:]])${property_name}([=<[:space:]]|$)" <<< "$wlasciwosci"
 }
 
 append_disable_legacy_if_supported() {
@@ -380,6 +488,479 @@ print_dry_run() {
     printf '%s\n' "${out% }"
 }
 
+# ============================================================ DZWIEK HOSTA (backend -audiodev)
+# Gosc zawsze ma ten sam Intel HDA (intel-hda + hda-output,audiodev=snd, PCI 00:02.0, przed VirtIO).
+# Wybierany jest tylko backend hosta. Zasady:
+#  - lista backendow pochodzi z zainstalowanego QEMU (`-audiodev help`), nie z zalozen o dystrybucji,
+#  - obecnosc backendu w QEMU NIE dowodzi, ze dziala serwer dzwieku - PipeWire/PulseAudio sa sprawdzane
+#    osobno (gniazdo w XDG_RUNTIME_DIR i, jesli jest klient, odpowiedz serwera); ALSA - karta w /proc/asound,
+#  - jawny wybor nigdy nie jest po cichu zamieniany na inny backend ani na "none",
+#  - launcher niczego nie instaluje ani nie restartuje (PipeWire/PulseAudio/ALSA tylko odczyt, z timeoutem).
+AUDIO_EFFECTIVE=""        # nazwa backendu QEMU po rozstrzygnieciu (np. pipewire)
+AUDIO_ARG=""              # pelna wartosc -audiodev (jeden argument)
+AUDIO_HOST_INFO=""        # opis wyjscia hosta do podsumowania
+AUDIO_WAV_FINAL=""        # bezwzgledna sciezka nagrania (tryb wav)
+AUDIO_STATUS_REASON=""    # ostatni wynik audio_backend_status
+QEMU_AUDIO_BACKENDS=""    # lista z `-audiodev help` (po jednym w linii) albo pusta
+QEMU_AUDIO_PROBED=false
+
+audio_label() {
+    case "$1" in
+        auto) printf 'Automatycznie' ;;
+        pipewire) printf 'PipeWire' ;;
+        pa) printf 'PulseAudio' ;;
+        alsa) printf 'ALSA' ;;
+        sdl) printf 'SDL' ;;
+        wav) printf 'Nagrywanie dźwięku do WAV' ;;
+        none) printf 'Brak dźwięku' ;;
+        coreaudio) printf 'CoreAudio' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+qemu_runnable() {
+    command -v "$QEMU" >/dev/null 2>&1
+}
+
+# Parsuje `-audiodev help`: kazda linia z sama nazwa [a-z0-9_]; naglowki (z ':') i puste linie pomijane.
+parse_audiodev_help() {
+    local line
+    while IFS= read -r line; do
+        line="${line//$'\r'/}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ "$line" =~ ^[a-z0-9_]+$ ]] && printf '%s\n' "$line"
+    done
+}
+
+probe_qemu_audio_backends() {
+    [[ "$QEMU_AUDIO_PROBED" == "true" ]] && return 0
+    QEMU_AUDIO_PROBED=true
+    QEMU_AUDIO_BACKENDS=""
+    qemu_runnable || return 1
+    local out
+    out="$(timeout 15 "$QEMU" -audiodev help 2>/dev/null)" || return 1
+    QEMU_AUDIO_BACKENDS="$(printf '%s\n' "$out" | parse_audiodev_help)"
+    [[ -n "$QEMU_AUDIO_BACKENDS" ]]
+}
+
+qemu_has_audio_backend() {
+    grep -qx -- "$1" <<< "$QEMU_AUDIO_BACKENDS"
+}
+
+qemu_version_line() {
+    qemu_runnable || { printf '(nie znaleziono %s)' "$QEMU"; return; }
+    local v
+    v="$(timeout 15 "$QEMU" --version 2>/dev/null | head -n 1)"
+    printf '%s' "${v:-(nieznana - QEMU nie podal wersji)}"
+}
+
+runtime_dir() {
+    printf '%s' "${XDG_RUNTIME_DIR:-}"
+}
+
+# Status serwera PipeWire: 0 = dziala, 1 = brak. Opis w AUDIO_STATUS_REASON.
+pipewire_server_status() {
+    local dir sock
+    dir="${PIPEWIRE_RUNTIME_DIR:-$(runtime_dir)}"
+    if [[ -z "$dir" ]]; then
+        AUDIO_STATUS_REASON="brak XDG_RUNTIME_DIR - brak sesji użytkownika z serwerem dźwięku"
+        return 1
+    fi
+    sock="$dir/${PIPEWIRE_REMOTE:-pipewire-0}"
+    if [[ ! -S "$sock" ]]; then
+        AUDIO_STATUS_REASON="serwer PipeWire nie działa (brak gniazda $sock)"
+        return 1
+    fi
+    if command -v pw-cli >/dev/null 2>&1; then
+        if ! timeout 3 pw-cli info 0 >/dev/null 2>&1; then
+            AUDIO_STATUS_REASON="gniazdo $sock istnieje, ale serwer PipeWire nie odpowiada"
+            return 1
+        fi
+        AUDIO_STATUS_REASON="serwer PipeWire odpowiada"
+    else
+        AUDIO_STATUS_REASON="gniazdo PipeWire istnieje (bez pw-cli - odpowiedź serwera niesprawdzona)"
+    fi
+    return 0
+}
+
+# Status serwera PulseAudio (takze pipewire-pulse). 0 = dziala, 1 = brak, 2 = brak urzadzenia wyjsciowego.
+pulse_server_status() {
+    local dir sock info sink
+    dir="$(runtime_dir)"
+    sock="$dir/pulse/native"
+    if [[ -z "${PULSE_SERVER:-}" ]]; then
+        if [[ -z "$dir" ]]; then
+            AUDIO_STATUS_REASON="brak XDG_RUNTIME_DIR - brak sesji użytkownika z serwerem dźwięku"
+            return 1
+        fi
+        if [[ ! -S "$sock" ]]; then
+            AUDIO_STATUS_REASON="serwer PulseAudio nie działa (brak gniazda $sock)"
+            return 1
+        fi
+    fi
+    if command -v pactl >/dev/null 2>&1; then
+        if ! info="$(timeout 3 pactl info 2>/dev/null)"; then
+            AUDIO_STATUS_REASON="serwer PulseAudio nie odpowiada (pactl info)"
+            return 1
+        fi
+        sink="$(printf '%s\n' "$info" | sed -n 's/^Default Sink: //p; s/^Domyślny odpływ: //p' | head -n 1)"
+        if [[ -z "$sink" || "$sink" == "auto_null" || "$sink" == *".monitor" ]]; then
+            AUDIO_STATUS_REASON="serwer odpowiada, ale brak urządzenia wyjściowego (domyślne wyjście: ${sink:-brak})"
+            return 2
+        fi
+        local name
+        name="$(printf '%s\n' "$info" | sed -n 's/^Server Name: //p; s/^Nazwa serwera: //p' | head -n 1)"
+        AUDIO_STATUS_REASON="${name:-serwer PulseAudio} odpowiada, wyjście: $sink"
+    else
+        AUDIO_STATUS_REASON="gniazdo PulseAudio istnieje (bez pactl - odpowiedź serwera niesprawdzona)"
+    fi
+    return 0
+}
+
+alsa_cards_status() {
+    local cards="${BURSZTYN_ASOUND_CARDS:-/proc/asound/cards}"
+    if [[ -r "$cards" ]] && grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+\[' "$cards"; then
+        AUDIO_STATUS_REASON="karta ALSA: $(grep -Em1 '^[[:space:]]*[0-9]+[[:space:]]+\[' "$cards" | sed 's/^[[:space:]]*//; s/[[:space:]]\{2,\}/ /g')"
+        return 0
+    fi
+    if pipewire_server_status || pulse_server_status; then
+        AUDIO_STATUS_REASON="brak karty w $cards; ALSA tylko przez wtyczkę serwera dźwięku (pipewire/pulse)"
+        return 0
+    fi
+    AUDIO_STATUS_REASON="brak karty dźwiękowej ALSA ($cards) i brak serwera dźwięku"
+    return 1
+}
+
+# Dostepnosc backendu: 0 = mozna uzyc, 1 = niedostepny (powod w AUDIO_STATUS_REASON).
+audio_backend_status() {
+    local b="$1"
+    if [[ -n "$QEMU_AUDIO_BACKENDS" ]] && ! qemu_has_audio_backend "$b"; then
+        AUDIO_STATUS_REASON="ta instalacja QEMU nie ma backendu '$b' (-audiodev help)"
+        return 1
+    fi
+    case "$b" in
+        pipewire) pipewire_server_status ;;
+        pa) pulse_server_status; [[ $? -eq 0 ]] ;;
+        alsa) alsa_cards_status ;;
+        sdl)
+            if pipewire_server_status || pulse_server_status || alsa_cards_status; then
+                AUDIO_STATUS_REASON="SDL wybierze własny sterownik (SDL_AUDIODRIVER); serwer/karta dostępne"
+                return 0
+            fi
+            AUDIO_STATUS_REASON="brak serwera dźwięku i karty ALSA - SDL nie ma dokąd odtwarzać"
+            return 1
+            ;;
+        wav) AUDIO_STATUS_REASON="zapis do pliku, bez odtwarzania" ;;
+        none) AUDIO_STATUS_REASON="dźwięk wyłączony" ;;
+        coreaudio) AUDIO_STATUS_REASON="CoreAudio (macOS)" ;;
+        *) AUDIO_STATUS_REASON="nieznany backend"; return 1 ;;
+    esac
+}
+
+# Sciezka nagrania WAV: domyslnie logi_qemu/nagrania_audio/bursztyn-hda-DATA.wav (unikalna); sciezka
+# wzgledna wzgledem katalogu wywolania; katalog = nazwa domyslna w nim. Istniejacy plik: tylko za
+# --audio-overwrite albo po potwierdzeniu w trybie interaktywnym. Dowiazania sa odrzucane.
+resolve_wav_path() {
+    local p="$AUDIO_WAV_PATH" stamp base candidate n
+    stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+    if [[ -z "$p" ]]; then
+        p="$LOG_DIR/nagrania_audio"
+    elif [[ "$p" != /* ]]; then
+        p="$INVOCATION_DIR/$p"
+    fi
+    if [[ -z "$AUDIO_WAV_PATH" || -d "$p" || "$p" == */ ]]; then
+        base="${p%/}/bursztyn-hda-$stamp"
+        candidate="$base.wav"
+        n=2
+        while [[ -e "$candidate" || -L "$candidate" ]]; do
+            candidate="$base-$n.wav"
+            n=$((n + 1))
+        done
+        p="$candidate"
+    fi
+    if [[ -L "$p" ]]; then
+        show_error "Ścieżka nagrania jest dowiązaniem - odmowa: $p"
+        return 1
+    fi
+    if [[ -e "$p" && ! -f "$p" ]]; then
+        show_error "Ścieżka nagrania istnieje i nie jest zwykłym plikiem: $p"
+        return 1
+    fi
+    if [[ -f "$p" && "$AUDIO_OVERWRITE" != "true" ]]; then
+        if [[ -z "$MODE" && -t 0 && "$DRY_RUN" != "true" ]]; then
+            local answer=""
+            read -r -p "Plik nagrania istnieje: $p - nadpisać? [t/N]: " answer || answer=""
+            if [[ "$answer" != "t" && "$answer" != "T" ]]; then
+                echo "Anulowano - istniejące nagranie nie zostało nadpisane."
+                return 1
+            fi
+        else
+            show_error "Plik nagrania już istnieje (nie nadpisuję bez --audio-overwrite): $p"
+            return 1
+        fi
+    fi
+    local dir="${p%/*}"
+    if [[ "$DRY_RUN" != "true" && ! -d "$dir" ]]; then
+        if ! mkdir -p -- "$dir"; then
+            show_error "Nie można utworzyć katalogu nagrań: $dir"
+            return 1
+        fi
+    fi
+    AUDIO_WAV_FINAL="$p"
+}
+
+# Rozstrzyga AUDIO_REQUEST -> AUDIO_EFFECTIVE / AUDIO_ARG. Zwraca 1 przy bledzie konfiguracji (bez QEMU).
+resolve_audio() {
+    local req="$AUDIO_REQUEST" b
+    AUDIO_EFFECTIVE=""; AUDIO_ARG=""; AUDIO_HOST_INFO=""; AUDIO_WAV_FINAL=""
+    local probed=true
+    probe_qemu_audio_backends || probed=false
+    if [[ "$req" == "auto" ]]; then
+        if [[ "$probed" != "true" ]]; then
+            show_error "Tryb automatyczny wymaga listy backendów QEMU ($QEMU -audiodev help), a nie udało się jej odczytać."
+            echo "Wybierz backend jawnie: --audio pipewire|pa|alsa|sdl|wav|none" >&2
+            return 1
+        fi
+        local candidates="pipewire pa alsa"
+        [[ "$HOST_NAME" == "macOS" ]] && candidates="coreaudio"
+        local reasons=""
+        for b in $candidates; do
+            if audio_backend_status "$b"; then
+                AUDIO_EFFECTIVE="$b"
+                AUDIO_HOST_INFO="automatycznie: $(audio_label "$b") - $AUDIO_STATUS_REASON"
+                break
+            fi
+            reasons+="  - $(audio_label "$b"): $AUDIO_STATUS_REASON"$'\n'
+        done
+        if [[ -z "$AUDIO_EFFECTIVE" ]]; then
+            show_error "Błąd uruchomienia dźwięku: nie znaleziono działającego wyjścia dźwięku hosta."
+            printf '%s' "$reasons" >&2
+            echo "Nie przełączam po cichu na 'none'. Wybierz jawnie: --audio wav (nagrywanie) albo --audio none." >&2
+            return 1
+        fi
+    else
+        AUDIO_EFFECTIVE="$req"
+        if [[ "$probed" != "true" ]]; then
+            warn "Nie udało się odczytać listy backendów QEMU (-audiodev help) - nie można sprawdzić '$req'."
+            AUDIO_HOST_INFO="$(audio_label "$req") (niesprawdzony - brak listy backendów QEMU)"
+        elif audio_backend_status "$req"; then
+            AUDIO_HOST_INFO="$(audio_label "$req") - $AUDIO_STATUS_REASON"
+        else
+            if [[ "$DRY_RUN" == "true" ]]; then
+                warn "$(audio_label "$req"): $AUDIO_STATUS_REASON (dry-run - tylko ostrzeżenie)"
+                AUDIO_HOST_INFO="$(audio_label "$req") - NIEDOSTĘPNY: $AUDIO_STATUS_REASON"
+            else
+                show_error "Błąd uruchomienia dźwięku: $(audio_label "$req") jest niedostępny - $AUDIO_STATUS_REASON."
+                echo "QEMU nie zostało uruchomione. Wybierz inne wyjście dźwięku (menu 'A' albo --audio ...)." >&2
+                return 1
+            fi
+        fi
+    fi
+    if [[ "$AUDIO_EFFECTIVE" == "wav" ]]; then
+        resolve_wav_path || return 1
+        AUDIO_ARG="wav,id=snd,path=$(qemu_opt_path "$AUDIO_WAV_FINAL")"
+        AUDIO_HOST_INFO="nagrywanie do pliku WAV (bez odtwarzania na głośnikach hosta)"
+    else
+        AUDIO_ARG="${AUDIO_EFFECTIVE},id=snd"
+    fi
+    return 0
+}
+
+print_audio_summary() {
+    echo "Wyjście dźwięku: $(audio_label "$AUDIO_REQUEST")$([[ "$AUDIO_REQUEST" == "auto" ]] && printf ' -> %s' "$(audio_label "$AUDIO_EFFECTIVE")") (-audiodev $AUDIO_ARG)"
+    echo "Wersja QEMU:     $(qemu_version_line)"
+    if [[ "$GUEST_AUDIO" == "ac97" ]]; then
+        echo "Kontroler dźwięku gościa: Intel ICH AC97 (AC97,audiodev=snd, PCI 00:02.0) - tryb deweloperski, bez Intel HDA"
+    else
+        echo "Wykryte urządzenie Intel HDA: intel-hda + hda-output,audiodev=snd (PCI 00:02.0, przed VirtIO)"
+    fi
+    echo "Dźwięk hosta:    $AUDIO_HOST_INFO"
+    if [[ -n "$AUDIO_WAV_FINAL" ]]; then
+        echo "Ścieżka nagrania: $AUDIO_WAV_FINAL"
+    fi
+}
+
+AUDIO_QEMU_LINE_RE='^(qemu[^ :]*: )?(audio|dsound|sdl|wav|alsa|pulseaudio|pa|pipewire|oss|jack|coreaudio|spice|dbus)[^:]{0,24}:|-audiodev|sdl_openaudio'
+# Klasyfikacja komunikatow QEMU o dzwieku (stderr albo log). Wynik: "rodzaj<TAB>linie".
+# Rodzaje: unsupported, server, device, file, init, none.
+classify_audio_output() {
+    local file="$1" lines kind="none"
+    [[ -r "$file" ]] || { printf 'none\t'; return; }
+    # Tylko komunikaty w formacie QEMU (prefiks backendu albo -audiodev), nie linie portu szeregowego goscia.
+    lines="$(grep -aiE "$AUDIO_QEMU_LINE_RE" "$file" | head -n 8)"
+    if [[ -z "$lines" ]]; then
+        printf 'none\t'
+        return
+    fi
+    if grep -aqiE "unknown audio driver|audiodev.*(invalid|unknown|not supported)|parameter 'driver'|invalid parameter value.*driver" <<<"$lines"; then
+        kind="unsupported"
+    elif grep -aqiE "pa_context_connect|connection refused|failed to connect|pw_context_connect|host is down|no such file or directory.*(pulse|pipewire)" <<<"$lines"; then
+        kind="server"
+    elif grep -aqiE "no (available )?audio device|no such device|could not open.*device|could not initialize dac|snd_pcm_open|auto_null|device or resource busy" <<<"$lines"; then
+        kind="device"
+    elif grep -aqiE "wav: |wave file" <<<"$lines"; then
+        kind="file"
+    elif grep -aqiE "could not init|failed to (create|initiali[sz]e)|sdl_openaudio|init.*fail" <<<"$lines"; then
+        kind="init"
+    fi
+    printf '%s\t%s' "$kind" "$lines"
+}
+
+# Raport po zakonczeniu QEMU: nie twierdzi, ze dzwiek gral, tylko dlatego, ze proces wystartowal.
+report_audio_outcome() {
+    local code="$1" file="$2" result kind lines
+    result="$(classify_audio_output "$file")"
+    kind="${result%%$'\t'*}"
+    lines="${result#*$'\t'}"
+    echo
+    case "$kind" in
+        unsupported) echo "Błąd uruchomienia dźwięku: backend '$AUDIO_EFFECTIVE' nie jest obsługiwany przez to QEMU." ;;
+        server) echo "Błąd uruchomienia dźwięku: serwer dźwięku ($AUDIO_EFFECTIVE) jest niedostępny." ;;
+        device) echo "Błąd uruchomienia dźwięku: brak urządzenia wyjściowego hosta ($AUDIO_EFFECTIVE)." ;;
+        file) echo "Błąd nagrywania: QEMU nie mógł zapisać pliku WAV." ;;
+        init) echo "Błąd uruchomienia dźwięku: inicjalizacja backendu '$AUDIO_EFFECTIVE' nie powiodła się." ;;
+    esac
+    if [[ "$kind" != "none" ]]; then
+        echo "Komunikaty QEMU:"
+        printf '%s\n' "$lines" | sed 's/^/  /'
+        echo "Wybierz inne wyjście dźwięku (menu 'A' albo --audio ...) - launcher nie przełącza go samodzielnie."
+    elif [[ "$code" -ne 0 ]]; then
+        echo "QEMU zakończył się kodem $code bez komunikatów o dźwięku - przyczyna niezwiązana z wyborem dźwięku (zob. wyjście powyżej)."
+    elif [[ "$AUDIO_EFFECTIVE" != "none" && "$AUDIO_EFFECTIVE" != "wav" ]]; then
+        echo "Dźwięk: brak komunikatów o błędach backendu $(audio_label "$AUDIO_EFFECTIVE") (to nie potwierdza słyszalnego odtwarzania)."
+    fi
+    if [[ -n "$AUDIO_WAV_FINAL" ]]; then
+        if [[ -f "$AUDIO_WAV_FINAL" ]]; then
+            echo "Nagranie WAV: $AUDIO_WAV_FINAL ($(wc -c < "$AUDIO_WAV_FINAL") B; dźwięk wyjścia HDA gościa, nie biblioteka muzyki Bursztyn OS)"
+        else
+            echo "Nagranie WAV nie powstało: $AUDIO_WAV_FINAL"
+        fi
+    fi
+    AUDIO_LAST_KIND="$kind"
+}
+AUDIO_LAST_KIND="none"
+
+# Uruchamia QEMU z kopia stderr do pliku tymczasowego (stderr nadal widoczny w terminalu); serial (stdout) bez
+# zmian. Z logiem: stdout+stderr przez tee do pliku logu (jak dotad). Ustawia kod w zmiennej QEMU_RUN_CODE.
+run_qemu_captured() {
+    local save_log="$1" mode_name="$2"
+    shift 2
+    local code=0 capture=""
+    if [[ "$save_log" == "true" ]]; then
+        mkdir -p "$LOG_DIR"
+        local stamp safe_name log_file
+        stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
+        safe_name="$(printf '%s' "$mode_name" | tr -c 'A-Za-z0-9_-' '_')"
+        log_file="$LOG_DIR/${stamp}_${safe_name}.log"
+        echo "Log COM1:"
+        echo "$log_file"
+        echo
+        exec_qemu "$@" 2>&1 | tee "$log_file"
+        code=${PIPESTATUS[0]}
+        capture="$log_file"
+        report_audio_outcome "$code" "$capture"
+    else
+        capture="$(mktemp "${TMPDIR:-/tmp}/bursztyn-qemu-stderr.XXXXXX")"
+        exec_qemu "$@" 2> >(tee -a "$capture" >&2)
+        code=$?
+        wait "$!" 2>/dev/null || true
+        report_audio_outcome "$code" "$capture"
+        rm -f -- "$capture"
+    fi
+    QEMU_RUN_CODE="$code"
+}
+QEMU_RUN_CODE=0
+
+# Interaktywny wybor wyjscia dzwieku (menu glowne: A). Niedostepne opcje sa pokazane z powodem.
+audio_menu() {
+    probe_qemu_audio_backends || warn "Nie udało się odczytać listy backendów QEMU - dostępność niesprawdzona."
+    local opts=(auto pipewire pa alsa sdl wav none)
+    [[ "$HOST_NAME" == "macOS" ]] && opts=(auto coreaudio sdl wav none)
+    local desc
+    echo
+    echo "================ Wyjście dźwięku (gość: Intel HDA) ================"
+    local i=1 b
+    for b in "${opts[@]}"; do
+        case "$b" in
+            auto) desc="wybierz automatycznie działający serwer (PipeWire > PulseAudio > ALSA)" ;;
+            pipewire) desc="odtwarzanie przez PipeWire" ;;
+            pa) desc="odtwarzanie przez PulseAudio (także pipewire-pulse)" ;;
+            alsa) desc="odtwarzanie przez ALSA (domyślne, jak Makefile)" ;;
+            sdl) desc="odtwarzanie przez SDL (alternatywa)" ;;
+            coreaudio) desc="odtwarzanie przez CoreAudio" ;;
+            wav) desc="zapis dźwięku gościa do pliku WAV, bez odtwarzania" ;;
+            none) desc="bez dźwięku (diagnostyka); HDA zostaje" ;;
+        esac
+        local st="dostępny"
+        if [[ "$b" != "auto" ]]; then
+            if audio_backend_status "$b"; then st="dostępny"; else st="NIEDOSTĘPNY: $AUDIO_STATUS_REASON"; fi
+        fi
+        printf '  %d - %-26s %s\n' "$i" "$(audio_label "$b")" "$desc"
+        printf '      %s\n' "$st"
+        i=$((i + 1))
+    done
+    echo "  0 - powrót (bez zmian; obecnie: $(audio_label "$AUDIO_REQUEST"))"
+    local pick=""
+    read -r -p "Wybierz wyjście dźwięku: " pick || return 0
+    [[ "$pick" == "0" || -z "$pick" ]] && return 0
+    if [[ ! "$pick" =~ ^[0-9]+$ ]] || (( pick < 1 || pick > ${#opts[@]} )); then
+        show_error "Nieprawidłowy wybór."
+        return 1
+    fi
+    b="${opts[$((pick - 1))]}"
+    if [[ "$b" != "auto" ]] && ! audio_backend_status "$b"; then
+        show_error "$(audio_label "$b") jest niedostępny: $AUDIO_STATUS_REASON"
+        return 1
+    fi
+    if [[ "$b" == "wav" ]]; then
+        local path=""
+        read -r -p "Ścieżka nagrania (Enter = logi_qemu/nagrania_audio/...): " path || path=""
+        AUDIO_WAV_PATH="$path"
+    fi
+    AUDIO_REQUEST="$b"
+    echo "Wyjście dźwięku: $(audio_label "$b")"
+}
+
+# Diagnostyka dzwieku hosta - wylacznie odczyt (bez restartow uslug i zmian konfiguracji).
+audio_diag() {
+    echo "=== Diagnostyka dźwięku hosta (tylko odczyt) ==="
+    echo "Host:            $HOST_NAME / $HOST_ARCH"
+    if command -v systemd-detect-virt >/dev/null 2>&1; then
+        echo "Wirtualizacja:   $(systemd-detect-virt 2>/dev/null || echo brak) (oracle = VirtualBox)"
+    fi
+    echo "QEMU:            $(qemu_version_line)"
+    if probe_qemu_audio_backends; then
+        echo "Backendy QEMU:   $(printf '%s ' $QEMU_AUDIO_BACKENDS)"
+    else
+        echo "Backendy QEMU:   (nie udało się odczytać -audiodev help)"
+    fi
+    echo "XDG_RUNTIME_DIR: ${XDG_RUNTIME_DIR:-(brak)}"
+    local b
+    for b in pipewire pa alsa sdl; do
+        if audio_backend_status "$b"; then
+            printf '  %-11s dostępny - %s\n' "$(audio_label "$b")" "$AUDIO_STATUS_REASON"
+        else
+            printf '  %-11s NIEDOSTĘPNY - %s\n' "$(audio_label "$b")" "$AUDIO_STATUS_REASON"
+        fi
+    done
+    if command -v pactl >/dev/null 2>&1; then
+        echo "--- pactl info (serwer, format próbek) ---"
+        timeout 3 pactl info 2>/dev/null | grep -E '^(Server Name|Server Version|Default Sample Specification|Default Sink|Nazwa serwera|Domyślny)' || echo "(brak odpowiedzi)"
+        echo "--- wyjścia (sinks) ---"
+        timeout 3 pactl list short sinks 2>/dev/null || echo "(brak odpowiedzi)"
+        echo "--- aktywne strumienie odtwarzania (sink-inputs) - kto teraz gra ---"
+        timeout 3 pactl list short sink-inputs 2>/dev/null || echo "(brak odpowiedzi)"
+    fi
+    echo "--- /proc/asound/cards ---"
+    cat "${BURSZTYN_ASOUND_CARDS:-/proc/asound/cards}" 2>/dev/null || echo "(brak)"
+    echo "--- uruchomione procesy QEMU ---"
+    pgrep -a qemu-system 2>/dev/null || echo "(żaden - QEMU nie działa)"
+    echo
+    echo "Szumy/trzaski przy bezczynnym Linuksie: procedura w docs/qemu-dzwiek-launchery.md (sekcja VirtualBox)."
+    echo "Jeśli dźwięki występują, gdy QEMU nie działa, zmiana launchera Bursztyn OS nie może ich usunąć."
+}
+
 append_common_machine_args() {
     QEMU_ARGS+=(
         -machine pc,hpet=on
@@ -392,17 +973,34 @@ append_common_machine_args() {
 }
 
 append_audio_args() {
-    if [[ "$AUDIO_BACKEND" == "off" || "$AUDIO_BACKEND" == "none" ]]; then
-        # Keep HDA and its PCI slot when muted, matching Windows.
-        QEMU_ARGS+=( -audiodev none,id=snd -device intel-hda -device hda-output,audiodev=snd )
-        return 0
+    # Jeden -audiodev (id=snd) i jeden kontroler goscia; backend z resolve_audio. Wyciszenie zachowuje kontroler
+    # i jego slot PCI. AC97 (--guest-audio ac97) zajmuje ten sam slot zamiast HDA - nigdy oba naraz.
+    if [[ "$GUEST_AUDIO" == "ac97" ]]; then
+        QEMU_ARGS+=(
+            -audiodev "$AUDIO_ARG"
+            -device AC97,audiodev=snd
+        )
+        return
     fi
-
     QEMU_ARGS+=(
-        -audiodev "${AUDIO_BACKEND},id=snd"
+        -audiodev "$AUDIO_ARG"
         -device intel-hda
         -device hda-output,audiodev=snd
     )
+}
+
+# AC97 tylko na jawne zadanie i tylko, gdy ta instalacja QEMU je ma (bez cichego powrotu do HDA).
+check_guest_audio_device() {
+    [[ "$GUEST_AUDIO" == "ac97" ]] || return 0
+    if [[ "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+    if ! qemu_has_device AC97; then
+        show_error "Ta instalacja QEMU nie ma urzadzenia AC97 (--guest-audio ac97)."
+        echo "QEMU nie zostalo uruchomione. Uzyj domyslnego --guest-audio hda albo zainstaluj QEMU z AC97." >&2
+        return 1
+    fi
+    return 0
 }
 
 append_optional_cli_args() {
@@ -610,6 +1208,9 @@ run_qemu() {
 
     require_file "$iso" "obrazu ISO"
     check_iso_fresh "$iso"
+    # Dzwiek przed dyskiem: blad konfiguracji dzwieku nie tworzy dysku i nie uruchamia QEMU.
+    resolve_audio || return "$AUDIO_EXIT_CODE"
+    check_guest_audio_device || return "$AUDIO_EXIT_CODE"
     prepare_disk
 
     if [[ "$profile" == "virtio" ]]; then
@@ -631,6 +1232,7 @@ run_qemu() {
     final_args+=( -name "Bursztyn OS - $mode_name" )
 
     if [[ "$DRY_RUN" == "true" ]]; then
+        print_audio_summary >&2
         print_dry_run "${final_args[@]}"
         return 0
     fi
@@ -659,7 +1261,7 @@ run_qemu() {
         echo "Input:        xHCI + USB HID"
     fi
 
-    echo "Audio:        $AUDIO_BACKEND"
+    print_audio_summary
     echo "Display:      ${QEMU_DISPLAY_ARGS:-(domyslny QEMU)}"
     if sdl_ime_fix_active; then
         echo "Klawiatura:   QEMU bez IBus (tylko ten proces; AltGr/polskie znaki); QEMU_SDL_BEZ_IME=0 wylacza"
@@ -667,28 +1269,8 @@ run_qemu() {
     echo "============================================================"
     echo
 
-    local code=0
-
-    if [[ "$save_log" == "true" ]]; then
-        mkdir -p "$LOG_DIR"
-
-        local stamp safe_name log_file
-        stamp="$(date '+%Y-%m-%d_%H-%M-%S')"
-        safe_name="$(printf '%s' "$mode_name" | tr -c 'A-Za-z0-9_-' '_')"
-        log_file="$LOG_DIR/${stamp}_${safe_name}.log"
-
-        echo "Log COM1:"
-        echo "$log_file"
-        echo
-
-        exec_qemu "${final_args[@]}" 2>&1 | tee "$log_file"
-        code=${PIPESTATUS[0]}
-    else
-        exec_qemu "${final_args[@]}"
-        code=$?
-    fi
-
-    print_qemu_result "$code"
+    run_qemu_captured "$save_log" "$mode_name" "${final_args[@]}"
+    print_qemu_result "$QEMU_RUN_CODE"
 }
 
 run_installed() {
@@ -697,6 +1279,8 @@ run_installed() {
     # Nie tworzymy pustego dysku dla trybu "zainstalowany".
     assert_disk_path_safe
     require_file "$DISK" "zainstalowanego wirtualny_dysk.img"
+    resolve_audio || return "$AUDIO_EXIT_CODE"
+    check_guest_audio_device || return "$AUDIO_EXIT_CODE"
 
     if [[ "$profile" == "virtio" ]]; then
         validate_virtio_environment
@@ -715,6 +1299,7 @@ run_installed() {
     )
 
     if [[ "$DRY_RUN" == "true" ]]; then
+        print_audio_summary >&2
         print_dry_run "${final_args[@]}"
         return 0
     fi
@@ -742,13 +1327,12 @@ run_installed() {
         echo "Input:        USB HID"
     fi
 
+    print_audio_summary
     echo "============================================================"
     echo
 
-    local code=0
-    exec_qemu "${final_args[@]}"
-    code=$?
-    print_qemu_result "$code"
+    run_qemu_captured "false" "Zainstalowany UEFI" "${final_args[@]}"
+    print_qemu_result "$QEMU_RUN_CODE"
 }
 
 info_tests_canonical() {
@@ -895,6 +1479,9 @@ run_choice() {
         18)
             run_installed "legacy"
             ;;
+        a|A)
+            audio_menu
+            ;;
         0)
             exit 0
             ;;
@@ -904,6 +1491,11 @@ run_choice() {
             ;;
     esac
 }
+
+if [[ "$AUDIO_DIAG" == "true" ]]; then
+    audio_diag
+    exit 0
+fi
 
 if [[ "$DRY_RUN" != "true" ]]; then
     require_command "$QEMU"
@@ -964,10 +1556,13 @@ while true; do
     echo " 17  - UEFI: AHCI + E1000 + std VGA + USB HID"
     echo " 18  - Zainstalowany UEFI Legacy, bez ISO"
     echo
+    echo " WYJŚCIE DŹWIĘKU (gość: Intel HDA)"
+    echo "  A  - zmień (obecnie: $(audio_label "$AUDIO_REQUEST"))"
+    echo
     echo "  0  - Wyjscie"
     echo
 
-    read -r -p "Wybierz tryb [0-18]: " choice || exit 0
+    read -r -p "Wybierz tryb [0-18, A]: " choice || exit 0
 
     run_choice "$choice" || true
 done

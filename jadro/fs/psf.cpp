@@ -4489,6 +4489,94 @@ extern "C" bool usun_twor(const char* sciezka) {
  * PUBLICZNE API - ROZMIAR
  * ========================================================================= */
 
+/*
+ * Wolne miejsce na dane PSF w bajtach (bloki danych oznaczone w bitmapie jako wolne). Tylko odczyt: liczy bity
+ * bitmapy blok po bloku (bez zmiany stanu, bez alokacji). Uzywane przez import muzyki z modulu Multiboot2, aby
+ * nie zapelnic RAM-dysku zywego systemu (zostawia rezerwe dla ustawien i dokumentow). 0 = PSF niegotowy / blad.
+ */
+extern "C" uint64_t psf_wolne_bajty() {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !dysk_superblok || calkowita_liczba_blokow_danych == 0) return 0;
+    const uint64_t n = calkowita_liczba_blokow_danych;
+    const uint64_t bajty_bitmapy = (n + 7ULL) / 8ULL;
+    uint64_t wolne = 0;
+    for (uint64_t bajt = 0; bajt < bajty_bitmapy;) {
+        const uint64_t blok = 1ULL + bajt / static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+        if (blok >= dysk_superblok->start_wezlow) return 0;
+        const uint8_t* b = pobierz_blok(blok);
+        if (!b) return 0;
+        uint64_t koniec = bajt + (PSF_ROZMIAR_BLOKU - bajt % PSF_ROZMIAR_BLOKU);
+        if (koniec > bajty_bitmapy) koniec = bajty_bitmapy;
+        for (; bajt < koniec; ++bajt) {
+            const uint8_t v = b[bajt % PSF_ROZMIAR_BLOKU];
+            for (uint32_t k = 0; k < 8; ++k) {
+                if (bajt * 8ULL + k >= n) break;
+                if (!(v & (1U << k))) ++wolne;
+            }
+        }
+    }
+    return wolne * static_cast<uint64_t>(PSF_ROZMIAR_BLOKU);
+}
+
+extern "C" bool psf_statystyki(PsfStatystyki* out) {
+    if (!out) return false;
+    *out = PsfStatystyki{};
+    const uint64_t wolne = psf_wolne_bajty();
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !dysk_superblok) return false;
+    out->gotowy = true;
+    out->trwaly = nosnik_blokowy_dostepny && zapis_trwaly_dozwolony;
+    out->bloki_danych = calkowita_liczba_blokow_danych;
+    out->wolne_bajty = wolne;
+    out->wezly = calkowita_liczba_wezlow;
+    for (uint64_t id = 1; id <= calkowita_liczba_wezlow; ++id) {
+        const wezel_indeksowy* w = pobierz_wezel(id);
+        if (w && w->typ == TYP_WOLNY) ++out->wolne_wezly;
+    }
+    return true;
+}
+
+// Diagnostyka (tylko odczyt): bezwzgledny LBA dysku pierwszego sektora bloku `indeks_bloku` pliku.
+extern "C" bool psf_lba_bloku_pliku(const char* sciezka, uint64_t indeks_bloku, uint64_t* lba_dysku) {
+    if (!lba_dysku) return false;
+    *lba_dysku = 0;
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !sciezka || !nosnik_blokowy_dostepny || !bsp_partycja.device) return false;
+    const uint64_t id = rozwiaz_sciezke(sciezka, nullptr, false);
+    const wezel_indeksowy* w = id ? pobierz_wezel(id) : nullptr;
+    if (!w || w->typ != TYP_PLIK || !wskazniki_pliku_poprawne(w)) return false;
+    uint64_t bid = BARK_BLOKU;
+    if (!pobierz_wskaznik_bloku(w, indeks_bloku, &bid) || bid == BARK_BLOKU) return false;
+    const uint64_t abs = absolutny_blok_danych(bid);
+    if (abs == UINT64_MAX) return false;
+    *lba_dysku = bsp_partycja.start + BSP_START_LBA + abs * (PSF_ROZMIAR_BLOKU / ROZMIAR_SEKTORA);
+    return true;
+}
+
+// Weryfikacja instalatora: porzuca WYLACZNIE czyste wpisy pamieci podrecznej blokow danych, aby kolejne
+// odczyty pochodzily z nosnika. Gdy cokolwiek jest brudne (niezapisane), nic nie zmienia i zwraca false -
+// wolajacy musi najpierw wykonac udany psf_flush_cache(). Metadane (RAM) i format BSP2 bez zmian.
+extern "C" bool psf_porzuc_czyste_bloki_cache() {
+    BlokadaPSF blokada;
+    if (!psf_gotowy || !nosnik_blokowy_dostepny) return false;
+    if (brudny_caly_system || liczba_brudnych_blokow != 0) return false;
+    for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i)
+        if (wpisy_cache[i].nr_bloku != UINT64_MAX && wpisy_cache[i].brudny) return false;
+    for (size_t i = 0; i < POJEMNOSC_CACHE_BLOKOW; ++i) {
+        wpisy_cache[i].nr_bloku = UINT64_MAX;
+        wpisy_cache[i].wiek = 0;
+    }
+    return true;
+}
+
+// Diagnostyka: wynik ostatniego bsp_zapisz_zmiany()/psf_flush_cache().
+extern "C" bool psf_ostatni_flush_ok() { return ostatni_flush_ok; }
+
+// Diagnostyka: system plikow zamontowany z dysku i zapis trwaly nie zostal wylaczony po bledzie I/O.
+extern "C" bool psf_zapis_trwaly_aktywny() {
+    return nosnik_blokowy_dostepny && zapis_trwaly_dozwolony;
+}
+
 extern "C" uint32_t rozmiar_pliku(
     const char* sciezka
 ) {

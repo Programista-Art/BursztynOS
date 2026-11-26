@@ -153,6 +153,7 @@ public:
     Prostokat prostokat_naglowka(int index)const{return index>=0 && index<liczba_kart_?strony_[index].prostokat_naglowka_:Prostokat{};}
     int liczba_kart() const { return liczba_kart_; }
     int aktywna_karta() const { return aktywna_karta_; }
+    int wysokosc_paska() const { return wysokosc_paska_kart_; }
     Prostokat prostokat_obszaru_strony() const {
         const int y = wysokosc_paska_kart_;
         return Prostokat(1, y,

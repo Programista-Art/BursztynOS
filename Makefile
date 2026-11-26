@@ -494,6 +494,8 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	hda.o \
 	hda_diag.o \
 	hda_transport.o \
+	ac97.o \
+	wyjscie_audio.o \
 	klawiatura.o \
 	przegladarka_blob.o \
 	husarz_worker_blob.o \
@@ -567,6 +569,8 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	ikona_app_ustawienia_ekranu_blob.o \
 	ikona_app_menedzer_zadan_blob.o \
 	ikona_app_kalendarz_blob.o \
+	ikona_app_grajek_blob.o \
+	grajek_zasoby_blob.o \
 	heap.o \
 	scheduler.o \
 	fpu.o \
@@ -590,6 +594,7 @@ OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekr
 	diagnostyka_systemu.o diagnostyka_systemu_bws.o diagnostyka_systemu_boot.o diagnostyka_blob.o \
 	menedzer_zadan_blob.o \
 	kalendarz_blob.o \
+	grajek_blob.o \
 	pcm440_blob.o pcm660_blob.o \
 	logo_png_blob.o \
 	$(MBEDTLS_OBJS)
@@ -759,11 +764,17 @@ bws_nowoczesne.o: jadro/bws/bws_nowoczesne.cpp jadro/bws/bws_nowoczesne.h jadro/
 syscalls.o: jadro/bws/syscalls.cpp jadro/bws/bws_api.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
-hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_pcm_ring.h jadro/dzwiek/pcm_jadro.h jadro/dzwiek/mikser_pcm.h sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
+hda.o: sterowniki/dzwiek/hda.cpp sterowniki/dzwiek/hda_pcm_aplikacji.h sterowniki/dzwiek/hda_pcm_ring.h jadro/dzwiek/pcm_jadro.h jadro/dzwiek/mikser_pcm.h sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda_transport.o: sterowniki/dzwiek/hda_transport.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag_format.h jadro/mm/pamiec.h sterowniki/pci/pci.h sterowniki/dma.h sterowniki/czas/hpet.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c sterowniki/dzwiek/hda_transport.cpp -o $@
+
+ac97.o: sterowniki/dzwiek/ac97.cpp sterowniki/dzwiek/ac97.h sterowniki/dzwiek/ac97_rdzen.h sterowniki/dzwiek/ac97_pcm.h sterowniki/dzwiek/ac97_rejestry.h jadro/dzwiek/mikser_pcm.h sterowniki/pci/pci.h sterowniki/dma.h sterowniki/czas/hpet.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
+
+wyjscie_audio.o: jadro/dzwiek/wyjscie_audio.cpp jadro/dzwiek/wyjscie_audio.h jadro/dzwiek/wyjscie_audio_polityka.h jadro/dzwiek/pcm_aplikacji.h sterowniki/dzwiek/hda_pcm_aplikacji.h sterowniki/dzwiek/ac97.h
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 
 hda_diag.o: sterowniki/dzwiek/hda_diag.cpp sterowniki/dzwiek/hda_transport.h sterowniki/dzwiek/hda_diag.h sterowniki/dzwiek/hda_diag_format.h sterowniki/dzwiek/hda_wewnetrzny.h sterowniki/dzwiek/hda.h
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
@@ -1277,7 +1288,16 @@ GALERIA_STAMP := .galeria.stamp
 $(GALERIA_STAMP): FORCE narzedzia/package_galeria.py
 	@$(PYTHON) narzedzia/package_galeria.py --stamp $@
 
-$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py narzedzia/package_galeria.py $(GALERIA_STAMP) $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
+# Muzyka demonstracyjna dla Grajka (dane/muzyka -> modul muzyka.pak, tylko sesja Live) - WYLACZNIE NA ZADANIE.
+# Domyslne ISO nie czyta prywatnej muzyki z dane/muzyka. Wlaczenie (test/demonstracja): make MUZYKA_W_ISO=1 iso.
+# Zainstalowany system czyta muzyke z /dane/muzyka na dysku (Eksplorator, Bursztynowy Importer Plikow).
+MUZYKA_W_ISO ?= 0
+export MUZYKA_W_ISO
+MUZYKA_STAMP := .muzyka.stamp
+$(MUZYKA_STAMP): FORCE narzedzia/package_muzyka.py narzedzia/package_galeria.py
+	@$(PYTHON) narzedzia/package_muzyka.py --stamp $@
+
+$(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notices.py $(KERNEL) ustawienia_blob.o $(TAPETY_PAK) .installer-build/BOOTX64.EFI Makefile narzedzia/package_bsf.py narzedzia/package_support.py narzedzia/package_power_icons.py narzedzia/package_desktop_images.py narzedzia/package_galeria.py $(GALERIA_STAMP) narzedzia/package_muzyka.py $(MUZYKA_STAMP) $(DESKTOP_IMAGES) $(wildcard ikonki/przycisk*.png) $(wildcard dane/sponsorze/*.txt) czcionki/ttf czcionki/otf $(shell $(PYTHON) -c 'from pathlib import Path; from narzedzia.bsf_release_assets import assets; print(" ".join(str(p) for p in assets(Path("."))))')
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/grub
 	$(PYTHON) narzedzia/package_release_kernel.py $(KERNEL) $(ISO_DIR)/boot/$(KERNEL) $(OBJCOPY)
@@ -1334,6 +1354,7 @@ $(GRUB_CFG): narzedzia/package_release_kernel.py narzedzia/package_release_notic
 	$(PYTHON) narzedzia/package_power_icons.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_desktop_images.py $(ISO_DIR)
 	$(PYTHON) narzedzia/package_galeria.py $(ISO_DIR)
+	$(PYTHON) narzedzia/package_muzyka.py $(ISO_DIR)
 
 .installer-build/BOOTX64.EFI: narzedzia/instalator/grub-embedded.cfg Makefile
 	@mkdir -p .installer-build
@@ -1655,6 +1676,17 @@ endif
 QEMU_VIRTIO_XRES ?= 1280
 QEMU_VIRTIO_YRES ?= 720
 
+# Kontroler dzwieku GOSCIA: hda (domyslnie, wszystkie profile) albo ac97 - wylacznie do rozwoju sterownika AC97
+# (np. make QEMU_GUEST_AUDIO=ac97 run-installed). AC97 zajmuje slot HDA; nigdy oba naraz.
+QEMU_GUEST_AUDIO ?= hda
+ifeq ($(QEMU_GUEST_AUDIO),ac97)
+QEMU_GUEST_AUDIO_ARGS := -device AC97,audiodev=snd
+else ifeq ($(QEMU_GUEST_AUDIO),hda)
+QEMU_GUEST_AUDIO_ARGS := -device intel-hda -device hda-output,audiodev=snd
+else
+$(error QEMU_GUEST_AUDIO musi byc hda albo ac97)
+endif
+
 QEMUBASEARGS ?= \
 	-machine pc,hpet=on \
 	-cpu max \
@@ -1662,8 +1694,7 @@ QEMUBASEARGS ?= \
 	-smp $(QEMU_SMP) \
 	-m $(QEMU_RAM) \
 	-audiodev alsa,id=snd \
-	-device intel-hda \
-	-device hda-output,audiodev=snd \
+	$(QEMU_GUEST_AUDIO_ARGS) \
 	-serial stdio \
 	$(QEMUDISPLAYARGS)
 
@@ -2147,6 +2178,7 @@ test-abs-map-diag:
 .PHONY: test-explorer-host
 test-explorer-host:
 	@mkdir -p .bursztyn-ui-test
+	$(PYTHON) testy/test_skojarzenia_uprawnienia.py
 	g++ -std=c++17 -O1 -g $(HOST_INCLUDES) -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=address,undefined testy/test_explorer_host.cpp -o .bursztyn-ui-test/test-explorer
 	ASAN_OPTIONS=detect_leaks=0 .bursztyn-ui-test/test-explorer
 
@@ -2491,6 +2523,11 @@ test-launcher-parity:
 test-unix-launcher:
 	$(PYTHON) testy/test_unix_launcher.py
 
+# Wybor dzwieku w launcherach (Linux: atrapa QEMU/pactl/pw-cli; Windows: statycznie lub pwsh -PrintArgv).
+.PHONY: test-launcher-audio
+test-launcher-audio:
+	$(PYTHON) testy/test_launcher_audio.py
+
 .PHONY: test-virtio-input-qemu-parity-host
 test-virtio-input-qemu-parity-host:
 	$(PYTHON) testy/test_virtio_input_qemu_parity.py
@@ -2549,6 +2586,132 @@ kalendarz_blob.o: kalendarz_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_li
 	$(BUR_CONVERT) kalendarz.elf kalendarz.bin
 	$(PYTHON) narzedzia/kompresuj_blob.py kalendarz.bin kalendarz.bin.bz
 	$(LD) -r -b binary kalendarz.bin.bz -o kalendarz_blob.o
+
+# Grajek 1.0 (.cebula / BUR): odtwarzacz muzyki BursztynUI, WAV + MP3 (dr_mp3, public domain / MIT-0), PCM przez
+# BWS 110. Tylko dekoder MP3 jest kompilowany z SSE2 (minimp3 liczy w float; tak jak BSF i Husarz). Okladki: wspolny
+# dekoder obrazow Ring 3 (image_ring3.o + btp_ring3.o). Prawa: okna, pliki_czytaj, ustawienia_aplikacji.
+GRAJEK_NAGLOWKI := $(wildcard programy/grajek/*.h) programy/grajek/zewnetrzne/dr_mp3.h jadro/bws/pcm_api.h obrazy/dekoder_obrazu.h
+grajek_tmp.o: programy/grajek/grajek.cpp $(GRAJEK_NAGLOWKI) $(wildcard bursztyn_ui/*.h)
+	$(CXX) $(RING3_FLAGS) -DGRAJEK_RING3=1 -Os -c $< -o $@
+
+grajek_mp3_tmp.o: programy/grajek/dekoder_mp3.cpp $(GRAJEK_NAGLOWKI)
+	$(CXX) $(RING3_FLAGS) -DGRAJEK_RING3=1 -msse2 -mfpmath=sse -mno-avx -Os -c $< -o $@
+
+grajek_blob.o: grajek_tmp.o grajek_mp3_tmp.o image_ring3.o btp_ring3.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
+	$(LD) $(BUR_ORPHANS) -T $(call bur_linker,programy/kalendarz/kalendarz_linker.ld) $(RING3_LDFLAGS) grajek_tmp.o grajek_mp3_tmp.o image_ring3.o btp_ring3.o bursztyn_gui.o -o grajek.elf
+	$(BUR_CONVERT) grajek.elf grajek.bin
+	$(PYTHON) narzedzia/kompresuj_blob.py grajek.bin grajek.bin.bz
+	$(LD) -r -b binary grajek.bin.bz -o grajek_blob.o
+
+ikona_app_grajek_blob.o: ikonki/app_grajek.png
+	$(LD) -r -b binary $< -o $@
+
+# Grafiki uzytkownika dla Grajka (docs/grajek.md, "Grafiki"): ikony przyciskow z ikonki/grajek/ (nazwy ze spacjami,
+# dlatego zaleznosc od katalogu i narzedzia, nie od wildcard) przeskalowane przy budowaniu do 128x128 RGBA
+# (narzedzia/przygotuj_zasoby_grajka.py, oryginaly tylko czytane) oraz plyta winylowa ikonki/plyta_winylowa.jpg
+# osadzona BEZ zmian. Pliki trafiaja do /ikonki/grajek_*.png i /ikonki/grajek_plyta_winylowa.jpg (live i instalacja).
+GRAJEK_ZASOBY_DIR := grajek_zasoby
+GRAJEK_IKONY := poprzedni odtworz pauza stop nastepny wycisz odswiez dodaj w_gore w_dol usun wyczysc zapisz wczytaj losowo powtarzanie powtarzanie_jeden w_tle wizualizacja
+GRAJEK_IKONY_PNG := $(foreach a,$(GRAJEK_IKONY),$(GRAJEK_ZASOBY_DIR)/grajek_$(a).png)
+$(GRAJEK_ZASOBY_DIR)/.gotowe: narzedzia/przygotuj_zasoby_grajka.py ikonki/grajek ikonki/plyta_winylowa.jpg
+	$(PYTHON) narzedzia/przygotuj_zasoby_grajka.py $(GRAJEK_ZASOBY_DIR)
+	@touch $@
+grajek_zasoby_blob.o: $(GRAJEK_ZASOBY_DIR)/.gotowe ikonki/plyta_winylowa.jpg
+	$(LD) -r -b binary $(GRAJEK_IKONY_PNG) ikonki/plyta_winylowa.jpg -o $@
+
+# Testy hosta Grajka (ASan/UBSan): logika (WAV, ID3, MP3 z syntetycznych ramek, konwersje, korektor, analiza, silnik na
+# mikserze jadra z symulacja BWS 110, biblioteka, kolejka/M3U8, konfiguracja, okladka) oraz okno BursztynUI.
+GRAJEK_TEST_ZRODLA := programy/grajek/dekoder_mp3.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp
+.PHONY: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-grajek
+test-grajek-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek
+
+test-grajek-ui-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_grajek_ui_host.cpp $(GRAJEK_TEST_ZRODLA) -lz -o .bsf-test/grajek-ui
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek-ui
+
+# Bursztynowy Importer Plikow (narzedzie hosta, Python + Tkinter): testy na jednorazowych obrazach.
+# Narzedzie psf_obraz_host jest budowane z produkcyjnego kodu PSF jadra i sluzy jako niezalezny czytnik.
+IMPORTER_TEST_DIR := .importer-test
+$(IMPORTER_TEST_DIR)/psf_obraz_host: narzedzia/bursztynowy_importer/psf_obraz_host.cpp jadro/fs/psf.cpp jadro/fs/psf.h jadro/fs/storage_format.cpp jadro/fs/storage_format.h jadro/fs/psf_bootstrap.h
+	@mkdir -p $(IMPORTER_TEST_DIR)
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined $< jadro/fs/storage_format.cpp jadro/fs/psf.cpp -lcrypto -o $@
+
+$(IMPORTER_TEST_DIR)/grajek_e2e: testy/test_importer_grajek_host.cpp jadro/fs/psf.cpp jadro/fs/storage_format.cpp programy/grajek/dekoder_mp3.cpp $(wildcard programy/grajek/*.h) testy/grajek_fixtures.h
+	@mkdir -p $(IMPORTER_TEST_DIR)
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined $< jadro/fs/storage_format.cpp jadro/fs/psf.cpp programy/grajek/dekoder_mp3.cpp -o $@
+
+# Sterownik Intel ICH AC97 (rdzen + silnik PCM) na emulatorze kontrolera/kodeka; polityka wyboru wyjscia audio.
+.PHONY: test-ac97-host
+test-ac97-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ac97_host.cpp -o .bsf-test/ac97
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ac97
+
+.PHONY: test-magazyn-host
+test-magazyn-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined testy/test_magazyn_host.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -o .bsf-test/magazyn
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/magazyn
+	$(PYTHON) testy/test_muzyka_opcjonalna.py
+
+.PHONY: test-importer
+test-importer: $(IMPORTER_TEST_DIR)/psf_obraz_host $(IMPORTER_TEST_DIR)/grajek_e2e
+	BURSZTYN_PSF_HOST=$(abspath $(IMPORTER_TEST_DIR)/psf_obraz_host) BURSZTYN_GRAJEK_E2E=$(abspath $(IMPORTER_TEST_DIR)/grajek_e2e) $(PYTHON) testy/test_bursztynowy_importer.py
+
+# Instalator: rzeczywisty manifest instalacji (z kernel.cpp + modulow wpisu instalatora w $(ISO_DIR)) na jednorazowych
+# obrazach w .installertest/ - produkcyjny PSF/GPT i modul kontroli plikow (jadro/gui/instalacja_plikow.h).
+# Wymaga zbudowanego katalogu ISO (make -j1 iso); nigdy nie dotyka wirtualny_dysk.img.
+.PHONY: test-instalacja-host
+test-instalacja-host:
+	@test -f $(ISO_DIR)/boot/grub/grub.cfg && test -f $(ISO_DIR)/boot/zdjecia.pak || { echo "Brak $(ISO_DIR): uruchom najpierw make -j1 iso"; exit 1; }
+	@mkdir -p .installertest
+	rm -rf .installertest/manifest
+	$(PYTHON) testy/test_instalator_zrodla_planu.py
+	$(PYTHON) narzedzia/instalator/manifest_instalacji.py $(ISO_DIR) .installertest/manifest
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -DBURSZTYN_PSF_HOST_TEST -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_instalacja_host.cpp jadro/fs/storage_format.cpp jadro/fs/psf.cpp -lcrypto -o .installertest/test-instalacja
+	ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 .installertest/test-instalacja .installertest/manifest/manifest.tsv $(ISO_DIR)/boot/zdjecia.pak .installertest
+	rm -rf .installertest/manifest
+
+.PHONY: test-ikony-alfa-host
+# Ikony PNG z alfa (ASan/UBSan): wspolne skalowanie IkonaPNG/ObrazIkony bez obwodek z koloru spod A=0, kompozycja
+# na ciemnym/jasnym/kolorowym tle; syntetyczne i prawdziwe ikony (grajek_zasoby = oryginaly uzytkownika, ikonki).
+test-ikony-alfa-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -I. -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_ikony_alfa_host.cpp obrazy/dekoder_obrazu.cpp narzedzia/tapety-btp/tapetybtp.cpp -o .bsf-test/ikony-alfa
+	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/ikony-alfa $(GRAJEK_ZASOBY_DIR) ikonki
+
+.PHONY: test-muzyka-pak-host
+test-muzyka-pak-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_muzyka_pak_host.cpp -lcrypto -o .bsf-test/muzyka-pak
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .bsf-test/muzyka-pak
+
+# Uklad okna Grajka z prawdziwymi czcionkami TTF (BSF, DejaVu z czcionki/ttf) - metryki natywnego BursztynUI.
+test-grajek-ui-ttf-host: $(GRAJEK_ZASOBY_DIR)/.gotowe
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -Ibursztyn_ui -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie -ffunction-sections -fdata-sections testy/test_grajek_ui_ttf_host.cpp $(GRAJEK_TEST_ZRODLA) bsf/bsf.cpp bsf/runtime.cpp $(BSF2_SOURCES) bsf/bitmap.cpp -lz -Wl,--gc-sections -o .bsf-test/grajek-ui-ttf
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/grajek-ui-ttf
+
+.PHONY: test-zasoby-grajka
+test-zasoby-grajka:
+	$(PYTHON) testy/test_zasoby_grajka.py
+
+# Punkty kontrolne pracy audio w dlugich petlach jadra (sterta, VirtIO-BLK, AHCI): przerwy w muzyce przy innych
+# aplikacjach (jadro/dzwiek/punkt_kontrolny_audio.h).
+.PHONY: test-punkt-audio-host
+test-punkt-audio-host:
+	@mkdir -p .bsf-test
+	g++ -std=c++17 -O1 -g -Wall -Wextra -I. -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_punkt_kontrolny_audio_host.cpp -o .bsf-test/punkt-audio
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/punkt-audio
+	g++ -std=c++17 -O1 -g -Wall -Wextra $(HOST_INCLUDES) -fsanitize=address,undefined -fno-omit-frame-pointer testy/test_punkt_audio_ahci_host.cpp -o .bsf-test/punkt-audio-ahci
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 .bsf-test/punkt-audio-ahci
+	$(PYTHON) testy/test_punkt_kontrolny_audio.py
+
+test-grajek: test-grajek-host test-grajek-ui-host test-grajek-ui-ttf-host test-muzyka-pak-host test-zasoby-grajka test-magazyn-host test-punkt-audio-host
 
 # Kalendarz: komponent BursztynUI::Kalendarz (wzgledem niezaleznej referencji dat), ABI BWS 9 (czas lokalny V1),
 # aplikacja Kalendarz i polozenie panelu paska zadan (ASan/UBSan).
@@ -2969,7 +3132,7 @@ test-local-suite:
 	@printf '%s\n' '$(BUR_FORMAT)' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
-aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
+aktualizacje_tmp.o bsf_bitmap.o bsf_core.o bsf_runtime.o bsf_terminal.o btp_ring3.o bursztyn_gui_base.o bursztyn_gui_minimal_base.o demo_ui_tmp.o diagnostyka_tmp.o ekran_format_ring3.o ekran_tmp.o eksplorator_tmp.o fpu_probe_tmp.o husarz_worker_tmp.o ikona_png_ring3.o image_png_ring3.o image_ring3.o instalator_tmp.o kalkulator_tmp.o kontrolki2_tmp.o kontrolki3tmp.o kontrolki4tmp.o menedzer_okien_tmp.o menedzer_zadan_tmp.o kalendarz_tmp.o grajek_tmp.o grajek_mp3_tmp.o notatnik_tmp.o przegladarka_obrazow_tmp.o przegladarka_tmp.o repro_tmp.o ring3_ssp.o shell_tmp.o snake_tmp.o okno_informacyjne_tmp.o tapety_tmp.o test_dzwieku_tmp.o test_tmp.o ustawienia_tmp.o: .bur-format-config
 bur-v1:
 	$(MAKE) BUR_FORMAT=1 all ustawienia_blob.o
 bur-v2:
