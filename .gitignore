@@ -37,6 +37,7 @@ logi_qemu/
 .testrun/
 .test_run_*/
 .installer-build/
+.brb-build/
 .installertest/
 .installer-run/
 

@@ -3566,3 +3566,156 @@ pcm%_blob.o: pcm%_tmp.o bursztyn_gui.o programy/kalendarz/kalendarz_linker.ld
 	$(PYTHON) narzedzia/kompresuj_blob.py pcm$*.bin pcm$*.bin.bz
 	$(LD) -r -b binary pcm$*.bin.bz -o $@
 pcm440_tmp.o pcm660_tmp.o: .bur-format-config
+
+# ============================================================================
+# BRB - Bursztynowy Program Rozruchowy (Faza 2, WYLACZNIE rozwojowo)
+# ============================================================================
+# Odizolowane od produkcji: zaden istniejacy cel (all, kernel, iso, instalator) nie zalezy od celow BRB,
+# a cele BRB nie zaleza od jadra ani ISO. Wyniki trafiaja wylacznie do .brb-build/.
+#   make brb-uefi          -> .brb-build/uefi/brb-x64.efi (PE32+, IMAGE_SUBSYSTEM_EFI_APPLICATION)
+#   make test-brb-host     -> testy hosta (ASan/UBSan) + walidator PE (T-PE) + mutacje obrazu
+#   make brb-uefi-wolumin  -> .brb-build/wolumin-testowy/EFI/BOOT/BOOTX64.EFI (katalog testowy BRB)
+# Metoda budowy (docs/brb/architektura-uefi.md, sekcja 12): GCC (obiekty ELF64, SysV + ms_abi na granicy
+# firmware) -> GNU ld -m i386pep z wlasnym skryptem. BEZ --gc-sections i BEZ konwersji objcopy ELF->COFF
+# (oba warianty daja bledne obrazy - opis w dokumentacji).
+BRB_BUILD      := .brb-build
+BRB_UEFI_DIR   := $(BRB_BUILD)/uefi
+BRB_UEFI_OBJ   := $(BRB_UEFI_DIR)/obj
+BRB_HOST_DIR   := $(BRB_BUILD)/host
+BRB_WOLUMIN    := $(BRB_BUILD)/wolumin-testowy
+BRB_EFI        := $(BRB_UEFI_DIR)/brb-x64.efi
+BRB_EFI_DEBUG  := $(BRB_UEFI_DIR)/brb-x64.debug.efi
+BRB_OBJDUMP    := $(CROSS)objdump
+BRB_LDS        := rozruch/brb/uefi/brb_uefi.ld
+BRB_ZRODLA     := rozruch/brb/uefi/efi_main.cpp rozruch/brb/uefi/program.cpp rozruch/brb/uefi/plik_jadra.cpp \
+                  rozruch/brb/uefi/mapa_uefi.cpp rozruch/brb/uefi/ladowanie_jadra.cpp \
+                  rozruch/brb/wspolne/pamiec_podstawowa.cpp rozruch/brb/wspolne/utf8.cpp \
+                  rozruch/brb/wspolne/log_szeregowy.cpp rozruch/brb/wspolne/elf64.cpp \
+                  rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp
+BRB_ZRODLA_HOSTA := rozruch/brb/uefi/program.cpp rozruch/brb/uefi/plik_jadra.cpp rozruch/brb/uefi/mapa_uefi.cpp \
+                  rozruch/brb/uefi/ladowanie_jadra.cpp rozruch/brb/wspolne/utf8.cpp \
+                  rozruch/brb/wspolne/log_szeregowy.cpp rozruch/brb/wspolne/pamiec_podstawowa.cpp \
+                  rozruch/brb/wspolne/elf64.cpp rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp
+BRB_NAGLOWKI   := $(wildcard rozruch/brb/uefi/*.h rozruch/brb/wspolne/*.h)
+BRB_OBIEKTY    := $(patsubst rozruch/brb/%.cpp,$(BRB_UEFI_OBJ)/%.o,$(BRB_ZRODLA))
+BRB_GCC_INC    := $(shell $(CC) -print-file-name=include)
+BRB_OBRAZ_BAZA := 0x10000000
+
+# -nostdinc + tylko katalog naglowkow GCC: zadnych naglowkow glibc. -fpie: adresowanie wzgledem RIP
+# (bez relokacji 32-bitowych). -mgeneral-regs-only: brak SSE/x87, wiec XMM6-15 (nieulotne w ms_abi)
+# nigdy nie sa modyfikowane przez kod BRB.
+BRB_CXXFLAGS := -std=c++17 -O2 -g0 -nostdinc -isystem $(BRB_GCC_INC) \
+	-ffreestanding -fno-builtin -fno-tree-loop-distribute-patterns -fno-strict-aliasing \
+	-fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident \
+	-fno-stack-protector -fno-stack-clash-protection -fcf-protection=none \
+	-mno-red-zone -mgeneral-regs-only -mcmodel=small -fpie \
+	-Wall -Wextra -Wpedantic -Werror -Wvla -Wshadow
+
+BRB_LDFLAGS := -m i386pep --oformat pei-x86-64 -T $(BRB_LDS) -nostdlib \
+	--subsystem 10 -e efi_main --image-base $(BRB_OBRAZ_BAZA) \
+	--file-alignment 0x200 --section-alignment 0x1000 \
+	--dynamicbase --nxcompat --enable-reloc-section --no-insert-timestamp
+
+BRB_HOST_CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -Wshadow \
+	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+
+# Faza 3: kopia jadra produkcyjnego do testow (T-ELF-PROD, wolumin OVMF). Zrodlo podaje sie jawnie, np.
+#   make brb-jadro-testowe BRB_JADRO_ZRODLO=.release-private/<sha256>/kernel.elf
+# Kopia jest okrajana tak samo jak w narzedzia/package_release_kernel.py (objcopy --strip-all) i trafia
+# wylacznie do .brb-build/jadro/ - zrodlo nie jest modyfikowane.
+BRB_JADRO_ZRODLO ?= system_operacyjny.bin
+BRB_JADRO        ?= $(BRB_BUILD)/jadro/system_operacyjny.bin
+BRB_FUZZ_ITERACJE ?= 200000
+BRB_TESTY_ELF_ZRODLA := rozruch/brb/wspolne/elf64.cpp rozruch/brb/wspolne/pamiec_podstawowa.cpp
+BRB_TESTY_LAD_ZRODLA := $(BRB_TESTY_ELF_ZRODLA) rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp
+
+# Faza 4A: wariant TESTOWY (osobny katalog, osobny plik) z prawowitym zajeciem strony z zakresu jadra przed
+# ladowaniem - sprawdza wykrycie konfliktu, wycofanie i nienaruszenie cudzej strony. Nie jest brb-x64.efi.
+BRB_KONFLIKT_STRONA ?= 0x200000
+BRB_KONFLIKT_DIR    := $(BRB_BUILD)/uefi-konflikt
+BRB_KONFLIKT_EFI    := $(BRB_KONFLIKT_DIR)/brb-x64-test-konflikt.efi
+BRB_KONFLIKT_OBIEKTY := $(patsubst rozruch/brb/%.cpp,$(BRB_KONFLIKT_DIR)/obj/%.o,$(BRB_ZRODLA) rozruch/brb/uefi/test_konflikt.cpp)
+
+.PHONY: brb-uefi test-brb-host brb-uefi-wolumin brb-jadro-testowe test-brb-jadro brb-uefi-test-konflikt
+
+$(BRB_UEFI_OBJ)/%.o: rozruch/brb/%.cpp $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(BRB_CXXFLAGS) -c $< -o $@
+
+$(BRB_EFI): $(BRB_OBIEKTY) $(BRB_LDS) narzedzia/brb/sprawdz_obiekty_brb.py Makefile
+	$(PYTHON) narzedzia/brb/sprawdz_obiekty_brb.py --readelf $(READELF) --objdump $(BRB_OBJDUMP) \
+		--wynik $(BRB_UEFI_DIR)/relokacje_elf.txt $(BRB_OBIEKTY)
+	$(LD) $(BRB_LDFLAGS) -o $(BRB_EFI_DEBUG) $(BRB_OBIEKTY)
+	$(LD) $(BRB_LDFLAGS) --strip-all -o $@ $(BRB_OBIEKTY)
+	@$(NM) $(BRB_EFI_DEBUG) | awk '$$3 == "efi_main" { print $$1 }' > $(BRB_UEFI_DIR)/efi_main.va
+	@test -s $(BRB_UEFI_DIR)/efi_main.va || { echo "[BRB] BLAD: brak symbolu efi_main"; exit 1; }
+	$(BRB_OBJDUMP) -h -p $@ > $(BRB_UEFI_DIR)/brb-x64.objdump.txt
+	@echo "[BRB] Zbudowano $@ ($$(stat -c %s $@) B); naglowki: $(BRB_UEFI_DIR)/brb-x64.objdump.txt"
+
+brb-uefi: $(BRB_EFI)
+
+$(BRB_KONFLIKT_DIR)/obj/%.o: rozruch/brb/%.cpp $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(BRB_CXXFLAGS) -DBRB_TEST_KONFLIKT_STRONA=$(BRB_KONFLIKT_STRONA)ull -c $< -o $@
+
+$(BRB_KONFLIKT_EFI): $(BRB_KONFLIKT_OBIEKTY) $(BRB_LDS) Makefile
+	$(LD) $(BRB_LDFLAGS) --strip-all -o $@ $(BRB_KONFLIKT_OBIEKTY)
+	@echo "[BRB] Wariant testowy konfliktu (strona $(BRB_KONFLIKT_STRONA)): $@"
+
+brb-uefi-test-konflikt: $(BRB_KONFLIKT_EFI)
+
+$(BRB_HOST_DIR)/test-brb-host: testy/test_brb_host.cpp $(BRB_ZRODLA_HOSTA) $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/test_brb_host.cpp $(BRB_ZRODLA_HOSTA) -o $@
+
+$(BRB_HOST_DIR)/brb_pe_walidator: testy/brb_pe_walidator.cpp Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) testy/brb_pe_walidator.cpp -o $@
+
+$(BRB_HOST_DIR)/test-brb-elf: testy/test_brb_elf.cpp testy/brb_elf_fixture.h $(BRB_TESTY_ELF_ZRODLA) $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/test_brb_elf.cpp $(BRB_TESTY_ELF_ZRODLA) -o $@
+
+$(BRB_HOST_DIR)/brb_fuzz_elf: testy/brb_fuzz_elf.cpp testy/brb_elf_fixture.h $(BRB_TESTY_ELF_ZRODLA) $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/brb_fuzz_elf.cpp $(BRB_TESTY_ELF_ZRODLA) -o $@
+
+$(BRB_HOST_DIR)/test-brb-ladowanie: testy/test_brb_ladowanie.cpp testy/brb_elf_fixture.h $(BRB_TESTY_LAD_ZRODLA) $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/test_brb_ladowanie.cpp $(BRB_TESTY_LAD_ZRODLA) -o $@
+
+# Binarium testow hosta nie moze zawierac instrukcji portow we/wy (in/out) - dostep do UART idzie przez model.
+# Jadro produkcyjne ($(BRB_JADRO)) jest uzywane, jesli istnieje; w przeciwnym razie testy go pomijaja (NIE URUCHOMIONO).
+test-brb-host: $(BRB_HOST_DIR)/test-brb-host $(BRB_HOST_DIR)/test-brb-elf $(BRB_HOST_DIR)/brb_fuzz_elf \
+		$(BRB_HOST_DIR)/test-brb-ladowanie $(BRB_HOST_DIR)/brb_pe_walidator $(BRB_EFI)
+	@if $(BRB_OBJDUMP) -d --no-show-raw-insn $(BRB_HOST_DIR)/test-brb-host | \
+		grep -qE '^ +[0-9a-f]+:[[:space:]]+(in|out|ins|outs)[bwl]?[[:space:]]'; then \
+		echo "[BRB] BLAD: binarium testow hosta zawiera instrukcje portow we/wy"; exit 1; fi
+	$(BRB_HOST_DIR)/test-brb-host $(wildcard $(BRB_JADRO))
+	$(BRB_HOST_DIR)/test-brb-elf
+	$(BRB_HOST_DIR)/test-brb-ladowanie $(wildcard $(BRB_JADRO))
+	$(BRB_HOST_DIR)/brb_fuzz_elf $(BRB_FUZZ_ITERACJE) 0x42524233 $(wildcard $(BRB_JADRO))
+	$(BRB_HOST_DIR)/brb_pe_walidator $(BRB_EFI) \
+		--wejscie-rva $$(printf '0x%X' $$(( 0x$$(cat $(BRB_UEFI_DIR)/efi_main.va) - $(BRB_OBRAZ_BAZA) ))) \
+		--relokacje-elf $$(cat $(BRB_UEFI_DIR)/relokacje_elf.txt)
+	$(BRB_HOST_DIR)/brb_pe_walidator --mutacje $(BRB_EFI)
+	@echo "[BRB] test-brb-host: OK"
+
+brb-jadro-testowe:
+	@test -f "$(BRB_JADRO_ZRODLO)" || { echo "[BRB] BLAD: brak jadra zrodlowego $(BRB_JADRO_ZRODLO) (podaj BRB_JADRO_ZRODLO=...)"; exit 1; }
+	@mkdir -p $(dir $(BRB_JADRO))
+	$(OBJCOPY) --strip-all "$(BRB_JADRO_ZRODLO)" $(BRB_JADRO)
+	@echo "[BRB] Kopia jadra do testow: $(BRB_JADRO) SHA-256 $$(sha256sum $(BRB_JADRO) | cut -c1-64)"
+
+# T-ELF-PROD: parser BRB vs readelf/objdump na prawdziwym jadrze + mutacje jego naglowkow.
+test-brb-jadro: $(BRB_HOST_DIR)/test-brb-elf
+	@test -f "$(BRB_JADRO)" || { echo "[BRB] BLAD: brak $(BRB_JADRO) (make brb-jadro-testowe BRB_JADRO_ZRODLO=...)"; exit 1; }
+	$(PYTHON) narzedzia/brb/porownaj_plan_readelf.py $(BRB_HOST_DIR)/test-brb-elf $(BRB_JADRO) \
+		--readelf $(READELF) --objdump $(BRB_OBJDUMP)
+	@echo "[BRB] test-brb-jadro: OK"
+
+brb-uefi-wolumin: $(BRB_EFI)
+	@mkdir -p $(BRB_WOLUMIN)/EFI/BOOT
+	cp $(BRB_EFI) $(BRB_WOLUMIN)/EFI/BOOT/BOOTX64.EFI
+	@echo "[BRB] Wolumin testowy: $(BRB_WOLUMIN) (wylacznie EFI/BOOT/BOOTX64.EFI = BRB)"
