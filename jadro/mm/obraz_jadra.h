@@ -320,6 +320,21 @@ inline uint64_t flagi_mmio_apic(uint64_t pa) {
     return (r == LAPIC_MMIO || r == IOAPIC_MMIO) ? (PTE_PWT | PTE_PCD) : 0ULL;
 }
 
+/*
+ * R1B: czy [pa, pa+n) jest osiagalny jako PA-jako-wskaznik w bazowej przestrzeni jadra, tzn. kazda strona w planie
+ * jest obecna i mapuje VA == PA (tozsamosc albo okno obrazu tozsamosciowego). Falsz dla strony 0, okna obrazu
+ * nie-tozsamosciowego (VA pokazuje obraz, nie te ramke), dziury aliasu i wszystkiego >= 4 GiB.
+ */
+inline bool tozsamosc_bezpieczna(const Uklad& u, uint64_t pa, uint64_t n) {
+    uint64_t k = 0;
+    if (!u.poprawny || n == 0 || !Adresy::dodaj_u64(pa, n, &k) || k > LIMIT_DOLNYCH_4GIB) return false;
+    for (uint64_t s = pa & ~(ROZMIAR_STRONY_4K - 1ULL); s < k; s += ROZMIAR_STRONY_4K) {
+        const PlanStrony p = zaplanuj_strone_bazowa(u, s);
+        if (!strona_obecna(p) || p.pa != s) return false;
+    }
+    return true;
+}
+
 /* Liczba tablic PT (poza tablica pierwszych 2 MiB), ktorych wymaga plan. */
 inline size_t potrzebne_tablice_pt(const Uklad& u) {
     if (!u.poprawny) return 0;

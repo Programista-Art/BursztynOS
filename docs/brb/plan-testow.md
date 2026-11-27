@@ -133,7 +133,10 @@ Zasoby hosta: jeden QEMU naraz, partie 2–3 testów (zalecenia z wcześniejszyc
 | T-R1A-BIOS | `diag_grub_ovmf.py --firmware bios` + `sprawdz_kamienie_rozruchu.py` | kamienie milowe do pulpitu |
 | T-R1A-UEFI | `diag_grub_ovmf.py --wylacz-s3` + kamienie | jw. (układ bezpieczny: obraz na typie 1) |
 | T-R1A-NVS (diagnostyczny) | `diag_grub_ovmf.py` z S3 + `sprawdz_kamienie_rozruchu.py --oczekuj-bledu-pamieci` | jądro odmawia startu z kodem `OBRAZ_NA_ACPI_NVS`; **nie** jest testem akceptacji bezpieczeństwa ścieżki GRUB |
-| T-R1B-NATYW (przyszły, obowiązkowy) | jądro uruchomione z PA ≠ VA | kamienie milowe do pulpitu, zrzut NVS = 0 zmienionych bajtów — **NIE URUCHOMIONO** (wymaga R1B/R2) |
+| T-R1B-HOST | `make test-r1b-wejscie-host` | stan CPU, metadane wejścia (syntetyczne + jądro okrojone/nieokrojone), tablice przejścia W^X, analiza aliasów, przyjęcie kontraktu natywnego, PMM natywny; 0 FAIL |
+| T-R1B-MUT | mutanty kodu produkcyjnego R1B (raport) | każdy mutant daje FAIL > 0 |
+| T-R1B-UPRZAZ | wariant `BURSZTYN_TEST_WEJSCIE64=1` + `diag_grub_ovmf.py --firmware bios --bez-zrzutow --hmp "gva2gpa …"` | wejście natywne, PA ≠ VA (`gva2gpa`), kamienie milowe do pulpitu — PASS (QEMU, wariant testowy) |
+| T-R2-NATYW (przyszły, obowiązkowy) | jądro **produkcyjne** uruchomione **przez BRB** z PA ≠ VA | kamienie milowe do pulpitu, zrzut NVS = 0 zmienionych bajtów przypisanych BRB/jądru — **NIE URUCHOMIONO** (wymaga R2/4C) |
 
 ## 5. Sprzęt fizyczny
 

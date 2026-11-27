@@ -70,6 +70,12 @@ Skutek dla wydań: ścieżka GRUB UEFI na platformie z ACPI NVS pod obrazem (OVM
 błędem własności pamięci zamiast cichego nadpisania NVS (`r1a-rozdzielenie-adresow.md` §12). **Faza 4A pozostaje
 BLOKADĄ (BLOCKED)**, dopóki BRB nie załaduje jądra produkcyjnego bezpiecznie (R2). Fazy 4B/4C nie rozpoczęto.
 
+**Faza R1B (2026-11-27): zrealizowana jako kamień milowy wejścia 64-bit i bootstrapu, czeka na przegląd**
+(`r1b-wejscie-64bit.md`). Jądro ma drugie, niezależne wejście `wejscie_jadra64` (wykrywalne w okrojonym ELF przez
+metadane `BRBJADRO`), oba wejścia zbiegają się w `start_jadra`. Wariant testowy przeniósł jądro fizycznie
+(PA `0x2005000`, VA bez zmian) i uruchomił je do pulpitu. Produkcyjne ładowanie przez BRB (R2), `ExitBootServices`
+i przekazanie (4C) nie zostały rozpoczęte. **Faza 4A pozostaje BLOKADĄ.** W^X jądra nadal nieegzekwowane (bramka).
+
 ### Faza 4 — Informacje rozruchowe i przekazanie (tryb zgodności MB2)
 
 | | |

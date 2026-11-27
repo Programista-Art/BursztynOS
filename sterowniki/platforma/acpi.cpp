@@ -166,8 +166,15 @@ void log_sygnature(const char* prefiks,const char sig[4]) {
 void* mapuj_tabele(uint64_t fiz, uint32_t rozmiar) {
     if (fiz == 0 || rozmiar == 0 || rozmiar > ROZMIAR_OKNA ||
         fiz > UINT64_MAX - rozmiar) return nullptr;
-    if (fiz < LIMIT_IDENTITY && fiz + rozmiar <= LIMIT_IDENTITY)
-        return reinterpret_cast<void*>(fiz);
+    /*
+     * R1B: tozsamosc < 4 GiB tylko wtedy, gdy PMM/plan VMM potwierdza, ze VA == PA wskazuje TE ramki (nie okno
+     * obrazu jadra przeniesionego fizycznie ani dziure aliasu); RAM typu 1 - przez HHDM. W przeciwnym razie okno ACPI.
+     * Dla obrazu tozsamosciowego (MB2) wynik jest identyczny jak dotad. Dlugosci i sumy kontrolne sprawdzaja
+     * wywolujacy (pobierz_naglowek, checksum_ok).
+     */
+    if (fiz < LIMIT_IDENTITY && fiz + rozmiar <= LIMIT_IDENTITY) {
+        if (const void* p = PamiecFizycznaDoOdczytu(fiz, rozmiar)) return const_cast<void*>(p);
+    }
 
     const uint64_t baza = fiz & ~(STRONA - 1ULL);
     const uint64_t przesuniecie = fiz - baza;

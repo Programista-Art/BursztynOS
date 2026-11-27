@@ -25,7 +25,10 @@ kernel = (root / 'jadro/rdzen/kernel.cpp').read_text()
 wm = (root / 'programy/menedzer_okien/menedzer_okien.cpp').read_text()
 shell = (root / 'programy/shell/shell.cpp').read_text()
 gfx = (root / 'sterowniki/grafika/grafika.cpp').read_text()
-boot = body(kernel, 'void kernel_main(')
+# Faza R1B: oba wejscia (kernel_main - MB2, kernel_main_natywny - 64-bit) zbiegaja sie w start_jadra.
+check('start_jadra(multiboot_info_ptr)' in body(kernel, 'void kernel_main('), 'MB2 entry uses the shared pipeline')
+check('start_jadra(kontrakt->informacje_adres)' in body(kernel, 'void kernel_main_natywny('), 'native entry uses the shared pipeline')
+boot = body(kernel, 'static void start_jadra(uint64_t multiboot_info_ptr) {')
 wm_start = body(wm, 'void _start() {')
 check('/shell.bur' not in boot, 'boot must not spawn a Shell process')
 check('uruchom_powloke(' not in wm_start and 'SCIEZKA_POWLOKA' not in wm_start,

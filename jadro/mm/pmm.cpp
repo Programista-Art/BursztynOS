@@ -1438,13 +1438,17 @@ const uint8_t* dostep_rozruchu(uint64_t pa, uint64_t n) {
  * PA-jako-wskaznik, co jest poprawne WYLACZNIE przed VMM pod mapa tozsamosciowa boot.S (tablice w .bss obrazu,
  * < 4 GiB). Kazdy adres tablicy jest sprawdzany wzgledem tej granicy.
  */
-bool tlumacz_przez_aktywne_tablice(uint64_t va, uint64_t* pa) {
+template <class TabelaDostepna>
+bool tlumacz_przez_aktywne_tablice(uint64_t va, uint64_t* pa, TabelaDostepna tabela_dostepna) {
     if (!pa || va >= Adresy::KONIEC_DOLNEJ_POLOWY) return false;
     uint64_t cr3 = 0;
     asm volatile("mov %%cr3, %0" : "=r"(cr3) : : "memory");
     uint64_t tabela = cr3 & ObrazJadra::MASKA_ADRESU_4K;
     for (int poziom = 4; poziom >= 1; --poziom) {
-        if (tabela == 0 || tabela > KontraktPamieci::LIMIT_DOSTEPU_TOZSAMOSCIOWEGO - ROZMIAR_STRONY) return false;
+        if (tabela == 0 || tabela > KontraktPamieci::LIMIT_DOSTEPU_TOZSAMOSCIOWEGO - ROZMIAR_STRONY ||
+            !tabela_dostepna(tabela)) {
+            return false;
+        }
         const unsigned przesuniecie = 12U + 9U * static_cast<unsigned>(poziom - 1);
         const uint64_t wpis = reinterpret_cast<const volatile uint64_t*>(tabela)[(va >> przesuniecie) & 0x1FFULL];
         if ((wpis & 1ULL) == 0) return false;
@@ -1473,7 +1477,8 @@ bool tlumacz_obraz(uint64_t va, uint64_t* pa) {
     *pa = va;
     return true;
 #else
-    return tlumacz_przez_aktywne_tablice(va, pa);
+    // MB2: tablice boot.S w .bss obrazu, pod blanketowa tozsamoscia 0..4 GiB boot.S.
+    return tlumacz_przez_aktywne_tablice(va, pa, [](uint64_t) { return true; });
 #endif
 }
 
@@ -1493,6 +1498,115 @@ bool wymaga_pokrycia_ram(uint32_t rodzaj) {
 }
 
 } // namespace
+
+/* =========================================================================
+ * R1B: NATYWNE WEJSCIE 64-BIT, DOSTEP FIZYCZNY, ZASOBY ROZRUCHU
+ * ========================================================================= */
+
+namespace {
+bool direct_map_aktywny = false;
+#ifdef BURSZTYN_PMM_HOST_TEST
+bool host_tlumacz_kontraktu(const KontraktPamieci::KontraktV1&, uint64_t va, uint64_t* pa) {
+    return tlumacz_obraz(va, pa);
+}
+#endif
+} // namespace
+
+/*
+ * Przyjecie kontraktu z natywnego wejscia: odczyt dokladnie sizeof(KontraktV1) spod RSI (tozsamosc < 4 GiB),
+ * pelna walidacja kopii, spojnosc z aktywnym CR3 i POMIAR podkladu przez tablice przejscia - wolno czytac tylko
+ * tablice lezace w zakresach TABLICE_STRON_ROZRUCHU kontraktu (FLAGA_TOZSAMOSC_ZASOBOW: tylko one sa mapowane).
+ * Wynik: kopia w .bss jadra; blad w PmmStatusRozruchu().
+ */
+const KontraktPamieci::KontraktV1* PrzyjmijKontraktNatywny(uint64_t pa_kontraktu, uint64_t cr3_aktywny) {
+    static KontraktPamieci::KontraktV1 kopia_natywna{};
+    ObrazJadra::Uklad uklad{};
+    ObrazJadra::BladUkladu bu = ObrazJadra::BladUkladu::OK;
+    const KontraktPamieci::OczekiwanyObraz oczekiwany = KontraktPamieci::oczekiwany_z_symboli(symbole_obrazu());
+    const KontraktPamieci::Blad b = KontraktPamieci::przyjmij_kontrakt_natywny(
+        pa_kontraktu, cr3_aktywny, oczekiwany,
+        [](uint64_t pa, uint64_t n) { return dostep_rozruchu(pa, n); },
+#ifdef BURSZTYN_PMM_HOST_TEST
+        host_tlumacz_kontraktu,
+#else
+        [](const KontraktPamieci::KontraktV1& k, uint64_t va, uint64_t* pa) {
+            return tlumacz_przez_aktywne_tablice(va, pa, [&](uint64_t tab) {
+                for (uint32_t i = 0; i < k.liczba_zakresow; ++i) {
+                    const KontraktPamieci::Zakres& z = k.zakresy[i];
+                    if (z.rodzaj == KontraktPamieci::RODZAJ_TABLICE_STRON_ROZRUCHU &&
+                        Adresy::zakres_zawiera(z.poczatek, z.dlugosc, tab, ROZMIAR_STRONY)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        },
+#endif
+        &kopia_natywna, &uklad, &bu);
+    if (b != KontraktPamieci::Blad::OK) {
+        ustaw_status(b, 0, pa_kontraktu, static_cast<uint32_t>(bu));
+        return nullptr;
+    }
+    ustaw_status(KontraktPamieci::Blad::OK, 0, 0, 0);
+    return &kopia_natywna;
+}
+
+void PmmUstawDirectMapAktywny() {
+    direct_map_aktywny = true;
+}
+
+/*
+ * Ograniczony dostep do pamieci fizycznej do ODCZYTU (R1B). Kolejnosc:
+ *   1. Direct-Map (HHDM) - gdy VMM go zbudowal i PMM potwierdza pokrycie (RAM typu 1 + podklad obrazu),
+ *   2. tozsamosc w bazowej przestrzeni jadra - tylko strony, ktore plan ObrazJadra mapuje VA == PA (nigdy okno
+ *      obrazu nie-tozsamosciowego ani dziura aliasu),
+ *   3. przed VMM: tozsamosc rozruchu - MB2 (blanketowa < 4 GiB) albo wylacznie zasoby opisane w kontrakcie.
+ * nullptr = brak ustanowionego mapowania; wywolujacy musi miec sciezke zapasowa (np. okno ACPI).
+ */
+const void* PamiecFizycznaDoOdczytu(uint64_t pa, uint64_t n) {
+    uint64_t koniec = 0;
+    if (n == 0 || !dodaj_u64(pa, n, &koniec)) return nullptr;
+    if (direct_map_aktywny && n <= SIZE_MAX && CzyZakresWMapowaniuFizycznym(pa, static_cast<size_t>(n))) {
+        return reinterpret_cast<const void*>(BAZA_MAPOWANIA_FIZYCZNEGO + pa);
+    }
+    const ObrazJadra::Uklad* u = ObrazJadraAktywny();
+    if (!u || koniec > KontraktPamieci::LIMIT_DOSTEPU_TOZSAMOSCIOWEGO) return nullptr;
+    if (direct_map_aktywny) {
+        return ObrazJadra::tozsamosc_bezpieczna(*u, pa, n) ? reinterpret_cast<const void*>(pa) : nullptr;
+    }
+    if ((kontrakt_rozruchu.flagi & KontraktPamieci::FLAGA_TOZSAMOSC_4GIB_PRZED_VMM) && ObrazJadra::tozsamosciowy(*u)) {
+        return reinterpret_cast<const void*>(pa);
+    }
+    if ((kontrakt_rozruchu.flagi & KontraktPamieci::FLAGA_TOZSAMOSC_ZASOBOW) &&
+        KontraktPamieci::zasob_tozsamosciowy(kontrakt_rozruchu, pa, n)) {
+        return reinterpret_cast<const void*>(pa);
+    }
+    return nullptr;
+}
+
+/*
+ * Bramka R1B: konsumenci MBI i modulow (kernel.cpp, instalator, tapety, grafika, aktualizacja) czytaja je dzis
+ * przez PA-jako-wskaznik. Po VMM wolno to tylko wtedy, gdy kazda strona MBI i kazdego modulu jest w planie
+ * tozsamosciowa. Falsz = krytyczny blad startu (dla obrazu tozsamosciowego zawsze prawda).
+ */
+bool PmmZasobyRozruchuTozsamosciowe(uint64_t* adres_bledu) {
+    const ObrazJadra::Uklad* u = ObrazJadraAktywny();
+    if (!u) return false;
+    const KontraktPamieci::KontraktV1& k = kontrakt_rozruchu;
+    if (!ObrazJadra::tozsamosc_bezpieczna(*u, k.informacje_adres, k.informacje_rozmiar)) {
+        if (adres_bledu) *adres_bledu = k.informacje_adres;
+        return false;
+    }
+    for (uint32_t i = 0; i < k.liczba_zakresow; ++i) {
+        const KontraktPamieci::Zakres& z = k.zakresy[i];
+        if ((z.rodzaj == KontraktPamieci::RODZAJ_MODUL || z.rodzaj == KontraktPamieci::RODZAJ_INFORMACJE_ROZRUCHU) &&
+            !ObrazJadra::tozsamosc_bezpieczna(*u, z.poczatek, z.dlugosc)) {
+            if (adres_bledu) *adres_bledu = z.poczatek;
+            return false;
+        }
+    }
+    return true;
+}
 
 const ObrazJadra::Uklad* ObrazJadraAktywny() {
     return (pmm_zainicjalizowany && uklad_obrazu.poprawny) ? &uklad_obrazu : nullptr;
@@ -1534,7 +1648,9 @@ bool InicjalizujPMMZKontraktem(
      * Etap 1:
      * Udostepniamy tylko regiony jawnie oznaczone MEMORY_AVAILABLE (jedyny tag 6, zweryfikowany przez adapter).
      */
-    const uint8_t* mapa = dostep_rozruchu(k.mapa_adres, k.mapa_rozmiar);
+    const bool mapa_opisana = (k.flagi & KontraktPamieci::FLAGA_TOZSAMOSC_4GIB_PRZED_VMM) ||
+                              KontraktPamieci::zasob_tozsamosciowy(k, k.mapa_adres, k.mapa_rozmiar);
+    const uint8_t* mapa = mapa_opisana ? dostep_rozruchu(k.mapa_adres, k.mapa_rozmiar) : nullptr;
     if (!mapa) {
         ustaw_status(KontraktPamieci::Blad::MAPA_NIEPOPRAWNA, 0, k.mapa_adres, 0);
         return false;

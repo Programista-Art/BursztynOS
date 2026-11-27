@@ -2423,6 +2423,9 @@ void InicjalizujVMM() {
     wlacz_cr0_wp();
 
     vmm_zainicjalizowany = true;
+
+    /* R1B: od teraz PamiecFizycznaDoOdczytu moze uzywac HHDM i planu tozsamosci jadra. */
+    PmmUstawDirectMapAktywny();
 }
 
 /* =========================================================================

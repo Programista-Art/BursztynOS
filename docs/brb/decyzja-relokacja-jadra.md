@@ -355,8 +355,11 @@ i informacji rozruchowej.
    - **R1A** (zrealizowana jako fundament, czeka na przegląd): typy adresów, układ obrazu, kontrakt pamięci
      rozruchu v1 z adapterem MB2, PMM rezerwujący rzeczywisty podkład, VMM z PA tablic i oknem obrazu, strażniki
      izolacji, testy hosta. Ścieżka wejścia bez zmian (MB2, PA == VA).
-   - **R1B**: wejście 64-bit jądra niezależne od `boot.S`, adapter kontraktu dla bootstrapu, odzyskiwanie zasobów
-     rozruchu, migracja konsumentów PA-jako-wskaźnik, natywny test PA ≠ VA.
+   - **R1B** (zrealizowana jako kamień milowy wejścia i bootstrapu, czeka na przegląd — `r1b-wejscie-64bit.md`):
+     wejście `wejscie_jadra64` z metadanymi w okrojonym ELF, kontrakt stanu CPU, tablice przejścia z W^X
+     (`plan_przejscia.h`), przyjęcie kontraktu natywnego z pomiarem podkładu, wspólny potok `start_jadra`,
+     ograniczony dostęp fizyczny (ACPI), bramka MBI/modułów. Natywny test PA ≠ VA wykonany uprzężą testową
+     (GRUB BIOS, pulpit); wykonanie przez BRB pozostaje bramką R2/4C.
 3. **R2:** bootstrap PIC lub wejście 64-bit; BRB ładuje pod adres przydzielony przez firmware (Faza 4A
    z polityką przydziału dowolnego). GRUB nadal działa na starym kontrakcie. Wycofanie: wpis GRUB w menu.
 4. **R3 (opcjonalnie):** tag MB2 10, by także GRUB przestał nadpisywać NVS; pomiar zrzutem.

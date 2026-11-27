@@ -1,5 +1,6 @@
 extern "C" unsigned char _binary_pcm440_bin_bz_start[], _binary_pcm440_bin_bz_end[], _binary_pcm660_bin_bz_start[], _binary_pcm660_bin_bz_end[];
 #include "powiadomienia_jadra.h"
+#include "kontrakt_pamieci.h"
 #include "galeria_pak.h"
 #include "galeria_kopiowanie.h"
 #include "jadro/gui/instalacja_plikow.h"
@@ -2863,8 +2864,29 @@ extern "C" bool system_potwierdz_gotowosc_pulpitu(int pid) {
  * KERNEL MAIN
  * ========================================================================= */
 
+/*
+ * Faza R1B: dwa wejscia, jeden potok inicjalizacji.
+ *  - kernel_main(magic, mbi)        - wejscie Multiboot2 z boot.S (32-bit -> Long Mode, PA == VA),
+ *  - kernel_main_natywny(kontrakt)  - wejscie natywne 64-bit (jadro/arch/wejscie64.S -> start_natywny.cpp),
+ * oba koncza w start_jadra(): ten sam PMM (z kontraktu), VMM, sterowniki, planista i aplikacje.
+ * Natywne wejscie nadal korzysta z informacji w formacie MBI (kontrakt.informacje_adres) - docelowy BRBI to Faza 7.
+ */
+namespace {
+const KontraktPamieci::KontraktV1* g_kontrakt_natywny = nullptr;
+}
+
+[[noreturn]] static void start_jadra(uint64_t multiboot_info_ptr);
+
+#if defined(BURSZTYN_TEST_WEJSCIE64) && BURSZTYN_TEST_WEJSCIE64
+extern "C" void r1b_uprzaz_testowa(uint64_t multiboot_magic, uint64_t multiboot_info_ptr);
+#endif
+
 extern "C" void kernel_main(uint64_t multiboot_magic,
                             uint64_t multiboot_info_ptr) {
+#if defined(BURSZTYN_TEST_WEJSCIE64) && BURSZTYN_TEST_WEJSCIE64
+    /* TYLKO wariant testowy R1B: przeniesienie fizyczne i wejscie natywne; wraca, gdy warunki nie sa spelnione. */
+    r1b_uprzaz_testowa(multiboot_magic, multiboot_info_ptr);
+#endif
     /*
      * Cala faza inicjalizacji wykonuje sie atomowo wzgledem IRQ.
      * Szczegolnie wazne jest, aby timer APIC nie uruchomil schedulera
@@ -2889,6 +2911,22 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
             "Brak wskaznika informacji Multiboot2.");
     }
 
+    start_jadra(multiboot_info_ptr);
+}
+
+/* Wywolywane przez wejscie_jadra64_c po walidacji stanu CPU i przyjeciu kontraktu (kopia w .bss jadra). */
+extern "C" [[noreturn]] void kernel_main_natywny(const KontraktPamieci::KontraktV1* kontrakt) {
+    BootTiming::entry();
+    asm volatile("cli" ::: "memory");
+    if (!kontrakt) {
+        zatrzymaj_start("Wejscie natywne bez kontraktu pamieci rozruchu.");
+    }
+    g_kontrakt_natywny = kontrakt;
+    serial_wypisz("[ROZRUCH] Wejscie natywne 64-bit: kontrakt przyjety.\n");
+    start_jadra(kontrakt->informacje_adres);
+}
+
+[[noreturn]] static void start_jadra(uint64_t multiboot_info_ptr) {
     g_multiboot_info_ptr = multiboot_info_ptr;
     display_mode_policy.follow_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=host");
     display_mode_policy.observe_host=zadano_automatyczne_testy(g_multiboot_info_ptr,"bursztyn.display=observe");
@@ -2938,8 +2976,12 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
      * Fundament CPU i pamieci
      * ------------------------------------------------------------------ */
 
-    InicjalizujPMM(
-        multiboot_info_ptr);
+    if (g_kontrakt_natywny) {
+        (void)InicjalizujPMMZKontraktem(g_kontrakt_natywny, sizeof(*g_kontrakt_natywny));
+    } else {
+        InicjalizujPMM(
+            multiboot_info_ptr);
+    }
 
     /*
      * Faza R1A: PMM odrzuca kontrakt pamieci rozruchu fail-closed (np. obraz jadra zaladowany na ACPI NVS).
@@ -2985,6 +3027,18 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     if (!PobierzAktualnePML4()) {
         zatrzymaj_start(
             "VMM nie udostepnil aktywnego PML4.");
+    }
+
+    /*
+     * R1B: MBI i moduly sa czytane dalej przez PA-jako-wskaznik. Wolno to tylko, gdy w planie bazowej przestrzeni
+     * ich strony sa tozsamosciowe (nie w oknie obrazu nie-tozsamosciowego ani w dziurze aliasu).
+     */
+    {
+        uint64_t adres_bledu = 0;
+        if (!PmmZasobyRozruchuTozsamosciowe(&adres_bledu)) {
+            serial_wypisz("[PAMIEC] MBI albo modul rozruchu nie jest dostepny tozsamosciowo po VMM.\n");
+            zatrzymaj_start("Zasob rozruchu poza bezpiecznym mapowaniem tozsamosciowym.");
+        }
     }
 
     inicjalizuj_syscalls();

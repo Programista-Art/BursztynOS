@@ -91,6 +91,10 @@ def main():
                    help='std: -vga std; produkcja: urzadzenia jak runuefi (bez dysku, audio, SDL)')
     p.add_argument('--czas-jadra', type=int, default=45)
     p.add_argument('--port-gdb', type=int, default=12345)
+    p.add_argument('--hmp', action='append', default=[],
+                   help='R1B: polecenie monitora QEMU (np. "gva2gpa 0x100000") wykonane na koncu; wynik w hmp.txt')
+    p.add_argument('--bez-zrzutow', action='store_true',
+                   help='R1B: bez gdb i bez zrzutow pamieci (tylko COM1 i ekran) - oszczednosc miejsca')
     p.add_argument('--firmware', choices=('ovmf', 'bios'), default='ovmf',
                    help='ovmf: OVMF_CODE (tylko odczyt) + kopia zmiennych; bios: domyslny SeaBIOS QEMU (Faza R1A)')
     a = p.parse_args()
@@ -135,7 +139,7 @@ def main():
     if a.wylacz_s3:
         cmd += ['-global', ('ICH9-LPC' if 'q35' in a.maszyna else 'PIIX4_PM') + '.disable_s3=1']
     gdb = None
-    if a.tryb == 'grub':
+    if a.tryb == 'grub' and not a.bez_zrzutow:
         cmd += ['-gdb', f'tcp:127.0.0.1:{a.port_gdb}', '-S']
     (wyn / 'polecenie.txt').write_text(' '.join(cmd) + '\n')
     print('[DIAG] ' + ' '.join(cmd))
@@ -144,7 +148,15 @@ def main():
     wynik = 1
     try:
         qmp = Qmp(qmp_s)
-        if a.tryb == 'grub':
+        if a.tryb == 'grub' and a.bez_zrzutow:
+            time.sleep(a.czas_jadra)
+            qmp.polecenie('screendump', filename=str((wyn / 'ekran-koniec.png').resolve()), format='png')
+            with open(wyn / 'hmp.txt', 'w') as h:
+                for polecenie in a.hmp:
+                    o = qmp.polecenie('human-monitor-command', **{'command-line': polecenie})
+                    h.write(f'> {polecenie}\n{o.get("return", o)}\n')
+            wynik = 0
+        elif a.tryb == 'grub':
             wej = e_entry(Path(a.jadro))
             skrypt = wyn / 'gdb-polecenia.txt'
             skrypt.write_text('\n'.join([

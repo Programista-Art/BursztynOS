@@ -40,7 +40,8 @@ inline constexpr uint16_t WERSJA = 1U;
 enum Zrodlo : uint32_t {
     ZRODLO_NIEZNANE = 0,
     ZRODLO_MB2_ZGODNOSC = 1,           // tymczasowy adapter zgodnosci Multiboot2 (boot.S, PA == VA)
-    ZRODLO_BRB_NATYWNE_PRZYSZLE = 2,   // zarezerwowane dla R1B/R2/Fazy 7; dzis brak sciezki wejscia w jadrze
+    ZRODLO_BRB_NATYWNE_PRZYSZLE = 2,   // natywne wejscie 64-bit (wejscie_jadra64); R1B: tylko uprzaz testowa, R2: BRB
+    ZRODLO_NATYWNE_64 = 2,             // ta sama wartosc - nazwa uzywana przez sciezke wejscia R1B
 };
 
 enum FormatMapy : uint32_t {
@@ -56,8 +57,14 @@ enum ModelPodkladu : uint32_t {
 enum Flaga : uint32_t {
     FLAGA_TOZSAMOSC_4GIB_PRZED_VMM = 1U << 0,
     FLAGA_CR3_W_OBRAZIE = 1U << 1,     // tablice stron rozruchu leza w .bss obrazu (boot.S)
+    /*
+     * R1B: tablice przejscia mapuja tozsamosciowo WYLACZNIE zasoby opisane w zakresach kontraktu (informacje, mapa,
+     * moduly, tablice stron, obszary odzyskiwalne) - bez blanketowej tozsamosci 0..4 GiB. Jadro czyta przed VMM
+     * tylko te zakresy (pmm.cpp dostep_rozruchu sprawdza przynaleznosc).
+     */
+    FLAGA_TOZSAMOSC_ZASOBOW = 1U << 2,
 };
-inline constexpr uint32_t MASKA_FLAG = FLAGA_TOZSAMOSC_4GIB_PRZED_VMM | FLAGA_CR3_W_OBRAZIE;
+inline constexpr uint32_t MASKA_FLAG = FLAGA_TOZSAMOSC_4GIB_PRZED_VMM | FLAGA_CR3_W_OBRAZIE | FLAGA_TOZSAMOSC_ZASOBOW;
 
 enum Rodzaj : uint32_t {
     RODZAJ_OBRAZ_JADRA = 1,            // ciagly podklad obrazu (z BSS)
@@ -179,6 +186,12 @@ enum class Blad : uint32_t {
     OBRAZ_NA_USZKODZONEJ,
     OBRAZ_NA_NIEZNANYM_TYPIE,
     OBRAZ_POZA_RAM,
+    // R1B: przyjecie kontraktu na natywnym wejsciu 64-bit
+    ZRODLO_NIEDOZWOLONE,               // zrodlo kontraktu niezgodne ze sciezka wejscia
+    TOZSAMOSC_NIEOKRESLONA,            // brak flagi okreslajacej dostep do zasobow przed VMM
+    KONTRAKT_POZA_ZAKRESEM,            // sam kontrakt nie lezy w opisanym zakresie rozruchu
+    CR3_NIEZGODNY,                     // cr3_rozruchu != aktywny CR3
+    PODKLAD_NIEZGODNY_Z_KONTRAKTEM,    // zmierzony podklad != jadro_baza_fizyczna
 };
 
 inline const char* opis_bledu(Blad b) {
@@ -218,6 +231,11 @@ inline const char* opis_bledu(Blad b) {
     case Blad::OBRAZ_NA_USZKODZONEJ: return "obraz jadra lezy na uszkodzonej pamieci";
     case Blad::OBRAZ_NA_NIEZNANYM_TYPIE: return "obraz jadra lezy na pamieci nieznanego typu";
     case Blad::OBRAZ_POZA_RAM: return "obraz jadra lezy poza RAM opisanym w mapie";
+    case Blad::ZRODLO_NIEDOZWOLONE: return "zrodlo kontraktu niezgodne ze sciezka wejscia";
+    case Blad::TOZSAMOSC_NIEOKRESLONA: return "kontrakt nie okresla dostepu do zasobow przed VMM";
+    case Blad::KONTRAKT_POZA_ZAKRESEM: return "kontrakt nie lezy w opisanym zakresie rozruchu";
+    case Blad::CR3_NIEZGODNY: return "cr3_rozruchu niezgodny z aktywnym CR3";
+    case Blad::PODKLAD_NIEZGODNY_Z_KONTRAKTEM: return "zmierzony podklad obrazu niezgodny z kontraktem";
     }
     return "nieznany blad kontraktu";
 }
@@ -311,6 +329,10 @@ inline Blad waliduj(const void* dane, size_t dostepne, const OczekiwanyObraz* oc
     if (k.zarezerwowane0 != 0) return Blad::POLA_ZAREZERWOWANE;
     if (k.zrodlo != ZRODLO_MB2_ZGODNOSC && k.zrodlo != ZRODLO_BRB_NATYWNE_PRZYSZLE) return Blad::ZRODLO_NIEZNANE;
     if ((k.flagi & ~MASKA_FLAG) != 0) return Blad::FLAGI_NIEZNANE;
+    if (k.zrodlo == ZRODLO_MB2_ZGODNOSC && (k.flagi & FLAGA_TOZSAMOSC_4GIB_PRZED_VMM) == 0) {
+        return Blad::TOZSAMOSC_NIEOKRESLONA;
+    }
+    if ((k.flagi & (FLAGA_TOZSAMOSC_4GIB_PRZED_VMM | FLAGA_TOZSAMOSC_ZASOBOW)) == 0) return Blad::TOZSAMOSC_NIEOKRESLONA;
     if (k.model_podkladu != PODKLAD_CIAGLY) return Blad::MODEL_PODKLADU;
     if (k.liczba_segmentow > MAKS_SEGMENTOW || k.liczba_zakresow > MAKS_ZAKRESOW) return Blad::ZA_DUZO_ZAKRESOW;
     for (uint32_t i = 0; i < MAKS_SEGMENTOW; ++i) {
@@ -363,9 +385,8 @@ inline Blad waliduj(const void* dane, size_t dostepne, const OczekiwanyObraz* oc
                                           Adresy::RozmiarBajtow(k.informacje_rozmiar))) {
         return Blad::INFORMACJE_NIEPOPRAWNE;
     }
-    if (k.zrodlo == ZRODLO_MB2_ZGODNOSC &&
-        !Adresy::zakres_zawiera(k.informacje_adres, k.informacje_rozmiar, k.mapa_adres, k.mapa_rozmiar)) {
-        return Blad::MAPA_NIEPOPRAWNA;   // w MB2 mapa jest tagiem wewnatrz MBI
+    if (!Adresy::zakres_zawiera(k.informacje_adres, k.informacje_rozmiar, k.mapa_adres, k.mapa_rozmiar)) {
+        return Blad::MAPA_NIEPOPRAWNA;   // mapa jest tagiem wewnatrz MBI (MB2 i natywne R1B z MBI w formacie MB2)
     }
 
     // Zakresy.
@@ -537,6 +558,26 @@ inline bool dodaj_zakres(KontraktV1* k, uint64_t p, uint64_t n, uint32_t rodzaj,
     return true;
 }
 
+/*
+ * Pomiar ciaglego podkladu fizycznego okna [va, va+rozmiar) przez AKTYWNE tablice stron (strona po stronie).
+ * Wspolny dla adaptera MB2 i natywnego wejscia 64-bit: baza nie jest nigdy zgadywana ani przyjmowana na wiare.
+ */
+template <class Tlumacz>
+inline Blad zmierz_podklad(uint64_t va, uint64_t rozmiar, Tlumacz tlumacz, uint64_t* pa0) {
+    if (!pa0 || rozmiar == 0 || !Adresy::wyrownany_do_strony(va) || !Adresy::wyrownany_do_strony(rozmiar)) {
+        return Blad::NIEZGODNY_Z_LINKEREM;
+    }
+    uint64_t baza = 0;
+    if (!tlumacz(va, &baza)) return Blad::TLUMACZENIE_OBRAZU;
+    for (uint64_t off = Adresy::ROZMIAR_STRONY; off < rozmiar; off += Adresy::ROZMIAR_STRONY) {
+        uint64_t pa = 0;
+        if (!tlumacz(va + off, &pa)) return Blad::TLUMACZENIE_OBRAZU;
+        if (pa != baza + off) return Blad::PODKLAD_NIECIAGLY;
+    }
+    *pa0 = baza;
+    return Blad::OK;
+}
+
 template <class Dostep, class Tlumacz>
 inline Blad zbuduj_z_multiboot2(uint64_t mbi, const SymboleObrazu& sym, uint64_t cr3, Dostep dostep,
                                 Tlumacz tlumacz, KontraktV1* wynik) {
@@ -572,12 +613,8 @@ inline Blad zbuduj_z_multiboot2(uint64_t mbi, const SymboleObrazu& sym, uint64_t
 
     // Podklad fizyczny: zmierzony przez aktywne tablice stron, strona po stronie.
     uint64_t pa0 = 0;
-    if (!tlumacz(o.va_poczatek, &pa0)) return Blad::TLUMACZENIE_OBRAZU;
-    for (uint64_t off = Adresy::ROZMIAR_STRONY; off < o.rozmiar; off += Adresy::ROZMIAR_STRONY) {
-        uint64_t pa = 0;
-        if (!tlumacz(o.va_poczatek + off, &pa)) return Blad::TLUMACZENIE_OBRAZU;
-        if (pa != pa0 + off) return Blad::PODKLAD_NIECIAGLY;
-    }
+    const Blad bp = zmierz_podklad(o.va_poczatek, o.rozmiar, tlumacz, &pa0);
+    if (bp != Blad::OK) return bp;
     k.jadro_baza_fizyczna = pa0;
     k.cr3_rozruchu = cr3 & ObrazJadra::MASKA_ADRESU_4K;
     if (k.cr3_rozruchu != 0 && Adresy::zakres_zawiera(pa0, o.rozmiar, k.cr3_rozruchu, 4096)) {
@@ -651,6 +688,69 @@ inline Blad zbuduj_z_multiboot2(uint64_t mbi, const SymboleObrazu& sym, uint64_t
     if (mapy == 0) return Blad::MB2_BRAK_MAPY;
     *wynik = k;
     return Blad::OK;
+}
+
+/* ------------------------------------------------------------------------------------------------------------
+ * R1B: przyjecie kontraktu na natywnym wejsciu 64-bit (wejscie_jadra64).
+ *
+ * Kolejnosc bez zaleznosci cyklicznej:
+ *   1. wskaznik z RSI jest sprawdzany wylacznie arytmetycznie (niezerowy, wyrownany do 8, zakres w limicie
+ *      tozsamosci) i czytany jest DOKLADNIE sizeof(KontraktV1) bajtow przez `dostep` - nic wiecej,
+ *   2. kopia w pamieci jadra jest walidowana w calosci (waliduj, wzgledem symboli linkera),
+ *   3. dopiero wtedy sprawdzamy spojnosc z samym soba: kontrakt musi lezec w zakresie ODZYSKIWALNY_ROZRUCHU albo
+ *      INFORMACJE_ROZRUCHU, ktory sam opisuje; cr3_rozruchu musi rownac sie aktywnemu CR3,
+ *   4. podklad obrazu jest ZMIERZONY przez aktywne tablice i porownany z kontraktem.
+ * ---------------------------------------------------------------------------------------------------------- */
+/* `tlumacz(k, va, &pa)` dostaje zwalidowana kopie kontraktu: tablice stron wolno czytac tylko w jej zakresach. */
+template <class Dostep, class Tlumacz>
+inline Blad przyjmij_kontrakt_natywny(uint64_t pa_kontraktu, uint64_t cr3_aktywny, const OczekiwanyObraz& oczekiwany,
+                                      Dostep dostep, Tlumacz tlumacz, KontraktV1* kopia, ObrazJadra::Uklad* uklad,
+                                      ObrazJadra::BladUkladu* bl_ukladu = nullptr) {
+    if (!kopia || !uklad) return Blad::OBCIETY;
+    uint64_t koniec = 0;
+    if (pa_kontraktu == 0 || (pa_kontraktu & 7ULL) != 0 ||
+        !Adresy::dodaj_u64(pa_kontraktu, sizeof(KontraktV1), &koniec) || koniec > LIMIT_DOSTEPU_TOZSAMOSCIOWEGO) {
+        return Blad::KONTRAKT_POZA_ZAKRESEM;
+    }
+    const uint8_t* dane = dostep(pa_kontraktu, sizeof(KontraktV1));
+    if (!dane) return Blad::KONTRAKT_POZA_ZAKRESEM;
+    KontraktV1 k;
+    kopiuj(&k, dane, sizeof(k));
+    ObrazJadra::Uklad u{};
+    const Blad b = waliduj(&k, sizeof(k), &oczekiwany, &u, bl_ukladu);
+    if (b != Blad::OK) return b;
+    if (k.zrodlo != ZRODLO_NATYWNE_64) return Blad::ZRODLO_NIEDOZWOLONE;
+    if ((k.flagi & FLAGA_TOZSAMOSC_ZASOBOW) == 0) return Blad::TOZSAMOSC_NIEOKRESLONA;
+    bool w_zakresie = false;
+    for (uint32_t i = 0; i < k.liczba_zakresow; ++i) {
+        const Zakres& z = k.zakresy[i];
+        if ((z.rodzaj == RODZAJ_ODZYSKIWALNY_ROZRUCHU || z.rodzaj == RODZAJ_INFORMACJE_ROZRUCHU) &&
+            Adresy::zakres_zawiera(z.poczatek, z.dlugosc, pa_kontraktu, sizeof(KontraktV1))) {
+            w_zakresie = true;
+        }
+    }
+    if (!w_zakresie) return Blad::KONTRAKT_POZA_ZAKRESEM;
+    if (k.cr3_rozruchu == 0 || k.cr3_rozruchu != (cr3_aktywny & ObrazJadra::MASKA_ADRESU_4K)) return Blad::CR3_NIEZGODNY;
+    uint64_t pa0 = 0;
+    const Blad bp = zmierz_podklad(u.va_poczatek, ObrazJadra::rozmiar_obrazu(u),
+                                   [&](uint64_t va, uint64_t* pa) { return tlumacz(k, va, pa); }, &pa0);
+    if (bp != Blad::OK) return bp;
+    if (pa0 != u.pa_poczatek) return Blad::PODKLAD_NIEZGODNY_Z_KONTRAKTEM;
+    *kopia = k;
+    *uklad = u;
+    return Blad::OK;
+}
+
+/* Czy [pa, pa+n) lezy w calosci w zakresie kontraktu czytanym tozsamosciowo przed VMM (FLAGA_TOZSAMOSC_ZASOBOW). */
+inline bool zasob_tozsamosciowy(const KontraktV1& k, uint64_t pa, uint64_t n) {
+    if (Adresy::zakres_zawiera(k.informacje_adres, k.informacje_rozmiar, pa, n)) return true;
+    for (uint32_t i = 0; i < k.liczba_zakresow && i < MAKS_ZAKRESOW; ++i) {
+        const Zakres& z = k.zakresy[i];
+        const bool czytelny = z.rodzaj == RODZAJ_INFORMACJE_ROZRUCHU || z.rodzaj == RODZAJ_MODUL ||
+                              z.rodzaj == RODZAJ_TABLICE_STRON_ROZRUCHU || z.rodzaj == RODZAJ_ODZYSKIWALNY_ROZRUCHU;
+        if (czytelny && Adresy::zakres_zawiera(z.poczatek, z.dlugosc, pa, n)) return true;
+    }
+    return false;
 }
 
 } // namespace KontraktPamieci

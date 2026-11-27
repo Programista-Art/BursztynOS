@@ -28,7 +28,12 @@ def body(source, name):
     raise AssertionError(f'unclosed definition: {name}')
 
 
-kernel = body(code('jadro/rdzen/kernel.cpp'), 'kernel_main')
+# Faza R1B: kernel_main (wejscie MB2) i kernel_main_natywny (wejscie 64-bit) zbiegaja sie we wspolnym potoku
+# start_jadra - tam leza wszystkie sprawdzane wywolania inicjalizacji. Oba wejscia musza go wywolywac.
+_zrodlo_jadra = code('jadro/rdzen/kernel.cpp')
+assert 'start_jadra(multiboot_info_ptr)' in body(_zrodlo_jadra, 'kernel_main')
+assert 'start_jadra(kontrakt->informacje_adres)' in body(_zrodlo_jadra, 'kernel_main_natywny')
+kernel = body(_zrodlo_jadra, 'start_jadra')
 driver = code('sterowniki/virtio/virtio_input.cpp')
 prepare = body(driver, 'virtio_input_prepare')
 activate = body(driver, 'virtio_input_activate')

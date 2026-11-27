@@ -1048,7 +1048,10 @@ BRB — wariant konfliktowy i jądro syntetyczne potwierdzają poprawność wykr
    i po EBS kopiuje go pod adres docelowy, nadpisując ACPI NVS `0x800000–0x900000` (przy S3). Decyzja 2026-11-27:
    **ZAAKCEPTOWANA opcja C + E** (fizycznie ruchome jądro, stałe VA). Fundament jądra: Faza R1A
    (`r1a-rozdzielenie-adresow.md`). BRB nadal przydziela wyłącznie przez `AllocatePages(AllocateAddress)`; polityka
-   przydziału dowolnego regionu należy do R2. Do tego czasu Faza 4A pozostaje BLOKADĄ.
+   przydziału dowolnego regionu należy do R2. Do tego czasu Faza 4A pozostaje BLOKADĄ. R1B (`r1b-wejscie-64bit.md`) dodała
+   natywne wejście jądra `wejscie_jadra64`, metadane wejścia w okrojonym ELF (czytnik
+   `rozruch/brb/wspolne/metadane_jadra.cpp`, jeszcze nielinkowany do `brb-x64.efi`) i plan tablic przejścia
+   (`jadro/mm/plan_przejscia.h`) dla przyszłego przekazania w 4C.
 
 ### 18.8. T-EBS — wymagania przyszłe (tylko dokumentacja)
 

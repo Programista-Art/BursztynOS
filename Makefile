@@ -474,6 +474,8 @@ MBEDTLS_OBJS := $(MBEDTLS_SRCS:.c=.o)
 
 OBJS := entropia.o instalator.o instalator_blob.o storage_format.o blokowy.o ekran_blob.o ekran.o ekran_format.o bufory_grafiki.o bochs_vbe.o tapety_blob.o tapety.o btp.o \
 	boot.o \
+	wejscie64.o \
+	start_natywny.o \
 	gdt.o \
 	tss.o \
 	acpi.o \
@@ -640,6 +642,15 @@ ifeq ($(BURSZTYNDIAGPSFBOOTSTRAP),1)
 KERNEL_CXXFLAGS += -DBURSZTYNDIAGPSFBOOTSTRAP=1
 endif
 
+# Faza R1B: WYLACZNIE wariant testowy - uprzaz przenoszaca obraz fizycznie i wchodzaca przez wejscie_jadra64
+# (jadro/rdzen/start_natywny.cpp). Nigdy w produkcji; obiekty kernel.o, start_natywny.o, wejscie64.o trzeba
+# przebudowac (make -B) przy zmianie wariantu, bo make nie sledzi flag.
+BURSZTYN_TEST_WEJSCIE64 ?= 0
+ifeq ($(BURSZTYN_TEST_WEJSCIE64),1)
+KERNEL_CXXFLAGS += -DBURSZTYN_TEST_WEJSCIE64=1
+ASM_FLAGS += -DBURSZTYN_TEST_WEJSCIE64=1
+endif
+
 # ============================================================================
 # 9. REGULY OGOLNE
 # ============================================================================
@@ -665,6 +676,11 @@ bezpieczenstwo.o: jadro/bws/bezpieczenstwo.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 boot.o: jadro/arch/boot.S
 	$(CC) $(ASM_FLAGS) -c $< -o $@
+# Faza R1B: natywne wejscie 64-bit (metadane w .boot, wejscie_jadra64) i jego czesc C++.
+wejscie64.o: jadro/arch/wejscie64.S jadro/arch/metadane_jadra_asm.h
+	$(CC) $(ASM_FLAGS) -c $< -o $@
+start_natywny.o: jadro/rdzen/start_natywny.cpp
+	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 bufory_grafiki.o: jadro/gui/bufory_grafiki.cpp
 	$(CXX) $(KERNEL_CXXFLAGS) -c $< -o $@
 czcionka_systemowa.o: jadro/gui/czcionka_systemowa.cpp bsf/unicode_layout_data.inc bsf/unicode_layout_index.h
@@ -3502,6 +3518,22 @@ test-r1a-pamiec-host:
 		testy/test_r1a_pamiec_host.cpp jadro/mm/pmm.cpp -o .brb-build/r1a/test-r1a-pamiec-host
 	$(PYTHON) narzedzia/skan_instrukcji_uprzywilejowanych.py .brb-build/r1a/test-r1a-pamiec-host
 	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .brb-build/r1a/test-r1a-pamiec-host $(R1A_MBI_ARGS)
+
+# Faza R1B: natywne wejscie 64-bit - kontrakt stanu CPU, metadane wejscia (na planie ELF BRB, plik okrojony i nie),
+# tablice przejscia z W^X, analiza aliasow, przyjecie kontraktu natywnego, PMM (BURSZTYN_PMM_HOST_TEST).
+R1B_JADRO ?= .brb-build/r1b/produkcyjne/system_operacyjny.bin
+R1B_JADRO_OKROJONE ?= .brb-build/r1b/produkcyjne/system_operacyjny.stripped
+.PHONY: test-r1b-wejscie-host
+test-r1b-wejscie-host:
+	@mkdir -p .brb-build/r1b
+	g++ $(BRB_HOST_CXXFLAGS) $(HOST_INCLUDES) -DBURSZTYN_PMM_HOST_TEST -DBRB_TEST_HOSTA \
+		testy/test_r1b_wejscie_host.cpp jadro/mm/pmm.cpp rozruch/brb/wspolne/metadane_jadra.cpp \
+		$(BRB_TESTY_ELF_ZRODLA) -o .brb-build/r1b/test-r1b-wejscie-host
+	$(PYTHON) narzedzia/skan_instrukcji_uprzywilejowanych.py .brb-build/r1b/test-r1b-wejscie-host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .brb-build/r1b/test-r1b-wejscie-host \
+		$(if $(wildcard $(R1B_JADRO)),$(R1B_JADRO) $(R1B_JADRO_OKROJONE) \
+		$$($(NM) $(R1B_JADRO) | awk '$$3=="wejscie_jadra64"{print $$1}') \
+		$$($(NM) $(R1B_JADRO) | awk '$$3=="_start"{print $$1}'))
 
 .PHONY: test-rozszerzenie-powierzchni-host
 test-rozszerzenie-powierzchni-host:

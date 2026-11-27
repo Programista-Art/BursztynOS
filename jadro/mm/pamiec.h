@@ -452,6 +452,19 @@ struct StatusPamieciRozruchu {
 };
 StatusPamieciRozruchu PmmStatusRozruchu();
 
+/*
+ * Faza R1B (docs/brb/r1b-wejscie-64bit.md):
+ *  - PrzyjmijKontraktNatywny: kontrakt z natywnego wejscia 64-bit (RSI) -> zwalidowana kopia w .bss jadra,
+ *  - PmmUstawDirectMapAktywny: VMM zglasza, ze HHDM jest zbudowany i aktywny (CR3 jadra),
+ *  - PamiecFizycznaDoOdczytu: ograniczony odczyt PA (HHDM albo tozsamosc potwierdzona planem); nullptr = brak mapowania,
+ *  - PmmZasobyRozruchuTozsamosciowe: bramka dla konsumentow MBI/modulow czytajacych PA jako wskaznik.
+ */
+namespace KontraktPamieci { struct KontraktV1; }
+const KontraktPamieci::KontraktV1* PrzyjmijKontraktNatywny(uint64_t pa_kontraktu, uint64_t cr3_aktywny);
+void PmmUstawDirectMapAktywny();
+const void* PamiecFizycznaDoOdczytu(uint64_t pa, uint64_t n);
+bool PmmZasobyRozruchuTozsamosciowe(uint64_t* adres_bledu);
+
 /* =========================================================================
  * 9. API VIRTUAL MEMORY MANAGERA
  * ========================================================================= */
