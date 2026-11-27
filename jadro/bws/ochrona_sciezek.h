@@ -4,6 +4,8 @@
  * Chronione: /system, /jadro, /programy, /gry, pojedyncze *.bur tuz pod "/" oraz /aktualizacje (stan slotow
  * rozruchowych, lista i paczki aktualizacji: zwykla aplikacja nie moze ich podmienic ani uszkodzic - rollback/blokada
  * aktualizacji). Sciezki niekanoniczne ("..", "//", ".") sa odrzucane, wiec aliasy nie obchodza ochrony.
+ * /sloty jest fizycznym miejscem /programy i /system (PSF tlumaczy je na /sloty/{a,b}/...), a /sterowniki
+ * jest chroniony juz przy usuwaniu drzew - bez nich zapis przez alias /sloty/a/programy/... omijal ochrone.
  */
 #include <stddef.h>
 
@@ -45,7 +47,8 @@ inline bool sciezka_kanoniczna(const char* sciezka) {
 inline bool sciezka_chroniona(const char* sciezka) {
     return segment_prefiksu(sciezka, "/system") || segment_prefiksu(sciezka, "/jadro") ||
            segment_prefiksu(sciezka, "/programy") || segment_prefiksu(sciezka, "/gry") ||
-           segment_prefiksu(sciezka, "/aktualizacje") || plik_bur_w_korzeniu(sciezka);
+           segment_prefiksu(sciezka, "/aktualizacje") || segment_prefiksu(sciezka, "/sloty") ||
+           segment_prefiksu(sciezka, "/sterowniki") || plik_bur_w_korzeniu(sciezka);
 }
 
 } // namespace OchronaSciezek
