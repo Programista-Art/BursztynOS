@@ -19,6 +19,17 @@
  * Po inicjalizacji VMM ramki PMM sa dereferencjonowane przez walidowany
  * Direct-Map. Limit alokacji ponizej 1 GiB pozostaje wymaganiem DMA obecnych
  * sterownikow, a nie zalozeniem PA==VA.
+ *
+ * FAZA R1A (rozdzielenie PA/VA, docs/brb/decyzja-relokacja-jadra.md):
+ *  - PMM nie interpretuje juz symboli linkera (__kernel_start/__kernel_end, VA) jako adresow fizycznych.
+ *    Rezerwuje RZECZYWISTY podklad fizyczny obrazu opisany w zwalidowanym kontrakcie pamieci rozruchu
+ *    (kontrakt_pamieci.h). Dla MB2 podklad jest MIERZONY przez aktywne tablice stron boot.S.
+ *  - Obraz jadra nie jest juz dopisywany do puli "dostepnej" pamieci: jego ramki trafiaja wylacznie do
+ *    Direct-Map (statyczne tablice stron obrazu sa czytane przez HHDM) i sa stale zarezerwowane.
+ *  - Obraz lezacy na pamieci innej niz typ 1 (ACPI NVS, zarezerwowana, ACPI reclaimable, uszkodzona) albo
+ *    poza RAM jest KRYTYCZNYM bledem wlasnosci pamieci: PMM konczy fail-closed i NIE zamienia takiej pamieci
+ *    w dostepna. Uwaga: jadro moze takie nadpisanie jedynie WYKRYC po wejsciu - nie cofnie zniszczenia danych
+ *    firmware dokonanego wczesniej przez zewnetrzny program rozruchowy.
  */
 
 #if !defined(BURSZTYN_PMM_HOST_TEST) && !defined(BURSZTYN_LOCK_HOST_TEST)
@@ -26,13 +37,7 @@
 #endif
 #include "pamiec.h"
 #include "pmm_diagnostics.h"
-
-#ifdef BURSZTYN_PMM_HOST_TEST
-// Host tests exercise the actual bitmap/tag/allocator code. Only privileged
-// CPU operations and linker-provided physical kernel bounds are substituted.
-#define __kernel_start reinterpret_cast<char*>(0x100000ULL)
-#define __kernel_end reinterpret_cast<char*>(0x200000ULL)
-#endif
+#include "kontrakt_pamieci.h"
 #ifdef BURSZTYN_LOCK_HOST_TEST
 extern uint64_t host_memory_irq_save();
 extern void host_memory_irq_restore(uint64_t);
@@ -156,6 +161,14 @@ uint32_t blokada_pmm = 0;
 #if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
 uint64_t diagnostic_multiboot = 0;
 #endif
+
+/*
+ * Kontrakt pamieci rozruchu (kopia nalezaca do jadra, zyje do konca pracy) i zainstalowany z niego uklad obrazu.
+ * Uklad jest publikowany dopiero po pelnym sukcesie inicjalizacji PMM.
+ */
+KontraktPamieci::KontraktV1 kontrakt_rozruchu = {};
+ObrazJadra::Uklad uklad_obrazu = {};
+StatusPamieciRozruchu status_rozruchu = {};
 
 /* =========================================================================
  * STRUKTURY MULTIBOOT2 NIEOBECNE W PUBLICZNYM NAGLOWKU
@@ -472,6 +485,7 @@ static inline uint64_t wyrownaj_w_dol_do_strony(
         ~(ROZMIAR_STRONY - 1ULL);
 }
 
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
 static bool wyrownaj_w_gore_do_8(
     uint64_t wartosc,
     uint64_t* wynik
@@ -491,6 +505,7 @@ static bool wyrownaj_w_gore_do_8(
 
     return true;
 }
+#endif
 
 /* =========================================================================
  * BEZPIECZNE KOPIOWANIE MALYCH STRUKTUR
@@ -585,6 +600,36 @@ static void dodaj_dostepny_zakres(
         najwyzsza_znaleziona_ramka =
             ramka_za_koncem;
     }
+}
+
+/*
+ * R1A: dopisuje wyrownany do stron zakres WYLACZNIE do Direct-Map (HHDM), bez nadawania ramkom statusu
+ * "dostepnej pamieci". Uzywane dla podkladu obrazu jadra: VMM czyta statyczne tablice stron obrazu przez HHDM,
+ * ale ramki obrazu nigdy nie moga trafic do alokatora (mapa_dostepnosci pozostaje 0). Wczesniej obraz byl
+ * dopisywany przez dodaj_dostepny_zakres() i dopiero potem rezerwowany - co zamienialo np. ACPI NVS pod obrazem
+ * w "dostepna" pamiec. Wynik netto dla obrazu na zwyklym RAM jest identyczny.
+ */
+static bool dodaj_zakres_direct_map(
+    uint64_t poczatek,
+    uint64_t dlugosc
+) {
+    uint64_t koniec = 0;
+    if (dlugosc == 0 ||
+        (poczatek & (ROZMIAR_STRONY - 1ULL)) != 0 ||
+        (dlugosc & (ROZMIAR_STRONY - 1ULL)) != 0 ||
+        !dodaj_u64(poczatek, dlugosc, &koniec) ||
+        koniec > MAKS_ADRES_FIZYCZNY_PMM) {
+        return false;
+    }
+    if (liczba_zakresow_hhdm >= MAKS_ZAKRESOW_HHDM) {
+        zakresy_hhdm_przepelnione = true;
+        return false;
+    }
+    zakresy_hhdm[liczba_zakresow_hhdm++] = {poczatek, koniec};
+    if (koniec / ROZMIAR_STRONY > najwyzsza_znaleziona_ramka) {
+        najwyzsza_znaleziona_ramka = koniec / ROZMIAR_STRONY;
+    }
+    return true;
 }
 
 /*
@@ -768,6 +813,8 @@ static void zarezerwuj_zakres_modulu(
  * WALIDACJA STRUKTURY INFORMACJI MULTIBOOT2
  * ========================================================================= */
 
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
+/* Parser MBI dla diagnostyki wlascicieli stron (inicjalizacja korzysta z adaptera kontraktu). */
 struct ZakresMultiboot {
     uint64_t poczatek;
     uint64_t koniec;
@@ -895,6 +942,8 @@ static bool przejdz_po_tagach_multiboot(
     return znaleziono_koniec;
 }
 
+#endif
+
 /* =========================================================================
  * PARSOWANIE MAPY PAMIECI
  * ========================================================================= */
@@ -986,109 +1035,11 @@ static bool przetworz_mape_pamieci(
 
 /* =========================================================================
  * REZERWACJA OBIEKTOW OPISANYCH PRZEZ MULTIBOOT2
+ *
+ * R1A: moduly i framebuffer sa opisywane przez adapter zgodnosci MB2 jako zakresy kontraktu pamieci rozruchu
+ * (KontraktPamieci::zbuduj_z_multiboot2, te same reguly pomijania co dotychczas) i rezerwowane w
+ * InicjalizujPMMZKontraktem().
  * ========================================================================= */
-
-constexpr uint64_t MAKS_ROZMIAR_MODULU =
-    256ULL * 1024ULL * 1024ULL;
-
-static void zarezerwuj_modul(
-    const WpisTaguMB2* zwykly_tag
-) {
-    if (!zwykly_tag) return;
-
-    if (zwykly_tag->rozmiar < 16U) {
-        return;
-    }
-
-    TagModuluMB2 modul{};
-
-    /*
-     * Kopiujemy tylko stala czesc tagu. Pole tekst jest zmiennej dlugosci.
-     */
-    kopiuj_bajty(
-        &modul,
-        zwykly_tag,
-        16U
-    );
-
-    const uint64_t start =
-        static_cast<uint64_t>(
-            modul.mod_start);
-
-    const uint64_t koniec =
-        static_cast<uint64_t>(
-            modul.mod_end);
-
-    if (start == 0 || koniec <= start) {
-        return;
-    }
-
-    if (start >= MAKS_ADRES_FIZYCZNY_PMM ||
-        koniec > MAKS_ADRES_FIZYCZNY_PMM) {
-        return;
-    }
-
-    const uint64_t rozmiar = koniec - start;
-    if (rozmiar > MAKS_ROZMIAR_MODULU) {
-        return;
-    }
-
-    zarezerwuj_zakres_modulu(
-        start,
-        rozmiar
-    );
-}
-
-static void zarezerwuj_framebuffer(
-    const WpisTaguMB2* zwykly_tag
-) {
-    if (!zwykly_tag) return;
-
-    if (zwykly_tag->rozmiar <
-        sizeof(TagFramebufferMB2)) {
-        return;
-    }
-
-    TagFramebufferMB2 fb{};
-
-    kopiuj_bajty(
-        &fb,
-        zwykly_tag,
-        sizeof(fb)
-    );
-
-    if (fb.adres_fizyczny == 0 ||
-        fb.pitch == 0 ||
-        fb.wysokosc == 0) {
-        return;
-    }
-
-    const uint64_t pitch =
-        static_cast<uint64_t>(
-            fb.pitch);
-
-    const uint64_t wysokosc =
-        static_cast<uint64_t>(
-            fb.wysokosc);
-
-    if (wysokosc >
-        UINT64_MAX / pitch) {
-        return;
-    }
-
-    const uint64_t rozmiar =
-        pitch * wysokosc;
-
-    zarezerwuj_zakres_na_stale(
-        fb.adres_fizyczny,
-        rozmiar
-    );
-
-    usun_zakres_z_hhdm(
-        fb.adres_fizyczny,
-        rozmiar
-    );
-}
 
 /* =========================================================================
  * RESET STANU PMM
@@ -1337,8 +1288,9 @@ void OdblokujZakres(
     const uint64_t ramka_za_koncem = koniec_wyrownany / ROZMIAR_STRONY;
     const uint64_t limit_niski = GRANICA_NISKIEJ_PAMIECI / ROZMIAR_STRONY;
 
-    const uint64_t k_start_ramka = reinterpret_cast<uint64_t>(__kernel_start) / ROZMIAR_STRONY;
-    const uint64_t k_end_ramka = (reinterpret_cast<uint64_t>(__kernel_end) + ROZMIAR_STRONY - 1ULL) / ROZMIAR_STRONY;
+    /* R1A: ramki RZECZYWISTEGO podkladu obrazu (nie VA z linkera); i tak maja mapa_dostepnosci == 0. */
+    const uint64_t k_start_ramka = uklad_obrazu.pa_poczatek / ROZMIAR_STRONY;
+    const uint64_t k_end_ramka = uklad_obrazu.pa_koniec / ROZMIAR_STRONY;
 
     uint64_t najnizsza_odblokowana = UINT64_MAX;
 
@@ -1423,80 +1375,200 @@ bool CzyRamkaWolna(
  * INICJALIZACJA
  * ========================================================================= */
 
-void InicjalizujPMM(
-    uint64_t adres_info_multiboot
+/*
+ * R1A: srodowisko adaptera rozruchu.
+ *
+ * Jadro: symbole linkera (VA), dostep do pamieci rozruchu przez PA-jako-wskaznik WYLACZNIE ponizej 4 GiB
+ * (gwarancja mapy tozsamosciowej boot.S przed VMM, FLAGA_TOZSAMOSC_4GIB_PRZED_VMM) i pomiar podkladu obrazu
+ * przejsciem po AKTYWNYCH tablicach stron (CR3). Host: wartosci podstawiane przez testy (PmmHost).
+ */
+#ifdef BURSZTYN_PMM_HOST_TEST
+namespace PmmHost {
+KontraktPamieci::SymboleObrazu symbole = {0x100000ULL, 0x100050ULL, 0x101000ULL, 0x17F000ULL, 0x180000ULL,
+                                          0x1BF000ULL, 0x1C0000ULL, 0x1FF800ULL, 0x200000ULL};
+bool (*tlumacz)(uint64_t va, uint64_t* pa) = nullptr;            // nullptr = PA == VA
+const uint8_t* (*dostep)(uint64_t pa, uint64_t n) = nullptr;   // nullptr = adres hosta (dotychczasowe testy)
+uint64_t cr3 = 0;
+} // namespace PmmHost
+#endif
+
+#ifndef BURSZTYN_PMM_HOST_TEST
+/* Konce zawartosci segmentow PT_LOAD (linker.ld); reszta symboli jest w pamiec.h. */
+extern "C" uint8_t __boot_end[];
+extern "C" uint8_t __kernel_dynamic_end[];
+#endif
+
+namespace {
+
+KontraktPamieci::SymboleObrazu symbole_obrazu() {
+#ifdef BURSZTYN_PMM_HOST_TEST
+    return PmmHost::symbole;
+#else
+    return {
+        reinterpret_cast<uint64_t>(__kernel_start),
+        reinterpret_cast<uint64_t>(__boot_end),
+        reinterpret_cast<uint64_t>(__text_start),
+        reinterpret_cast<uint64_t>(__text_end),
+        reinterpret_cast<uint64_t>(__rodata_start),
+        reinterpret_cast<uint64_t>(__rodata_end),
+        reinterpret_cast<uint64_t>(__data_start),
+        reinterpret_cast<uint64_t>(__kernel_dynamic_end),
+        reinterpret_cast<uint64_t>(__kernel_end),
+    };
+#endif
+}
+
+const uint8_t* dostep_rozruchu(uint64_t pa, uint64_t n) {
+#ifdef BURSZTYN_PMM_HOST_TEST
+    if (PmmHost::dostep) return PmmHost::dostep(pa, n);
+    return n ? reinterpret_cast<const uint8_t*>(pa) : nullptr;
+#else
+    uint64_t koniec = 0;
+    if (pa == 0 || n == 0 || !dodaj_u64(pa, n, &koniec) ||
+        koniec > KontraktPamieci::LIMIT_DOSTEPU_TOZSAMOSCIOWEGO) {
+        return nullptr;
+    }
+    return reinterpret_cast<const uint8_t*>(pa);
+#endif
+}
+
+#ifndef BURSZTYN_PMM_HOST_TEST
+/*
+ * Tlumaczy VA przez aktywne tablice stron (4 poziomy, strony 4 KiB / 2 MiB / 1 GiB). Tablice sa czytane przez
+ * PA-jako-wskaznik, co jest poprawne WYLACZNIE przed VMM pod mapa tozsamosciowa boot.S (tablice w .bss obrazu,
+ * < 4 GiB). Kazdy adres tablicy jest sprawdzany wzgledem tej granicy.
+ */
+bool tlumacz_przez_aktywne_tablice(uint64_t va, uint64_t* pa) {
+    if (!pa || va >= Adresy::KONIEC_DOLNEJ_POLOWY) return false;
+    uint64_t cr3 = 0;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3) : : "memory");
+    uint64_t tabela = cr3 & ObrazJadra::MASKA_ADRESU_4K;
+    for (int poziom = 4; poziom >= 1; --poziom) {
+        if (tabela == 0 || tabela > KontraktPamieci::LIMIT_DOSTEPU_TOZSAMOSCIOWEGO - ROZMIAR_STRONY) return false;
+        const unsigned przesuniecie = 12U + 9U * static_cast<unsigned>(poziom - 1);
+        const uint64_t wpis = reinterpret_cast<const volatile uint64_t*>(tabela)[(va >> przesuniecie) & 0x1FFULL];
+        if ((wpis & 1ULL) == 0) return false;
+        const uint64_t rozmiar = 1ULL << przesuniecie;
+        if (poziom == 1 || ((poziom == 2 || poziom == 3) && (wpis & ObrazJadra::PDE_PS))) {
+            const uint64_t baza = wpis & ObrazJadra::MASKA_ADRESU_4K & ~(rozmiar - 1ULL);
+            *pa = baza | (va & (rozmiar - 1ULL));
+            return true;
+        }
+        tabela = wpis & ObrazJadra::MASKA_ADRESU_4K;
+    }
+    return false;
+}
+
+uint64_t odczytaj_cr3_rozruchu() {
+    uint64_t cr3 = 0;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3) : : "memory");
+    return cr3;
+}
+#endif
+
+bool tlumacz_obraz(uint64_t va, uint64_t* pa) {
+#ifdef BURSZTYN_PMM_HOST_TEST
+    if (PmmHost::tlumacz) return PmmHost::tlumacz(va, pa);
+    if (!pa) return false;
+    *pa = va;
+    return true;
+#else
+    return tlumacz_przez_aktywne_tablice(va, pa);
+#endif
+}
+
+void ustaw_status(KontraktPamieci::Blad blad, uint32_t typ, uint64_t adres, uint32_t szczegol) {
+    status_rozruchu.kod = static_cast<uint32_t>(blad);
+    status_rozruchu.typ_mapy = typ;
+    status_rozruchu.adres = adres;
+    status_rozruchu.szczegol = szczegol;
+    status_rozruchu.opis = KontraktPamieci::opis_bledu(blad);
+}
+
+/* Zakresy, ktore program rozruchowy zaladowal do RAM i ktore musza lezec WYLACZNIE na pamieci typu 1. */
+bool wymaga_pokrycia_ram(uint32_t rodzaj) {
+    return rodzaj == KontraktPamieci::RODZAJ_OBRAZ_JADRA ||
+           rodzaj == KontraktPamieci::RODZAJ_TABLICE_STRON_ROZRUCHU ||
+           rodzaj == KontraktPamieci::RODZAJ_ODZYSKIWALNY_ROZRUCHU;
+}
+
+} // namespace
+
+const ObrazJadra::Uklad* ObrazJadraAktywny() {
+    return (pmm_zainicjalizowany && uklad_obrazu.poprawny) ? &uklad_obrazu : nullptr;
+}
+
+StatusPamieciRozruchu PmmStatusRozruchu() {
+    return status_rozruchu;
+}
+
+/*
+ * Inicjalizacja PMM z kontraktu pamieci rozruchu (R1A). Kontrakt jest walidowany ponownie (obrona w glab), takze
+ * wzgledem ukladu z linkera. Kazdy blad konczy fail-closed: PMM pozostaje niezainicjalizowany, uklad obrazu nie
+ * jest publikowany, a status opisuje przyczyne (kernel_main zatrzymuje start).
+ */
+bool InicjalizujPMMZKontraktem(
+    const void* dane_kontraktu,
+    size_t rozmiar_kontraktu
 ) {
     BlokadaPMM blokada;
 
     wyzeruj_stan_pmm();
+    uklad_obrazu = {};
+    ustaw_status(KontraktPamieci::Blad::OK, 0, 0, 0);
 
-#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
-    diagnostic_multiboot = adres_info_multiboot;
-#endif
-
-    ZakresMultiboot mb{};
-
-    if (!pobierz_zakres_multiboot(
-            adres_info_multiboot,
-            &mb)) {
-        /*
-         * Fail closed. Nie zgadujemy "512 MB", poniewaz prowadzi to
-         * do alokacji nieistniejacej albo zarezerwowanej pamieci.
-         */
-        return;
+    const KontraktPamieci::OczekiwanyObraz oczekiwany =
+        KontraktPamieci::oczekiwany_z_symboli(symbole_obrazu());
+    ObrazJadra::Uklad uklad{};
+    ObrazJadra::BladUkladu blad_ukladu = ObrazJadra::BladUkladu::OK;
+    const KontraktPamieci::Blad blad = KontraktPamieci::waliduj(
+        dane_kontraktu, rozmiar_kontraktu, &oczekiwany, &uklad, &blad_ukladu);
+    if (blad != KontraktPamieci::Blad::OK) {
+        ustaw_status(blad, 0, 0, static_cast<uint32_t>(blad_ukladu));
+        return false;
     }
-
-    bool znaleziono_mape = false;
-    bool mapa_poprawna = true;
+    KontraktPamieci::kopiuj(&kontrakt_rozruchu, dane_kontraktu, sizeof(kontrakt_rozruchu));
+    const KontraktPamieci::KontraktV1& k = kontrakt_rozruchu;
 
     /*
      * Etap 1:
-     * Udostepniamy tylko regiony jawnie oznaczone MEMORY_AVAILABLE.
+     * Udostepniamy tylko regiony jawnie oznaczone MEMORY_AVAILABLE (jedyny tag 6, zweryfikowany przez adapter).
      */
-    const bool tagi_poprawne =
-        przejdz_po_tagach_multiboot(
-            mb,
-            [&](const WpisTaguMB2* tag) -> bool {
-                if (tag->typ ==
-                    MULTIBOOT_TAG_TYPE_MEMORY_MAP) {
-
-                    /*
-                     * Dwie mapy pamieci sa nietypowe i niepotrzebnie
-                     * komplikowalyby priorytety. Traktujemy to jako blad.
-                     */
-                    if (znaleziono_mape) {
-                        mapa_poprawna = false;
-                        return false;
-                    }
-
-                    znaleziono_mape = true;
-
-                    if (!przetworz_mape_pamieci(tag)) {
-                        mapa_poprawna = false;
-                        return false;
-                    }
-                }
-
-                return true;
-            }
-        );
-
-    if (!tagi_poprawne ||
-        !znaleziono_mape ||
-        !mapa_poprawna ||
+    const uint8_t* mapa = dostep_rozruchu(k.mapa_adres, k.mapa_rozmiar);
+    if (!mapa) {
+        ustaw_status(KontraktPamieci::Blad::MAPA_NIEPOPRAWNA, 0, k.mapa_adres, 0);
+        return false;
+    }
+    const WpisTaguMB2* tag_mapy = reinterpret_cast<const WpisTaguMB2*>(mapa);
+    if (tag_mapy->typ != MULTIBOOT_TAG_TYPE_MEMORY_MAP ||
+        static_cast<uint64_t>(tag_mapy->rozmiar) != k.mapa_rozmiar ||
+        !przetworz_mape_pamieci(tag_mapy) ||
         najwyzsza_znaleziona_ramka == 0) {
-
         wyzeruj_stan_pmm();
-        return;
+        ustaw_status(KontraktPamieci::Blad::MAPA_NIEPOPRAWNA, 0, k.mapa_adres, 0);
+        return false;
     }
 
     /*
      * Etap 2:
-     * Rezerwujemy obszary, ktore moga lezec wewnatrz regionu oznaczonego
-     * przez firmware jako AVAILABLE.
+     * Krytyczna kontrola wlasnosci: obraz jadra (i ewentualne tablice/obszary programu rozruchowego) musi lezec
+     * w calosci na pamieci typu 1. Nie "naprawiamy" mapy - kolizja z ACPI NVS, pamiecia zarezerwowana (m.in.
+     * uslugi runtime firmware), ACPI reclaimable albo uszkodzona konczy start.
      */
+    for (uint32_t i = 0; i < k.liczba_zakresow; ++i) {
+        const KontraktPamieci::Zakres& z = k.zakresy[i];
+        if (!wymaga_pokrycia_ram(z.rodzaj)) continue;
+        const KontraktPamieci::WynikKlasyfikacji w =
+            KontraktPamieci::klasyfikuj_wobec_mapy_mb2(mapa, k.mapa_rozmiar, z.poczatek, z.dlugosc);
+        if (w.blad != KontraktPamieci::Blad::OK) {
+            wyzeruj_stan_pmm();
+            ustaw_status(w.blad, w.typ, w.adres, z.rodzaj);
+            return false;
+        }
+    }
 
     /*
+     * Etap 3:
      * Pierwszy 1 MiB:
      * IVT/BDA, VGA, BIOS, legacy MMIO oraz adres 0.
      *
@@ -1509,70 +1581,54 @@ void InicjalizujPMM(
     );
 
     /*
-     * Caly obraz jadra, wlacznie z .boot, .text, .rodata, .data, .bss,
-     * tablicami startowymi i stosem z boot.S.
+     * Etap 4:
+     * Rzeczywisty podklad fizyczny obrazu (z .boot, .text, .rodata, .data, .bss, tablicami startowymi i stosem
+     * z boot.S): Direct-Map bez statusu "dostepnej" pamieci + stala rezerwacja.
      */
-    const uint64_t jadro_start =
-        reinterpret_cast<uint64_t>(
-            __kernel_start
-        );
-
-    const uint64_t jadro_koniec =
-        reinterpret_cast<uint64_t>(
-            __kernel_end
-        );
-
-    if (jadro_koniec <= jadro_start) {
+    if (!dodaj_zakres_direct_map(uklad.pa_poczatek, ObrazJadra::rozmiar_obrazu(uklad))) {
         wyzeruj_stan_pmm();
-        return;
+        ustaw_status(KontraktPamieci::Blad::ZAKRES_NIEPOPRAWNY, 0, uklad.pa_poczatek, KontraktPamieci::RODZAJ_OBRAZ_JADRA);
+        return false;
+    }
+    zarezerwuj_zakres_na_stale(
+        uklad.pa_poczatek,
+        ObrazJadra::rozmiar_obrazu(uklad)
+    );
+
+    /*
+     * Etap 5:
+     * Pozostale zakresy rozruchu wedlug rodzaju i czasu zycia:
+     *  - informacje rozruchu (MBI) - stale (konsumenci czytaja tagi do konca startu),
+     *  - moduly - zajete, ale z zachowaniem bitu dostepnosci (OdblokujZakres po imporcie),
+     *  - framebuffer - stale + wylaczenie z Direct-Map (osobne mapowanie z typem cache innym niz WB),
+     *  - tablice/obszary programu rozruchowego - stale do czasu zdefiniowania odzyskiwania (R1B).
+     */
+    for (uint32_t i = 0; i < k.liczba_zakresow; ++i) {
+        const KontraktPamieci::Zakres& z = k.zakresy[i];
+        switch (z.rodzaj) {
+        case KontraktPamieci::RODZAJ_OBRAZ_JADRA:
+            break;
+        case KontraktPamieci::RODZAJ_MODUL:
+            zarezerwuj_zakres_modulu(z.poczatek, z.dlugosc);
+            break;
+        case KontraktPamieci::RODZAJ_FRAMEBUFFER:
+            zarezerwuj_zakres_na_stale(z.poczatek, z.dlugosc);
+            usun_zakres_z_hhdm(z.poczatek, z.dlugosc);
+            break;
+        default:
+            zarezerwuj_zakres_na_stale(z.poczatek, z.dlugosc);
+            if (z.flagi & KontraktPamieci::ZAKRES_BEZ_DIRECT_MAP) usun_zakres_z_hhdm(z.poczatek, z.dlugosc);
+            break;
+        }
     }
 
-    dodaj_dostepny_zakres(
-        jadro_start,
-        jadro_koniec - jadro_start
-    );
-
-    zarezerwuj_zakres_na_stale(
-        jadro_start,
-        jadro_koniec - jadro_start
-    );
-
     /*
-     * Sama struktura informacji Multiboot2 musi pozostac zywa co najmniej
-     * do zakonczenia inicjalizacji wszystkich modulow czytajacych jej tagi.
-     * PMM oznacza ja stale zajeta - jej rozmiar jest maly, a upraszcza to
-     * bezpieczenstwo wczesnego startu.
+     * Etap 6 (tylko obraz nie-tozsamosciowy):
+     * fizyczne ramki pod VA okna obrazu traca mape tozsamosciowa (VA pokazuje obraz). Dopoki kazdy konsument
+     * PA-jako-wskaznik nie zostanie zmigrowany (R1B), PMM nie wydaje tych ramek - zachowawczo, kosztem ~13 MiB.
      */
-    zarezerwuj_zakres_na_stale(
-        mb.poczatek,
-        mb.koniec - mb.poczatek
-    );
-
-    /*
-     * Etap 3:
-     * Rezerwujemy moduly GRUB i framebuffer opisane w tagach.
-     */
-    const bool rezerwacje_ok =
-        przejdz_po_tagach_multiboot(
-            mb,
-            [&](const WpisTaguMB2* tag) -> bool {
-                if (tag->typ ==
-                    MULTIBOOT_TAG_TYPE_MODULE) {
-
-                    zarezerwuj_modul(tag);
-                } else if (tag->typ ==
-                           MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
-
-                    zarezerwuj_framebuffer(tag);
-                }
-
-                return true;
-            }
-        );
-
-    if (!rezerwacje_ok) {
-        wyzeruj_stan_pmm();
-        return;
+    if (!ObrazJadra::tozsamosciowy(uklad)) {
+        zarezerwuj_zakres_na_stale(uklad.va_poczatek, ObrazJadra::rozmiar_obrazu(uklad));
     }
 
     /*
@@ -1601,7 +1657,8 @@ void InicjalizujPMM(
 
     if (zakresy_hhdm_przepelnione) {
         wyzeruj_stan_pmm();
-        return;
+        ustaw_status(KontraktPamieci::Blad::ZA_DUZO_ZAKRESOW, 0, 0, 0);
+        return false;
     }
 
     /*
@@ -1611,7 +1668,45 @@ void InicjalizujPMM(
         GRANICA_NISKIEJ_PAMIECI /
         ROZMIAR_STRONY;
 
+    uklad_obrazu = uklad;
     pmm_zainicjalizowany = true;
+    return true;
+}
+
+/*
+ * Wejscie zgodnosci Multiboot2 (boot.S -> kernel_main). Tymczasowy adapter buduje kontrakt z MBI i z podkladu
+ * zmierzonego przez aktywne tablice stron; potem obowiazuje wspolna sciezka InicjalizujPMMZKontraktem().
+ */
+void InicjalizujPMM(
+    uint64_t adres_info_multiboot
+) {
+#if BURSZTYNDIAGVIRTIOINPUTINIT || defined(BURSZTYN_PMM_HOST_TEST)
+    diagnostic_multiboot = adres_info_multiboot;
+#endif
+
+    KontraktPamieci::KontraktV1 kontrakt{};
+#ifdef BURSZTYN_PMM_HOST_TEST
+    const uint64_t cr3 = PmmHost::cr3;
+#else
+    const uint64_t cr3 = odczytaj_cr3_rozruchu();
+#endif
+    const KontraktPamieci::Blad blad = KontraktPamieci::zbuduj_z_multiboot2(
+        adres_info_multiboot, symbole_obrazu(), cr3,
+        [](uint64_t pa, uint64_t n) { return dostep_rozruchu(pa, n); },
+        [](uint64_t va, uint64_t* pa) { return tlumacz_obraz(va, pa); },
+        &kontrakt);
+    if (blad != KontraktPamieci::Blad::OK) {
+        /*
+         * Fail closed. Nie zgadujemy "512 MB" ani bazy obrazu, poniewaz prowadzi to
+         * do alokacji nieistniejacej albo zarezerwowanej pamieci.
+         */
+        BlokadaPMM blokada;
+        wyzeruj_stan_pmm();
+        uklad_obrazu = {};
+        ustaw_status(blad, 0, adres_info_multiboot, 0);
+        return;
+    }
+    (void)InicjalizujPMMZKontraktem(&kontrakt, sizeof(kontrakt));
 }
 
 /* =========================================================================
@@ -1945,7 +2040,7 @@ PmmPageOwner pmm_diagnostic_page_owner(uint64_t physical) {
         return PmmPageOwner::UNKNOWN;
     const uint64_t page = wyrownaj_w_dol_do_strony(physical);
     if (page < GRANICA_NISKIEJ_PAMIECI ||
-        (page < reinterpret_cast<uint64_t>(__kernel_end) && page + ROZMIAR_STRONY > reinterpret_cast<uint64_t>(__kernel_start)))
+        (uklad_obrazu.poprawny && page < uklad_obrazu.pa_koniec && page + ROZMIAR_STRONY > uklad_obrazu.pa_poczatek))
         return PmmPageOwner::KERNEL;
     if (page == LAPIC_MMIO || page == IOAPIC_MMIO) return PmmPageOwner::MMIO;
     ZakresMultiboot mb{};

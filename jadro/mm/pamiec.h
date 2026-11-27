@@ -435,6 +435,23 @@ extern "C" uint64_t pmm_pobierz_dostepne_ramki();
  */
 void InicjalizujPMM(uint64_t adres_info_multiboot);
 
+/*
+ * Faza R1A: inicjalizacja PMM z wewnetrznego kontraktu pamieci rozruchu (jadro/mm/kontrakt_pamieci.h).
+ * InicjalizujPMM(mbi) jest tymczasowym adapterem zgodnosci Multiboot2, ktory buduje ten kontrakt.
+ * Wynik i przyczyna bledu sa dostepne przez PmmStatusRozruchu(); kod 0 = OK, pozostale kody to
+ * KontraktPamieci::Blad (m.in. obraz jadra na ACPI NVS - krytyczny blad wlasnosci pamieci).
+ */
+bool InicjalizujPMMZKontraktem(const void* kontrakt, size_t rozmiar);
+
+struct StatusPamieciRozruchu {
+    uint32_t kod;          // KontraktPamieci::Blad
+    uint32_t typ_mapy;     // typ wpisu mapy pamieci przy kolizji (np. 4 = ACPI NVS), 0 = brak/dziura
+    uint64_t adres;        // najnizszy adres kolizji albo adres struktury, ktorej dotyczy blad
+    uint32_t szczegol;     // rodzaj zakresu albo ObrazJadra::BladUkladu
+    const char* opis;      // staly tekst diagnostyczny (ASCII)
+};
+StatusPamieciRozruchu PmmStatusRozruchu();
+
 /* =========================================================================
  * 9. API VIRTUAL MEMORY MANAGERA
  * ========================================================================= */

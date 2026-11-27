@@ -2941,6 +2941,35 @@ extern "C" void kernel_main(uint64_t multiboot_magic,
     InicjalizujPMM(
         multiboot_info_ptr);
 
+    /*
+     * Faza R1A: PMM odrzuca kontrakt pamieci rozruchu fail-closed (np. obraz jadra zaladowany na ACPI NVS).
+     * Kontynuacja bez PMM konczyla sie dawniej nieokreslonym bledem pozniej; teraz zatrzymujemy start jawnie,
+     * z przyczyna na COM1. Grafika nie jest jeszcze gotowa - komunikat trafia wylacznie do portu szeregowego.
+     */
+    {
+        const StatusPamieciRozruchu st = PmmStatusRozruchu();
+        if (st.kod != 0) {
+            char hex[19] = {'0', 'x'};
+            const char* cyfry = "0123456789ABCDEF";
+            for (int i = 0; i < 16; ++i) hex[2 + i] = cyfry[(st.adres >> (60 - 4 * i)) & 0xFU];
+            hex[18] = 0;
+            char kod[4] = {char('0' + (st.kod / 10) % 10), char('0' + st.kod % 10), 0, 0};
+            char typ[2] = {char('0' + (st.typ_mapy % 10)), 0};
+            serial_wypisz("\n[PAMIEC] KRYTYCZNY BLAD WLASNOSCI PAMIECI ROZRUCHU: kod=");
+            serial_wypisz(kod);
+            serial_wypisz(" typ_mapy=");
+            serial_wypisz(typ);
+            serial_wypisz(" adres=");
+            serial_wypisz(hex);
+            serial_wypisz("\n[PAMIEC] ");
+            serial_wypisz(st.opis ? st.opis : "brak opisu");
+            serial_wypisz("\n[PAMIEC] Jadro nie moze cofnac nadpisania pamieci firmware dokonanego przed wejsciem;"
+                          " start zatrzymany zamiast traktowac te pamiec jako dostepna.\n");
+            zatrzymaj_start(
+                "Krytyczny blad wlasnosci pamieci rozruchu (PMM).");
+        }
+    }
+
     InicjalizujGDT();
 
     inicjalizuj_tss(

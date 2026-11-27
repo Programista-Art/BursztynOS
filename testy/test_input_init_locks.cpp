@@ -30,14 +30,18 @@ void assert_unlocked() {
 
 struct TestMultiboot {
     std::vector<uint64_t> words;
-    TestMultiboot() : words(8, 0) {
-        const uint32_t header[] = {64, 0, 6, 40, 24, 0};
+    // R1A: mapa opisuje tez RAM pod obrazem jadra (host: 1..2 MiB). PMM nie dopisuje juz obrazu jako
+    // "dostepnego" na sile - obraz poza RAM z mapy jest krytycznym bledem wlasnosci pamieci.
+    TestMultiboot() : words(10, 0) {
+        const uint32_t header[] = {80, 0, 6, 64, 24, 0};
         std::memcpy(words.data(), header, sizeof(header));
+        const WpisMapyPamieciMB2 kernel_ram{0x00100000, 0x100000, 1, 0};
+        std::memcpy(reinterpret_cast<uint8_t*>(words.data()) + 24, &kernel_ram, sizeof(kernel_ram));
         const WpisMapyPamieciMB2 ram{0x03000000, 0x100000, 1, 0};
-        std::memcpy(reinterpret_cast<uint8_t*>(words.data()) + 24, &ram, sizeof(ram));
+        std::memcpy(reinterpret_cast<uint8_t*>(words.data()) + 48, &ram, sizeof(ram));
         const uint32_t end[] = {0, 8};
-        std::memcpy(reinterpret_cast<uint8_t*>(words.data()) + 48, end, sizeof(end));
-        words[0] = 56;
+        std::memcpy(reinterpret_cast<uint8_t*>(words.data()) + 72, end, sizeof(end));
+        words[0] = 80;
     }
 };
 

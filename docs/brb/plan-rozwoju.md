@@ -58,6 +58,18 @@ PASS, scenariusz konfliktu PASS, regresje Faz 2–3 PASS. Jądro `303cb82e…`: 
 odrzucany przez OVMF (`EfiBootServicesData` od `0x900000`/`0x820000`, przy S3 także ACPI NVS
 `0x800000–0x900000`) → BRB-E506. Fazy 4B/4C nie rozpoczęto. Propozycje rozwiązań: §18.7.
 
+**Faza 4A-R (2026-11-27): analiza zakończona, decyzja PROPONOWANA** (`decyzja-relokacja-jadra.md`): GRUB w tej samej
+konfiguracji ładuje jądro przez bufor pośredni i po EBS nadpisuje ACPI NVS; rekomendacja — opcja C (fizycznie ruchome
+jądro ze stałymi VA) realizowana przez natywne wejście 64-bit BRB. Bez zmian w jądrze do czasu akceptacji.
+
+**Decyzja 2026-11-27: opcja C + E ZAAKCEPTOWANA** (`decyzja-relokacja-jadra.md` §0). Etap R1 podzielono na
+**R1A** (rozdzielenie PA/VA, kontrakt pamięci rozruchu, fundamenty PMM/VMM) i **R1B** (wejście 64-bit jądra,
+integracja z bootstrapem). **Faza R1A: zrealizowana jako fundament, czeka na przegląd** (`r1a-rozdzielenie-adresow.md`).
+Jedynym wejściem jądra pozostaje MB2 (PA == VA). Natywny test PA ≠ VA jest obowiązkową bramką R1B/R2.
+Skutek dla wydań: ścieżka GRUB UEFI na platformie z ACPI NVS pod obrazem (OVMF z S3) kończy się teraz jawnym
+błędem własności pamięci zamiast cichego nadpisania NVS (`r1a-rozdzielenie-adresow.md` §12). **Faza 4A pozostaje
+BLOKADĄ (BLOCKED)**, dopóki BRB nie załaduje jądra produkcyjnego bezpiecznie (R2). Fazy 4B/4C nie rozpoczęto.
+
 ### Faza 4 — Informacje rozruchowe i przekazanie (tryb zgodności MB2)
 
 | | |

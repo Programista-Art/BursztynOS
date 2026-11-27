@@ -123,6 +123,18 @@ Zasoby hosta: jeden QEMU naraz, partie 2–3 testów (zalecenia z wcześniejszyc
 
 ---
 
+### 4.2. Faza R1A — architektura pamięci jądra
+
+| Test | Polecenie | Kryterium |
+|---|---|---|
+| T-R1A-HOST | `make test-r1a-pamiec-host` | ASan/UBSan, `-Werror`; typy adresów, układ obrazu, plan dolnych 4 GiB (tożsamość = układ sprzed R1A), kontrakt + mutacje (48+ deterministycznych, 200 000 losowych), klasyfikacja mapy, PMM dla 6 baz, rzeczywiste MBI GRUB; 0 FAIL |
+| T-R1A-MUT | mutanty kodu produkcyjnego (raport R1A) | każdy mutant daje FAIL > 0 |
+| T-R1A-ELF | `readelf`/`nm`/`objdump`, `make test-brb-jadro BRB_JADRO=<kopia>` | ET_EXEC, wejście, VMA == LMA, nagłówek MB2 identyczny, brak zależności, brak nowych ostrzeżeń |
+| T-R1A-BIOS | `diag_grub_ovmf.py --firmware bios` + `sprawdz_kamienie_rozruchu.py` | kamienie milowe do pulpitu |
+| T-R1A-UEFI | `diag_grub_ovmf.py --wylacz-s3` + kamienie | jw. (układ bezpieczny: obraz na typie 1) |
+| T-R1A-NVS (diagnostyczny) | `diag_grub_ovmf.py` z S3 + `sprawdz_kamienie_rozruchu.py --oczekuj-bledu-pamieci` | jądro odmawia startu z kodem `OBRAZ_NA_ACPI_NVS`; **nie** jest testem akceptacji bezpieczeństwa ścieżki GRUB |
+| T-R1B-NATYW (przyszły, obowiązkowy) | jądro uruchomione z PA ≠ VA | kamienie milowe do pulpitu, zrzut NVS = 0 zmienionych bajtów — **NIE URUCHOMIONO** (wymaga R1B/R2) |
+
 ## 5. Sprzęt fizyczny
 
 Po zgodzie właściciela, na sprzęcie bez danych produkcyjnych (nośnik USB):

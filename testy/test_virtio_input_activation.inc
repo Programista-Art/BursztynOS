@@ -6,9 +6,10 @@ struct InitMultiboot {
         const auto old=words.size(); words.resize(old+(size+7)/8,0);
         std::memcpy(words.data()+old,bytes,size);
     }
+    // R1A: drugi wpis opisuje RAM pod obrazem jadra (host: 1..2 MiB); bez niego PMM odrzuca kontrakt (obraz poza RAM).
     void ram(uint64_t start,uint64_t size,uint32_t type=1) {
-        struct __attribute__((packed)) {uint32_t type,size,entry_size,version; WpisMapyPamieciMB2 entry;}
-            tag{6,40,24,0,{start,size,type,0}};
+        struct __attribute__((packed)) {uint32_t type,size,entry_size,version; WpisMapyPamieciMB2 entry,kernel;}
+            tag{6,64,24,0,{start,size,type,0},{0x100000,0x100000,1,0}};
         append(&tag,sizeof(tag));
     }
     void module(uint32_t start,uint32_t end) {

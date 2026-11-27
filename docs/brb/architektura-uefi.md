@@ -1044,7 +1044,11 @@ BRB — wariant konfliktowy i jądro syntetyczne potwierdzają poprawność wykr
    projektu relokacji (obecnie zakazane).
 3. **Kopiowanie po EBS** wyłącznie do zakresów, które w **ostatecznej** mapie są `Conventional`/`BootServices*`
    /`Loader*` (z wykluczeniem ACPI NVS) — wymaga formalnej analizy okna EBS (T-EBS) i osobnej zgody.
-4. Do ustalenia: jak obecna ścieżka GRUB ładuje to jądro w tej samej konfiguracji OVMF (nie badano w Fazie 4A).
+4. Ustalone w Fazie 4A-R (`decyzja-relokacja-jadra.md` §3–4): GRUB 2.12 składa segment 3 w buforze pośrednim
+   i po EBS kopiuje go pod adres docelowy, nadpisując ACPI NVS `0x800000–0x900000` (przy S3). Decyzja 2026-11-27:
+   **ZAAKCEPTOWANA opcja C + E** (fizycznie ruchome jądro, stałe VA). Fundament jądra: Faza R1A
+   (`r1a-rozdzielenie-adresow.md`). BRB nadal przydziela wyłącznie przez `AllocatePages(AllocateAddress)`; polityka
+   przydziału dowolnego regionu należy do R2. Do tego czasu Faza 4A pozostaje BLOKADĄ.
 
 ### 18.8. T-EBS — wymagania przyszłe (tylko dokumentacja)
 

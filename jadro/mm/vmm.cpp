@@ -13,6 +13,16 @@
  *  - dynamiczne tablice stron sa dereferencjonowane wylacznie przez HHDM,
  *  - CR0.WP jest wlaczony, aby Ring 0 respektowal strony read-only.
  *
+ * FAZA R1A (rozdzielenie PA/VA, docs/brb/decyzja-relokacja-jadra.md):
+ *  - adresy fizyczne statycznych tablic stron (st_*) sa wyliczane z zainstalowanego ukladu obrazu
+ *    (obraz_jadra.h) zamiast traktowania ich VA z .bss jako PA,
+ *  - dolne 4 GiB bazowej przestrzeni sa budowane wedlug planu ObrazJadra: okno obrazu -> rzeczywisty podklad,
+ *    alias podkladu (obraz nie-tozsamosciowy) -> brak mapowania, reszta -> tozsamosc; dla obrazu
+ *    tozsamosciowego (MB2) wpisy sa identyczne z dotychczasowymi,
+ *  - strona uzytkownika nie moze lezec w oknie VA obrazu ani wskazywac ramki podkladu obrazu.
+ *  - W^X jadra NIE jest egzekwowane: okno obrazu jest RW+X (strony 2 MiB), a podklad ma dodatkowe aliasy RW
+ *    w HHDM (NX) i - dla obrazu tozsamosciowego - jest samym oknem.
+ *
  * WAZNE:
  * API ZmapujStrone() nadal zwraca void dla zgodnosci z obecnym pamiec.h.
  * Wewnatrz VMM wszystkie operacje maja jednak wynik bool i w razie bledu
@@ -25,6 +35,7 @@
 #include "zarezerwowane_va.h"
 #include "pamiec.h"
 #include "pamiec_procesu.h"
+#include "obraz_jadra.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -216,6 +227,17 @@ uint64_t st_hhdm_pt[MAKS_CZESCIOWYCH_PT_HHDM][512];
  */
 alignas(4096)
 uint64_t st_pt_pierwsze_2m[512];
+
+/*
+ * R1A: tablice PT dla regionow 2 MiB, w ktorych plan ObrazJadra miesza okno obrazu, tozsamosc i dziure aliasu
+ * (wylacznie obraz nie-tozsamosciowy; dla MB2 pula pozostaje nieuzywana). Musza lezec w .bss obrazu: przed
+ * przelaczeniem CR3 sa osiagalne tylko przez VA okna obrazu, niezaleznie od programu rozruchowego.
+ * Najgorszy przypadek: 6 regionow okna (1..14 MiB poza regionem 0) + 2 brzegi aliasu.
+ */
+constexpr size_t MAKS_PT_OKNA_OBRAZU = 8;
+
+alignas(4096)
+uint64_t st_pt_okna_obrazu[MAKS_PT_OKNA_OBRAZU][512];
 
 static_assert(
     sizeof(st_pml4) == ROZMIAR_STRONY_4K,
@@ -658,6 +680,39 @@ static uint64_t fizyczny_adres_tabeli(
     }
 
     return fiz;
+}
+
+/*
+ * R1A: fizyczny adres statycznej tablicy stron z .bss obrazu. Tlumaczenie WYLACZNIE przez okno obrazu
+ * zainstalowane przez PMM z kontraktu pamieci rozruchu - nigdy przez zalozenie PA == VA.
+ */
+static uint64_t pa_tabeli_statycznej(
+    const uint64_t* tabela
+) {
+    const ObrazJadra::Uklad* uklad = ObrazJadraAktywny();
+    if (!uklad || !tabela) return 0;
+    Adresy::AdresFizyczny pa;
+    if (!ObrazJadra::zakres_va_na_pa(
+            *uklad,
+            Adresy::AdresWirtualny(reinterpret_cast<uint64_t>(tabela)),
+            Adresy::RozmiarBajtow(ROZMIAR_STRONY_4K),
+            &pa) ||
+        !adres_fizyczny_strony_poprawny(pa.wartosc)) {
+        return 0;
+    }
+    return pa.wartosc;
+}
+
+/*
+ * R1A: okno VA obrazu jadra jest wypelniane wylacznie przy budowie bazowej przestrzeni (zbuduj_dolne_4gib).
+ * Kazde pozniejsze mapowanie albo odmapowanie strony w tym oknie (np. mapowanie BAR-u VA == PA trafiajace w okno,
+ * strona uzytkownika) zastapiloby kod lub dane jadra - odmowa. Brak ukladu = odmowa (fail-closed).
+ */
+static bool va_w_oknie_obrazu(
+    uint64_t va
+) {
+    const ObrazJadra::Uklad* uklad = ObrazJadraAktywny();
+    return !uklad || ObrazJadra::okno_przecina(*uklad, va, ROZMIAR_STRONY_4K);
 }
 
 /* =========================================================================
@@ -1178,6 +1233,10 @@ static bool mapuj_strone_wewnetrznie(
     const bool user =
         (flagi & PTE_USER) != 0;
 
+    if (va_w_oknie_obrazu(adres_wirtualny)) {
+        return false;
+    }
+
     if (user) {
         if (!adres_user_kanoniczny(
                 adres_wirtualny)) {
@@ -1189,6 +1248,17 @@ static bool mapuj_strone_wewnetrznie(
          */
         if (adres_wirtualny <
             ROZMIAR_STRONY_4K) {
+            return false;
+        }
+
+        /*
+         * R1A: strona uzytkownika nie moze przykryc okna VA obrazu jadra ani wskazywac ramki podkladu obrazu
+         * (aliasu kodu/danych jadra w Ring 3). Brak ukladu = odmowa.
+         */
+        const ObrazJadra::Uklad* uklad = ObrazJadraAktywny();
+        if (!uklad ||
+            !ObrazJadra::mapowanie_uzytkownika_dozwolone(
+                *uklad, adres_wirtualny, adres_fizyczny)) {
             return false;
         }
     }
@@ -1847,14 +1917,31 @@ static bool przygotuj_mapowania_jadra() {
         st_pt_pierwsze_2m
     );
 
+    for (size_t i = 0;
+         i < MAKS_PT_OKNA_OBRAZU;
+         ++i) {
+        WyzerujStrone(st_pt_okna_obrazu[i]);
+    }
+
+    const ObrazJadra::Uklad* uklad = ObrazJadraAktywny();
+
+    if (!uklad) {
+        return false;
+    }
+
+    const uint64_t pa_pdp = pa_tabeli_statycznej(st_pdp);
+
+    if (pa_pdp == 0) {
+        return false;
+    }
+
     /*
      * Brak PTE_USER jest tutaj celowy.
      * Ring 3 nie moze otrzymac dostepu do calej fizycznej pamieci tylko
      * dlatego, ze aplikacja uzywa adresow w tej samej czesci PML4.
      */
     st_pml4[0] =
-        (reinterpret_cast<uint64_t>(
-            st_pdp) &
+        (pa_pdp &
          MASKA_ADRESU_4K) |
         PTE_PRESENT |
         PTE_WRITE;
@@ -1863,81 +1950,40 @@ static bool przygotuj_mapowania_jadra() {
          gigabajt < 4;
          ++gigabajt) {
 
+        const uint64_t pa_pd = pa_tabeli_statycznej(st_pd[gigabajt]);
+
+        if (pa_pd == 0) {
+            return false;
+        }
+
         st_pdp[gigabajt] =
-            (reinterpret_cast<uint64_t>(
-                st_pd[gigabajt]) &
+            (pa_pd &
              MASKA_ADRESU_4K) |
             PTE_PRESENT |
             PTE_WRITE;
     }
 
     /*
-     * Pierwsze 2 MiB jako 4 KiB.
-     * PTE[0] = 0 -> NULL dereference wywola #PF.
+     * Dolne 4 GiB wedlug planu ObrazJadra (obraz_jadra.h):
+     *  - pierwsze 2 MiB jako 4 KiB, PTE[0] = 0 -> NULL dereference wywola #PF,
+     *  - okno obrazu -> rzeczywisty podklad fizyczny,
+     *  - alias podkladu obrazu nie-tozsamosciowego -> brak mapowania,
+     *  - reszta jako supervisor-only tozsamosc (strony 2 MiB, MMIO APIC z PWT+PCD dla zgodnosci z apic.cpp).
+     * Dla obrazu tozsamosciowego (MB2) wynik jest identyczny z dotychczasowym ukladem tablic.
      */
-    st_pd[0][0] =
-        (reinterpret_cast<uint64_t>(
-            st_pt_pierwsze_2m) &
-         MASKA_ADRESU_4K) |
-        PTE_PRESENT |
-        PTE_WRITE;
+    ObrazJadra::TabliceDolne4GiB tablice{
+        st_pd,
+        st_pt_pierwsze_2m,
+        st_pt_okna_obrazu,
+        MAKS_PT_OKNA_OBRAZU,
+        0
+    };
 
-    st_pt_pierwsze_2m[0] = 0;
-
-    for (uint64_t i = 1;
-         i < 512;
-         ++i) {
-
-        st_pt_pierwsze_2m[i] =
-            i * ROZMIAR_STRONY_4K |
-            PTE_PRESENT |
-            PTE_WRITE;
-    }
-
-    /*
-     * Reszta 0..4 GiB jako supervisor-only strony 2 MiB.
-     */
-    for (uint64_t gigabajt = 0;
-         gigabajt < 4;
-         ++gigabajt) {
-
-        for (uint64_t i = 0;
-             i < 512;
-             ++i) {
-
-            if (gigabajt == 0 &&
-                i == 0) {
-                continue;
-            }
-
-            const uint64_t fiz =
-                gigabajt *
-                    ROZMIAR_STRONY_1G +
-                i *
-                    ROZMIAR_STRONY_2M;
-
-            uint64_t flagi =
-                PTE_PRESENT |
-                PTE_WRITE |
-                PDE_PS;
-
-            /*
-             * MMIO APIC nie powinno korzystac ze zwyklego cache WB.
-             * PWT+PCD zachowuje kompatybilnosc z obecnym apic.cpp.
-             */
-            if (fiz == LAPIC_MMIO ||
-                fiz == IOAPIC_MMIO) {
-
-                flagi |=
-                    PTE_PWT |
-                    PTE_PCD;
-            }
-
-            st_pd[gigabajt][i] =
-                (fiz &
-                 MASKA_ADRESU_2M) |
-                flagi;
-        }
+    if (!ObrazJadra::zbuduj_dolne_4gib(
+            *uklad,
+            tablice,
+            [](const uint64_t* tabela) { return pa_tabeli_statycznej(tabela); })) {
+        return false;
     }
 
     /*
@@ -2014,9 +2060,12 @@ static bool przygotuj_mapowania_jadra() {
             }
 
             if (pt_ma_wpis) {
+                const uint64_t pa_pt = pa_tabeli_statycznej(st_hhdm_pt[uzyte_pt_hhdm]);
+                if (pa_pt == 0) {
+                    return false;
+                }
                 st_hhdm_pd[gigabajt][i] =
-                    (reinterpret_cast<uint64_t>(
-                        st_hhdm_pt[uzyte_pt_hhdm]) &
+                    (pa_pt &
                      MASKA_ADRESU_4K) |
                     PTE_PRESENT |
                     PTE_WRITE;
@@ -2027,9 +2076,12 @@ static bool przygotuj_mapowania_jadra() {
         }
 
         if (pd_ma_wpis) {
+            const uint64_t pa_pd = pa_tabeli_statycznej(st_hhdm_pd[gigabajt]);
+            if (pa_pd == 0) {
+                return false;
+            }
             st_hhdm_pdp[gigabajt] =
-                (reinterpret_cast<uint64_t>(
-                    st_hhdm_pd[gigabajt]) &
+                (pa_pd &
                  MASKA_ADRESU_4K) |
                 PTE_PRESENT |
                 PTE_WRITE;
@@ -2040,9 +2092,14 @@ static bool przygotuj_mapowania_jadra() {
         return false;
     }
 
+    const uint64_t pa_hhdm_pdp = pa_tabeli_statycznej(st_hhdm_pdp);
+
+    if (pa_hhdm_pdp == 0) {
+        return false;
+    }
+
     st_pml4[256] =
-        (reinterpret_cast<uint64_t>(
-            st_hhdm_pdp) &
+        (pa_hhdm_pdp &
          MASKA_ADRESU_4K) |
         PTE_PRESENT |
         PTE_WRITE;
@@ -2261,7 +2318,7 @@ extern "C" void* VmmOdmapujStroneJadraGlobalnie(void* va_) {
     const uint64_t va = reinterpret_cast<uint64_t>(va_);
     BlokadaVMM blokada;
     if (!vmm_zainicjalizowany || !bazowe_pml4_jadra || !adres_strony_poprawny(va) ||
-        va >= VmmZakres::KONIEC_DOLNEJ_POLOWY) return nullptr;
+        va >= VmmZakres::KONIEC_DOLNEJ_POLOWY || va_w_oknie_obrazu(va)) return nullptr;
     if (!(va < VmmZakres::LIMIT_IDENTITY_MAPY || ZarezerwowaneVA::koliduje_z_jadrem(va, va + ROZMIAR_STRONY_4K))) return nullptr;
     OpsVmm o;
     uint64_t stary = 0;
@@ -2331,10 +2388,14 @@ void InicjalizujVMM() {
         return;
     }
 
+    /*
+     * R1A: PA bazowego PML4 pochodzi z okna obrazu (nie z VA .bss), a CR3 dostaje go przez
+     * WirtualnyDoFizycznego(HHDM) w zapisz_cr3().
+     */
     bazowe_pml4_jadra =
         static_cast<uint64_t*>(
             FizycznyZakresDoWirtualnego(
-                reinterpret_cast<uint64_t>(st_pml4),
+                pa_tabeli_statycznej(st_pml4),
                 ROZMIAR_STRONY_4K
             )
         );
@@ -2674,7 +2735,7 @@ extern "C" void* VmmOdmapujBuforGrafiki(void* adres) {
 
 extern "C" void* VmmOdmapujStroneJadra(void* adres) {
     const uint64_t va = reinterpret_cast<uint64_t>(adres);
-    if (!adres_strony_poprawny(va)) return nullptr;
+    if (!adres_strony_poprawny(va) || va_w_oknie_obrazu(va)) return nullptr;
     BlokadaVMM guard;
     uint64_t* tab = pml4_z_cr3();
     const unsigned indeksy[4] = {

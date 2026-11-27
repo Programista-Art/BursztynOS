@@ -3487,6 +3487,22 @@ test-vmm-zakres-host:
 	g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined testy/test_vmm_zakres_host.cpp -o .bsf-test/vmm_zakres_host
 	UBSAN_OPTIONS=halt_on_error=1 .bsf-test/vmm_zakres_host
 
+# Faza R1A: rozdzielenie PA/VA jadra - typy adresow, uklad obrazu, plan dolnych 4 GiB, kontrakt pamieci rozruchu,
+# adapter MB2 i produkcyjny PMM (BURSZTYN_PMM_HOST_TEST) na symulowanej pamieci fizycznej. Opcjonalnie rzeczywiste
+# MBI z GRUB 2.12/OVMF zarejestrowane w Fazie 4A-R (tylko odczyt; brak plikow = NIE URUCHOMIONO).
+R1A_DIAG := .brb-build/qemu-diag
+R1A_MBI_ARGS := $(foreach s,grub-q35-256 grub-pc-2g grub-pc-2g-prod grub-q35-256-tapety,$(if $(wildcard $(R1A_DIAG)/$(s)/mbi.bin),--mbi $(R1A_DIAG)/$(s)/mbi.bin:2000:NVS)) \
+	$(if $(wildcard $(R1A_DIAG)/grub-q35-256-bez-s3/mbi.bin),--mbi $(R1A_DIAG)/grub-q35-256-bez-s3/mbi.bin:2000:OK) \
+	$(if $(wildcard $(R1A_DIAG)/r1a-mod-bios-pc-2g-prod/mbi.bin),--mbi $(R1A_DIAG)/r1a-mod-bios-pc-2g-prod/mbi.bin:100080:OK)
+.PHONY: test-r1a-pamiec-host
+test-r1a-pamiec-host:
+	@mkdir -p .brb-build/r1a
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -Wshadow $(HOST_INCLUDES) -DBURSZTYN_PMM_HOST_TEST \
+		-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+		testy/test_r1a_pamiec_host.cpp jadro/mm/pmm.cpp -o .brb-build/r1a/test-r1a-pamiec-host
+	$(PYTHON) narzedzia/skan_instrukcji_uprzywilejowanych.py .brb-build/r1a/test-r1a-pamiec-host
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 .brb-build/r1a/test-r1a-pamiec-host $(R1A_MBI_ARGS)
+
 .PHONY: test-rozszerzenie-powierzchni-host
 test-rozszerzenie-powierzchni-host:
 	@mkdir -p .bsf-test
