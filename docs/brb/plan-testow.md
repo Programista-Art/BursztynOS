@@ -115,8 +115,8 @@ Zasoby hosta: jeden QEMU naraz, partie 2–3 testów (zalecenia z wcześniejszyc
 - **ExitBootServices**: test z wymuszonym zdarzeniem timera zmieniającym mapę (aplikacja testowa UEFI
   w ramach BRB w trybie diagnostycznym budowy — `BRB_TEST_EBS_RETRY=1`) → oczekiwane ≥ 2 próby w rekordzie
   diagnostycznym i udany start.
-- **Pamięć 1–14 MiB zajęta**: konfiguracja OVMF, w której zakres jądra jest `EfiBootServicesData` (sprawdzić
-  w logu BRB, czy użyto ścieżki „kopiuj po EBS”). **[DO POTWIERDZENIA]** jak wymusić w OVMF.
+- **Pamięć 1–14 MiB zajęta** **[HISTORYCZNE — kopiowanie po EBS zastąpione w R2]**: w aktywnej architekturze jądro
+  nie trafia pod 1 MiB; odpowiednik to T-R2-BLEDY wariant 4 (zajęta pamięć wymusza inną bazę).
 - **BIOS etap 0/2**: obraz z etapem 2 na różnych LBA (porcje > 127 sektorów, granica 64 KiB), CD z 2048 B.
 - **Uszkodzenia**: obcięte jądro, zły CRC etapu 2, uszkodzona konfiguracja, brak modułu wymaganego, oba sloty
   uszkodzone — oczekiwane polskie komunikaty i brak zawieszenia.
@@ -136,7 +136,12 @@ Zasoby hosta: jeden QEMU naraz, partie 2–3 testów (zalecenia z wcześniejszyc
 | T-R1B-HOST | `make test-r1b-wejscie-host` | stan CPU, metadane wejścia (syntetyczne + jądro okrojone/nieokrojone), tablice przejścia W^X, analiza aliasów, przyjęcie kontraktu natywnego, PMM natywny; 0 FAIL |
 | T-R1B-MUT | mutanty kodu produkcyjnego R1B (raport) | każdy mutant daje FAIL > 0 |
 | T-R1B-UPRZAZ | wariant `BURSZTYN_TEST_WEJSCIE64=1` + `diag_grub_ovmf.py --firmware bios --bez-zrzutow --hmp "gva2gpa …"` | wejście natywne, PA ≠ VA (`gva2gpa`), kamienie milowe do pulpitu — PASS (QEMU, wariant testowy) |
-| T-R2-NATYW (przyszły, obowiązkowy) | jądro **produkcyjne** uruchomione **przez BRB** z PA ≠ VA | kamienie milowe do pulpitu, zrzut NVS = 0 zmienionych bajtów przypisanych BRB/jądru — **NIE URUCHOMIONO** (wymaga R2/4C) |
+| T-R2-HOST | `make test-brb-r2` (ASan/UBSan, jądro R1B) | umiejscowienie, przesunięcie, ładowanie pod 3 bazy ze strażnikami, rejestr, weryfikator + mutacje, transakcja na symulowanym UEFI; 0 FAIL — **PASS (333)** |
+| T-R2-MUT | 4 mutanty (translacja, własność, W w budowniczym, W+X w weryfikatorze) w scratchpadzie | każdy FAIL > 0 — **PASS** |
+| T-R2-OVMF | `uruchom_ovmf.py --wolumin .brb-build/r2/woluminy/prod` pc 2G (`--profil produkcja`) i q35 1G, S3 włączone | sukces, PA ≠ VA, ≥ 2 bazy, weryfikacja obrazu i tablic, 0 zasobów po — **PASS** |
+| T-R2-NVS | `--zrzut PA:DŁ` (QMP `pmemsave`, tylko zakresy NVS z logu BRB, zatrzymana maszyna) przed etapem R2 i po zwolnieniu | 0 zmienionych bajtów — **PASS** (5 zakresów, 2052 KiB) |
+| T-R2-BLEDY | warianty `BRB_R2_TEST=1..5`, woluminy z błędnymi metadanymi/jądrami | kody `BRB-E6xx`/`E7xx`, 0 zasobów, brak próby stałego adresu — **PASS** |
+| T-R2-NATYW (przyszły, obowiązkowy) | jądro **produkcyjne** uruchomione **przez BRB** z PA ≠ VA | kamienie milowe do pulpitu, zrzut NVS = 0 zmienionych bajtów przypisanych BRB/jądru — **NIE URUCHOMIONO** (wymaga 4B/4C) |
 
 ## 5. Sprzęt fizyczny
 

@@ -37,6 +37,10 @@ Podział etapu R1 (§11) na dwie kontrolowane podfazy:
 
 Numeracja i zakres kolejnych etapów (R2, R3, R4) oraz faz BRB (4B, 4C, 5…) pozostają bez zmian.
 
+**Realizacja (2026-11-28):** R1A (PA/VA), R1B (wejście 64-bit), **R2** (BRB: elastyczne umieszczenie, własność,
+tablice przejścia — `r2-elastyczne-ladowanie.md`). Konflikt z §2 nie występuje w ścieżce natywnej: OVMF z S3
+przydzielił podkład `0x7CD40000`/`0x3CA97000`/`0x3BE1B000`, zrzuty NVS bez zmian. Przekazanie (4B/4C) — nie rozpoczęte.
+
 ## 1. Problem
 
 Jądro jest obrazem ELF64 `ET_EXEC` zlinkowanym pod stałe adresy `VMA == LMA` od 1 MiB (`linker.ld`:

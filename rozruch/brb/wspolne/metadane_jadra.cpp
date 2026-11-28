@@ -1,10 +1,10 @@
 /*
  * BRB - wykrywanie metadanych natywnego wejscia jadra (Faza R1B). Opis: metadane_jadra.h.
  */
-#include "rozruch/brb/wspolne/metadane_jadra.h"
+#include "metadane_jadra.h"
 
-#include "jadro/arch/metadane_jadra.h"
-#include "rozruch/brb/wspolne/arytmetyka.h"
+#include "../../../jadro/arch/metadane_jadra.h"
+#include "arytmetyka.h"
 
 namespace brb {
 

@@ -1,5 +1,6 @@
 #include "program.h"
 
+#include "../wspolne/pamiec_podstawowa.h"
 #include "../wspolne/utf8.h"
 #include "../wspolne/wersja.h"
 
@@ -289,7 +290,76 @@ EFI_STATUS sprawdz_jadro(EFI_BOOT_SERVICES* bs, const EFI_LOADED_IMAGE_PROTOCOL*
     s = wypisz(k, plan_linia.b);
     if (EFI_ERROR(s)) { zwolnij_bufor(); return s; }
 
-    // ---- Faza 4A ----
+    // ---- Faza R2: metadane natywnego wejscia na zwalidowanym planie (bez drugiego parsera ELF) ----
+    MetadaneWejscia meta;
+    brb_memset(&meta, 0, sizeof(meta));
+    const BladMetadanych bm = znajdz_metadane_wejscia(bufor.dane(), bufor.rozmiar, plan, &meta);
+    stan.blad_metadanych = bm;
+    if (bm == BladMetadanych::Brak) {
+        log.tekst("[BRB] metadane: BRBJADRO plik=");
+        log.hex(meta.przesuniecie_pliku);
+        log.tekst(" segment=");
+        log.dziesietnie(meta.segment);
+        log.tekst(" kontrakt=");
+        log.dziesietnie(meta.kontrakt_wejscia);
+        log.tekst(" baza_wirt=");
+        log.hex(meta.baza_wirtualna);
+        log.tekst(" wejscie64=");
+        log.hex(meta.wejscie64);
+        log.tekst(" (segment ");
+        log.dziesietnie(meta.segment_wejscia);
+        log.tekst(") wyrownanie=");
+        log.hex(meta.wyrownanie_podkladu);
+        log.tekst(" cechy=");
+        log.hex(meta.wymagane_cechy);
+        log.znak('\n');
+        log.tekst("[BRB] metadane: e_entry (wejscie MB2) ");
+        log.hex(plan.wejscie_wirtualne);
+        log.linia(" NIE jest uzywane przez sciezke natywna");
+        RaportR2 r2;
+        const CechyProcesora cpu = odczytaj_cechy_procesora();
+        const EFI_STATUS s2 = faza_r2_zaladuj_natywnie(bs, zaladowany, bufor, plan, meta, cpu, pamiec, log, &r2);
+        zwolnij_bufor();
+        stan.status_r2 = s2;
+        stan.blad_r2 = r2.blad;
+        stan.etap_r2 = r2.etap;
+        stan.baza_r2 = r2.umiejscowienie.baza;
+        stan.bledy_sprzatania_r2 = r2.bledy_sprzatania;
+        stan.status_jadra = s2;
+        Tekst l2;
+        if (r2.blad != BladR2::Brak) {
+            l2.dodaj("Błąd fazy R2 (BRB-E6").dziesietnie(uint32_t(r2.blad) / 10).dziesietnie(uint32_t(r2.blad) % 10)
+                .dodaj("): ").dodaj(opis_bledu_r2(r2.blad)).dodaj(".");
+        } else {
+            l2.dodaj("Faza R2: jądro załadowane pod adres fizyczny ").hex(r2.umiejscowienie.baza)
+                .dodaj(", zweryfikowane, tablice przejścia sprawdzone; pamięć zwolniona.");
+        }
+        s = wypisz(k, l2.b);
+        if (EFI_ERROR(s)) return s;
+        return wypisz(k, "Jądro nie zostało uruchomione.");
+    }
+    log.tekst("[BRB] metadane: ");
+    log_kod(log, '7', uint32_t(bm));
+    log.tekst(" ");
+    log.linia(opis_bledu_metadanych(bm));
+#ifdef BRB_DIAG_STARY_4A
+    if (bm != BladMetadanych::NieZnaleziono) {
+#endif
+        // Jadro bez poprawnych metadanych natywnych: brak przydzialu i brak jakiejkolwiek proby adresu stalego.
+        zwolnij_bufor();
+        stan.status_jadra = EFI_LOAD_ERROR;
+        Tekst lm;
+        lm.dodaj("Błąd metadanych wejścia natywnego (BRB-E7").dziesietnie(uint32_t(bm) / 10).dziesietnie(uint32_t(bm) % 10)
+            .dodaj("): ").dodaj(opis_bledu_metadanych(bm)).dodaj(". Brak próby ładowania pod stały adres.");
+        s = wypisz(k, lm.b);
+        if (EFI_ERROR(s)) return s;
+        return wypisz(k, "Jądro nie zostało uruchomione.");
+#ifdef BRB_DIAG_STARY_4A
+    }
+    log.linia("[BRB] TRYB DIAGNOSTYCZNY 4A (wariant brb-x64-diag-4a.efi): jadro bez metadanych - historyczna sciezka adresu stalego");
+#endif
+
+    // ---- Faza 4A (historyczna sciezka diagnostyczna adresu stalego; tylko BRB_DIAG_STARY_4A) ----
 #ifdef BRB_TEST_KONFLIKT_STRONA
     BlokadaTestowa blokada{};
     zajmij_strone_testowa(bs, BRB_TEST_KONFLIKT_STRONA, pamiec, &blokada, log);

@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-#include "rozruch/brb/wspolne/elf64.h"
+#include "elf64.h"
 
 namespace brb {
 

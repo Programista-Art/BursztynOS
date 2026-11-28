@@ -70,6 +70,9 @@ to cel późniejszych faz (sekcja 5).
 
 ### 3.1. Reguły Fazy 4A (przydział i ładowanie)
 
+> **[HISTORYCZNE — stały adres, tylko wariant `BRB_DIAG_STARY_4A`]** Wymóg `AllocateAddress` pod stały adres
+> jądra nie dotyczy już normalnego BRB. Aktywne reguły: §3.2.
+
 - Zapis do pamięci fizycznej wyłącznie po udanym `AllocatePages(AllocateAddress)` tej strony przez BRB; wpis
   „wolna” w mapie nie daje prawa zapisu. Brak odzyskiwania pamięci firmware, brak relokacji, brak kopiowania po EBS.
 - Każda kontrola (zakresy, źródło, plan, tłumaczenie adresów) przed **pierwszym** zapisem; odrzucenie = zero zapisów.
@@ -79,6 +82,20 @@ to cel późniejszych faz (sekcja 5).
 - Błędy `FreePages` są raportowane (BRB-E510, `bledy_sprzatania`), zakres porzucany bez ponownego zwalniania.
 - Weryfikacja bajt po bajcie (dane, BSS, wypełnienie); CRC nie zastępuje porównania. W^X **nie** jest egzekwowane
   (tablice stron firmware bez zmian) — prawa ELF są tylko zadeklarowane.
+
+### 3.2. Reguły Fazy R2 (elastyczne umieszczenie, `r2-elastyczne-ladowanie.md`)
+
+- Metadane natywne walidowane przed jakimkolwiek przydziałem; brak lub błąd → `BRB-E7xx`, **brak powrotu do stałego
+  adresu**. Brak relokacji ELF, brak ET_DYN, brak kopiowania po EBS.
+- Zapis wyłącznie do stron zwróconych BRB przez `AllocatePages(AllocateMaxAddress < 4 GiB)`; każdy adres sprawdzony
+  (wyrównanie, przepełnienie, MAXPHYADDR, rozłączność z obrazem BRB, buforem źródła i innymi zasobami) przed zapisem.
+- Migawki mapy przed/po: każdy własny przydział porównany z ACPI NVS (`BRB-E615`); NVS, Reclaim, Runtime, Reserved,
+  MMIO i Unusable nigdy nie są celem.
+- Rejestr własności: zwalnianie w odwrotnej kolejności na sukcesie i porażce, brak podwójnego zwolnienia, błędy
+  `FreePages` raportowane (`BRB-E616`), zasób porzucany.
+- Tablice przejścia budowane i niezależnie weryfikowane (U=0, brak W+X, brak dużych stron, brak aliasów, strażniki),
+  ale **nieaktywne**: W^X jądra nie jest w R2 egzekwowane i pozostaje blokadą produkcyjną.
+- Wstrzykiwanie błędów tylko w wariantach `BRB_TEST_R2`; normalny EFI bez kodu testowego.
 
 ## 4. Odporność na awarie (fail-safe)
 

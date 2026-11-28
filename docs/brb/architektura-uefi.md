@@ -121,6 +121,9 @@ instalacjach albo podłączonym nośniku instalacyjnym.
 
 ### 5.2. Plan ładowania
 
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** Aktywna architektura natywna: jądro ładowane pod bazę przydzieloną przez firmware (`AllocateMaxAddress`, `EfiLoaderData`), weryfikacja przed EBS, bez kopiowania po EBS — `r2-elastyczne-ladowanie.md` §1–5. Poniższy opis dotyczy wyłącznie historycznego trybu zgodności (wariant `BRB_DIAG_STARY_4A`).
+
+
 Segmenty są ładowane pod stałe adresy fizyczne 1 MiB…`__kernel_end`. Na rzeczywistym sprzęcie UEFI ten zakres
 **może być zajęty** przez firmware jako `EfiBootServicesData/Code` (usługi rozruchowe). Taka pamięć jest
 wolna dopiero po `ExitBootServices`. Dlatego BRB stosuje model **przygotuj teraz, skopiuj po EBS**:
@@ -150,12 +153,18 @@ istniejącym wpisem (O(n²) przy n ≤ 256 — akceptowalne). Rejestr jest źró
 
 ### 6.2. Typy pamięci UEFI a cel kopiowania po EBS
 
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** W aktywnej architekturze nie ma kopiowania po EBS; cel jądra to wyłącznie strony `EfiLoaderData` przydzielone BRB (`r2-elastyczne-ladowanie.md` §4). Tabela pozostaje jako klasyfikacja typów dla kontroli NVS/Runtime/Reserved.
+
+
 | Typ UEFI (UEFI 2.10, rozdz. 7.2, tabela *Memory Type Usage after ExitBootServices*) | Może być celem jądra/modułów po EBS |
 |---|---|
 | `EfiConventionalMemory`, `EfiBootServicesCode`, `EfiBootServicesData`, `EfiLoaderCode`, `EfiLoaderData` | tak |
 | `EfiRuntimeServicesCode/Data`, `EfiACPIReclaimMemory`, `EfiACPIMemoryNVS`, `EfiReservedMemoryType`, `EfiUnusableMemory`, `EfiMemoryMappedIO*`, `EfiPalCode`, `EfiPersistentMemory`, `EfiUnacceptedMemoryType`, nieznane | nie |
 
 ### 6.3. Tablice stron i GDT
+
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** Aktywne: 4-poziomowe tablice przejścia ze stronami 4 KiB i W^X okna jądra z `jadro/mm/plan_przejscia.h`, ograniczona tożsamość (bez identity 0..4 GiB, bez stron 2 MiB), niezależna weryfikacja — `r2-elastyczne-ladowanie.md` §6. GDT/IDT przejścia: projekt §8 tamże (4C).
+
 
 **[FAKT]** Tablice stron firmware leżą w pamięci usług rozruchowych, którą po EBS wolno nadpisać, i nie
 gwarantują identity map całego zakresu < 4 GiB. **[PROJEKT]** Przed EBS BRB:
@@ -285,6 +294,9 @@ zakresami jądra i modułów. Wymaga identity map, bo w trybie zgodności wyłą
 
 ### 10.1. Wspólna część (po EBS)
 
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** Aktywne przekazanie (4C, nie rozpoczęte): bez `memmove` po EBS — jądro już leży pod bazą firmware; skok do `wejscie_jadra64` (RDI = magic, RSI = PA `KontraktV1`) wg `r1b-wejscie-64bit.md` §3 i `r2-elastyczne-ladowanie.md` §1, §7–8.
+
+
 ```
 cli
 lgdt  gdt_brb                     ; własna GDT
@@ -299,6 +311,9 @@ COM1: "[BRB] przekazanie"
 
 ### 10.2. Tryb natywny (BRBI)
 
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** BRBI pozostaje Fazą 7; natywne wejście R1B/R2 używa kontraktu V1, nie BRBI.
+
+
 ```
 mov edi, 0x31425242 ; RDI = magic
 mov rsi, brbi_fiz
@@ -308,6 +323,9 @@ jmp  wejscie64
 ```
 
 ### 10.3. Tryb zgodności MB2 (wejście 32-bit do `_start`)
+
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** Przekazanie przez trampolinę 64→32 do `_start` nie jest planowane dla BRB; wejście MB2 (`e_entry`) służy wyłącznie GRUB.
+
 
 Zgodnie z Intel SDM tom 3A, rozdział o inicjalizacji i wyłączaniu trybu IA-32e (*Initializing IA-32e Mode*,
 *IA-32e Mode Deactivation*):
@@ -1036,6 +1054,9 @@ model „skopiuj po EBS” z §5.2 też nie miałby tu zastosowania bez zmiany u
 BRB — wariant konfliktowy i jądro syntetyczne potwierdzają poprawność wykrycia i wycofania.
 
 ### 18.7. Propozycje bezpiecznego rozwiązania (do decyzji właściciela, NIE zaimplementowane)
+
+> **[HISTORYCZNE — ścieżka zgodności / stały adres, zastąpione w Fazie R2 (2026-11-28)]** Rozstrzygnięte decyzją C + E (`decyzja-relokacja-jadra.md` §0) i zrealizowane w R1A/R1B/R2 (`r2-elastyczne-ladowanie.md`). Propozycje 1 i 3 odrzucone, 2 (relokacja ELF) nadal zakazana.
+
 
 1. **Zmiana adresu ładowania jądra** (`linker.ld`, `boot.S`, adresy fizyczne): np. przeniesienie obrazu
    powyżej obszaru używanego przez OVMF albo układ, w którym `.data/.bss` nie wchodzi w `0x800000+`.

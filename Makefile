@@ -3635,15 +3635,21 @@ BRB_EFI        := $(BRB_UEFI_DIR)/brb-x64.efi
 BRB_EFI_DEBUG  := $(BRB_UEFI_DIR)/brb-x64.debug.efi
 BRB_OBJDUMP    := $(CROSS)objdump
 BRB_LDS        := rozruch/brb/uefi/brb_uefi.ld
+# Faza R2: metadane natywnego wejscia, elastyczne umieszczenie, rejestr zasobow, weryfikacja tablic przejscia.
+BRB_ZRODLA_R2  := rozruch/brb/uefi/ladowanie_natywne.cpp rozruch/brb/wspolne/metadane_jadra.cpp \
+                  rozruch/brb/wspolne/umiejscowienie.cpp rozruch/brb/wspolne/rejestr_zasobow.cpp \
+                  rozruch/brb/wspolne/weryfikacja_tablic.cpp
 BRB_ZRODLA     := rozruch/brb/uefi/efi_main.cpp rozruch/brb/uefi/program.cpp rozruch/brb/uefi/plik_jadra.cpp \
                   rozruch/brb/uefi/mapa_uefi.cpp rozruch/brb/uefi/ladowanie_jadra.cpp \
                   rozruch/brb/wspolne/pamiec_podstawowa.cpp rozruch/brb/wspolne/utf8.cpp \
                   rozruch/brb/wspolne/log_szeregowy.cpp rozruch/brb/wspolne/elf64.cpp \
-                  rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp
+                  rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp \
+                  $(BRB_ZRODLA_R2)
 BRB_ZRODLA_HOSTA := rozruch/brb/uefi/program.cpp rozruch/brb/uefi/plik_jadra.cpp rozruch/brb/uefi/mapa_uefi.cpp \
                   rozruch/brb/uefi/ladowanie_jadra.cpp rozruch/brb/wspolne/utf8.cpp \
                   rozruch/brb/wspolne/log_szeregowy.cpp rozruch/brb/wspolne/pamiec_podstawowa.cpp \
-                  rozruch/brb/wspolne/elf64.cpp rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp
+                  rozruch/brb/wspolne/elf64.cpp rozruch/brb/wspolne/mapa_pamieci.cpp rozruch/brb/wspolne/ladowanie.cpp \
+                  $(BRB_ZRODLA_R2)
 BRB_NAGLOWKI   := $(wildcard rozruch/brb/uefi/*.h rozruch/brb/wspolne/*.h)
 BRB_OBIEKTY    := $(patsubst rozruch/brb/%.cpp,$(BRB_UEFI_OBJ)/%.o,$(BRB_ZRODLA))
 BRB_GCC_INC    := $(shell $(CC) -print-file-name=include)
@@ -3705,7 +3711,7 @@ brb-uefi: $(BRB_EFI)
 
 $(BRB_KONFLIKT_DIR)/obj/%.o: rozruch/brb/%.cpp $(BRB_NAGLOWKI) Makefile
 	@mkdir -p $(dir $@)
-	$(CXX) $(BRB_CXXFLAGS) -DBRB_TEST_KONFLIKT_STRONA=$(BRB_KONFLIKT_STRONA)ull -c $< -o $@
+	$(CXX) $(BRB_CXXFLAGS) -DBRB_DIAG_STARY_4A -DBRB_TEST_KONFLIKT_STRONA=$(BRB_KONFLIKT_STRONA)ull -c $< -o $@
 
 $(BRB_KONFLIKT_EFI): $(BRB_KONFLIKT_OBIEKTY) $(BRB_LDS) Makefile
 	$(LD) $(BRB_LDFLAGS) --strip-all -o $@ $(BRB_KONFLIKT_OBIEKTY)
@@ -3713,9 +3719,38 @@ $(BRB_KONFLIKT_EFI): $(BRB_KONFLIKT_OBIEKTY) $(BRB_LDS) Makefile
 
 brb-uefi-test-konflikt: $(BRB_KONFLIKT_EFI)
 
+# Faza R2: WARIANT DIAGNOSTYCZNY historycznej sciezki adresu stalego (Faza 4A) dla jader BEZ metadanych natywnych
+# (fixture'y syntetyczne, dowody 4A-R). Zwykly brb-x64.efi nigdy nie probuje adresu stalego.
+BRB_DIAG4A_DIR      := $(BRB_BUILD)/uefi-diag-4a
+BRB_DIAG4A_EFI      := $(BRB_DIAG4A_DIR)/brb-x64-diag-4a.efi
+BRB_DIAG4A_OBIEKTY  := $(patsubst rozruch/brb/%.cpp,$(BRB_DIAG4A_DIR)/obj/%.o,$(BRB_ZRODLA))
+$(BRB_DIAG4A_DIR)/obj/%.o: rozruch/brb/%.cpp $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(BRB_CXXFLAGS) -DBRB_DIAG_STARY_4A -c $< -o $@
+$(BRB_DIAG4A_EFI): $(BRB_DIAG4A_OBIEKTY) $(BRB_LDS) Makefile
+	$(LD) $(BRB_LDFLAGS) --strip-all -o $@ $(BRB_DIAG4A_OBIEKTY)
+	@echo "[BRB] Wariant diagnostyczny 4A (adres staly, jadra bez metadanych): $@"
+.PHONY: brb-uefi-diag-4a brb-uefi-test-r2
+brb-uefi-diag-4a: $(BRB_DIAG4A_EFI)
+
+# Faza R2: WARIANTY TESTOWE ze wstrzykiwaniem bledow (nigdy w brb-x64.efi). BRB_R2_TEST:
+#   1 = zadanie podkladu przekraczajace pamiec (prawdziwa odmowa firmware), 2 = wstrzyknieta odmowa podkladu,
+#   3 = wstrzyknieta odmowa puli tablic, 4 = prawowity straznik zajety przed przydzialem, 5 = uszkodzony bajt obrazu.
+BRB_R2_TEST         ?= 4
+BRB_R2T_DIR         := $(BRB_BUILD)/r2/uefi-test-$(BRB_R2_TEST)
+BRB_R2T_EFI         := $(BRB_R2T_DIR)/brb-x64-test-r2-$(BRB_R2_TEST).efi
+BRB_R2T_OBIEKTY     := $(patsubst rozruch/brb/%.cpp,$(BRB_R2T_DIR)/obj/%.o,$(BRB_ZRODLA))
+$(BRB_R2T_DIR)/obj/%.o: rozruch/brb/%.cpp $(BRB_NAGLOWKI) Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(BRB_CXXFLAGS) -DBRB_TEST_R2=$(BRB_R2_TEST) -c $< -o $@
+$(BRB_R2T_EFI): $(BRB_R2T_OBIEKTY) $(BRB_LDS) Makefile
+	$(LD) $(BRB_LDFLAGS) --strip-all -o $@ $(BRB_R2T_OBIEKTY)
+	@echo "[BRB] Wariant testowy R2 nr $(BRB_R2_TEST): $@"
+brb-uefi-test-r2: $(BRB_R2T_EFI)
+
 $(BRB_HOST_DIR)/test-brb-host: testy/test_brb_host.cpp $(BRB_ZRODLA_HOSTA) $(BRB_NAGLOWKI) Makefile
 	@mkdir -p $(dir $@)
-	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/test_brb_host.cpp $(BRB_ZRODLA_HOSTA) -o $@
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -DBRB_DIAG_STARY_4A -I. testy/test_brb_host.cpp $(BRB_ZRODLA_HOSTA) -o $@
 
 $(BRB_HOST_DIR)/brb_pe_walidator: testy/brb_pe_walidator.cpp Makefile
 	@mkdir -p $(dir $@)
@@ -3749,6 +3784,17 @@ test-brb-host: $(BRB_HOST_DIR)/test-brb-host $(BRB_HOST_DIR)/test-brb-elf $(BRB_
 		--relokacje-elf $$(cat $(BRB_UEFI_DIR)/relokacje_elf.txt)
 	$(BRB_HOST_DIR)/brb_pe_walidator --mutacje $(BRB_EFI)
 	@echo "[BRB] test-brb-host: OK"
+
+# Faza R2: elastyczne umieszczenie, rejestr zasobow, tablice przejscia + niezalezna weryfikacja, transakcja R2 na
+# symulowanym UEFI (prawdziwe jadro R1B, gdy dostepne). ASan/UBSan, -Werror.
+R2_JADRO ?= .brb-build/r1b/produkcyjne/system_operacyjny.stripped
+$(BRB_HOST_DIR)/test-brb-r2: testy/test_brb_r2.cpp testy/brb_elf_fixture.h $(BRB_ZRODLA_HOSTA) $(BRB_NAGLOWKI) \
+		jadro/mm/plan_przejscia.h jadro/mm/obraz_jadra.h jadro/mm/kontrakt_pamieci.h jadro/arch/metadane_jadra.h Makefile
+	@mkdir -p $(dir $@)
+	g++ $(BRB_HOST_CXXFLAGS) -DBRB_TEST_HOSTA -I. testy/test_brb_r2.cpp $(BRB_ZRODLA_HOSTA) -o $@
+.PHONY: test-brb-r2
+test-brb-r2: $(BRB_HOST_DIR)/test-brb-r2
+	$(BRB_HOST_DIR)/test-brb-r2 $(wildcard $(R2_JADRO))
 
 brb-jadro-testowe:
 	@test -f "$(BRB_JADRO_ZRODLO)" || { echo "[BRB] BLAD: brak jadra zrodlowego $(BRB_JADRO_ZRODLO) (podaj BRB_JADRO_ZRODLO=...)"; exit 1; }

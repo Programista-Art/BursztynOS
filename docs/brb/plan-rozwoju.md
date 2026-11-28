@@ -76,7 +76,18 @@ metadane `BRBJADRO`), oba wejścia zbiegają się w `start_jadra`. Wariant testo
 (PA `0x2005000`, VA bez zmian) i uruchomił je do pulpitu. Produkcyjne ładowanie przez BRB (R2), `ExitBootServices`
 i przekazanie (4C) nie zostały rozpoczęte. **Faza 4A pozostaje BLOKADĄ.** W^X jądra nadal nieegzekwowane (bramka).
 
+**Faza R2 (2026-11-28): zrealizowana, czeka na przegląd** (`r2-elastyczne-ladowanie.md`). BRB wykrywa wejście
+natywne z metadanych, przydziela podkład przez `AllocateMaxAddress` (< 4 GiB, `EfiLoaderData`), ładuje i weryfikuje
+produkcyjne jądro R1B pod bazę wybraną przez firmware (PA ≠ VA), buduje i niezależnie weryfikuje tablice przejścia
+(nieaktywne), zwalnia wszystkie zasoby i wraca do firmware. OVMF z S3 (pc i q35): 3 różne bazy, 0 zmian w ACPI NVS.
+**Faza 4A: ROZWIĄZANA przez R2 dla przetestowanego środowiska (OVMF/QEMU, pc + q35, S3 włączone)** — warunek
+akceptacji właściciela. Stały adres pozostaje tylko w wariancie diagnostycznym. Fazy 4B/4C/7 nie rozpoczęto;
+W^X jądra nadal blokadą produkcyjną.
+
 ### Faza 4 — Informacje rozruchowe i przekazanie (tryb zgodności MB2)
+
+> **[HISTORYCZNE]** Przekazanie do `_start` (MB2, trampolina 64→32) zastąpione architekturą natywną: 4B = informacje
+> rozruchu (kontrakt V1), 4C = EBS + CR3 + skok do `wejscie_jadra64` (`r2-elastyczne-ladowanie.md` §1).
 
 | | |
 |---|---|

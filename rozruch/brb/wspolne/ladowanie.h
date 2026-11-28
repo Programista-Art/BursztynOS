@@ -70,6 +70,8 @@ enum class BladLadowania : uint8_t {
     WeryfikacjaBss,           // bajt BSS != 0
     WeryfikacjaWypelnienia,   // bajt wypelnienia strony (poza segmentami) != 0
     WejscieNiewykonywalne,    // wejscie planu poza wykonywalnym segmentem
+    // Faza R2 (umieszczenie elastyczne)
+    PrzesuniecieNiepoprawne,  // baza fizyczna niewyrownana, przepelnienie albo plan niezgodny z modelem ciaglym
 };
 
 struct RaportSegmentu {
@@ -95,13 +97,24 @@ struct RaportLadowania {
 // strone (dozwolone przez Faze 3 tylko przy identycznych prawach) sa scalane, aby nie przydzielac strony dwa razy.
 BladLadowania zbuduj_zakresy_przydzialu(const PlanLadowania& plan, ZakresyPrzydzialu* wynik);
 
+/*
+ * Faza R2: przesuniecie zwalidowanego planu (zlinkowane VA, p_paddr == p_vaddr wg POLITYKA_JADRA_BURSZTYN) na
+ * ciagly podklad pod baza_fizyczna. Adres docelowy segmentu = baza_fizyczna + (p_vaddr - najnizsza strona VA);
+ * p_vaddr, offsety pliku, rozmiary i prawa pozostaja bez zmian. Oryginalne p_paddr NIE jest adresem docelowym.
+ * Wymaga: baza wyrownana do 4 KiB, segmenty w obrebie [zakres_poczatek, zakres_koniec) planu, brak przepelnien.
+ */
+BladLadowania przesun_plan(const PlanLadowania& wzor, uint64_t baza_fizyczna, PlanLadowania* wynik);
+
 // Kontrola bez zapisu: plan == ponownie wyliczony plan z bajtow zrodla (ta sama polityka), zrodlo i cele.
+// baza_przesuniecia != nullptr (R2): ponownie wyliczony plan jest najpierw przesuwany przez przesun_plan().
 BladLadowania sprawdz_przed_kopiowaniem(const PlanLadowania& plan, const PolitykaElf& polityka, const ZrodloJadra& zrodlo,
-                                        const ZakresyPrzydzialu& posiadane, const DostepFizyczny& pamiec);
+                                        const ZakresyPrzydzialu& posiadane, const DostepFizyczny& pamiec,
+                                        const uint64_t* baza_przesuniecia = nullptr);
 
 // Kontrola + zerowanie posiadanych stron + kopiowanie p_filesz + jawne zerowanie BSS.
 BladLadowania zaladuj_segmenty(const PlanLadowania& plan, const PolitykaElf& polityka, const ZrodloJadra& zrodlo,
-                               const ZakresyPrzydzialu& posiadane, const DostepFizyczny& pamiec, RaportLadowania* raport);
+                               const ZakresyPrzydzialu& posiadane, const DostepFizyczny& pamiec, RaportLadowania* raport,
+                               const uint64_t* baza_przesuniecia = nullptr);
 
 // Niezalezna weryfikacja kazdego posiadanego bajtu (dane, BSS, wypelnienie) i spojnosci planu.
 BladLadowania weryfikuj_zaladowany_obraz(const PlanLadowania& plan, const ZrodloJadra& zrodlo,

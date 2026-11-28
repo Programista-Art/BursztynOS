@@ -104,6 +104,7 @@ const char* opis_bledu_ladowania(BladLadowania b) {
         case BladLadowania::WeryfikacjaBss: return "obszar BSS nie jest wyzerowany";
         case BladLadowania::WeryfikacjaWypelnienia: return "wypelnienie stron nie jest wyzerowane";
         case BladLadowania::WejscieNiewykonywalne: return "punkt wejscia poza segmentem wykonywalnym";
+        case BladLadowania::PrzesuniecieNiepoprawne: return "przesuniecie planu na baze fizyczna niepoprawne";
     }
     return "nieznany blad ladowania";
 }
@@ -136,8 +137,42 @@ BladLadowania zbuduj_zakresy_przydzialu(const PlanLadowania& plan, ZakresyPrzydz
     return sprawdz_zakresy(*wy);
 }
 
+BladLadowania przesun_plan(const PlanLadowania& w, uint64_t baza, PlanLadowania* wy) {
+    if (!wy) return BladLadowania::BrakDanych;
+    brb_memset(wy, 0, sizeof(*wy));
+    if (w.liczba_segmentow == 0) return BladLadowania::PustyPlan;
+    if (w.liczba_segmentow > ELF_MAKS_SEGMENTOW) return BladLadowania::ZaDuzoZakresow;
+    if (baza == 0 || baza % ELF_STRONA != 0 || w.zakres_poczatek % ELF_STRONA != 0 || w.zakres_koniec <= w.zakres_poczatek)
+        return BladLadowania::PrzesuniecieNiepoprawne;
+    const uint64_t va0 = w.zakres_poczatek;   // najnizsza strona (polityka: p_paddr == p_vaddr)
+    uint64_t rozmiar = w.zakres_koniec - va0, koniec_bazy;
+    if (!dodaj_u64(baza, rozmiar, &koniec_bazy)) return BladLadowania::PrzesuniecieNiepoprawne;
+    *wy = w;
+    auto przesun = [&](uint64_t va, uint64_t dlugosc, uint64_t* pa) -> bool {
+        uint64_t k;
+        if (va < va0 || !dodaj_u64(va, dlugosc, &k) || k > w.zakres_koniec) return false;
+        return dodaj_u64(baza, va - va0, pa);
+    };
+    for (uint32_t i = 0; i < w.liczba_segmentow; ++i) {
+        const SegmentPlanu& s = w.segmenty[i];
+        SegmentPlanu& d = wy->segmenty[i];
+        // Model ciagly: wzor musi byc tozsamosciowy (Faza 3), a strony segmentu - w zakresie planu.
+        if (s.adres_fizyczny != s.adres_wirtualny || s.strona_koniec < s.strona_poczatek ||
+            !przesun(s.adres_wirtualny, s.rozmiar_w_pamieci, &d.adres_fizyczny) ||
+            !przesun(s.strona_poczatek, s.strona_koniec - s.strona_poczatek, &d.strona_poczatek) ||
+            !dodaj_u64(d.strona_poczatek, s.strona_koniec - s.strona_poczatek, &d.strona_koniec))
+            return BladLadowania::PrzesuniecieNiepoprawne;
+    }
+    if (w.segment_wejscia >= w.liczba_segmentow) return BladLadowania::WejscieNiewykonywalne;
+    if (!przesun(w.wejscie_wirtualne, 1, &wy->wejscie_fizyczne)) return BladLadowania::PrzesuniecieNiepoprawne;
+    wy->zakres_poczatek = baza;
+    wy->zakres_koniec = koniec_bazy;
+    return BladLadowania::Brak;
+}
+
 BladLadowania sprawdz_przed_kopiowaniem(const PlanLadowania& plan, const PolitykaElf& pol, const ZrodloJadra& z,
-                                        const ZakresyPrzydzialu& p, const DostepFizyczny& pamiec) {
+                                        const ZakresyPrzydzialu& p, const DostepFizyczny& pamiec,
+                                        const uint64_t* baza_przesuniecia) {
     if (!z.dane || !pamiec.wskaznik) return BladLadowania::BrakDanych;
     if (plan.liczba_segmentow == 0) return BladLadowania::PustyPlan;
     if (plan.liczba_segmentow > ELF_MAKS_SEGMENTOW) return BladLadowania::NiespojnyPlan;
@@ -146,9 +181,13 @@ BladLadowania sprawdz_przed_kopiowaniem(const PlanLadowania& plan, const Polityk
     if (z.rozmiar != plan.rozmiar_pliku || z.rozmiar > z.rozmiar_bufora) return BladLadowania::ZrodloNiezgodne;
     // Ponowne wyliczenie planu z TYCH SAMYCH bajtow (jedyny parser): wykrywa zmiane planu albo bufora.
     PlanLadowania ponownie;
-    if (zbuduj_plan_ladowania(z.dane, z.rozmiar, pol, &ponownie).blad != BladElf::Brak ||
-        !plany_rowne(ponownie, plan))
-        return BladLadowania::NiespojnyPlan;
+    if (zbuduj_plan_ladowania(z.dane, z.rozmiar, pol, &ponownie).blad != BladElf::Brak) return BladLadowania::NiespojnyPlan;
+    if (baza_przesuniecia) {   // R2: to samo przesuniecie co plan docelowy (z tych samych bajtow)
+        PlanLadowania przesuniety;
+        if (przesun_plan(ponownie, *baza_przesuniecia, &przesuniety) != BladLadowania::Brak) return BladLadowania::NiespojnyPlan;
+        ponownie = przesuniety;
+    }
+    if (!plany_rowne(ponownie, plan)) return BladLadowania::NiespojnyPlan;
     if (plan.segment_wejscia >= plan.liczba_segmentow || plan.liczba_segmentow > ELF_MAKS_SEGMENTOW ||
         !(plan.segmenty[plan.segment_wejscia].prawa & ELF_PF_X))
         return BladLadowania::WejscieNiewykonywalne;
@@ -170,9 +209,10 @@ BladLadowania sprawdz_przed_kopiowaniem(const PlanLadowania& plan, const Polityk
 }
 
 BladLadowania zaladuj_segmenty(const PlanLadowania& plan, const PolitykaElf& pol, const ZrodloJadra& z,
-                               const ZakresyPrzydzialu& p, const DostepFizyczny& pamiec, RaportLadowania* r) {
+                               const ZakresyPrzydzialu& p, const DostepFizyczny& pamiec, RaportLadowania* r,
+                               const uint64_t* baza_przesuniecia) {
     if (r) { brb_memset(r, 0, sizeof(*r)); r->segment_bledu = -1; }
-    const BladLadowania b = sprawdz_przed_kopiowaniem(plan, pol, z, p, pamiec);
+    const BladLadowania b = sprawdz_przed_kopiowaniem(plan, pol, z, p, pamiec, baza_przesuniecia);
     if (b != BladLadowania::Brak) return b;
     // 1. Zerowanie calych posiadanych stron (wypelnienie, BSS, wspolne strony) - przed jakimkolwiek kopiowaniem.
     for (uint32_t i = 0; i < p.liczba; ++i) {

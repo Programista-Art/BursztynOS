@@ -64,12 +64,12 @@ class Qmp:
                 return odp
 
 
-def czekaj_na(log, tekst, limit):
+def czekaj_na(log, tekst, limit, krok=0.5):
     koniec = time.monotonic() + limit
     while time.monotonic() < koniec:
         if log.exists() and tekst in log.read_bytes().decode('latin-1'):
             return True
-        time.sleep(0.5)
+        time.sleep(krok)
     return False
 
 
@@ -84,6 +84,11 @@ def main():
     p.add_argument('--wylacz-s3', action='store_true', help='diagnostyka: -global ICH9-LPC.disable_s3=1 (q35)')
     p.add_argument('--oczekiwany-status')
     p.add_argument('--oczekiwany-tekst', action='append', default=[])
+    p.add_argument('--zrzut', action='append', default=[],
+                   help='R2: zakres PA:DLUGOSC (hex) zrzucany przez QMP pmemsave (maszyna zatrzymana) przed etapem R2 '
+                        'i po zwolnieniu zasobow R2 - porownanie NVS')
+    p.add_argument('--profil', choices=('std', 'produkcja'), default='std',
+                   help='produkcja: -cpu max i urzadzenia virtio jak cele run* (bez dyskow i audio)')
     a = p.parse_args()
     if not all(c.isalnum() or c in '_-' for c in a.scenariusz):
         print('[OVMF] BLAD: niedozwolona nazwa scenariusza')
@@ -115,13 +120,27 @@ def main():
         '-drive', f'if=pflash,format=raw,unit=1,file={zmienne}',
         '-drive', f'if=none,id=wolumin,format=raw,readonly=on,file=fat:{wolumin}',
         '-device', 'virtio-blk-pci,drive=wolumin',
-        '-vga', 'std', '-display', 'none',
+        '-display', 'none',
         '-serial', f'file:{com1}',
-        '-net', 'none',
         '-qmp', f'unix:{qmp_gniazdo},server=on,wait=off',
     ]
+    if a.profil == 'std':
+        polecenie += ['-vga', 'std', '-net', 'none']
+    else:
+        polecenie += ['-cpu', 'max', '-accel', 'tcg,thread=single', '-vga', 'none',
+                      '-device', 'virtio-vga,disable-legacy=on,xres=1280,yres=720',
+                      '-netdev', 'user,id=n1,restrict=on', '-device', 'virtio-net-pci,netdev=n1,disable-legacy=on',
+                      '-object', 'rng-builtin,id=rng0', '-device', 'virtio-rng-pci,rng=rng0,disable-legacy=on',
+                      '-device', 'virtio-keyboard-pci', '-device', 'virtio-mouse-pci', '-device', 'virtio-tablet-pci']
     if a.wylacz_s3:
-        polecenie += ['-global', 'ICH9-LPC.disable_s3=1']
+        polecenie += ['-global', ('ICH9-LPC' if 'q35' in a.maszyna else 'PIIX4_PM') + '.disable_s3=1']
+    zakresy = []
+    for z in a.zrzut:
+        pa, dl = z.split(':')
+        zakresy.append((int(pa, 16), int(dl, 16)))
+        if zakresy[-1][1] > 0x400000:
+            print('[OVMF] BLAD: zrzut ograniczony do 4 MiB na zakres (bez pelnych zrzutow pamieci)')
+            return 2
     (wyniki / 'polecenie.txt').write_text(' '.join(polecenie) + '\n')
     print('[OVMF] ' + ' '.join(polecenie))
     with open(wyniki / 'qemu.log', 'w') as qlog:
@@ -129,7 +148,27 @@ def main():
     wynik = 1
     try:
         qmp = Qmp(qmp_gniazdo)
-        if not czekaj_na(com1, '[BRB] klawiatura: oczekiwanie', 120):
+
+        def zrzuc(etykieta):
+            qmp.polecenie('stop')
+            stan = com1.read_bytes().decode('latin-1')
+            for pa, dl in zakresy:
+                plik = (wyniki / f'zrzut-{pa:x}-{etykieta}.bin').resolve()
+                print(f'[OVMF] zrzut {etykieta} {pa:#x}+{dl:#x}:', qmp.polecenie('pmemsave', val=pa, size=dl, filename=str(plik)))
+            qmp.polecenie('cont')
+            return stan
+
+        if zakresy:
+            if not czekaj_na(com1, '[BRB] etap 1: wejscie UEFI', 120, krok=0.02):
+                print('[OVMF] BLAD: brak startu BRB')
+                return 1
+            stan = zrzuc('przed')
+            przed_r2 = '[BRB] etap R2' not in stan
+            print('[OVMF] zrzut "przed" wykonany', 'PRZED etapem R2 (potwierdzone logiem)' if przed_r2 else 'PO rozpoczeciu R2 (NIEWAZNY)')
+            (wyniki / 'zrzut-przed-stan.txt').write_text('przed_r2=%d\n' % przed_r2)
+            if czekaj_na(com1, '[BRB] R2: zasoby zwolnione', 240):
+                zrzuc('po')
+        if not czekaj_na(com1, '[BRB] klawiatura: oczekiwanie', 240):
             print('[OVMF] BLAD: brak kamienia milowego oczekiwania na klawisz w 120 s')
             return 1
         time.sleep(2)

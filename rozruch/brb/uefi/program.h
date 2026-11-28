@@ -11,6 +11,7 @@
 #define BRB_UEFI_PROGRAM_H
 
 #include "ladowanie_jadra.h"
+#include "ladowanie_natywne.h"
 #include "plik_jadra.h"
 #include "uefi_typy.h"
 #include "../wspolne/elf64.h"
@@ -76,6 +77,13 @@ struct StanProgramu {                       // do diagnostyki i testow
     EtapFazy4A etap_4a = EtapFazy4A::WejscieZweryfikowane;
     UINT64 strony_4a = 0;
     UINT32 bledy_sprzatania_4a = 0;
+    // Faza R2: metadane natywne i elastyczne umieszczenie
+    BladMetadanych blad_metadanych = BladMetadanych::Brak;
+    EFI_STATUS status_r2 = EFI_NOT_READY;      // EFI_NOT_READY = etap nie zostal wykonany
+    BladR2 blad_r2 = BladR2::Brak;
+    EtapR2 etap_r2 = EtapR2::Start;
+    UINT64 baza_r2 = 0;
+    UINT32 bledy_sprzatania_r2 = 0;
 };
 
 // Kontrola, czy obraz zostal poprawnie zaladowany i zrelokowany: adres kodu BRB w [ImageBase, +ImageSize)
